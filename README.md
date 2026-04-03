@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://capsule-render.vercel.app/api?type=slice&height=180&color=0:140B03,45:F59E0B,100:F97316&text=Claude%20Usage%20Monitor&fontColor=ffffff&fontSize=34&fontAlign=70&fontAlignY=25&rotate=13&desc=CRT-styled%20Claude%20Code%20usage%20widget&descAlign=60&descAlignY=44&descSize=18" />
+  <img src="https://capsule-render.vercel.app/api?type=slice&height=180&color=0:140B03,45:F59E0B,100:F97316&text=Claude%20Usage%20Monitor&fontColor=ffffff&fontSize=34&fontAlign=68&fontAlignY=28&rotate=9&desc=CRT-styled%20Claude%20Code%20usage%20widget&descAlign=60&descAlignY=47&descSize=18" />
 </p>
 
 > **"Never be surprised by a rate limit again — unless you deserve it."**
