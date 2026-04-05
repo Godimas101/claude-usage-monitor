@@ -27,7 +27,7 @@ A lightweight Windows widget that shows your Claude Code usage at a glance. Ambe
 - Vertical pip cursor anchored to the right edge of the last filled pip
 - Blinking LIVE / PAUSED status
 
-<img src="https://i.imgur.com/ohdgiN4.png" alt="Alt text" width="400">
+<img src="https://github.com/Godimas101/Godimas101/blob/main/images/screenshots/claude-usage-monotor-02.png?raw=true" alt="Alt text" width="400">
 
 ### Options Panel — General Tab
 - **Tool Theme** — choose from Default (amber), Red, Blue, Green, Purple, Cyan, Orange, or White phosphor
@@ -44,7 +44,7 @@ A lightweight Windows widget that shows your Claude Code usage at a glance. Ambe
 - Refresh button
 - Claude Code mascot
 
-<img src="https://i.imgur.com/QpNSTPU.png" alt="Alt text" width="500">
+<img src="https://github.com/Godimas101/Godimas101/blob/main/images/screenshots/claude-usage-monotor-01.png?raw=true" alt="Alt text" width="500">
 
 ---
 
