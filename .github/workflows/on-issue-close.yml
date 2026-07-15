@@ -1,0 +1,15 @@
+name: On issue close → append CHANGELOG
+
+on:
+  issues:
+    types: [closed]
+
+jobs:
+  call-append:
+    uses: gitpush-mod/.github/.github/workflows/append-changelog.yml@main
+    secrets: inherit
+    with:
+      issue_number: ${{ github.event.issue.number }}
+      issue_title: ${{ github.event.issue.title }}
+      closed_by: ${{ github.event.sender.login }}
+      state_reason: ${{ github.event.issue.state_reason }}
