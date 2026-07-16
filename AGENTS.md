@@ -10,8 +10,8 @@ projects.
 
 ## README + UI style
 
-- **General README style:** [`../../personal-projects/docs/style-guides/README_STYLE_GUIDE.md`](../../personal-projects/docs/style-guides/README_STYLE_GUIDE.md)
-- **App-specific style:** [`../../personal-projects/docs/style-guides/CLAUDE_USAGE_STYLE_GUIDE.md`](../../personal-projects/docs/style-guides/CLAUDE_USAGE_STYLE_GUIDE.md)
+- **General README style:** [`../../personal-docs/style-guides/README_STYLE_GUIDE.md`](../../personal-docs/style-guides/README_STYLE_GUIDE.md)
+- **App-specific style:** [`../../personal-docs/style-guides/CLAUDE_USAGE_STYLE_GUIDE.md`](../../personal-docs/style-guides/CLAUDE_USAGE_STYLE_GUIDE.md)
 
 The monitor has a CRT / NASA-punk visual identity — preserve it.
 
@@ -30,4 +30,4 @@ in the repo root.
 ## Related
 
 - Parent: [`../../AGENTS.md`](../../AGENTS.md)
-- Style guides: [`../../personal-projects/docs/style-guides/`](../../personal-projects/docs/style-guides/)
+- Style guides: [`../../personal-docs/style-guides/`](../../personal-docs/style-guides/)
