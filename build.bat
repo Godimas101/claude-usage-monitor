@@ -17,7 +17,7 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-echo       Done. dist\ClaudeUsageMonitor.exe ready.
+echo       Done. dist\ClaudeUsageMonitor\ ready.
 
 :: ── Step 2: Inno Setup ────────────────────
 echo.

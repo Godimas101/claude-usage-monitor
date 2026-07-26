@@ -1,7 +1,7 @@
 ; Version is supplied by the build (CI + build.bat pass it from the VERSION
 ; file):  ISCC /DAppVer=1.2.3 installer.iss  — falls back to the default below.
 #ifndef AppVer
-  #define AppVer "1.1.4"
+  #define AppVer "1.1.5"
 #endif
 
 [Setup]
@@ -26,7 +26,8 @@ WizardStyle=modern
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
-Source: "dist\ClaudeUsageMonitor.exe"; DestDir: "{app}"; Flags: ignoreversion
+; Onedir build: package the whole PyInstaller output folder (exe + _internal).
+Source: "dist\ClaudeUsageMonitor\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\Claude Usage Monitor"; Filename: "{app}\ClaudeUsageMonitor.exe"

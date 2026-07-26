@@ -1,5 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+# Built as a ONEDIR app (not onefile). A onefile exe unpacks all of its DLLs to
+# %TEMP%\_MEIxxxx on every launch, and that per-launch extraction races Windows
+# Defender — intermittently failing with "Failed to load Python DLL ... module
+# could not be found" right after an install. Onedir installs the files once
+# (Inno packages the whole folder), so there's no extraction race and startup is
+# faster. The installer experience is identical.
+
 a = Analysis(
     ['main.py'],
     pathex=[],
@@ -21,19 +28,22 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
-    [],
+    exclude_binaries=True,        # onedir: binaries go into the COLLECT folder
     name='ClaudeUsageMonitor',
     debug=False,
+    bootloader_ignore_signals=False,
     strip=False,
-    # UPX is disabled on purpose. The GitHub runner has UPX installed, and
-    # UPX-packed Python DLLs intermittently trip Windows Defender on first
-    # launch after install ("Failed to load Python DLL … module could not be
-    # found"). Uncompressed is a few MB larger but loads reliably.
     upx=False,
-    upx_exclude=[],
-    runtime_tmpdir=None,
     console=False,
     icon='usage_monitor.ico',
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name='ClaudeUsageMonitor',
 )

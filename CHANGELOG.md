@@ -4,6 +4,11 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
+## [1.1.5] — 2026-07-26
+
+### Fixed
+- **"Failed to load Python DLL" on launch:** the app is now built as a onedir bundle instead of onefile. Onefile unpacked its bundled DLLs to a temp folder on every launch — a step that raced Windows Defender and intermittently failed right after an install. Onedir installs the files once (no per-launch extraction), which removes the race and starts a little faster. This is the real fix for the launch error that v1.1.3–1.1.4 were chasing.
+
 ## [1.1.4] — 2026-07-26
 
 ### Fixed
