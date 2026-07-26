@@ -1,7 +1,7 @@
 ; Version is supplied by the build (CI + build.bat pass it from the VERSION
 ; file):  ISCC /DAppVer=1.2.3 installer.iss  — falls back to the default below.
 #ifndef AppVer
-  #define AppVer "1.1.0"
+  #define AppVer "1.1.1"
 #endif
 
 [Setup]

@@ -9,6 +9,8 @@ import sys
 
 import theme as T
 import usage_reader
+import update_check
+import version
 
 APP_NAME        = "ClaudeUsageMonitor"
 REPO_URL        = "https://github.com/Godimas101/claude-usage-monitor"
@@ -16,7 +18,7 @@ ISSUES_URL      = "https://github.com/Godimas101/claude-usage-monitor/issues/new
 PATREON_URL     = "https://patreon.com/Godimas101"
 SUPPORTERS_URL  = ("https://raw.githubusercontent.com/Godimas101/"
                    "personal-projects/main/patreon/supporters.json")
-VERSION         = "1.1.0"
+VERSION         = version.APP_VERSION
 
 POLL_OPTIONS = [
     ("1 MIN",  1 * 60 * 1000),
@@ -98,11 +100,15 @@ class OptionsPanel(tk.Toplevel):
         self._tab_nerds      = self._build_nerds(self._content)
         self._tab_supporters = self._build_supporters(self._content)
 
-        # Size window to fit Nerds Only tab, then switch to General
+        # Size to fit the tallest tab (General grew with the UPDATES section).
         self._switch_tab("NERDS ONLY")
         self.update_idletasks()
         w = max(self.winfo_reqwidth(),  440)
         h = max(self.winfo_reqheight(), 400)
+        self._switch_tab("GENERAL")
+        self.update_idletasks()
+        w = max(w, self.winfo_reqwidth())
+        h = max(h, self.winfo_reqheight())
         self.geometry(f"{w}x{h}")
         self._switch_tab("GENERAL")
 
@@ -233,6 +239,26 @@ class OptionsPanel(tk.Toplevel):
         row("TRANSPARENT BG", _ck("taskbar_transparent_bg", False))
         row("TEXT F/X",       _ck("taskbar_text_fx",        True))
 
+        # UPDATES
+        section("UPDATES")
+
+        self._autocheck_var = tk.BooleanVar(
+            value=self._settings.get("check_updates", True))
+
+        def make_autocheck(r):
+            def toggle():
+                self._settings["check_updates"] = self._autocheck_var.get()
+            tk.Checkbutton(r, variable=self._autocheck_var, command=toggle,
+                           bg=T.BG, fg=T.AMBER_DIM,
+                           activebackground=T.BG, activeforeground=T.AMBER,
+                           selectcolor=T.PANEL, relief="flat", bd=0).pack(side="left")
+
+        row("AUTO-CHECK", make_autocheck)
+
+        self._update_row = tk.Frame(frame, bg=T.BG)
+        self._update_row.pack(fill="x", padx=10, pady=2)
+        self._render_update_row()
+
         # ABOUT
         section("ABOUT")
 
@@ -273,6 +299,103 @@ class OptionsPanel(tk.Toplevel):
 
         tk.Frame(frame, bg=T.BG, height=12).pack()
         return frame
+
+    # ── Updates ───────────────────────────────────────────────────────────────
+
+    def _render_update_row(self):
+        """(Re)draw the status/action line under AUTO-CHECK to match state."""
+        row = self._update_row
+        for w in row.winfo_children():
+            w.destroy()
+        tk.Label(row, text="STATUS", bg=T.BG, fg=T.AMBER_DIM,
+                 font=T.best_font(8), width=18, anchor="w").pack(side="left")
+
+        info = self._settings.get("_update_info")
+        if info:
+            if update_check.can_self_update(info):
+                tk.Button(row, text="⬆ UPDATE TO v%s & RESTART" % info["version"],
+                          bg=T.PANEL, fg=T.AMBER_BRIGHT,
+                          activebackground=T.BORDER_DIM, activeforeground=T.AMBER_BRIGHT,
+                          font=T.best_font(8, bold=True), relief="flat", bd=0,
+                          padx=10, pady=3, cursor="hand2",
+                          highlightthickness=1, highlightbackground=T.AMBER,
+                          command=self._do_self_update).pack(side="left")
+            else:
+                link = tk.Label(row,
+                                text="⬆ v%s available — view release" % info["version"],
+                                bg=T.BG, fg=T.AMBER_BRIGHT, font=T.best_font(8),
+                                cursor="hand2")
+                link.pack(side="left")
+                link.bind("<Button-1>", lambda _e: _open_url(info["url"]))
+            skip = tk.Label(row, text="  skip", bg=T.BG, fg=T.AMBER_DIM,
+                            font=T.best_font(8), cursor="hand2")
+            skip.pack(side="left")
+            skip.bind("<Button-1>", lambda _e: self._skip_update())
+            skip.bind("<Enter>", lambda _e: skip.configure(fg=T.AMBER))
+            skip.bind("<Leave>", lambda _e: skip.configure(fg=T.AMBER_DIM))
+        else:
+            self._update_status_lbl = tk.Label(row, text="up to date",
+                                               bg=T.BG, fg=T.AMBER_DIM,
+                                               font=T.best_font(8))
+            self._update_status_lbl.pack(side="left")
+            chk = tk.Label(row, text="  check now", bg=T.BG, fg=T.AMBER,
+                           font=T.best_font(8), cursor="hand2")
+            chk.pack(side="left")
+            chk.bind("<Button-1>", lambda _e: self._check_now())
+            chk.bind("<Enter>", lambda _e: chk.configure(fg=T.AMBER_BRIGHT))
+            chk.bind("<Leave>", lambda _e: chk.configure(fg=T.AMBER))
+
+    def _check_now(self):
+        lbl = getattr(self, "_update_status_lbl", None)
+        if lbl and lbl.winfo_exists():
+            lbl.configure(text="checking…")
+
+        def cb(info):
+            def apply():
+                if not self.winfo_exists():
+                    return
+                if info and info.get("version") != self._settings.get("skip_version"):
+                    self._settings["_update_info"] = info
+                    self._render_update_row()
+                else:
+                    l = getattr(self, "_update_status_lbl", None)
+                    if l and l.winfo_exists():
+                        l.configure(text="up to date")
+            try:
+                self.after(0, apply)
+            except Exception:
+                pass
+
+        update_check.check_async(version.REPO, version.APP_VERSION, cb)
+
+    def _do_self_update(self):
+        info = self._settings.get("_update_info")
+        if not info:
+            return
+        if not update_check.can_self_update(info):
+            _open_url(info["url"])
+            return
+        for w in self._update_row.winfo_children():
+            w.destroy()
+        tk.Label(self._update_row, text="STATUS", bg=T.BG, fg=T.AMBER_DIM,
+                 font=T.best_font(8), width=18, anchor="w").pack(side="left")
+        tk.Label(self._update_row, text="downloading v%s…" % info["version"],
+                 bg=T.BG, fg=T.AMBER_BRIGHT, font=T.best_font(8)).pack(side="left")
+        update_check.apply_update(
+            info["asset_url"],
+            on_error=lambda _e: self.after(0, lambda: _open_url(info["url"])),
+            on_before_exit=self._settings.get("_save_cb"),
+        )
+
+    def _skip_update(self):
+        info = self._settings.get("_update_info")
+        if info:
+            self._settings["skip_version"] = info.get("version", "")
+        self._settings["_update_info"] = None
+        self._render_update_row()
+        cb = self._settings.get("_refresh_tray_cb")
+        if cb:
+            cb()
 
     # ── Supporters tab ────────────────────────────────────────────────────────
 

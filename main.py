@@ -6,6 +6,9 @@ import pathlib
 import sys
 import tkinter as tk
 
+import update_check
+import version
+
 # ── Settings ──────────────────────────────────────────────────────────────────
 
 APPDATA_DIR   = pathlib.Path(os.environ.get("APPDATA", pathlib.Path.home())) / "ClaudeUsageMonitor"
@@ -16,6 +19,8 @@ DEFAULT_SETTINGS = {
     "position":         None,
     "show_floating":    True,
     "show_taskbar":     True,
+    "check_updates":    True,
+    "skip_version":     "",
 }
 
 
@@ -54,6 +59,21 @@ def _acquire_lock() -> bool:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
+    # Headless smoke hook: `ClaudeUsageMonitor.exe --print-version <file>` writes
+    # the version and exits. The build is windowed (no console), so we write to a
+    # file rather than stdout. Used to verify the frozen build reads its bundled
+    # VERSION — if that ever regressed, the updater would think it's always behind.
+    if "--print-version" in sys.argv:
+        i = sys.argv.index("--print-version")
+        out = sys.argv[i + 1] if i + 1 < len(sys.argv) else None
+        if out:
+            try:
+                with open(out, "w", encoding="utf-8") as f:
+                    f.write(version.APP_VERSION)
+            except Exception:
+                pass
+        return
+
     if not _acquire_lock():
         sys.exit(0)
 
@@ -130,6 +150,23 @@ def main():
         if taskbar:
             taskbar._redraw()
     settings["_on_colour_change_cb"] = on_colour_change
+
+    # Save hook — the self-updater calls this right before it exits, so a
+    # just-changed setting isn't lost when we bypass the normal shutdown path.
+    settings["_save_cb"] = lambda: save_settings(settings)
+    # Let the options panel refresh the tray menu (e.g. after "skip version").
+    settings["_refresh_tray_cb"] = tray.refresh_update_item
+
+    # ── Update check ────────────────────────────────────────────────────────────
+    # Silent, non-blocking, opt-out. Surfaces only when a newer release exists.
+    if settings.get("check_updates", True):
+        def _on_update_found(info):
+            # Runs on the checker's daemon thread.
+            if not info or info.get("version") == settings.get("skip_version"):
+                return
+            settings["_update_info"] = info
+            tray.refresh_update_item()
+        update_check.check_async(version.REPO, version.APP_VERSION, _on_update_found)
 
     try:
         root.mainloop()

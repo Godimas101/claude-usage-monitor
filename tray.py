@@ -5,6 +5,7 @@ import webbrowser
 import pystray
 from PIL import Image, ImageDraw
 import theme as T
+import update_check
 
 _ISSUES_URL = "https://github.com/Godimas101/claude-usage-monitor/issues/new"
 
@@ -84,6 +85,12 @@ class Tray:
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Settings...", self._open_settings),
             pystray.MenuItem("Report a Bug", self._report_bug),
+            pystray.MenuItem(
+                lambda item: "⬆ Update to v%s" % (
+                    (self._settings.get("_update_info") or {}).get("version", "")),
+                self._on_update,
+                visible=lambda item: bool(self._settings.get("_update_info")),
+            ),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Exit", self._on_exit),
         )
@@ -107,6 +114,35 @@ class Tray:
 
     def _report_bug(self, icon, item):
         webbrowser.open(_ISSUES_URL)
+
+    def refresh_update_item(self):
+        """Re-read the menu so the update item appears once a check finds one.
+        Safe to call from the update-check daemon thread."""
+        try:
+            self._icon.update_menu()
+        except Exception:
+            pass
+
+    def _on_update(self, icon, item):
+        info = self._settings.get("_update_info")
+        if not info:
+            return
+        if update_check.can_self_update(info):
+            # Frozen build + installer asset → download and apply silently, then
+            # the app relaunches itself. Fall back to the release page on error.
+            try:
+                icon.notify("Downloading v%s…" % info.get("version", ""),
+                            "Claude Usage Monitor")
+            except Exception:
+                pass
+            update_check.apply_update(
+                info["asset_url"],
+                on_error=lambda _e: webbrowser.open(info["url"]),
+                on_before_exit=self._settings.get("_save_cb"),
+            )
+        else:
+            # Running from source (nothing to overwrite) — just open the release.
+            webbrowser.open(info["url"])
 
     def _on_exit(self, icon, item):
         icon.stop()

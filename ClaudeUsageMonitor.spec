@@ -4,7 +4,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('usage_monitor.ico', '.')],
+    datas=[('usage_monitor.ico', '.'), ('VERSION', '.')],
     hiddenimports=[
         'pystray._win32',
         'PIL._tkinter_finder',
