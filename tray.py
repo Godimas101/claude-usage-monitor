@@ -7,7 +7,8 @@ from PIL import Image, ImageDraw
 import theme as T
 import update_check
 
-_ISSUES_URL = "https://github.com/Godimas101/claude-usage-monitor/issues/new"
+_ISSUES_URL = ("https://github.com/Godimas101/claude-usage-monitor/issues/new"
+               "?template=bug_report.md&labels=bug")
 
 
 def _make_icon(session_pct: float = 0.0) -> Image.Image:

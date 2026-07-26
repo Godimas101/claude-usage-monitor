@@ -14,7 +14,8 @@ import version
 
 APP_NAME        = "ClaudeUsageMonitor"
 REPO_URL        = "https://github.com/Godimas101/claude-usage-monitor"
-ISSUES_URL      = "https://github.com/Godimas101/claude-usage-monitor/issues/new"
+ISSUES_URL      = ("https://github.com/Godimas101/claude-usage-monitor/issues/new"
+                   "?template=bug_report.md&labels=bug")
 PATREON_URL     = "https://patreon.com/Godimas101"
 SUPPORTERS_URL  = ("https://raw.githubusercontent.com/Godimas101/"
                    "personal-projects/main/patreon/supporters.json")

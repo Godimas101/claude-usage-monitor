@@ -4,6 +4,11 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
+## [1.1.2] — 2026-07-26
+
+### Added
+- **Bug-report template:** the issue tracker now has a pre-filled **bug** form (and a feature-request form), and the in-app **Report a Bug** links open it directly with the `bug` label already applied — no more blank issue.
+
 ## [1.1.1] — 2026-07-26
 
 ### Added

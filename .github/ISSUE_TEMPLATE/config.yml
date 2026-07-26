@@ -1,0 +1,8 @@
+blank_issues_enabled: true  # a blank issue is fine for a quick note
+contact_links:
+  - name: 🧡 Patreon — project log
+    url: https://patreon.com/Godimas101
+    about: Follow the ongoing project log, updates, and roadmap chatter.
+  - name: 🎮 Game mods (gitpush-mod)
+    url: https://github.com/gitpush-mod
+    about: Space Engineers + MechWarrior 5 mod issues go to the gitpush-mod org, not here.
