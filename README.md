@@ -96,6 +96,12 @@ Settings are stored at `%APPDATA%\ClaudeUsageMonitor\settings.json`.
 
 ---
 
+## 🐛 Found a bug?
+
+[Open an issue on GitHub](https://github.com/Godimas101/claude-usage-monitor/issues/new) — or use **Report a Bug** from the tray menu or **Settings → About**.
+
+---
+
 ## 🔩 Requirements
 
 - Windows 10 / 11

@@ -1,6 +1,12 @@
+; Version is supplied by the build (CI + build.bat pass it from the VERSION
+; file):  ISCC /DAppVer=1.2.3 installer.iss  — falls back to the default below.
+#ifndef AppVer
+  #define AppVer "1.1.0"
+#endif
+
 [Setup]
 AppName=Claude Usage Monitor
-AppVersion=1.0.0
+AppVersion={#AppVer}
 AppPublisher=Godimas
 AppPublisherURL=https://patreon.com/Godimas101
 AppSupportURL=https://github.com/Godimas101/claude-usage-monitor
@@ -8,7 +14,7 @@ DefaultDirName={localappdata}\ClaudeUsageMonitor
 DefaultGroupName=Claude Usage Monitor
 DisableProgramGroupPage=yes
 OutputDir=installer
-OutputBaseFilename=ClaudeUsageMonitorSetup-v1.0.0
+OutputBaseFilename=ClaudeUsageMonitorSetup-v{#AppVer}
 SetupIconFile=usage_monitor.ico
 UninstallDisplayIcon={app}\ClaudeUsageMonitor.exe
 Compression=lzma

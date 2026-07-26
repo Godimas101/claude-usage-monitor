@@ -1,0 +1,84 @@
+name: Release
+
+# Builds the installer on a Windows runner and publishes a GitHub Release.
+# Fires on every push to main, but only cuts a release when VERSION is a new
+# version (i.e. the tag v<VERSION> doesn't exist yet). Bump VERSION to release.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: ver
+        shell: bash
+        run: echo "version=$(tr -d '[:space:]' < VERSION)" >> "$GITHUB_OUTPUT"
+
+      - name: Does this release already exist?
+        id: exists
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "v${{ steps.ver.outputs.version }}" >/dev/null 2>&1; then
+            echo "skip=true"  >> "$GITHUB_OUTPUT"
+            echo "Release v${{ steps.ver.outputs.version }} already exists — nothing to build."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Python
+        if: steps.exists.outputs.skip == 'false'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        if: steps.exists.outputs.skip == 'false'
+        run: pip install -r requirements.txt pyinstaller
+
+      - name: Build the exe
+        if: steps.exists.outputs.skip == 'false'
+        run: pyinstaller --noconfirm ClaudeUsageMonitor.spec
+
+      - name: Install Inno Setup
+        if: steps.exists.outputs.skip == 'false'
+        run: choco install innosetup --no-progress -y
+
+      - name: Build the installer
+        if: steps.exists.outputs.skip == 'false'
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DAppVer=${{ steps.ver.outputs.version }}" installer.iss
+
+      - name: Verify build output
+        if: steps.exists.outputs.skip == 'false'
+        shell: pwsh
+        run: |
+          $exe = "installer/ClaudeUsageMonitorSetup-v${{ steps.ver.outputs.version }}.exe"
+          if (-not (Test-Path $exe)) { throw "installer was not produced: $exe" }
+
+      - name: Publish release
+        if: steps.exists.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          VER="${{ steps.ver.outputs.version }}"
+          # Pull this version's section out of CHANGELOG.md for the notes;
+          # fall back to auto-generated notes if it isn't there.
+          awk -v v="$VER" '$0 ~ "^## \\[" v "\\]" {f=1; next} /^## \[/ {f=0} f' CHANGELOG.md > notes.md || true
+          ASSET="installer/ClaudeUsageMonitorSetup-v$VER.exe"
+          if [ -s notes.md ]; then
+            gh release create "v$VER" "$ASSET" --title "Claude Usage Monitor v$VER" --notes-file notes.md
+          else
+            gh release create "v$VER" "$ASSET" --title "Claude Usage Monitor v$VER" --generate-notes
+          fi

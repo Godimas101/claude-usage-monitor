@@ -12,10 +12,11 @@ import usage_reader
 
 APP_NAME        = "ClaudeUsageMonitor"
 REPO_URL        = "https://github.com/Godimas101/claude-usage-monitor"
+ISSUES_URL      = "https://github.com/Godimas101/claude-usage-monitor/issues/new"
 PATREON_URL     = "https://patreon.com/Godimas101"
 SUPPORTERS_URL  = ("https://raw.githubusercontent.com/Godimas101/"
                    "personal-projects/main/patreon/supporters.json")
-VERSION         = "1.0.0"
+VERSION         = "1.1.0"
 
 POLL_OPTIONS = [
     ("1 MIN",  1 * 60 * 1000),
@@ -258,6 +259,17 @@ class OptionsPanel(tk.Toplevel):
         link.bind("<Button-1>", lambda _: _open_url(REPO_URL))
         link.bind("<Enter>",    lambda _: link.configure(fg=T.AMBER_BRIGHT))
         link.bind("<Leave>",    lambda _: link.configure(fg=T.AMBER))
+
+        r = tk.Frame(frame, bg=T.BG)
+        r.pack(fill="x", padx=10, pady=1)
+        tk.Label(r, text="FOUND A BUG?", bg=T.BG, fg=T.AMBER_DIM,
+                 font=T.best_font(8), width=18, anchor="w").pack(side="left")
+        bug = tk.Label(r, text="report it on GitHub", bg=T.BG, fg=T.AMBER,
+                       font=T.best_font(8), cursor="hand2")
+        bug.pack(side="left")
+        bug.bind("<Button-1>", lambda _: _open_url(ISSUES_URL))
+        bug.bind("<Enter>",    lambda _: bug.configure(fg=T.AMBER_BRIGHT))
+        bug.bind("<Leave>",    lambda _: bug.configure(fg=T.AMBER))
 
         tk.Frame(frame, bg=T.BG, height=12).pack()
         return frame

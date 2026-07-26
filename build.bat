@@ -2,6 +2,8 @@
 setlocal
 cd /d "%~dp0"
 
+set /p APPVER=<VERSION
+
 echo ==========================================
 echo  Claude Usage Monitor — Build
 echo ==========================================
@@ -34,7 +36,7 @@ if "%ISCC%"=="" (
     exit /b 1
 )
 
-%ISCC% installer.iss
+%ISCC% /DAppVer=%APPVER% installer.iss
 if errorlevel 1 (
     echo ERROR: Inno Setup failed.
     pause
@@ -44,6 +46,6 @@ if errorlevel 1 (
 echo.
 echo ==========================================
 echo  Build complete!
-echo  Installer: installer\ClaudeUsageMonitorSetup-v1.0.0.exe
+echo  Installer: installer\ClaudeUsageMonitorSetup-v%APPVER%.exe
 echo ==========================================
 pause

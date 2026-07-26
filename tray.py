@@ -1,9 +1,12 @@
 # tray.py — System tray icon with right-click menu
 
 import threading
+import webbrowser
 import pystray
 from PIL import Image, ImageDraw
 import theme as T
+
+_ISSUES_URL = "https://github.com/Godimas101/claude-usage-monitor/issues/new"
 
 
 def _make_icon(session_pct: float = 0.0) -> Image.Image:
@@ -80,6 +83,7 @@ class Tray:
             ),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Settings...", self._open_settings),
+            pystray.MenuItem("Report a Bug", self._report_bug),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Exit", self._on_exit),
         )
@@ -100,6 +104,9 @@ class Tray:
     def _open_settings(self, icon, item):
         if cb := self._callbacks.get("settings"):
             cb()
+
+    def _report_bug(self, icon, item):
+        webbrowser.open(_ISSUES_URL)
 
     def _on_exit(self, icon, item):
         icon.stop()

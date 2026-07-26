@@ -4,6 +4,13 @@ on:
   issues:
     types: [closed]
 
+# The reusable workflow needs contents:write to push the CHANGELOG commit.
+# A called workflow can't escalate above the caller, so grant it here —
+# otherwise the caller inherits the repo's read-only default and the call
+# fails at startup.
+permissions:
+  contents: write
+
 jobs:
   call-append:
     uses: gitpush-mod/.github/.github/workflows/append-changelog.yml@main
