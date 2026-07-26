@@ -4,6 +4,11 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
+## [1.1.3] — 2026-07-26
+
+### Fixed
+- **Self-update relaunch:** after a silent update the app now waits for the new install to fully settle before relaunching, fixing an intermittent *"Failed to load Python DLL"* error when it restarted itself too quickly. The update itself always applied correctly — only the automatic restart was affected.
+
 ## [1.1.2] — 2026-07-26
 
 ### Added

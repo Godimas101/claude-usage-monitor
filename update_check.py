@@ -128,10 +128,11 @@ def _helper_script(installer_path, exe):
     without executing anything."""
     lines = [
         "@echo off",
-        "ping 127.0.0.1 -n 4 >nul",                                     # ~3s: let us fully exit + unlock
+        "ping 127.0.0.1 -n 4 >nul",                                     # ~3s: wait for the old app to exit + unlock the exe
         '"%s" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART' % installer_path,
-        'start "" "%s"' % exe,                                          # relaunch the (now updated) app
+        "ping 127.0.0.1 -n 8 >nul",                                     # ~7s: let the silent install flush + Defender scan the fresh exe before we launch it
         'del "%s" >nul 2>&1' % installer_path,
+        'if exist "%s" start "" "%s"' % (exe, exe),                     # relaunch only once the new exe is actually in place
         'del "%~f0" >nul 2>&1',                                         # self-delete (must be last)
     ]
     return "\r\n".join(lines) + "\r\n"
