@@ -27,7 +27,11 @@ exe = EXE(
     name='ClaudeUsageMonitor',
     debug=False,
     strip=False,
-    upx=True,
+    # UPX is disabled on purpose. The GitHub runner has UPX installed, and
+    # UPX-packed Python DLLs intermittently trip Windows Defender on first
+    # launch after install ("Failed to load Python DLL … module could not be
+    # found"). Uncompressed is a few MB larger but loads reliably.
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,

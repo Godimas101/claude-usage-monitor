@@ -4,6 +4,11 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
+## [1.1.4] — 2026-07-26
+
+### Fixed
+- **"Failed to load Python DLL" on launch:** disabled UPX compression in the build. The release runner was UPX-packing the executable, which tripped Windows Defender into intermittently blocking the packed Python DLL from loading right after install. The download is a few MB larger now, but the app launches reliably.
+
 ## [1.1.3] — 2026-07-26
 
 ### Fixed
