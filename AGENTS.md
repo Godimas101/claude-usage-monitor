@@ -27,6 +27,14 @@ Keep these local (not committed):
 Compiled binaries and installers ship through **GitHub Releases**, not tracked
 in the repo root.
 
+## Publishing + feedback flow
+
+Wired into the [TCS Discord bot](https://github.com/The-Canadian-Space/tcs-forum-watcher) with tag `Claude Monitor` under the `tools` category. Full flow: [`discord/release-and-feedback-flow`](https://docs.thecanadian.space/discord/release-and-feedback-flow/) (wiki, Cloudflare-Access-gated).
+
+- Issues labelled `bug` or `suggestion` → `🐛-tool-feedback` thread (auto). Other labels don't mirror.
+- GitHub releases → persistent thread in `📦-tool-updates`. **Public — users watch this thread for new versions.**
+- **Releases are user-driven.** Every release fires a public Discord post. Do NOT run `gh release create` autonomously. If the work looks releasable (new feature, notable fix, packaged binary re-cut), **ask** first with proposed release notes.
+
 ## Related
 
 - Parent: [`../../AGENTS.md`](../../AGENTS.md)
