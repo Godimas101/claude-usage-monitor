@@ -14,7 +14,19 @@ jobs:
   auto-assign:
     runs-on: ubuntu-latest
     steps:
-      - name: Assign default maintainer
+      # kentaro-m/auto-assign-action only understands pull request events: on an
+      # issue event it fails with "the webhook payload is not exist". Issues get
+      # a plain gh call instead.
+      - name: Assign default maintainer (pull requests)
+        if: github.event_name == 'pull_request_target'
         uses: kentaro-m/auto-assign-action@v2.0.0
         with:
           configuration-path: .github/auto_assign.yml
+
+      - name: Assign default maintainer (issues)
+        if: github.event_name == 'issues' && !github.event.issue.assignee
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+          MAINTAINER: ${{ github.repository_owner }}
+        run: gh issue edit "$ISSUE" --repo "$GITHUB_REPOSITORY" --add-assignee "$MAINTAINER"
