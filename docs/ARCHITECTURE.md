@@ -253,6 +253,157 @@ clamped to one day; a cycle that raises waits `ERROR_RETRY_S` (60 s).
 `pause_check()` true → status `PAUSED`, no work (the credentials file is still watched). Reprices the store when the pricing
 version changes; refreshes remote pricing at most daily.
 
+## Phase 2 — stats (#11–#14)
+
+Read-only reports for the dashboard (`GET /api/analytics/<name>`, `GET /api/export`). They run
+on the server's own `Store` (WAL), never on the service thread, and never write.
+
+### `data/analytics.py`
+```python
+WINDOW_NAMES = ("session", "today", "week", "month", "cycle", "all")
+def resolve_window(name: str, store: Store, *, now: datetime, usage: UsageSnapshot | None,
+                   billing_day: int | None, tz: tzinfo | None = None) -> tuple[datetime | None, datetime | None]
+def project_name(project: str, cwd: str | None) -> str     # basename of cwd, else the slug
+def cost_report(store, pricing, *, now, usage, plan: PlanInfo, plan_price: float | None,
+                billing_day: int | None, breakdown_window: str = "cycle", tz=None) -> dict
+def efficiency_report(store, *, start, end) -> dict
+def pacing_report(store, *, now, usage: UsageSnapshot | None) -> dict
+def history_report(store, *, now, tz=None, days: int = 371) -> dict
+def sessions_report(store, pricing, *, start, end, limit: int = 25) -> dict
+def daily_rollups(store, *, tz=None, start=None, end=None) -> list[dict]
+def export_csv(rows: list[dict]) -> str
+def export_json(rows: list[dict]) -> str
+```
+Shared rules:
+- Output is JSON-ready: str / int / float / bool / None / list / dict only. Datetimes are
+  ISO-8601 UTC strings ending in `Z`; local calendar dates are `"YYYY-MM-DD"`. Money is a USD
+  float (not rounded); tokens are int. Every report that shows cost carries
+  `"basis": "API-equivalent at list prices"`.
+- Windows come from `data/windows.py` (`resolve_window`): `session` and `week` follow the
+  usage API windows when known; `cycle` = `windows.cycle(now, billing_day)` (calendar month
+  when `billing_day` is None); `all` = (None, None). Unknown name → `ValueError`.
+- Local days and hours use `tz` (None = the machine's local zone) and must be DST-correct:
+  aggregate in SQL into 900-second UTC buckets, convert buckets to local time in Python.
+- SQL lives in `analytics.py` and goes through `Store.query(sql, params=()) -> list[sqlite3.Row]`
+  (new public read-only helper). Each report must finish in < 300 ms on 70K requests /
+  90K tool calls; no Python loop over every request row unless a statistic needs it.
+- `project_name`: group by `requests.project`; the display name is the basename of the most
+  common `cwd` for that project, else the slug.
+
+`cost_report` → `{basis, windows: {name: W}, plan, value, monthly, breakdowns, top_sessions_week, spend}`
+- `W` = `{start, end, requests, tokens: {input, output, cache_read, cache_write, thinking, total},
+  cost_usd, nocache_cost_usd, unpriced_requests}` for every name in `WINDOW_NAMES`.
+- `plan` = `{name, subscription_type, rate_limit_tier, price_usd, price_source}`; `price_usd`
+  = `plan_price` (source `"override"`), else `plan.monthly_price_usd` (`"detected"`), else None.
+- `value` = `{cycle_start, cycle_end, cycle_cost_usd, multiplier, projected_cycle_cost_usd}`;
+  multiplier = cycle cost / price (None without a price); projection = cost / elapsed fraction
+  of the cycle (None in the first hour).
+- `monthly` = one row per local calendar month with activity, oldest first:
+  `{month: "YYYY-MM", requests, tokens, cost_usd, multiplier}`.
+- `breakdowns` (for `breakdown_window`): `window`; `by_model` `[{model, name, requests,
+  tokens, cost_usd, share}]` (cost desc; `name` = `pricing.display_name`); `by_project` (same
+  shape with `project` and `name`; top 15, then one `"other"` row); `by_thread` `{main,
+  subagent}`; `haiku` `{main, subagent}` (Haiku-family models only); `fast` `{requests,
+  cost_usd}` (`speed == "fast"`). Thread and haiku values are `{requests, tokens, cost_usd}`.
+- `top_sessions_week` = the 5 most expensive sessions in the `week` window (rows as in
+  `sessions_report`).
+- `spend` = the usage API's `Spend` as a dict (real money), or None. Never added to cost.
+
+`efficiency_report` → `{start, end, basis, cache, thinking, context, compactions, active_days,
+tools, productivity, effort, api_errors, web}`
+- `cache` = `{hit_rate, fresh_input_tokens, read_tokens, write_tokens, write_5m_tokens,
+  write_1h_tokens, cost_usd, nocache_cost_usd, saved_usd}`. Hit rate = read / (fresh + read +
+  write); saved = max(0, nocache − cost).
+- `thinking` = `{thinking_tokens, output_tokens, share}`.
+- `context` = prompt tokens per request (input + cache read + cache writes):
+  `{requests, avg, p50, p95, max}`.
+- `compactions` = `{count, auto, manual, per_active_day, avg_pre_tokens}`. `active_days` =
+  local days with ≥ 1 request in the window.
+- `tools` = `{total, builtin: [{name, count}], mcp: [{server, count, tools}]}`. MCP tool names
+  `mcp__<server>__<tool>` are grouped by server (`tools` = distinct tool names); sorted by count.
+- `productivity` = `{lines_added, lines_removed, files_created, commits, pushes, prs,
+  cost_per_pr_usd, cost_per_100_lines_usd}`. PRs = distinct `pull_requests` URLs whose `ts`
+  is in the window. Ratios are None when the divisor is 0.
+- `effort` = `[{effort, requests, cost_usd}]` (a None effort is reported as `"default"`);
+  `api_errors` = count; `web` = `{searches, fetches}`.
+- An empty window gives zeros and None ratios, never an exception.
+
+`pacing_report` → `{now, session, weekly, scoped}`
+- `session` = `{percent, resets_at, window_start, slope_pct_per_hour, projected_limit_at,
+  verdict, points}`. Points = stored snapshots in the current session window (same
+  `session_resets_at` within 60 s), plus `usage` when it is newer, as `[iso, pct]`. Slope = least
+  squares over the points from the last 90 minutes; it needs ≥ 2 points spanning ≥ 10 minutes.
+  Verdict: percent ≥ 100 → `LIMITED`; no slope → `UNKNOWN`; slope < 0.5 %/h → `IDLE`;
+  projected time (now + (100 − pct) / slope) ≥ resets_at → `SAFE`; otherwise `AT_RISK`, with
+  `projected_limit_at`.
+- `weekly` = `{percent, resets_at, window_start, elapsed_pct, pace_delta_pp, verdict,
+  daily_budget_pct, even_daily_pct, projected_end_pct, points}`. Window = [resets_at − 7 d,
+  resets_at); `pace_delta_pp` = percent − elapsed_pct. Verdict `AHEAD` (> +5), `BEHIND`
+  (< −5), otherwise `ON_PACE`; `UNKNOWN` without a weekly limit. `daily_budget_pct` = (100 −
+  percent) / max(days left, 1); `even_daily_pct` = 100/7; `projected_end_pct` = percent /
+  elapsed fraction (None while elapsed < 5 %). Points are downsampled to one per hour.
+- `scoped` = one entry per scoped limit (for example the Fable weekly) with the `weekly`
+  fields (window from its `window_seconds`, default 7 d), plus `label`, `model`,
+  `allowance_pct` and `used_pct_of_weekly`.
+- Every limit block is None-safe: missing usage → percent None, verdict `UNKNOWN`.
+
+`history_report` → `{tz, days, hour_weekday, streaks, busiest_day, first_use, active_days, odometer}`
+- `days` = the last `days` local days ending today, zero-filled, oldest first:
+  `{date, requests, tokens, output_tokens, cost_usd}`.
+- `hour_weekday` = `{requests: 7×24, cost_usd: 7×24}` over the same range; row 0 = Monday.
+- `streaks` = `{current_days, longest_days, longest_start, longest_end}`. An active day has
+  ≥ 1 request; the current streak ends today, or yesterday when today has no activity yet.
+- `busiest_day` = `{date, cost_usd, tokens}` by cost over all time (None when empty);
+  `first_use` = the first request ts; `active_days` = the all-time count.
+- `odometer` = `{total_tokens, output_tokens, requests, cost_usd, comparisons}`. Comparisons
+  are `[{key, label, value}]` for `war_and_peace` (output tokens / 783,000), `britannica`
+  (total tokens / 58,700,000) and `page_stack_m` (output tokens × 0.75 / 500 pages ×
+  0.0001 m).
+
+`sessions_report` → `{start, end, basis, sessions: [...]}`: sessions with requests in the
+window, cost desc, at most `limit` rows: `{session_id, title, project, project_name, first_ts,
+last_ts, requests, tokens, cost_usd, subagent_cost_usd, models (top 3 display names by cost),
+prs}`. `title` = the custom title, else the AI title, else None.
+
+`daily_rollups` → one row per local day with activity, oldest first: `{date, requests,
+input_tokens, output_tokens, cache_read_tokens, cache_write_5m_tokens, cache_write_1h_tokens,
+thinking_tokens, cost_usd, nocache_cost_usd}`. `export_csv` writes a header row plus one row
+per dict (stable column order, CRLF line ends); `export_json` writes `{"basis": ..., "rows": [...]}`.
+
+Store change: `pull_requests` keeps the earliest `ts` for a URL (upsert with `MIN`), so a PR
+counts in the window where it first appeared.
+
+### `data/alerts.py` (#13)
+```python
+@dataclass(slots=True)
+class Alert:
+    key: str          # dedupe key
+    kind: str         # "threshold" | "reset" | "credits"
+    severity: str     # "info" | "warning" | "critical"
+    title: str        # "Session limit at 90%"
+    message: str      # "Resets 4:40 PM"
+class AlertEngine:
+    def __init__(self, settings: Settings, *, tz: tzinfo | None = None): ...
+    def evaluate(self, state: MonitorState, *, suppressed: bool = False) -> list[Alert]
+```
+New settings (in `DEFAULTS`, with value rules): `alerts_enabled` (True), `alert_thresholds`
+([80, 90, 100]: 1–5 ints in 1..100), `alert_on_threshold` / `alert_on_reset` /
+`alert_on_credits` (True), `alert_quiet_hours` (None, or `{"start": "HH:MM", "end": "HH:MM"}`
+in local time; may wrap midnight).
+- Runs only when `state.status` is `LIVE` and `state.usage` is set. Limits: session, weekly
+  and each scoped limit. A limit's window identity is (kind, label, resets_at to the minute).
+- The first evaluation with usage records a baseline and returns nothing (no toasts for
+  levels already reached at startup).
+- Threshold: the first time percent ≥ T in a window → one alert for the highest T crossed;
+  lower ones are marked done. Severity is `critical` for T ≥ 100, else `warning`. The message
+  gives the local reset time ("Resets 4:40 PM"; weekly: "Resets Tue 4:00 PM").
+- Reset: the window identity changes and the previous percent was ≥ the lowest threshold →
+  `info` "Session limit reset".
+- Credits: spend enabled and `used` above the last seen value → `info` "Usage credits in
+  use", at most once per local day.
+- Master off, kind toggled off, quiet hours, or `suppressed=True` (the caller's fullscreen
+  check): the state still advances and nothing is returned. Never raises.
+
 ## Phase 3 target (v2.0) — summary
 
 - **Widgets:** a Win32 UI thread hosts layered windows (`WS_EX_LAYERED`, `UpdateLayeredWindow`
