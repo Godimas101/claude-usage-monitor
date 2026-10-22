@@ -541,3 +541,124 @@ def test_a_bookmark_keeps_its_tail_fingerprint(file_store):
     file_store.save_file_state(FileState("/p/a.jsonl", 120, 1.5, 100, tail="abc123"))
     assert file_store.file_state("/p/a.jsonl") == FileState("/p/a.jsonl", 120, 1.5, 100, tail="abc123")
     assert file_store.file_states()["/p/a.jsonl"].tail == "abc123"
+
+
+# ── Read-only query helper ────────────────────────────────────────────────────────
+
+def test_query_returns_named_rows_for_select_and_with(store):
+    store.add_items([make_rec("k1", inp=7)], PRICING)
+    rows = store.query("SELECT key, input_tokens FROM requests WHERE key = ?", ("k1",))
+    assert [(row["key"], row["input_tokens"]) for row in rows] == [("k1", 7)]
+    assert store.query("WITH x AS (SELECT 2 AS v) SELECT v FROM x")[0][0] == 2
+    assert store.query("SELECT 1;")[0][0] == 1
+
+
+@pytest.mark.parametrize("sql", [
+    "INSERT INTO meta (key, value) VALUES ('a', 'b')",
+    "UPDATE requests SET model = 'x'",
+    "DELETE FROM requests",
+    "DROP TABLE requests",
+    "PRAGMA user_version",
+    "ATTACH DATABASE ':memory:' AS other",
+    "SELECT 1; DROP TABLE requests",
+    "SELECT 1; SELECT 2",
+    "selectx 1",
+    "",
+    "   ",
+])
+def test_query_rejects_anything_that_is_not_one_select_or_with(store, sql):
+    store.add_items([make_rec("k1")], PRICING)
+    with pytest.raises(ValueError):
+        store.query(sql)
+    assert store.table_counts()["requests"] == 1
+
+
+def test_query_cannot_write_even_inside_a_with_statement(file_store):
+    file_store.add_items([make_rec("k1")], PRICING)
+    with pytest.raises(sqlite3.Error):
+        file_store.query("WITH doomed AS (SELECT 1) DELETE FROM requests")
+    assert raw(file_store._path, "SELECT COUNT(*) FROM requests")[0][0] == 1
+    # The connection is writable again once the read is over.
+    file_store.add_items([make_rec("k2")], PRICING)
+    assert raw(file_store._path, "SELECT COUNT(*) FROM requests")[0][0] == 2
+
+
+def test_query_accepts_semicolons_in_literals_and_comments(store):
+    for sql in ["SELECT ';'", "SELECT 1 WHERE 'a;b' LIKE 'a;b'", "/* c */ SELECT 1", "-- lead\nSELECT 1",
+                "/* ; */ SELECT 1", "SELECT 1; -- end", "  \n SELECT 1 /* x */ ;"]:
+        assert len(store.query(sql)) == 1, sql
+    assert store.query("SELECT 1 WHERE 'a;b' LIKE ?", ("a;b",))[0][0] == 1
+
+
+@pytest.mark.parametrize("sql", [
+    "/* c */ DELETE FROM requests",
+    "-- c\nPRAGMA query_only = 0",
+    "(DELETE FROM requests)",
+    "SELECT 1; /* x */ DELETE FROM requests",
+    "SELECT 1; SELECT 2 -- tail",
+])
+def test_query_still_rejects_writes_hidden_behind_comments_and_second_statements(store, sql):
+    store.add_items([make_rec("k1")], PRICING)
+    with pytest.raises(ValueError):
+        store.query(sql)
+    assert store.table_counts()["requests"] == 1
+
+
+# ── Pull requests keep the earliest ts per URL ────────────────────────────────────
+
+PR_URL = "https://github.com/o/r/pull/9"
+
+
+def pr_ts(file_store) -> float | None:
+    return raw(file_store._path, "SELECT ts FROM pull_requests WHERE url = ?", (PR_URL,))[0][0]
+
+
+def test_pull_request_keeps_the_earliest_ts_in_either_order(file_store):
+    later = PullRequest(url=PR_URL, number=9, repository="o/r", session_id="s", ts=T0 + timedelta(hours=1))
+    earlier = PullRequest(url=PR_URL, number=9, repository="o/r", session_id="s", ts=T0)
+    file_store.add_items([later], PRICING)
+    file_store.add_items([earlier], PRICING)
+    assert pr_ts(file_store) == T0.timestamp()
+    file_store.add_items([later], PRICING)
+    assert pr_ts(file_store) == T0.timestamp()
+
+
+def test_pull_request_null_ts_never_overrides_a_known_one_and_is_filled_by_one(file_store):
+    file_store.add_items([PullRequest(url=PR_URL, number=9, repository="o/r", session_id="s", ts=None)], PRICING)
+    assert pr_ts(file_store) is None
+    file_store.add_items([PullRequest(url=PR_URL, number=9, repository="o/r", session_id="s", ts=T0)], PRICING)
+    assert pr_ts(file_store) == T0.timestamp()
+    file_store.add_items([PullRequest(url=PR_URL, number=9, repository="o/r", session_id="s", ts=None)], PRICING)
+    assert pr_ts(file_store) == T0.timestamp()
+
+
+def test_pull_request_fills_null_metadata_and_keeps_the_first_non_null(file_store):
+    file_store.add_items([PullRequest(url=PR_URL, number=None, repository=None, session_id=None, ts=T0)], PRICING)
+    file_store.add_items([PullRequest(url=PR_URL, number=9, repository="o/r", session_id="s", ts=T0)], PRICING)
+    file_store.add_items([PullRequest(url=PR_URL, number=10, repository="x/y", session_id="t", ts=T0)], PRICING)
+    row = raw(file_store._path, "SELECT number, repository, session_id FROM pull_requests WHERE url = ?", (PR_URL,))
+    assert row == [(9, "o/r", "s")]
+
+
+@pytest.mark.parametrize("a_first", [True, False])
+def test_pull_request_session_follows_the_earliest_ts_in_either_ingest_order(file_store, a_first):
+    a = PullRequest(url=PR_URL, number=9, repository="o/r", session_id="sess-A", ts=T0)
+    b = PullRequest(url=PR_URL, number=9, repository="o/r", session_id="sess-B", ts=T0 + timedelta(days=5))
+    for item in ([a, b] if a_first else [b, a]):
+        file_store.add_items([item], PRICING)
+    assert raw(file_store._path, "SELECT session_id, ts FROM pull_requests WHERE url = ?", (PR_URL,))         == [("sess-A", T0.timestamp())]
+
+
+def test_pull_request_known_ts_keeps_its_session_when_a_later_null_ts_arrives(file_store):
+    file_store.add_items([PullRequest(url=PR_URL, number=9, repository="o/r", session_id="sess-A", ts=T0)], PRICING)
+    file_store.add_items([PullRequest(url=PR_URL, number=9, repository="o/r", session_id="sess-B", ts=None)], PRICING)
+    assert raw(file_store._path, "SELECT session_id FROM pull_requests WHERE url = ?", (PR_URL,)) == [("sess-A",)]
+
+
+def test_pull_requests_in_one_batch_merge_like_separate_batches(store):
+    store.add_items([
+        PullRequest(url=PR_URL, number=None, repository=None, session_id=None, ts=T0 + timedelta(hours=2)),
+        PullRequest(url=PR_URL, number=9, repository="o/r", session_id="s", ts=T0 + timedelta(hours=1)),
+    ], PRICING)
+    rows = store.query("SELECT number, repository, session_id, ts FROM pull_requests")
+    assert [tuple(row) for row in rows] == [(9, "o/r", "s", (T0 + timedelta(hours=1)).timestamp())]

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import re
 import sqlite3
 import threading
 from collections.abc import Iterable, Iterator, Sequence
@@ -164,8 +165,22 @@ _CODE_CHANGE_SQL = ("INSERT OR IGNORE INTO code_changes (tool_use_id, session_id
                     "lines_removed, is_new_file) VALUES (?, ?, ?, ?, ?, ?)")
 _GIT_EVENT_SQL = ("INSERT OR IGNORE INTO git_events (tool_use_id, session_id, ts, is_commit, is_push, "
                   "is_pr) VALUES (?, ?, ?, ?, ?, ?)")
-_PULL_REQUEST_SQL = ("INSERT OR IGNORE INTO pull_requests (url, number, repository, session_id, ts) "
-                     "VALUES (?, ?, ?, ?, ?)")
+# Keeps the earliest ts for a URL (a PR counts where it first appeared) and the session that
+# earliest sighting belongs to; number and repository only fill in while they are still null.
+# All right-hand sides read the row as it was before the update, so the ts test is the same
+# for every column.
+_PULL_REQUEST_SQL = (
+    "INSERT INTO pull_requests (url, number, repository, session_id, ts) VALUES (?, ?, ?, ?, ?) "
+    "ON CONFLICT (url) DO UPDATE SET "
+    "ts = CASE WHEN pull_requests.ts IS NULL THEN excluded.ts "
+    "WHEN excluded.ts IS NULL THEN pull_requests.ts "
+    "ELSE MIN(pull_requests.ts, excluded.ts) END, "
+    "number = COALESCE(pull_requests.number, excluded.number), "
+    "repository = COALESCE(pull_requests.repository, excluded.repository), "
+    "session_id = CASE WHEN excluded.session_id IS NOT NULL AND excluded.ts IS NOT NULL "
+    "AND (pull_requests.ts IS NULL OR excluded.ts < pull_requests.ts) THEN excluded.session_id "
+    "ELSE COALESCE(pull_requests.session_id, excluded.session_id) END"
+)
 # Latest non-empty title wins; a later record without a title keeps the stored one.
 _TITLE_SQL = (
     "INSERT INTO session_titles (session_id, project, ai_title, custom_title) VALUES (?, ?, ?, ?) "
@@ -194,6 +209,8 @@ _LATEST_TS = "latest_usage_ts"
 _LATEST_RAW = "latest_usage_raw"
 _PRICING_VERSION = "pricing_version"
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+# SELECT or WITH, after any whitespace and comments.
+_READ_ONLY_START = re.compile(r"(?is)(?:\s|--[^\n]*(?:\n|$)|/\*.*?\*/)*(?:select|with)\b")
 
 
 # ── Store ─────────────────────────────────────────────────────────────────────────
@@ -434,6 +451,28 @@ class Store:
             log.warning("stored usage response is unreadable; ignored")
             return None
         return (when, raw) if isinstance(raw, dict) else None
+
+    def query(self, sql: str, params: Sequence[Any] = ()) -> list[sqlite3.Row]:
+        """Run one read-only SELECT or WITH statement and return all its rows.
+
+        Anything else, or more than one statement, raises ValueError (sqlite3 itself refuses a
+        second statement, so a ';' inside a string literal or comment is fine). The connection is
+        in query_only mode for the call, so a WITH ... DELETE fails rather than writing.
+        """
+        text = sql.strip()
+        if not _READ_ONLY_START.match(text):
+            raise ValueError("query() accepts one SELECT or WITH statement")
+        with self._lock:
+            previous = self._conn.execute("PRAGMA query_only").fetchone()[0]
+            self._conn.execute("PRAGMA query_only = 1")
+            try:
+                return self._conn.execute(text, params).fetchall()
+            except (sqlite3.ProgrammingError, sqlite3.Warning) as exc:
+                if "one statement" in str(exc):  # ProgrammingError since 3.12, Warning before
+                    raise ValueError("query() accepts one SELECT or WITH statement") from exc
+                raise
+            finally:
+                self._conn.execute(f"PRAGMA query_only = {int(previous)}")
 
     # ── Internals ────────────────────────────────────────────────────────────────
 
