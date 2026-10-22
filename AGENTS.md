@@ -4,16 +4,105 @@
 
 ## What this is
 
-Local workspace for the `claude-usage-monitor` project — a tray widget that
-surfaces Claude Code token usage. Standalone repo under Chris's personal
-projects.
+Claude Usage Monitor v2: a Windows 11 tray utility (Python) that shows Claude Code plan usage. A
+floating widget, a taskbar strip, a tray icon and a dashboard window, fed by the usage API
+(`/api/oauth/usage`) and Claude Code's local transcripts. Standalone repo under Chris's personal
+projects. **Chris uses it constantly** — do not break the installed copy, and test a change in the
+real app before calling it done.
+
+Privacy, everywhere: never print, store or log message text, prompts, file contents or OAuth tokens.
+
+## Layout
+
+| Path | What |
+|---|---|
+| `main.py` | Entry point: the monitor, `--dashboard`, `--print-version`, `--dump-frames`, `--smoke-test` |
+| `usage_monitor/app.py` | `MonitorApp`: wires settings, data service, UI host, widgets, tray, local API |
+| `usage_monitor/data/` | Data layer, no UI imports: transcripts, SQLite store, usage API, windows, `DataService` |
+| `usage_monitor/ui/` | Win32 layer (ctypes, no Tk): host, layered windows, widgets, tray, menu, server, dashboard |
+| `usage_monitor/render/` | Pillow renderers: view model, drawing engine, one skin per theme |
+| `usage_monitor/themes/` | Theme tokens (`<id>.json`) and their loader |
+| `usage_monitor/webui/` | Dashboard HTML/CSS/JS and the bundled OFL fonts (the Pillow skins read them too) |
+| `update_check.py`, `version.py` | GitHub release check and self-update; version read from `VERSION` |
+| `tests/` | pytest, offline, synthetic fixtures only |
+
+Read before changing anything: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (data layer rules and
+contracts) and [`docs/UI_ARCHITECTURE.md`](docs/UI_ARCHITECTURE.md) (threads, windows, interfaces,
+local API). Update them in the same change when behaviour moves.
+
+## Stack decision (#15)
+
+Hybrid, no Tk: **Pillow-drawn widgets on per-pixel-alpha layered windows** (floating widget, taskbar
+strip, tooltip, tray icon) plus a **pywebview dashboard** (WebView2) served by a local API. Python
+3.10+, standard library + Pillow + pywebview only.
+
+- The UI thread (main) owns every window. Other threads call `UIHost.post()`; the data service
+  publishes `MonitorState` on its own thread; the dashboard is a separate `--dashboard` process.
+- All Win32 goes through ctypes with explicit `argtypes`/`restype` on every function (use
+  `usage_monitor/ui/win32.py`). Keep callbacks referenced and catch every exception inside one.
+- Log with `usage_monitor.log.get_logger(__name__)`. No hidden globals: paths, clock and HTTP are
+  injectable. The monitor never runs `claude` and never sends a model request.
+
+## Themes
+
+Tokens live in `usage_monitor/themes/<id>.json` and feed both the Pillow skins and the dashboard CSS.
+Settings: `theme_id`, `theme_variant`, `theme_mode`, `reduce_motion`. Theme changes apply live.
+
+- **Nostromo** (default): amber phosphor on CRT black, the shipped identity — *preserve it*. Variants
+  amber (default), green, white, red, blue, cyan, orange, purple. The only theme with its own skin
+  today and the only one that blinks; the other two render through its skin until theirs land.
+- **Night City**: Blackwall (default), Relic, Edgerun, Mox; chamfered frames, RAM-meter tray icon.
+- **Gates**: Fluent surfaces; accents (system by default) in light, dark or system mode; Windows
+  fonts, never bundled.
+
+## Branches and releases
+
+- `main` is what ships. v2 is built on the `v2` branch. Never push to `main` without Chris's say-so.
+- **Releases are Chris's call.** `release.yml` runs on every push to `main`, but only builds and
+  publishes a public GitHub Release (and a Discord post) when `VERSION` names a tag that does not
+  exist yet. A `VERSION` bump that reaches `main` *is* a release.
+- Add the change to `CHANGELOG.md` under `[Unreleased]`. When Chris releases, that section becomes
+  `## [VERSION]`, and `release.yml` publishes it as the release notes.
+- Never bump `VERSION` yourself, and never run `gh release create`. Ask first (see Publishing below).
+
+## Running a dev instance
+
+A test build must run beside the installed copy without touching it:
+
+```
+set CUM_DEV_INSTANCE=1
+set CUM_APPDATA_DIR=C:\some\scratch\folder
+python main.py            (console: Ctrl+C quits, errors print)     or    launch.bat   (pythonw)
+```
+
+- `CUM_DEV_INSTANCE=1`: mutex `Global\ClaudeUsageMonitor-dev`, its own controller window class, tray
+  tooltip ends "(dev)", no repair of the sign-in (Run) entry at launch. The dashboard's *Launch on
+  startup* switch still writes the real entry from a dev instance, so leave it alone there.
+- `CUM_APPDATA_DIR`: settings, `usage.db` and logs go there instead of `%APPDATA%\ClaudeUsageMonitor`.
+- Logs: `monitor.log` (dashboard child: `dashboard.log`, hard crashes: `faults.log`).
+- `python main.py --smoke-test 45 report.json` runs the real app for 45 s (real server, dashboard,
+  widgets; the data service never pauses) and exits 0 when clean. The first run backfills your
+  transcripts into the dev database.
+- `python main.py --dump-frames <dir>` renders every theme, variant, state and scale to PNGs plus a
+  contact sheet per theme. Screen capture can be blocked, so check visuals through these.
+
+## Tests
+
+- `python -m pytest` — offline and fast; what CI (`tests.yml`, Windows, Python 3.12) runs.
+- `CUM_UI_TESTS=1 python -m pytest` — adds the tests that create real windows, tray icons or
+  processes. They need an interactive desktop, park widgets off-screen and use a fake data service.
+  A new test that opens a window, a tray icon or a process must be gated the same way.
+
+## DELETE ME/ convention
+
+Files that the rewrite replaces (the v1 Tk modules `widget.py`, `options.py`, `theme.py`, `tray.py`,
+`usage_reader.py`, `win_utils.py`) are moved into `DELETE ME/` for Chris to review and delete. The
+folder is gitignored and never committed. Do not delete anything yourself: list it, move it there.
 
 ## README + UI style
 
 - **General README style:** [`../../personal-docs/style-guides/README_STYLE_GUIDE.md`](../../personal-docs/style-guides/README_STYLE_GUIDE.md)
 - **App-specific style:** [`../../personal-docs/style-guides/CLAUDE_USAGE_STYLE_GUIDE.md`](../../personal-docs/style-guides/CLAUDE_USAGE_STYLE_GUIDE.md)
-
-The monitor has a CRT / NASA-punk visual identity — preserve it.
 
 ## Local-only docs
 
