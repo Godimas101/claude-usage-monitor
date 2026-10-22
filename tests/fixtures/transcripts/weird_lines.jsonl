@@ -1,0 +1,25 @@
+{not json
+[1, 2, 3]
+"just a string"
+42
+{"type":"assistant","uuid":"w5","timestamp":"2026-07-14T10:00:00Z","requestId":"r5","message":[1,2]}
+{"type":"assistant","uuid":"w6","timestamp":"2026-07-14T10:00:00Z","requestId":"r6","message":{"id":"m6","model":"claude-opus-5-5","usage":"not a dict","content":{"type":"tool_use","id":"t6","name":"Bash"}}}
+{"type":"assistant","uuid":"w7","timestamp":12345,"requestId":"r7","message":{"id":"m7","model":"claude-opus-5-5","usage":{"input_tokens":"5","output_tokens":-3,"cache_read_input_tokens":null}}}
+{"type":"assistant","uuid":"w8","timestamp":"not a date","requestId":"r8","message":{"id":"m8","model":"claude-opus-5-5","usage":{"input_tokens":1,"output_tokens":1}}}
+{"type":"assistant","uuid":"w9","timestamp":"2026-07-14T10:00:00.1234567890+05:30","requestId":"r9","message":{"id":"m9","model":"claude-opus-5-5","usage":{"input_tokens":1,"output_tokens":2}}}
+{"type":"assistant","uuid":"w10","timestamp":"2026-07-14T10:00:00Z","message":{"model":"claude-opus-5-5","usage":{"input_tokens":1,"output_tokens":1}}}
+{"type":"assistant","uuid":"w11","timestamp":"2026-07-14T10:00:00Z","requestId":"r11","message":{"id":"m11","model":"claude-opus-5-5","usage":{"input_tokens":1,"output_tokens":1}}}
+{"type":"assistant","uuid":"w12","timestamp":"2026-07-14T10:00:00Z","message":{"id":"m12","model":"claude-opus-5-5","usage":{"input_tokens":1,"output_tokens":1}}}
+{"type":"user","uuid":"w13","timestamp":"2026-07-14T10:00:00Z","message":{"content":[{"type":"tool_result","tool_use_id":["x"]}]},"toolUseResult":{"structuredPatch":[{"lines":["+a","-b","+c"]}]}}
+{"type":"user","uuid":"w14","timestamp":"2026-07-14T10:00:00Z","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_W14"}]},"toolUseResult":{"structuredPatch":"nope","type":"create","content":42}}
+{"type":"user","uuid":"w15","timestamp":"2026-07-14T10:00:00Z","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_W15"}]},"toolUseResult":{"gitOperation":["commit"]}}
+{"type":"pr-link","sessionId":"sess-w","prNumber":"forty","prUrl":"https://github.com/example/weird/pull/1","timestamp":"bad"}
+{"type":"pr-link","sessionId":"sess-w","prNumber":5,"prUrl":""}
+{"type":"ai-title","sessionId":"sess-w","aiTitle":42}
+{"type":"ai-title","sessionId":"sess-w","aiTitle":"   "}
+{"type":"system","subtype":"compact_boundary","uuid":"c20","timestamp":"2026-07-14T10:00:00Z","sessionId":"sess-w","compactMetadata":"nope"}
+{"type":"system","subtype":"api_error","timestamp":"2026-07-14T10:00:00Z","sessionId":"sess-w"}
+{"type":"assistant","uuid":"w22","timestamp":"2026-07-14T10:00:00Z","requestId":"r22","message":{"id":"m22","model":"<synthetic>","usage":{"input_tokens":0,"output_tokens":0}}}
+{"type":"assistant","uuid":"w23","timestamp":"2026-07-14T10:00:00Z","requestId":"r23","message":{"id":"m23","model":"claude-opus-5-5","usage":{"input_tokens":true,"output_tokens":3.5,"cache_creation_input_tokens":"7"},"content":[{"type":"tool_use","name":"NoIdTool"}]}}
+{"type":"user","uuid":"w25","timestamp":"2026-07-14T10:00:00Z","toolUseResult":{"type":"update","structuredPatch":[{"lines":["+x"]}]}}
+{"type":"assistant","uuid":"w26","timestamp":"2026-07-14T10:00:00Z","message":"just text"}

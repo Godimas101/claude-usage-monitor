@@ -31,3 +31,10 @@ env/
 # IDE
 .vscode/
 .idea/
+
+# Files replaced by the v2 rewrite, parked for Chris to review + delete (never committed)
+DELETE ME/
+
+# Design review screenshots (local only; the HTML mockups are tracked)
+design/mockups/shots/
+design/mockups/*/review-img/

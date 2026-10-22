@@ -1,0 +1,69 @@
+{
+  "five_hour": {
+    "utilization": 97.0,
+    "resets_at": "2026-10-22T02:39:59.903338+00:00",
+    "limit_dollars": null,
+    "used_dollars": null,
+    "remaining_dollars": null,
+    "locked_reason": null
+  },
+  "seven_day": {
+    "utilization": 40.0,
+    "resets_at": "2026-10-28T19:59:59.903359+00:00",
+    "limit_dollars": null,
+    "used_dollars": null,
+    "remaining_dollars": null,
+    "locked_reason": null
+  },
+  "limits": [
+    {
+      "kind": "session",
+      "group": "session",
+      "percent": 97,
+      "severity": "warning",
+      "resets_at": "2026-10-22T02:39:59.903338+00:00",
+      "scope": null,
+      "is_active": true
+    },
+    {
+      "kind": "weekly_all",
+      "group": "weekly",
+      "percent": 40,
+      "severity": "normal",
+      "resets_at": "2026-10-28T19:59:59.903359+00:00",
+      "scope": null,
+      "is_active": false
+    }
+  ],
+  "spend": {
+    "used": {
+      "amount_minor": 1234,
+      "currency": "USD",
+      "exponent": 2
+    },
+    "limit": {
+      "amount_minor": 5000,
+      "currency": "USD",
+      "exponent": 2
+    },
+    "percent": 24.68,
+    "severity": "normal",
+    "enabled": true,
+    "disabled_reason": null,
+    "cap": {
+      "amount_minor": 5000,
+      "currency": "USD",
+      "exponent": 2
+    },
+    "balance": {
+      "amount_minor": 3766,
+      "currency": "USD",
+      "exponent": 2
+    },
+    "auto_reload": false,
+    "disclaimer": "Usage credits cover you when you hit your plan limits.",
+    "can_purchase_credits": true,
+    "can_toggle": true
+  },
+  "weekly_scoped_shares": []
+}
