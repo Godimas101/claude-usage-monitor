@@ -1,41 +1,68 @@
 """Dev helper: the real webui on the local API, fed by a fake MonitorState (no Win32, no tray).
 
     python -m usage_monitor.ui.devserver --port 8765 --scenario normal|warning|critical|stale
+                                         [--db PATH] [--theme ID[/VARIANT]]
 
 Used for Playwright checks and design review. Settings go to CUM_APPDATA_DIR (or a temporary
 folder), never to the owner's real app data, and the server is a dev one, so the "Start with
 Windows" switch never reaches the sign-in (Run) entry. The numbers are realistic: the session
 window is 31 % elapsed, the weekly window 57 % elapsed, and the month sits at about $1,659
 API-equivalent.
+
+The statistics routes (/api/analytics/*, /api/export) read a usage database. With ``--db PATH``
+that is the file you name, read the way the app reads its own (it is never created and never
+upgraded, so a copy from an older schema is refused with a 503). Pass a COPY, never the live
+usage.db: opening a WAL database leaves -wal and -shm files beside it. Its usage snapshots are old,
+so the pacing page shows only the fake state's current readings. Without ``--db`` a synthetic
+history is built in memory (a year of invented sessions, tool calls, pull requests and usage
+readings that lead up to the fake state's limits), so every page has data.
+
+``--theme`` sets the theme the page starts in: nostromo, night_city/edgerun, gates/blue-light.
+It is stored in the dev settings like a choice made on the page.
 """
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import math
 import os
+import random
+import re
+import sqlite3
 import tempfile
 import threading
-from datetime import datetime, timedelta, timezone
+from collections.abc import Callable
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from usage_monitor import paths
+from usage_monitor import paths, themes
 from usage_monitor.data.models import (
+    ApiErrorEvent,
     ApiStatus,
     BreakdownRow,
     BurnRate,
+    CodeChange,
+    Compaction,
     IngestProgress,
     Limit,
     MonitorState,
     PlanInfo,
+    PullRequest,
+    RequestRecord,
+    SessionMeta,
     Spend,
     TokenTotals,
+    ToolCall,
+    ToolError,
     UsageSnapshot,
     WindowStats,
 )
+from usage_monitor.data.pricing import Pricing
+from usage_monitor.data.store import Store
 from usage_monitor.log import get_logger
 from usage_monitor.settings import Settings
-from usage_monitor.ui.server import ApiServer
+from usage_monitor.ui.server import ApiServer, open_statistics_store
 
 log = get_logger(__name__)
 
@@ -181,16 +208,290 @@ def _app_version() -> str:
         return "dev"
 
 
-def make_server(scenario: str, port: int, settings_dir: Path | None = None) -> tuple[ApiServer, Settings]:
-    """A configured ApiServer for ``scenario``. Not started; the caller runs start()/stop()."""
+# ── Synthetic history for the statistics pages (used without --db) ────────────────
+
+HISTORY_DAYS = 380              # how far back the invented history starts
+HISTORY_SEED = 20261021         # the same invented year on every run
+HISTORY_SCALE = 1.0             # 1 = about 40 000 requests; the tests lower it for speed
+LIVE_SESSION_MINUTES = 85       # today's last session runs up to the present, so the session window has data
+CHUNK = 4000                    # items per Store.add_items call
+
+_FOLDERS = (                    # (working directory, weight)
+    (r"C:\Demo\atlas-web", 30), (r"C:\Demo\atlas-web\packages\design-system", 6), (r"C:\Demo\atlas-api", 20),
+    (r"C:\Demo\ledger-tools", 14), (r"C:\Demo\home-automation", 10), (r"D:\Games\prototype", 9),
+    (r"C:\Demo\dotfiles", 6), (r"C:\Users\demo\notes", 5),
+)
+_TITLES = (
+    "Fix the login redirect loop", "Add CSV export to the reports page", "Refactor the settings store",
+    "Investigate the flaky integration tests", "Write the migration for the new schema",
+    "Tidy the build pipeline", "Draft the release notes", "Debug the websocket reconnect",
+    "Speed up the dashboard query", "Port the old scripts to the new CLI",
+    "Review the pull request feedback", "Set up the staging environment",
+)
+_TOOLS = (
+    ("Bash", 30), ("Read", 22), ("Edit", 16), ("Grep", 8), ("Glob", 5), ("Write", 4), ("TodoWrite", 4),
+    ("Task", 3), ("WebSearch", 1), ("mcp__github__create_pull_request", 2), ("mcp__github__get_file_contents", 2),
+    ("mcp__n8n-mcp__search_nodes", 2), ("mcp__n8n-mcp__n8n_get_workflow", 1),
+)
+_GIT_OPS = ((None, 88), ("commit", 6), ("commit+push", 3), ("push", 1.5), ("pr", 1.5))
+_HOURS = ((9, 3), (10, 5), (11, 4), (12, 1), (13, 3), (14, 5), (15, 5), (16, 4), (17, 2), (20, 2), (21, 1))
+_EFFORTS = ((None, 10), ("low", 8), ("medium", 30), ("high", 35), ("xhigh", 17))
+_RECENT_MODELS = (("claude-opus-5-5", 50), ("claude-sonnet-5-5", 25), ("claude-haiku-5-5", 10), ("claude-haiku-4-5", 15))
+_OLDER_MODELS = (("claude-opus-4-8", 45), ("claude-sonnet-4-6", 30), ("claude-haiku-4-5", 25))
+_SUBAGENT_MODELS = ("claude-haiku-4-5", "claude-haiku-5-5", "claude-sonnet-5-5")
+_FORCED_ACTIVE = ((0, 8), (60, 85), (150, 158))     # day offsets from today: a current streak and two long ones
+_FORCED_IDLE = ((9, 9), (59, 59), (86, 88), (200, 214), (330, 345))
+_WEEKDAY_ODDS = (0.82, 0.82, 0.82, 0.82, 0.8, 0.45, 0.3)
+
+
+def _local_moment(day: date, hour: int, minute: int = 0) -> datetime:
+    """A wall-clock time on a local day as an aware UTC datetime (the machine's zone, which the reports use)."""
+    return datetime.combine(day, time(hour, minute)).astimezone(timezone.utc)
+
+
+class _History:
+    """Invents a year of Claude Code use as transcript items: sessions with their requests, tool calls,
+    errors, code changes, pull requests, compactions and titles. Deterministic for a given ``now``."""
+
+    def __init__(self, now: datetime, seed: int = HISTORY_SEED, scale: float = 1.0) -> None:
+        self.now = now
+        self.scale = scale                  # shrinks every session's request count (the tests build a small year)
+        self.rng = random.Random(seed)
+        self.items: list[Any] = []
+        self._n = 0                     # one counter for every id, so keys never collide
+
+    def build(self) -> list[Any]:
+        today = self.now.astimezone().date()
+        for offset in range(HISTORY_DAYS, -1, -1):
+            day = today - timedelta(days=offset)
+            if self._active(offset, day):
+                for _ in range(self._pick(((2, 35), (3, 40), (4, 25)))):
+                    start = _local_moment(day, self._pick(_HOURS), self.rng.randint(0, 50))
+                    if start < self.now - timedelta(minutes=LIVE_SESSION_MINUTES + 20):
+                        self._session(start, offset)
+        self._session(self.now - timedelta(minutes=LIVE_SESSION_MINUTES), 0,
+                      requests=max(10, round(48 * self.scale)), model="claude-opus-5-5")
+        return self.items
+
+    def _active(self, offset: int, day: date) -> bool:
+        if any(low <= offset <= high for low, high in _FORCED_ACTIVE):
+            return True
+        if any(low <= offset <= high for low, high in _FORCED_IDLE):
+            return False
+        odds = _WEEKDAY_ODDS[day.weekday()] * (0.6 if offset > 300 else 1.0)    # the first months were lighter
+        return self.rng.random() < odds
+
+    def _pick(self, choices: tuple[tuple[Any, float], ...]) -> Any:
+        return self.rng.choices([item for item, _ in choices], [weight for _, weight in choices])[0]
+
+    def _id(self, prefix: str) -> str:
+        self._n += 1
+        return f"{prefix}{self._n:07d}"
+
+    def _session(self, start: datetime, offset: int, requests: int | None = None, model: str | None = None) -> None:
+        rng = self.rng
+        folder = self._pick(_FOLDERS)
+        slug = re.sub(r"[^A-Za-z0-9]", "-", folder)
+        sid = self._id("synthetic-session-")
+        model = model or self._pick(_RECENT_MODELS if offset <= 150 else _OLDER_MODELS)
+        effort = self._pick(_EFFORTS)
+        count = requests or max(3, round(rng.randint(20, 80) * self.scale))
+        if rng.random() < 0.6:
+            title = rng.choice(_TITLES)
+            custom = rng.random() < 0.15
+            self.items.append(SessionMeta(sid, slug, ai_title=None if custom else title,
+                                          custom_title=title if custom else None))
+        moment = start
+        for index in range(count):
+            moment += timedelta(seconds=rng.uniform(40, 200))
+            if moment >= self.now - timedelta(minutes=1):
+                break
+            self._request(sid, slug, folder, moment, index, model, effort)
+        if count >= 3 and rng.random() < 0.3 * min(1.0, count / 40):
+            trigger = "auto" if rng.random() < 0.85 else "manual"
+            self.items.append(Compaction(self._id("compaction-"), sid, min(moment, self.now), trigger,
+                                         rng.randint(140_000, 195_000), rng.randint(9_000, 30_000)))
+
+    def _request(self, sid: str, slug: str, folder: str, moment: datetime, index: int, model: str,
+                 effort: str | None) -> None:
+        rng = self.rng
+        number = self._id("")
+        output = min(30_000, max(60, int(rng.lognormvariate(math.log(4500), 0.8))))
+        fast = model == "claude-opus-5-5" and rng.random() < 0.025
+        self.items.append(RequestRecord(
+            key=f"msg_{number}|req_{number}", message_id=f"msg_{number}", request_id=f"req_{number}",
+            ts=moment, session_id=sid, project=slug, cwd=folder, git_branch="main", is_subagent=False,
+            agent_id=None, model=model, input_tokens=rng.randint(80, 3500), output_tokens=output,
+            cache_read_tokens=min(600_000, int(60_000 + index * rng.uniform(8_000, 20_000))),
+            cache_write_5m_tokens=rng.randint(4_000, 30_000) if index else rng.randint(30_000, 90_000),
+            cache_write_1h_tokens=rng.randint(0, 6_000) if rng.random() < 0.15 else 0,
+            thinking_tokens=int(output * rng.uniform(0.2, 0.5)) if rng.random() < 0.6 else 0,
+            web_search_requests=1 if rng.random() < 0.01 else 0, speed="fast" if fast else "standard",
+            service_tier="standard", effort=effort, entrypoint="cli", cc_version="2.1.290"))
+        for _ in range(self._pick(((0, 20), (1, 35), (2, 30), (3, 15)))):
+            self._tool_call(sid, number, folder, moment)
+        if rng.random() < 0.25:                                     # a subagent reads on the side
+            sub = self._id("")
+            self.items.append(RequestRecord(
+                key=f"msg_{sub}|req_{sub}", message_id=f"msg_{sub}", request_id=f"req_{sub}",
+                ts=moment + timedelta(seconds=2), session_id=sid, project=slug, cwd=folder, git_branch="main",
+                is_subagent=True, agent_id="a" + sub, model=rng.choice(_SUBAGENT_MODELS),
+                input_tokens=rng.randint(200, 2000), output_tokens=rng.randint(300, 2500),
+                cache_read_tokens=rng.randint(20_000, 120_000), cache_write_5m_tokens=rng.randint(2_000, 12_000),
+                entrypoint="cli", cc_version="2.1.290"))
+        if rng.random() < 0.004:
+            self.items.append(ApiErrorEvent(self._id("api-error-"), sid, moment))
+
+    def _tool_call(self, sid: str, number: str, folder: str, moment: datetime) -> None:
+        rng = self.rng
+        name = self._pick(_TOOLS)
+        use_id = self._id("toolu_")
+        ops = self._pick(_GIT_OPS) if name == "Bash" else None
+        self.items.append(ToolCall(use_id, name, f"msg_{number}|req_{number}", sid, moment, False, ops))
+        if rng.random() < (0.02 if ops and "commit" in ops else 0.05):
+            self.items.append(ToolError(use_id, sid, moment + timedelta(seconds=1)))
+        if name in ("Edit", "Write"):
+            self.items.append(CodeChange(use_id, sid, moment + timedelta(seconds=1), rng.randint(1, 120),
+                                         rng.randint(0, 60) if name == "Edit" else 0,
+                                         name == "Write" and rng.random() < 0.6))
+        if ops and "pr" in ops.split("+"):
+            repo = re.split(r"[\\/]", folder)[-1]
+            pull = rng.randint(1, 400)
+            self.items.append(PullRequest(f"https://github.com/demo/{repo}/pull/{pull}-{self._n}", pull,
+                                          f"demo/{repo}", sid, moment + timedelta(seconds=3)))
+
+
+def _sync_usage_history(store: Store, state: MonitorState) -> None:
+    """Store usage readings that lead up to the limits in ``state``, so the pacing page has a slope to show.
+
+    Readings sit on a fixed grid (every 5 minutes over the last 95, every hour over the last week) and
+    each rises with the elapsed share of its window to the limit's current percent. Writing the same
+    grid again replaces its rows, so repeating this for the next minute's state does not pile rows up.
+    """
+    usage = state.usage
+    if usage is None:
+        return
+    end = usage.fetched_at
+    epoch = end.timestamp()
+    stamps = {int((epoch - k * 300) // 300 * 300) for k in range(1, 20)}
+    stamps |= {int((epoch - k * 3600) // 3600 * 3600) for k in range(1, 170)}
+    for stamp in sorted(stamps):
+        at = datetime.fromtimestamp(stamp, timezone.utc)
+        limits = [reading for limit in usage.limits if (reading := _reading(limit, at, end)) is not None]
+        if limits:
+            store.save_usage_snapshot(UsageSnapshot(fetched_at=at, limits=limits))
+
+
+def _reading(limit: Limit, at: datetime, end: datetime) -> Limit | None:
+    """``limit`` as it read at ``at``, or None before its window opened."""
+    if limit.resets_at is None:
+        return None
+    start = limit.resets_at - timedelta(seconds=limit.window_seconds or _WEEK_S)
+    span = (end - start).total_seconds()
+    if at < start or span <= 0:
+        return None
+    share = ((at - start).total_seconds() / span) ** 0.85
+    return dataclasses.replace(limit, percent=round(limit.percent * share, 1))
+
+
+class SyntheticHistory:
+    """The statistics source for a dev server without --db: an in-memory Store built on first use.
+
+    open() hands the Store over (the server closes it); sync() keeps the usage readings in step with
+    the fake state, whose reset times slide forward a minute at a time.
+    """
+
+    def __init__(self, scenario: str, now: Any = None, scale: float | None = None) -> None:
+        self._scenario = scenario
+        self._now = now or _quantised_now
+        self._scale = HISTORY_SCALE if scale is None else scale
+        self._lock = threading.Lock()
+        self._ready: Store | None = None
+        self._live: Store | None = None
+        self._synced: tuple[Any, ...] | None = None
+
+    def warm(self) -> None:
+        """Build the Store now instead of on the first statistics request."""
+        with self._lock:
+            if self._ready is None:
+                self._ready = self._build()
+
+    def open(self) -> Store:
+        with self._lock:
+            store = self._ready or self._build()
+            self._ready, self._live = None, store
+            return store
+
+    def sync(self, state: MonitorState) -> None:
+        usage = state.usage
+        key = tuple(limit.resets_at for limit in usage.limits) if usage is not None else ()
+        with self._lock:
+            store = self._live
+            if store is None or key == self._synced:
+                return
+            try:
+                _sync_usage_history(store, state)
+            except sqlite3.Error:       # the server closed this Store; the next open() starts afresh
+                self._live = None
+                return
+            self._synced = key
+
+    def _build(self) -> Store:
+        now = self._now()
+        began = datetime.now()
+        store = Store(":memory:")
+        items = _History(now, scale=self._scale).build()
+        pricing = Pricing.load()
+        for start in range(0, len(items), CHUNK):
+            store.add_items(items[start:start + CHUNK], pricing)
+        state = fake_state(self._scenario, now)
+        _sync_usage_history(store, state)
+        self._synced = tuple(limit.resets_at for limit in state.usage.limits) if state.usage else ()
+        log.info("devserver: built %d synthetic items in %.1f s", len(items), (datetime.now() - began).total_seconds())
+        return store
+
+
+def theme_settings(spec: str) -> dict[str, str]:
+    """The settings for ``--theme ID[/VARIANT]``. Without a variant the theme's default one is named, so
+    the result does not depend on what an earlier run left in the dev settings. ValueError for an unknown theme."""
+    theme_id, _, variant = spec.strip().partition("/")
+    known = themes.all_themes()
+    theme = known.get(theme_id)
+    if theme is None:
+        raise ValueError(f"unknown theme {theme_id!r} (known: {', '.join(known)})")
+    return {"theme_id": theme.id, "theme_variant": variant or theme.default_variant.id}
+
+
+def make_server(scenario: str, port: int, settings_dir: Path | None = None, *, db: Path | str | None = None,
+                theme: str | None = None, warm: bool = False,
+                clock: Callable[[], datetime] | None = None) -> tuple[ApiServer, Settings]:
+    """A configured ApiServer for ``scenario``. Not started; the caller runs start()/stop().
+
+    ``db`` is the usage database the statistics read (a copy; see the module docstring); without it a
+    synthetic history serves them (``warm`` builds it now instead of on the first request). ``theme`` is
+    "ID" or "ID/VARIANT". ValueError for a theme that does not exist. ``clock`` returns the current time
+    as an aware datetime; it dates the fake state, the invented year and every report, so a test can pin
+    them all to one instant (the default is the real clock, rounded down to the minute for the fake state).
+    """
     folder = settings_dir or Path(os.environ.get("CUM_APPDATA_DIR") or tempfile.mkdtemp(prefix="cum-dev-"))
     settings = Settings(folder / "devserver-settings.json", save_delay_s=0.2)
+    now = clock or _quantised_now
+    history = None if db is not None else SyntheticHistory(scenario, now=now)
 
     def update_check() -> dict[str, Any]:
         return {"available": False, "current": _app_version()}
 
+    def state() -> MonitorState:
+        current = fake_state(scenario, now())
+        if history is not None:
+            history.sync(current)
+        return current
+
+    def open_store() -> Store:
+        return history.open() if history is not None else open_statistics_store(Path(str(db)))
+
     server = ApiServer(
-        lambda: fake_state(scenario, _quantised_now()),
+        state,
         settings,
         refresh_cb=lambda: log.info("devserver: refresh requested"),
         update_cb={
@@ -203,20 +504,42 @@ def make_server(scenario: str, port: int, settings_dir: Path | None = None) -> t
         version=_app_version(),
         dev=True,
         port=port,
+        analytics_store=open_store,
+        wall_clock=clock,
     )
+    try:
+        if theme:
+            server.apply_settings(theme_settings(theme))
+    except ValueError:
+        settings.close()
+        raise
+    if warm and history is not None:
+        history.warm()
     return server, settings
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, wait: Callable[[], Any] | None = None) -> int:
+    """Run the dev server until Ctrl+C. ``wait`` replaces the wait for it (tests)."""
     parser = argparse.ArgumentParser(description="Serve the webui with a fake MonitorState.")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--scenario", choices=SCENARIOS, default="normal")
+    parser.add_argument("--db", type=Path, metavar="PATH",
+                        help="usage database for the statistics pages; pass a COPY of usage.db "
+                             "(default: a synthetic history in memory)")
+    parser.add_argument("--theme", metavar="ID[/VARIANT]",
+                        help="theme to start in, e.g. night_city/edgerun or gates/blue-light")
     args = parser.parse_args(argv)
-    server, settings = make_server(args.scenario, args.port)
+    if args.db is not None and not args.db.is_file():
+        parser.error(f"--db: no such file: {args.db}")
+    try:
+        server, settings = make_server(args.scenario, args.port, db=args.db, theme=args.theme, warm=True)
+    except ValueError as exc:
+        parser.error(f"--theme: {exc}")
     try:
         server.start()
-        print(f"devserver scenario={args.scenario} url={server.url}", flush=True)
-        threading.Event().wait()
+        print(f"devserver scenario={args.scenario} url={server.url} "
+              f"data={args.db if args.db is not None else 'synthetic'}", flush=True)
+        (wait or threading.Event().wait)()
     except KeyboardInterrupt:
         pass
     finally:

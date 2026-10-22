@@ -44,7 +44,7 @@ _RESET_MATCH = timedelta(seconds=60)    # snapshots whose reset time is this clo
 _SLOPE_SPAN = timedelta(minutes=90)     # the session slope uses points from this long before now
 _SLOPE_MIN_SPAN_S = 600                 # ... and needs points spanning at least this many seconds
 _IDLE_SLOPE = 0.5                       # %/h below which a session is IDLE
-_PACE_BAND = 5.0                        # weekly pace delta (points) beyond which AHEAD / BEHIND
+_PACE_BAND = windows.PACE_BAND_POINTS   # pace delta (points) beyond which AHEAD / BEHIND
 _MIN_ELAPSED_PCT = 5.0                  # a weekly projection needs this much of the window
 _MIN_CYCLE_ELAPSED_S = 3600             # a cycle projection needs an hour of the cycle
 _EVEN_DAILY_PCT = 100 / 7

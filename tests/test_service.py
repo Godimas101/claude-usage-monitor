@@ -633,7 +633,10 @@ def test_a_newer_remote_table_is_loaded_and_the_store_repriced(make, projects, t
         check.close()
 
 
-def test_the_plan_comes_from_the_sign_in_and_the_price_override_wins(make, settings, isolated_folders):
+def test_the_plan_is_the_detected_one_and_the_price_override_is_never_baked_into_it(make, settings, isolated_folders):
+    """The override is applied where a price is used (analytics.cost_report, the dashboard). Baked into the state
+    it hid the detected price from the settings hint, and a report asked for right after the override was cleared
+    read the old baked price as "detected" until the next cycle."""
     write_sign_in(isolated_folders)
     service = make(Clock())
     states = watch(service)
@@ -641,13 +644,24 @@ def test_the_plan_comes_from_the_sign_in_and_the_price_override_wins(make, setti
     first = next_state(states)
     assert (first.plan.name, first.plan.monthly_price_usd) == ("Max 5x", 100.0)
 
-    settings.set("plan_price_override", 85)   # a wake key: the next cycle shows the override
+    settings.set("plan_price_override", 85)
+    service.refresh_now()
     overridden = next_state(states)
-    assert (overridden.plan.name, overridden.plan.monthly_price_usd) == ("Max 5x", 85.0)
+    assert (overridden.plan.name, overridden.plan.monthly_price_usd) == ("Max 5x", 100.0)
 
     settings.set("plan_price_override", None)
-    restored = next_state(states)
-    assert restored.plan.monthly_price_usd == 100.0
+    service.refresh_now()
+    assert next_state(states).plan.monthly_price_usd == 100.0
+
+
+def test_a_price_override_does_not_wake_the_loop(make, settings):
+    service = make(Clock())
+    states = watch(service)
+    service.start()
+    next_state(states)
+    settings.set("plan_price_override", 85)       # read by the reports, not by a cycle: nothing is published
+    with pytest.raises(AssertionError):
+        next_state(states, timeout=0.5)
 
 
 # ── Regression: retries, sign-in changes, paused start, window isolation, restarts ──────

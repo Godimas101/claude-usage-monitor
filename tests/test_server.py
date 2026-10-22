@@ -6,17 +6,29 @@ tray icons or child processes are skipped unless CUM_UI_TESTS=1.
 """
 from __future__ import annotations
 
+import collections
+import contextlib
+import csv
 import dataclasses
+import html
 import http.client
+import http.server
 import importlib
+import io
 import json
+import logging
 import math
 import os
+import re
 import socket
+import sqlite3
+import struct
 import subprocess
 import sys
+import threading
 import time
 import types
+import urllib.error
 from collections.abc import Callable, Iterator
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -24,7 +36,10 @@ from typing import Any
 
 import pytest
 
+from usage_monitor.data import analytics
 from usage_monitor.data import models as m
+from usage_monitor.data.pricing import Pricing
+from usage_monitor.data.store import Store
 from usage_monitor.settings import Settings
 from usage_monitor.ui import dashboard, devserver, server as server_mod, startup
 from usage_monitor.ui.server import ApiServer, to_jsonable
@@ -135,6 +150,7 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("APPDATA", str(tmp_path / "roaming"))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    monkeypatch.delenv(server_mod.DEV_ENV, raising=False)    # a dev shell must not turn "dev=False" tests into dev ones
 
 
 @pytest.fixture
@@ -325,6 +341,118 @@ def test_index_carries_the_token_in_the_meta_tag(make_server: Any) -> None:
     assert f'<meta name="monitor-token" content="{server.token}">' in body.decode("utf-8")
     assert "default-src 'self'" in headers["content-security-policy"]
     assert headers["cache-control"] == "no-store"
+
+
+# The shell the real index.html has the markers of: the html tag, the colour-scheme meta, the theme link.
+SHELL = (
+    '<!doctype html>\n<html lang="en" data-theme="nostromo">\n<head>\n'
+    '<meta name="color-scheme" content="dark">\n<meta name="monitor-token" content="">\n'
+    '<link id="theme-css" rel="stylesheet" href="/static/themes/nostromo.css">\n</head>\n<body>ok</body>\n</html>\n'
+)
+
+
+@pytest.fixture
+def themed_webui(webui: Path) -> Path:
+    (webui / "index.html").write_text(SHELL, encoding="utf-8")
+    for name in ("gates", "night_city"):
+        (webui / "themes" / f"{name}.css").write_text("body{}", encoding="utf-8")
+    return webui
+
+
+def shell_tokens(page: str) -> dict[str, str]:
+    """The custom properties the shell's html tag carries, as the browser reads them."""
+    style = html.unescape(re.search(r'<html[^>]* style="([^"]*)"', page).group(1))
+    return dict(item.split(":", 1) for item in style.split(";") if item.startswith("--"))
+
+
+def test_index_opens_in_the_active_theme_so_the_first_paint_is_not_the_nostromo_shell(
+        themed_webui: Path, themes_module: Any, make_server: Any, settings: Settings) -> None:
+    settings.update({"theme_id": "gates", "theme_variant": "blue-light"})
+    server, _ = make_server(webui_dir=themed_webui)
+    page = request(server, "GET", "/")[2].decode("utf-8")
+    assert '<html lang="en" data-theme="gates" data-variant="blue-light" style="color-scheme:light;' in page
+    assert '<meta name="color-scheme" content="light">' in page
+    assert '<link id="theme-css" rel="stylesheet" href="/static/themes/gates.css" data-theme="gates">' in page
+    assert "nostromo.css" not in page and 'data-theme="nostromo"' not in page
+    assert f'<meta name="monitor-token" content="{server.token}">' in page          # the token is still in
+    assert shell_tokens(page) == {"--bg": "#090909", "--text": "#e8a020", "--accent": "#ffb300"}
+
+
+def test_index_keeps_the_nostromo_shell_for_nostromo(
+        themed_webui: Path, themes_module: Any, make_server: Any) -> None:
+    server, _ = make_server(webui_dir=themed_webui)
+    page = request(server, "GET", "/")[2].decode("utf-8")
+    assert 'data-theme="nostromo" data-variant="amber" style="color-scheme:dark;' in page
+    assert '<meta name="color-scheme" content="dark">' in page
+    assert 'href="/static/themes/nostromo.css" data-theme="nostromo"' in page
+
+
+@pytest.mark.parametrize(("settings_change", "theme_id"), [
+    ({"theme_id": "nostromo", "theme_variant": "green"}, "nostromo"),
+    ({"theme_id": "night_city", "theme_variant": "edgerun"}, "night_city"),
+    ({"theme_id": "gates", "theme_variant": "blue", "theme_mode": "light"}, "gates"),
+])
+def test_the_shell_tokens_are_the_ones_the_page_applies_when_its_state_arrives(
+        webui: Path, make_server: Any, settings: Settings, settings_change: dict[str, str], theme_id: str) -> None:
+    """The shipped themes, not fakes: what the first paint has equals what applyTheme sets a moment later
+    (so the swap changes nothing), and no shipped value is dropped by the shell's safety filter."""
+    for name in ("nostromo", "night_city", "gates"):
+        (webui / "themes" / f"{name}.css").write_text("body{}", encoding="utf-8")
+    (webui / "index.html").write_text(SHELL, encoding="utf-8")
+    settings.update(settings_change)
+    server, _ = make_server(webui_dir=webui)
+    page = request(server, "GET", "/")[2].decode("utf-8")
+    theme = json.loads(request(server, "GET", "/api/state")[2])["theme"]
+    assert theme["id"] == theme_id
+    assert f'data-theme="{theme_id}" data-variant="{theme["variant"]}"' in page
+    assert f'href="/static/themes/{theme_id}.css" data-theme="{theme_id}"' in page
+    assert len(theme["css_vars"]) > 20
+    assert shell_tokens(page) == theme["css_vars"]
+
+
+def test_index_leaves_the_link_alone_when_the_theme_ships_no_stylesheet(
+        webui: Path, themes_module: Any, make_server: Any, settings: Settings) -> None:
+    (webui / "index.html").write_text(SHELL, encoding="utf-8")       # no night_city.css next to it
+    settings.update({"theme_id": "night_city", "theme_variant": "cyan"})
+    server, _ = make_server(webui_dir=webui)
+    page = request(server, "GET", "/")[2].decode("utf-8")
+    assert 'data-theme="night_city" data-variant="cyan"' in page
+    assert 'href="/static/themes/nostromo.css">' in page             # the page swaps in its fallback itself
+
+
+def test_index_is_served_as_it_is_when_the_theme_cannot_be_resolved(
+        themed_webui: Path, make_server: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(server_mod, "_themes", lambda: (_ for _ in ()).throw(RuntimeError("no themes")))
+    server, _ = make_server(webui_dir=themed_webui)
+    status, _headers, body = request(server, "GET", "/")
+    assert status == 200
+    assert body.decode("utf-8") == SHELL.replace('content=""', f'content="{server.token}"')
+
+
+def test_themed_shell_does_not_let_a_token_value_out_of_its_attribute() -> None:
+    view = {"id": "gates", "variant": "blue-dark", "mode": "dark", "assets": {"css": True}, "css_vars": {
+        "--ok": "#fff", "--quoted": '"Segoe UI", sans-serif', "--bad name": "1", "Bad": "1", "--semi": "red;background:url(x)",
+        "--close": 'red"><script>alert(1)</script>', "--brace": "red}body{x:y", "--line": "red\nblue", "--slash": "a\\b"}}
+    page = server_mod._themed_shell(SHELL, view)
+    assert "<script>" not in page and "alert(1)" not in page
+    style = re.search(r'<html[^>]* style="([^"]*)"', page).group(1)
+    assert '"' not in style and "&quot;Segoe UI&quot;, sans-serif" in style
+    assert shell_tokens(page) == {"--ok": "#fff", "--quoted": '"Segoe UI", sans-serif'}
+    assert page.count("<html") == 1 and page.count("<link") == 1 and page.count("<meta") == 2
+
+
+@pytest.mark.parametrize("view", [
+    None, {}, {"id": "../etc", "variant": "blue-dark"}, {"id": "gates", "variant": "Blue Dark"}, {"id": "", "variant": ""},
+])
+def test_themed_shell_ignores_a_view_it_cannot_trust(view: Any) -> None:
+    assert server_mod._themed_shell(SHELL, view) == SHELL
+
+
+def test_themed_shell_replaces_the_attributes_it_sets_and_keeps_the_others() -> None:
+    shell = '<html lang="en" class="x" data-theme="nostromo" data-variant="old" style="color:red"><head></head></html>'
+    page = server_mod._themed_shell(shell, {"id": "gates", "variant": "teal-dark", "mode": "dark", "css_vars": {"--bg": "#000"}})
+    assert page == ('<html lang="en" class="x" data-theme="gates" data-variant="teal-dark" '
+                    'style="color-scheme:dark;--bg:#000"><head></head></html>')
 
 
 def test_no_cors_headers_on_any_response(make_server: Any) -> None:
@@ -554,13 +682,22 @@ ACCEPTED: list[dict[str, Any]] = [
     {"billing_day": 1},
     {"billing_day": 31},
     {"billing_day": None},
-    {"plan_price_override": 0},
+    {"plan_price_override": 0.01},
     {"plan_price_override": 10_000},
     {"plan_price_override": 99.5},
+    {"plan_price_override": 100},
     {"plan_price_override": None},
     {"reduce_motion": True},
     {"check_updates": False},
-    {"notifications_enabled": False},
+    {"alerts_enabled": False},
+    {"alert_thresholds": [50]},
+    {"alert_thresholds": [80, 90, 100]},
+    {"alert_thresholds": [1, 2, 3, 4, 5]},
+    {"alert_thresholds": [100, 25]},
+    {"alert_on_threshold": False, "alert_on_reset": False, "alert_on_credits": False},
+    {"alert_quiet_hours": {"start": "22:00", "end": "07:00"}},
+    {"alert_quiet_hours": {"start": "00:00", "end": "23:59"}},
+    {"alert_quiet_hours": None},
     {"dashboard_bounds": {"x": -1200, "y": 40, "w": 1200, "h": 780}},
     {"dashboard_bounds": None},
     {"theme_id": "gates", "theme_variant": "blue-light", "theme_mode": "light"},
@@ -584,11 +721,38 @@ REJECTED: list[tuple[str, bytes]] = [
     ("billing day zero", b'{"billing_day": 0}'),
     ("billing day 32", b'{"billing_day": 32}'),
     ("billing day float", b'{"billing_day": 1.5}'),
+    ("billing day bool", b'{"billing_day": true}'),
+    ("billing day string", b'{"billing_day": "15"}'),
+    ("price zero", b'{"plan_price_override": 0}'),
     ("price negative", b'{"plan_price_override": -1}'),
     ("price too high", b'{"plan_price_override": 10001}'),
     ("price NaN", b'{"plan_price_override": NaN}'),
     ("price infinity", b'{"plan_price_override": Infinity}'),
     ("price as string", b'{"plan_price_override": "100"}'),
+    ("price bool", b'{"plan_price_override": true}'),
+    ("the old notifications key is gone", b'{"notifications_enabled": false}'),
+    ("alerts switch as int", b'{"alerts_enabled": 1}'),
+    ("alerts switch as string", b'{"alerts_enabled": "yes"}'),
+    ("alert kind as null", b'{"alert_on_reset": null}'),
+    ("thresholds empty", b'{"alert_thresholds": []}'),
+    ("thresholds six", b'{"alert_thresholds": [10, 20, 30, 40, 50, 60]}'),
+    ("threshold zero", b'{"alert_thresholds": [0, 50]}'),
+    ("threshold 101", b'{"alert_thresholds": [101]}'),
+    ("threshold repeated", b'{"alert_thresholds": [80, 80]}'),
+    ("threshold fractional", b'{"alert_thresholds": [80.5]}'),
+    ("threshold as string", b'{"alert_thresholds": ["80"]}'),
+    ("threshold as bool", b'{"alert_thresholds": [true]}'),
+    ("threshold nested", b'{"alert_thresholds": [[80]]}'),
+    ("thresholds not a list", b'{"alert_thresholds": 80}'),
+    ("thresholds as text", b'{"alert_thresholds": "80,90"}'),
+    ("thresholds null", b'{"alert_thresholds": null}'),
+    ("quiet hours missing end", b'{"alert_quiet_hours": {"start": "22:00"}}'),
+    ("quiet hours hour 25", b'{"alert_quiet_hours": {"start": "25:00", "end": "07:00"}}'),
+    ("quiet hours short hour", b'{"alert_quiet_hours": {"start": "22:00", "end": "7:00"}}'),
+    ("quiet hours seconds", b'{"alert_quiet_hours": {"start": "22:00:00", "end": "07:00"}}'),
+    ("quiet hours extra key", b'{"alert_quiet_hours": {"start": "22:00", "end": "07:00", "tz": "x"}}'),
+    ("quiet hours as text", b'{"alert_quiet_hours": "22:00-07:00"}'),
+    ("quiet hours as list", b'{"alert_quiet_hours": ["22:00", "07:00"]}'),
     ("unknown theme id", b'{"theme_id": "unknown"}'),
     ("theme id with path", b'{"theme_id": "../evil"}'),
     ("mode not allowed", b'{"theme_mode": "neon"}'),
@@ -862,15 +1026,6 @@ def test_update_callback_failure_is_a_500_without_details(make_server: Any) -> N
     assert b"private" not in body
 
 
-def test_analytics_routes_are_not_available_yet(make_server: Any) -> None:
-    server, _ = make_server()
-    status, _, body = request(server, "GET", "/api/analytics/cost")
-    assert status == 404
-    assert json.loads(body) == {"error": "not yet available"}
-    assert request(server, "GET", "/api/analytics/bad%20name")[0] == 404
-    assert request(server, "POST", "/api/analytics/cost", body=b"{}")[0] == 405
-
-
 def test_bad_json_error_does_not_echo_the_body(make_server: Any) -> None:
     server, _ = make_server()
     status, _, body = request(server, "POST", "/api/settings", body=b'{"secret_token": "abc123"')
@@ -932,12 +1087,169 @@ def test_the_picker_and_the_applied_theme_agree_on_the_system_accent(make_server
     server, _ = make_server()
     gates = [t for t in json.loads(request(server, "GET", "/api/themes")[2])["themes"] if t["id"] == "gates"][0]
     picker = {v["id"]: v for v in gates["variants"]}
-    assert picker["system-dark"]["colors"]["accent"] == "#d0000c"
+    # #d0000c is lifted to read on a dark window (#ff5145); it is close to the critical red, so normal fills
+    # keep the Gates default accent (--accent-fill) while the chrome keeps the system colour (--accent)
+    assert picker["system-dark"]["colors"]["accent"] == "#ff5145"
     assert picker["system-light"]["css_vars"]["--accent"] == "#d0000c"
-    assert picker["blue-dark"]["colors"]["accent"] != "#d0000c"
+    assert picker["system-dark"]["css_vars"]["--accent-fill"] == "#60cdff"
+    assert picker["system-light"]["css_vars"]["--accent-fill"] == "#0067c0"
+    assert picker["blue-dark"]["colors"]["accent"] not in ("#d0000c", "#ff5145")
     assert post_json(server, "/api/settings", {"theme_id": "gates", "theme_variant": "system", "theme_mode": "dark"})[0] == 200
     applied = json.loads(request(server, "GET", "/api/state")[2])["theme"]
-    assert applied["css_vars"]["--accent"] == picker["system-dark"]["css_vars"]["--accent"] == "#d0000c"
+    for token in ("--accent", "--accent-fill", "--accent-alt", "--accent-soft", "--glow"):
+        assert applied["css_vars"][token] == picker["system-dark"]["css_vars"][token], token
+    assert applied["css_vars"]["--accent"] == "#ff5145"
+
+
+# ── Clients that hang up ─────────────────────────────────────────────────────────────
+
+class HangUpRequest:
+    """A request whose client is gone: the headers read fine, and every write fails like a closed socket."""
+
+    def __init__(self, error: BaseException, headers: dict[str, str], path: str = "/api/state") -> None:
+        self.path = path
+        self.headers = headers
+        self.error = error
+        self.close_connection = False
+        self.wfile = self
+
+    def send_response(self, *_args: Any) -> None:
+        pass
+
+    def send_header(self, *_args: Any) -> None:
+        pass
+
+    def end_headers(self) -> None:
+        self.write(b"")
+
+    def write(self, _data: bytes) -> None:
+        raise self.error
+
+    def flush(self) -> None:
+        pass
+
+
+def _hang_up_headers(server: ApiServer, *, host_ok: bool = True) -> dict[str, str]:
+    return {"Host": f"127.0.0.1:{server.port}" if host_ok else "evil.example:1", server_mod.TOKEN_HEADER: server.token}
+
+
+@pytest.mark.parametrize("host_ok", [True, False], ids=["answer", "error reply"])
+@pytest.mark.parametrize("error", [BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError])
+def test_a_client_that_hangs_up_is_a_debug_line_and_not_an_error(
+        make_server: Any, caplog: pytest.LogCaptureFixture, error: type[OSError], host_ok: bool) -> None:
+    """On Windows a cancelled fetch is a ConnectionAbortedError (WinError 10053), a sibling of the reset and
+    broken pipe the handler already knew. It was logged as an ERROR traceback and its 500 reply, written to the
+    dead socket, raised out of the handler. The same goes for a 4xx reply written to a client that has gone."""
+    server, _ = make_server()
+    req = HangUpRequest(error("WinError 10053"), _hang_up_headers(server, host_ok=host_ok))
+    with caplog.at_level(logging.DEBUG, logger="usage_monitor.ui.server"):
+        server._handle(req, "GET")                         # type: ignore[arg-type]  # must not raise
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any("closed the connection" in r.getMessage() for r in caplog.records)
+
+
+def test_a_failing_handler_whose_client_is_also_gone_is_still_one_logged_error(
+        make_server: Any, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    server, _ = make_server()
+
+    def boom(_req: Any) -> None:
+        raise RuntimeError("a real bug")
+
+    monkeypatch.setattr(server, "_get_state", boom)
+    req = HangUpRequest(ConnectionAbortedError("gone"), _hang_up_headers(server))
+    with caplog.at_level(logging.DEBUG, logger="usage_monitor.ui.server"):
+        server._handle(req, "GET")                         # type: ignore[arg-type]  # the 500 cannot be sent: no raise
+    errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert len(errors) == 1 and "API request failed" in errors[0].getMessage()
+
+
+def test_socketserver_errors_from_a_hung_up_client_are_quiet_and_real_ones_are_logged(
+        make_server: Any, caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]) -> None:
+    """The reset of a connection that is read before ApiServer._handle runs reaches the server's handle_error,
+    whose default prints a traceback on stderr every time."""
+    server, _ = make_server()
+    httpd = server._httpd
+    with caplog.at_level(logging.DEBUG, logger="usage_monitor.ui.server"):
+        for error in (ConnectionResetError("reset"), ConnectionAbortedError("aborted"), TimeoutError("slow")):
+            try:
+                raise error
+            except OSError:
+                httpd.handle_error(None, ("127.0.0.1", 1))
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+        try:
+            raise ValueError("a bug in a handler")
+        except ValueError:
+            httpd.handle_error(None, ("127.0.0.1", 1))
+    assert [r.levelno for r in caplog.records if r.levelno >= logging.ERROR] == [logging.ERROR]
+    captured = capsys.readouterr()
+    assert captured.out == "" and captured.err == ""
+
+
+def test_clients_that_reset_the_connection_do_not_fill_the_log_or_stderr(
+        make_server: Any, caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]) -> None:
+    server, _ = make_server()
+    linger = struct.pack("ii", 1, 0)                       # close sends a RST, not a FIN
+    with caplog.at_level(logging.DEBUG, logger="usage_monitor.ui.server"):
+        for _ in range(25):
+            conn = socket.create_connection(("127.0.0.1", server.port), timeout=5)
+            conn.sendall(f"GET /api/state HTTP/1.1\r\nHost: 127.0.0.1:{server.port}\r\n"
+                         f"{server_mod.TOKEN_HEADER}: {server.token}\r\n\r\n".encode("ascii"))
+            conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, linger)
+            conn.close()
+        assert request(server, "GET", "/api/state")[0] == 200          # the server is still serving
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert capsys.readouterr().err == ""
+
+
+# ── The statistics database on a network share ───────────────────────────────────────
+
+def test_the_read_only_uri_of_a_local_path_is_the_file_uri_with_mode_ro(tmp_path: Path) -> None:
+    uri = server_mod._read_only_uri(tmp_path / "a b" / "usage.db")
+    assert uri.startswith("file:///") and uri.endswith("/a%20b/usage.db?mode=ro")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="UNC paths are Windows paths")
+def test_the_read_only_uri_of_a_unc_path_has_an_empty_authority_and_four_slashes() -> None:
+    """SQLite refuses ``file://server/share/...`` ("invalid uri authority") and wants ``file:////server/...``."""
+    uri = server_mod._read_only_uri(Path(r"\\fileserver\home\Ada Lovelace\ClaudeUsageMonitor\usage.db"))
+    assert uri == "file:////fileserver/home/Ada%20Lovelace/ClaudeUsageMonitor/usage.db?mode=ro"
+
+
+def _admin_share_path(path: Path) -> Path | None:
+    """The administrative-share form of a file on a local drive (the localhost share named for the drive letter
+    with a dollar sign), or None when this account cannot open it."""
+    drive, rest = os.path.splitdrive(str(path))
+    if sys.platform != "win32" or len(drive) != 2:
+        return None
+    unc = Path(rf"\\localhost\{drive[0]}${rest}")
+    try:
+        return unc if unc.is_file() else None
+    except OSError:
+        return None
+
+
+def test_the_schema_of_a_database_on_a_unc_path_can_be_read(tmp_path: Path) -> None:
+    """The statistics were unavailable for good when the app data folder was on a share: the route answered
+    503 on every request while the data service, which opens the file by its plain path, worked."""
+    db = tmp_path / "share" / "usage.db"
+    seed_usage_db(db)
+    unc = _admin_share_path(db)
+    if unc is None:
+        pytest.skip("the administrative share of this drive cannot be opened by this account")
+    assert server_mod._schema_version(unc) == server_mod.SCHEMA_VERSION
+    with server_mod.open_statistics_store(unc) as store:
+        assert store.query("SELECT COUNT(*) FROM requests")[0][0] == 4
+
+
+def test_the_probe_never_creates_a_missing_database(tmp_path: Path) -> None:
+    missing = tmp_path / "gone" / "usage.db"
+    with pytest.raises(sqlite3.OperationalError):
+        server_mod.open_statistics_store(missing)
+    assert not missing.exists() and not missing.parent.exists()
+    (tmp_path / "gone").mkdir()
+    with pytest.raises(sqlite3.OperationalError):
+        server_mod._schema_version(missing)                 # even a racing probe must not leave a file behind
+    assert not missing.exists()
 
 
 # ── Supporters proxy ─────────────────────────────────────────────────────────────────
@@ -1020,6 +1332,731 @@ def test_supporters_failure_is_retried_after_five_minutes(make_server: Any) -> N
     clock.now += 301
     request(server, "GET", "/api/supporters")
     assert opener.calls == 2
+
+
+# ── Statistics routes: /api/analytics/<name> and /api/export ─────────────────────────
+
+PRICING = Pricing.load()
+MILLION = 1_000_000
+REPORT_NAMES = ["cost", "efficiency", "pacing", "history", "sessions"]
+REPORT_KEYS: dict[str, set[str]] = {
+    "cost": {"basis", "windows", "plan", "value", "monthly", "breakdowns", "top_sessions_week", "spend"},
+    "efficiency": {"start", "end", "basis", "cache", "thinking", "context", "compactions", "active_days", "tools",
+                   "productivity", "effort", "api_errors", "web"},
+    "pacing": {"now", "session", "weekly", "scoped"},
+    "history": {"tz", "days", "hour_weekday", "streaks", "busiest_day", "first_use", "active_days", "odometer"},
+    "sessions": {"start", "end", "basis", "sessions"},
+}
+
+
+def seed_usage_db(path: Path) -> None:
+    """A small history around NOW: an hour ago, yesterday, twelve days ago and forty days ago."""
+    def request_row(key: str, when: datetime, *, model: str = "claude-opus-5-5", inp: int = 0, out: int = 0,
+                    session: str = "s1", project: str = "alpha", cwd: str = "C:/work/alpha") -> m.RequestRecord:
+        return m.RequestRecord(
+            key=key, message_id="msg_" + key, request_id="req_" + key, ts=when, session_id=session,
+            project=project, cwd=cwd, git_branch="main", is_subagent=False, agent_id=None, model=model,
+            input_tokens=inp, output_tokens=out)
+
+    with Store(path) as store:
+        store.add_items([
+            request_row("a", NOW - timedelta(hours=1), inp=MILLION),
+            request_row("b", NOW - timedelta(days=1, hours=2), out=MILLION, model="claude-sonnet-5-5",
+                        session="s2", project="beta", cwd="D:/src/beta"),
+            request_row("c", NOW - timedelta(days=12), inp=2 * MILLION, session="s3"),
+            request_row("d", NOW - timedelta(days=40), inp=MILLION, session="s4"),
+            m.ToolCall("t1", "Bash", None, "s1", NOW - timedelta(hours=1), False, "commit"),
+            m.ToolCall("t2", "mcp__github__create_issue", None, "s2", NOW - timedelta(days=1), False),
+            m.SessionMeta("s1", "alpha", ai_title="First session", custom_title=None),
+        ], PRICING)
+
+
+class StatsRig(types.SimpleNamespace):
+    """A server on a seeded usage database. ``opened`` lists every Store the server asked for."""
+
+    server: ApiServer
+    rec: Recorder
+    clock: "FakeClock"
+    opened: list[Store]
+    db: Path
+
+    def get(self, path: str) -> tuple[int, dict[str, str], bytes]:
+        return request(self.server, "GET", path)
+
+    def json(self, path: str) -> Any:
+        status, _headers, body = self.get(path)
+        assert status == 200, body
+        return json.loads(body)
+
+
+@pytest.fixture
+def stats(make_server: Any, tmp_path: Path) -> StatsRig:
+    db = tmp_path / "stats" / "usage.db"
+    seed_usage_db(db)
+    clock = FakeClock()
+    opened: list[Store] = []
+
+    def open_store() -> Store:
+        opened.append(Store(db))
+        return opened[-1]
+
+    server, rec = make_server(analytics_store=open_store, wall_clock=lambda: NOW, clock=clock)
+    return StatsRig(server=server, rec=rec, clock=clock, opened=opened, db=db)
+
+
+@pytest.fixture
+def spy(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[dict[str, Any]]]:
+    """Records the keyword arguments (and ``_args``) of every analytics call, then calls the real function."""
+    calls: dict[str, list[dict[str, Any]]] = collections.defaultdict(list)
+    for name in ("cost_report", "efficiency_report", "pacing_report", "history_report", "sessions_report",
+                 "resolve_window", "daily_rollups"):
+        real = getattr(analytics, name)
+
+        def wrapper(*args: Any, _real: Any = real, _name: str = name, **kwargs: Any) -> Any:
+            calls[_name].append(dict(kwargs, _args=args))
+            return _real(*args, **kwargs)
+
+        monkeypatch.setattr(analytics, name, wrapper)
+    return calls
+
+
+@pytest.mark.parametrize("name", REPORT_NAMES)
+def test_each_report_is_served_as_json(stats: StatsRig, name: str) -> None:
+    status, headers, body = stats.get(f"/api/analytics/{name}")
+    assert status == 200
+    assert headers["content-type"] == "application/json; charset=utf-8"
+    assert headers["cache-control"] == "no-store"
+    assert set(json.loads(body)) == REPORT_KEYS[name]
+
+
+def test_the_reports_are_the_analytics_functions_run_on_the_state_and_the_settings(stats: StatsRig) -> None:
+    state = stats.rec.state
+    assert state is not None
+    with Store(stats.db) as store:
+        expected = {
+            "cost": analytics.cost_report(store, PRICING, now=NOW, usage=state.usage, plan=state.plan,
+                                          plan_price=None, billing_day=None, breakdown_window="cycle"),
+            "pacing": analytics.pacing_report(store, now=NOW, usage=state.usage),
+            "history": analytics.history_report(store, now=NOW, days=371),
+        }
+        start, end = analytics.resolve_window("month", store, now=NOW, usage=state.usage, billing_day=None)
+        expected["efficiency"] = analytics.efficiency_report(store, start=start, end=end)
+        start, end = analytics.resolve_window("week", store, now=NOW, usage=state.usage, billing_day=None)
+        expected["sessions"] = analytics.sessions_report(store, PRICING, start=start, end=end, limit=25)
+    for name, report in expected.items():
+        assert stats.json(f"/api/analytics/{name}") == json.loads(json.dumps(report)), name
+
+
+def test_the_seeded_history_shows_up_in_the_numbers(stats: StatsRig) -> None:
+    cost = stats.json("/api/analytics/cost")
+    assert cost["windows"]["all"]["requests"] == 4
+    assert cost["windows"]["session"]["requests"] == 1                       # the API window ends 3 h 27 m from now
+    assert cost["plan"] == {"name": "Max 5x", "subscription_type": "max", "rate_limit_tier": "default_claude_max_5x",
+                            "price_usd": 100.0, "price_source": "detected"}
+    assert {row["name"] for row in cost["breakdowns"]["by_model"]} == {"Opus 5.5", "Sonnet 5.5"}
+    sessions = stats.json("/api/analytics/sessions?window=all")["sessions"]
+    assert {s["session_id"]: s["title"] for s in sessions}["s1"] == "First session"
+    assert stats.json("/api/analytics/efficiency?window=all")["tools"]["total"] == 2
+
+
+def test_unknown_reports_are_404_and_only_get_is_allowed(stats: StatsRig) -> None:
+    for path in ("/api/analytics/nope", "/api/analytics/", "/api/analytics/cost/", "/api/analytics/bad%20name",
+                 "/api/analytics/Cost", "/api/analytics/cost%2f", "/api/analytics/../state"):
+        status, _headers, body = stats.get(path)
+        assert status == 404, path
+        assert "error" in json.loads(body)
+    for method in ("POST", "PUT", "DELETE", "PATCH"):
+        status, headers, _ = request(stats.server, method, "/api/analytics/cost", body=b"{}")
+        assert status == 405 and headers["allow"] == "GET", method
+    status, headers, _ = request(stats.server, "POST", "/api/export?format=csv", body=b"{}")
+    assert status == 405 and headers["allow"] == "GET"
+    assert stats.opened == []                                                # none of that touched the database
+
+
+@pytest.mark.parametrize("path", [
+    "/api/analytics/cost", "/api/analytics/efficiency?window=all", "/api/analytics/pacing",
+    "/api/analytics/history?days=7", "/api/analytics/sessions?limit=3", "/api/export?format=csv",
+    "/api/export?format=json",
+])
+def test_the_statistics_routes_keep_the_host_and_token_guards(stats: StatsRig, path: str) -> None:
+    server = stats.server
+    assert request(server, "GET", path, token=False)[0] == 401
+    assert request(server, "GET", path, token=False, headers={TOKEN_HEADER: "wrong"})[0] == 401
+    assert request(server, "GET", path, host="evil.example")[0] == 403
+    assert request(server, "GET", path, host=f"127.0.0.1:{server.port + 1}")[0] == 403
+    assert request(server, "GET", path, host=f"127.0.0.1.nip.io:{server.port}")[0] == 403
+    assert stats.opened == [], "a refused request must not reach the database"
+    assert request(server, "GET", path, host=f"localhost:{server.port}")[0] == 200
+    assert len(stats.opened) == 1
+
+
+@pytest.mark.parametrize("path, function, expected", [
+    ("/api/analytics/cost", "cost_report", {"breakdown_window": "cycle"}),
+    ("/api/analytics/cost?window=all", "cost_report", {"breakdown_window": "all"}),
+    ("/api/analytics/cost?window=session", "cost_report", {"breakdown_window": "session"}),
+    ("/api/analytics/history", "history_report", {"days": 371}),
+    ("/api/analytics/history?days=7", "history_report", {"days": 7}),
+    ("/api/analytics/history?days=800", "history_report", {"days": 800}),
+    ("/api/analytics/sessions", "sessions_report", {"limit": 25}),
+    ("/api/analytics/sessions?limit=1", "sessions_report", {"limit": 1}),
+    ("/api/analytics/sessions?window=all&limit=200", "sessions_report", {"limit": 200}),
+])
+def test_query_parameters_reach_the_report(stats: StatsRig, spy: dict[str, list[dict[str, Any]]], path: str,
+                                           function: str, expected: dict[str, Any]) -> None:
+    assert stats.get(path)[0] == 200
+    assert {key: spy[function][-1][key] for key in expected} == expected
+
+
+@pytest.mark.parametrize("path, window", [
+    ("/api/analytics/efficiency", "month"),
+    ("/api/analytics/efficiency?window=all", "all"),
+    ("/api/analytics/efficiency?window=session", "session"),
+    ("/api/analytics/efficiency?window=cycle", "cycle"),
+    ("/api/analytics/sessions", "week"),
+    ("/api/analytics/sessions?window=today", "today"),
+    ("/api/analytics/sessions?window=month", "month"),
+])
+def test_the_window_parameter_picks_the_span(stats: StatsRig, spy: dict[str, list[dict[str, Any]]], path: str,
+                                             window: str) -> None:
+    assert stats.get(path)[0] == 200
+    assert spy["resolve_window"][-1]["_args"][0] == window
+
+
+@pytest.mark.parametrize("path", [
+    "/api/analytics/cost?window=year",
+    "/api/analytics/cost?window=",
+    "/api/analytics/cost?window",
+    "/api/analytics/cost?window=WEEK",
+    "/api/analytics/cost?window=week&window=month",
+    "/api/analytics/cost?windw=week",
+    "/api/analytics/cost?days=7",
+    "/api/analytics/cost?window=%FF",
+    "/api/analytics/efficiency?window=weekly",
+    "/api/analytics/pacing?window=week",
+    "/api/analytics/pacing?x=1",
+    "/api/analytics/history?days=6",
+    "/api/analytics/history?days=801",
+    "/api/analytics/history?days=abc",
+    "/api/analytics/history?days=",
+    "/api/analytics/history?days=-7",
+    "/api/analytics/history?days=7.5",
+    "/api/analytics/history?days=+7",
+    "/api/analytics/history?days=1e3",
+    "/api/analytics/history?days=1_0",
+    "/api/analytics/history?days=%D9%A7%D9%A7",
+    "/api/analytics/history?days=0000007",
+    "/api/analytics/history?window=week",
+    "/api/analytics/sessions?limit=0",
+    "/api/analytics/sessions?limit=201",
+    "/api/analytics/sessions?limit=ten",
+    "/api/analytics/sessions?window=x",
+    "/api/analytics/sessions?limit=5&limit=6",
+    "/api/analytics/sessions?" + "&".join(f"p{n}=1" for n in range(12)),
+    "/api/export?format=xml",
+    "/api/export?format=CSV",
+    "/api/export?format=",
+    "/api/export",
+    "/api/export?format=csv&format=json",
+    "/api/export?format=csv&window=week",
+    "/api/export?window=week",
+])
+def test_bad_query_values_are_400_with_a_reason_and_never_reach_the_report(
+        stats: StatsRig, spy: dict[str, list[dict[str, Any]]], path: str) -> None:
+    status, headers, body = stats.get(path)
+    assert status == 400, path
+    assert json.loads(body)["error"]
+    assert "x-cache" not in headers
+    assert stats.opened == [] and not any(spy.values())
+
+
+def test_every_error_names_the_parameter_that_is_wrong(stats: StatsRig) -> None:
+    assert "window" in json.loads(stats.get("/api/analytics/cost?window=year")[2])["error"]
+    assert "days" in json.loads(stats.get("/api/analytics/history?days=3")[2])["error"]
+    assert "limit" in json.loads(stats.get("/api/analytics/sessions?limit=0")[2])["error"]
+    assert "format" in json.loads(stats.get("/api/export")[2])["error"]
+    assert "colour" in json.loads(stats.get("/api/analytics/cost?colour=red")[2])["error"]
+
+
+def test_a_report_is_computed_once_and_served_from_the_cache_for_twenty_seconds(
+        stats: StatsRig, spy: dict[str, list[dict[str, Any]]]) -> None:
+    first = stats.get("/api/analytics/cost")
+    assert first[1]["x-cache"] == "MISS"
+    stats.clock.now += 19
+    second = stats.get("/api/analytics/cost")
+    assert second[1]["x-cache"] == "HIT" and second[2] == first[2]
+    assert len(spy["cost_report"]) == 1 and len(stats.opened) == 1
+    stats.clock.now += 2                                                       # 21 s after it was computed
+    third = stats.get("/api/analytics/cost")
+    assert third[1]["x-cache"] == "MISS" and len(spy["cost_report"]) == 2
+    assert len(stats.opened) == 1, "the Store is kept open between reports"
+
+
+def test_each_set_of_parameters_has_its_own_cache_entry(stats: StatsRig,
+                                                        spy: dict[str, list[dict[str, Any]]]) -> None:
+    for path in ("/api/analytics/cost", "/api/analytics/cost?window=week", "/api/analytics/cost?window=week",
+                 "/api/analytics/cost?window=cycle"):                          # cycle is the default: the 1st again
+        stats.get(path)
+    assert len(spy["cost_report"]) == 2
+    for path in ("/api/analytics/sessions?limit=5&window=all", "/api/analytics/sessions?window=all&limit=5"):
+        stats.get(path)                                                        # the order of the parameters is not
+    assert len(spy["sessions_report"]) == 1
+    assert stats.get("/api/analytics/sessions?window=all&limit=6")[1]["x-cache"] == "MISS"
+
+
+def test_a_changed_setting_does_not_wait_out_the_cache(stats: StatsRig, settings: Settings,
+                                                       spy: dict[str, list[dict[str, Any]]]) -> None:
+    first = stats.json("/api/analytics/cost")
+    assert first["plan"]["price_source"] == "detected"
+    settings.set("plan_price_override", 250.0)
+    assert stats.get("/api/analytics/cost")[1]["x-cache"] == "MISS"
+    override = stats.json("/api/analytics/cost")
+    assert override["plan"]["price_usd"] == 250.0 and override["plan"]["price_source"] == "override"
+    assert spy["cost_report"][-1]["plan_price"] == 250.0
+    settings.set("billing_day", 15)
+    shifted = stats.json("/api/analytics/cost")
+    assert spy["cost_report"][-1]["billing_day"] == 15
+    assert shifted["value"]["cycle_start"] != first["value"]["cycle_start"]
+    settings.set("plan_price_override", None)
+    settings.set("billing_day", None)
+    assert stats.json("/api/analytics/cost")["value"]["cycle_start"] == first["value"]["cycle_start"]
+
+
+def test_the_cache_keeps_a_bounded_number_of_entries(stats: StatsRig) -> None:
+    limit = server_mod.ANALYTICS_CACHE_MAX
+    for days in range(7, 7 + limit + 10):
+        stats.get(f"/api/analytics/history?days={days}")
+    assert stats.get("/api/analytics/history?days=7")[1]["x-cache"] == "MISS"             # the oldest was dropped
+    assert stats.get(f"/api/analytics/history?days={7 + limit + 9}")[1]["x-cache"] == "HIT"
+
+
+def test_expired_entries_are_dropped_when_a_new_one_is_stored(stats: StatsRig) -> None:
+    for days in (7, 8, 9):
+        stats.get(f"/api/analytics/history?days={days}")
+    stats.clock.now += 25
+    stats.get("/api/analytics/pacing")
+    assert len(stats.server._reader._cache) == 1
+
+
+def test_a_reading_from_before_the_current_windows_does_not_pin_the_session_or_week(
+        stats: StatsRig, spy: dict[str, list[dict[str, Any]]]) -> None:
+    """The data service drops a limit whose window is over before it computes the windows; so does the API."""
+    state = sample_state()
+    assert state.usage is not None
+    state.usage.limits[0].resets_at = NOW - timedelta(hours=1)               # the session window ended an hour ago
+    stats.rec.state = state
+    stats.get("/api/analytics/cost")
+    assert [limit.kind for limit in spy["cost_report"][-1]["usage"].limits] == ["weekly_all"]
+    state.usage.limits[1].resets_at = NOW - timedelta(minutes=1)
+    stats.get("/api/analytics/pacing")
+    assert spy["pacing_report"][-1]["usage"].limits == []
+    assert stats.json("/api/analytics/pacing")["session"]["verdict"] == "UNKNOWN"
+
+
+def test_reports_work_before_the_first_state_arrives(stats: StatsRig) -> None:
+    stats.rec.state = None
+    cost = stats.json("/api/analytics/cost")
+    assert cost["plan"]["name"] == "Unknown plan" and cost["plan"]["price_usd"] is None
+    assert cost["value"]["multiplier"] is None
+    pacing = stats.json("/api/analytics/pacing")
+    assert pacing["session"]["verdict"] == "UNKNOWN" and pacing["weekly"]["verdict"] == "UNKNOWN"
+    # With no API window the session is the 5-hour block that holds now: the request an hour ago opened one.
+    assert [s["session_id"] for s in stats.json("/api/analytics/sessions?window=session")["sessions"]] == ["s1"]
+
+
+def test_the_cost_report_carries_real_spend_apart_from_the_api_equivalent_cost(stats: StatsRig) -> None:
+    state = sample_state()
+    assert state.usage is not None
+    state.usage.spend = m.Spend(enabled=True, used=12.5, limit=50.0, currency="USD")
+    stats.rec.state = state
+    cost = stats.json("/api/analytics/cost")
+    assert cost["spend"]["used"] == 12.5 and cost["basis"] == "API-equivalent at list prices"
+
+
+def test_a_missing_database_layer_is_501_not_a_crash(make_server: Any) -> None:
+    server, _ = make_server()                                                  # no analytics_store given
+    for path in ("/api/analytics/cost", "/api/export?format=json"):
+        status, _headers, body = request(server, "GET", path)
+        assert status == 501 and json.loads(body) == {"error": "statistics are not available"}
+    assert request(server, "GET", "/api/analytics/cost?window=x")[0] == 400   # a bad request is still said to be bad
+
+
+def test_a_database_that_cannot_be_opened_is_a_503_and_is_tried_again(make_server: Any, tmp_path: Path,
+                                                                      caplog: pytest.LogCaptureFixture) -> None:
+    db = tmp_path / "usage.db"
+    seed_usage_db(db)
+    attempts: list[int] = []
+
+    def flaky() -> Store:
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise sqlite3.OperationalError("unable to open database file")
+        return Store(db)
+
+    server, _ = make_server(analytics_store=flaky, wall_clock=lambda: NOW)
+    with caplog.at_level(logging.WARNING, logger="usage_monitor.ui.server"):
+        status, _headers, body = request(server, "GET", "/api/analytics/pacing")
+    assert status == 503 and "could not be opened" in json.loads(body)["error"]
+    assert "unable to open" not in body.decode("utf-8")                       # no internals in the answer
+    assert request(server, "GET", "/api/analytics/pacing")[0] == 200
+    assert len(attempts) == 2
+
+
+def test_a_store_that_fails_to_open_for_a_newer_schema_is_a_503(make_server: Any) -> None:
+    from usage_monitor.data.store import StoreError
+
+    def too_new() -> Store:
+        raise StoreError("database schema 9 is newer than this build (3)")
+
+    server, _ = make_server(analytics_store=too_new)
+    assert request(server, "GET", "/api/analytics/cost")[0] == 503
+
+
+def test_a_query_that_fails_reopens_the_store_and_runs_once_more(stats: StatsRig,
+                                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    real = analytics.history_report
+    failures: list[int] = []
+
+    def fail_once(store: Store, **kwargs: Any) -> Any:
+        if not failures:
+            failures.append(1)
+            raise sqlite3.DatabaseError("database disk image is malformed")
+        return real(store, **kwargs)
+
+    monkeypatch.setattr(analytics, "history_report", fail_once)
+    status, _headers, body = stats.get("/api/analytics/history")
+    assert status == 200 and set(json.loads(body)) == REPORT_KEYS["history"]
+    assert len(stats.opened) == 2
+    with pytest.raises(sqlite3.ProgrammingError):                              # the first one was closed, not leaked
+        stats.opened[0].query("SELECT 1")
+    assert stats.opened[1].query("SELECT 1")[0][0] == 1
+
+
+def test_a_query_that_keeps_failing_is_a_503_and_the_next_request_starts_clean(
+        stats: StatsRig, monkeypatch: pytest.MonkeyPatch) -> None:
+    real = analytics.pacing_report
+    broken = [True]
+
+    def maybe_fail(store: Store, **kwargs: Any) -> Any:
+        if broken[0]:
+            raise sqlite3.OperationalError("database is locked")
+        return real(store, **kwargs)
+
+    monkeypatch.setattr(analytics, "pacing_report", maybe_fail)
+    status, _headers, body = stats.get("/api/analytics/pacing")
+    assert status == 503 and json.loads(body) == {"error": "statistics are not available right now"}
+    assert len(stats.opened) == 2
+    for store in stats.opened:
+        with pytest.raises(sqlite3.ProgrammingError):
+            store.query("SELECT 1")
+    broken[0] = False
+    assert stats.get("/api/analytics/pacing")[0] == 200
+    assert len(stats.opened) == 3, "a failed report is not cached, and the Store is opened afresh"
+
+
+def test_a_bug_in_a_report_is_a_500_without_details_and_keeps_the_store(
+        stats: StatsRig, monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(store: Store, **kwargs: Any) -> Any:
+        raise KeyError("private detail")
+
+    monkeypatch.setattr(analytics, "history_report", boom)
+    status, _headers, body = stats.get("/api/analytics/history")
+    assert status == 500 and b"private detail" not in body
+    assert len(stats.opened) == 1 and stats.opened[0].query("SELECT 1")[0][0] == 1
+
+
+def test_stop_closes_the_statistics_store(stats: StatsRig) -> None:
+    stats.get("/api/analytics/pacing")
+    store = stats.opened[0]
+    stats.server.stop()
+    with pytest.raises(sqlite3.ProgrammingError):
+        store.query("SELECT 1")
+    stats.server.stop()                                                        # stopping twice is harmless
+
+
+def test_the_data_services_own_connection_is_never_used(stats: StatsRig) -> None:
+    """The server asks its factory for a Store of its own and never reaches for another one."""
+    with Store(stats.db) as service_store:
+        stats.get("/api/analytics/cost")
+        assert stats.opened and all(store is not service_store for store in stats.opened)
+        service_store.add_items([m.ApiErrorEvent("e1", "s1", NOW)], PRICING)   # the writer is not blocked by a reader
+        assert stats.json("/api/analytics/efficiency?window=all")["api_errors"] == 1
+
+
+def test_a_cached_report_and_the_state_answer_while_another_report_is_being_computed(
+        stats: StatsRig, monkeypatch: pytest.MonkeyPatch) -> None:
+    stats.get("/api/analytics/history")                                        # now cached
+    gate, entered = threading.Event(), threading.Event()
+    real = analytics.cost_report
+
+    def slow(*args: Any, **kwargs: Any) -> Any:
+        entered.set()
+        assert gate.wait(10)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(analytics, "cost_report", slow)
+    outcome: list[tuple[int, dict[str, str], bytes]] = []
+    worker = threading.Thread(target=lambda: outcome.append(stats.get("/api/analytics/cost")))
+    worker.start()
+    try:
+        assert entered.wait(5)
+        assert stats.get("/api/analytics/history")[1]["x-cache"] == "HIT"       # the cache is not behind the query
+        assert request(stats.server, "GET", "/api/state")[0] == 200
+    finally:
+        gate.set()
+        worker.join(10)
+    assert outcome and outcome[0][0] == 200
+
+
+def test_two_requests_for_the_same_report_compute_it_once(stats: StatsRig,
+                                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    gate, entered = threading.Event(), threading.Event()
+    real = analytics.cost_report
+    calls: list[int] = []
+
+    def slow(*args: Any, **kwargs: Any) -> Any:
+        calls.append(1)
+        entered.set()
+        assert gate.wait(10)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(analytics, "cost_report", slow)
+    outcome: list[tuple[int, dict[str, str], bytes]] = []
+    workers = [threading.Thread(target=lambda: outcome.append(stats.get("/api/analytics/cost"))) for _ in range(3)]
+    for worker in workers:
+        worker.start()
+    try:
+        assert entered.wait(5)
+        time.sleep(0.2)                                                       # the others are queued behind the first
+    finally:
+        gate.set()
+        for worker in workers:
+            worker.join(10)
+    assert len(calls) == 1
+    assert sorted(status for status, _h, _b in outcome) == [200, 200, 200]
+    assert sorted(headers["x-cache"] for _s, headers, _b in outcome) == ["HIT", "HIT", "MISS"]
+
+
+def test_a_result_is_cached_before_the_next_waiter_is_let_in(stats: StatsRig,
+                                                            monkeypatch: pytest.MonkeyPatch) -> None:
+    """A request queued behind the one that is computing must find the result when its turn comes, however
+    long the first takes to store it (it used to be stored after the lock was let go)."""
+    real_remember = server_mod._Reader._remember
+
+    def slow_remember(self: Any, key: Any, body: bytes) -> None:
+        time.sleep(0.3)                                                       # the window a waiter could slip through
+        real_remember(self, key, body)
+
+    gate, entered = threading.Event(), threading.Event()
+    real = analytics.cost_report
+    calls: list[int] = []
+
+    def slow_report(*args: Any, **kwargs: Any) -> Any:
+        calls.append(1)
+        entered.set()
+        assert gate.wait(10)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(server_mod._Reader, "_remember", slow_remember)
+    monkeypatch.setattr(analytics, "cost_report", slow_report)
+    outcome: list[tuple[int, dict[str, str], bytes]] = []
+    first = threading.Thread(target=lambda: outcome.append(stats.get("/api/analytics/cost")))
+    second = threading.Thread(target=lambda: outcome.append(stats.get("/api/analytics/cost")))
+    first.start()
+    try:
+        assert entered.wait(5)
+        second.start()
+        time.sleep(0.2)                                                       # the second request is queued now
+    finally:
+        gate.set()
+        first.join(10)
+        second.join(10)
+    assert len(calls) == 1
+    assert sorted(headers["x-cache"] for _status, headers, _body in outcome) == ["HIT", "MISS"]
+
+
+def test_the_export_is_a_csv_download_of_the_daily_rollups(stats: StatsRig) -> None:
+    status, headers, body = stats.get("/api/export?format=csv")
+    assert status == 200
+    assert headers["content-type"] == "text/csv; charset=utf-8"
+    local_day = NOW.astimezone().date().isoformat()
+    assert headers["content-disposition"] == f'attachment; filename="claude-usage-daily-{local_day}.csv"'
+    assert headers["cache-control"] == "no-store" and headers["x-content-type-options"] == "nosniff"
+    with Store(stats.db) as store:
+        expected = analytics.daily_rollups(store)
+    rows = list(csv.DictReader(io.StringIO(body.decode("utf-8"), newline="")))
+    assert len(rows) == len(expected) >= 3
+    assert [row["date"] for row in rows] == [row["date"] for row in expected]
+    assert set(rows[0]) == set(expected[0]) and "cost_usd" in rows[0]
+    assert float(rows[-1]["cost_usd"]) == pytest.approx(expected[-1]["cost_usd"])
+    assert int(rows[0]["requests"]) == expected[0]["requests"]
+    assert body.endswith(b"\r\n")
+
+
+def test_the_export_is_a_json_download_of_the_same_rows(stats: StatsRig) -> None:
+    status, headers, body = stats.get("/api/export?format=json")
+    assert status == 200
+    assert headers["content-type"] == "application/json; charset=utf-8"
+    local_day = NOW.astimezone().date().isoformat()
+    assert headers["content-disposition"] == f'attachment; filename="claude-usage-daily-{local_day}.json"'
+    with Store(stats.db) as store:
+        expected = analytics.daily_rollups(store)
+    payload = json.loads(body)
+    assert payload["basis"] == analytics.BASIS and payload["rows"] == json.loads(json.dumps(expected))
+
+
+def test_the_export_is_cached_but_the_filename_follows_the_clock(make_server: Any, tmp_path: Path,
+                                                                 spy: dict[str, list[dict[str, Any]]]) -> None:
+    db = tmp_path / "usage.db"
+    seed_usage_db(db)
+    today = [datetime(2026, 1, 2, 3, 30, tzinfo=timezone.utc)]
+    server, _ = make_server(analytics_store=lambda: Store(db), wall_clock=lambda: today[0], clock=FakeClock())
+    first = request(server, "GET", "/api/export?format=csv")
+    today[0] = datetime(2026, 7, 30, 23, 59, tzinfo=timezone.utc)             # later, but within the 20 s
+    second = request(server, "GET", "/api/export?format=csv")
+    assert (first[1]["x-cache"], second[1]["x-cache"]) == ("MISS", "HIT") and first[2] == second[2]
+    assert len(spy["daily_rollups"]) == 1
+    for answer, moment in ((first, datetime(2026, 1, 2, 3, 30, tzinfo=timezone.utc)), (second, today[0])):
+        assert answer[1]["content-disposition"] == (
+            f'attachment; filename="claude-usage-daily-{moment.astimezone().date().isoformat()}.csv"')
+    assert request(server, "GET", "/api/export?format=json")[1]["x-cache"] == "MISS"     # its own entry
+
+
+def test_an_empty_database_exports_an_empty_csv_and_an_empty_json_rows_list(make_server: Any, tmp_path: Path) -> None:
+    db = tmp_path / "empty.db"
+    Store(db).close()
+    server, _ = make_server(analytics_store=lambda: Store(db), wall_clock=lambda: NOW)
+    status, _headers, body = request(server, "GET", "/api/export?format=csv")
+    assert status == 200 and body == b""                                      # no rows, so no columns to name
+    assert json.loads(request(server, "GET", "/api/export?format=json")[2]) == {"basis": analytics.BASIS, "rows": []}
+    for name in REPORT_NAMES:                                                  # and every report copes with it
+        assert request(server, "GET", f"/api/analytics/{name}")[0] == 200
+
+
+# ── POST /api/settings: the alert, price and billing keys ──────────────────────────
+
+def test_the_alert_settings_are_stored_and_reported(make_server: Any, settings: Settings) -> None:
+    server, rec = make_server()
+    defaults = json.loads(request(server, "GET", "/api/state")[2])["settings"]
+    assert defaults["alerts_enabled"] is True and defaults["alert_thresholds"] == [80, 90, 100]
+    assert defaults["alert_on_threshold"] is defaults["alert_on_reset"] is defaults["alert_on_credits"] is True
+    assert defaults["alert_quiet_hours"] is None and "notifications_enabled" not in defaults
+
+    payload = {"alerts_enabled": False, "alert_thresholds": [60, 95], "alert_on_reset": False,
+               "alert_on_credits": False, "alert_quiet_hours": {"start": "23:00", "end": "06:30"},
+               "plan_price_override": 120.5, "billing_day": 7}
+    status, body = post_json(server, "/api/settings", payload)
+    assert status == 200 and body["applied"] == payload
+    for key, value in payload.items():
+        assert settings.get(key) == value, key
+        assert body["settings"][key] == value, key
+    assert rec.applied[-1] == payload
+
+
+@pytest.mark.parametrize("key, values", [
+    ("alerts_enabled", [True, False, 1, 0, "true", None]),
+    ("alert_on_threshold", [True, False, 1, "x", None]),
+    ("alert_thresholds", [[50], [80, 90, 100], [1, 2, 3, 4, 5], [], [1, 2, 3, 4, 5, 6], [0], [101], [80, 80], [80.5],
+                          ["80"], [True], 80, None, "80", [[1]], [{"a": 1}], [-5]]),
+    ("alert_quiet_hours", [None, {"start": "22:00", "end": "07:00"}, {"start": "00:00", "end": "23:59"},
+                           {"start": "22:00", "end": "22:00"}, {"start": "22:00"}, {"start": "24:00", "end": "07:00"},
+                           {"start": "22:00", "end": "7:00"}, {"start": "22:00", "end": "07:00", "x": 1},
+                           {"start": 2200, "end": "07:00"}, "22:00", [], 5, {}]),
+    ("billing_day", [None, 1, 31, 15, 0, 32, -1, 1.5, True, "15"]),
+])
+def test_the_server_and_settings_agree_on_what_these_keys_accept(tmp_path: Path, key: str,
+                                                                 values: list[Any]) -> None:
+    """The specs repeat Settings' rules so a bad value is refused before anything is applied. This keeps the
+    two from drifting apart."""
+    scratch = Settings(tmp_path / "scratch.json", save_delay_s=0.0)
+    try:
+        for value in values:
+            try:
+                scratch.set(key, value)
+                settings_says = True
+            except ValueError:
+                settings_says = False
+            assert server_mod.SETTING_SPECS[key].check(value) is settings_says, (key, value)
+    finally:
+        scratch.close()
+
+
+def test_settings_own_refusal_is_still_a_400_that_applies_nothing(make_server: Any, settings: Settings,
+                                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(server_mod.SETTING_SPECS, "alert_thresholds", server_mod._Spec(lambda value: True, [80]))
+    server, rec = make_server()
+    status, body = post_json(server, "/api/settings", {"reduce_motion": True, "alert_thresholds": [0]})
+    assert status == 400 and "alert_thresholds" in body["error"]
+    assert settings.get("reduce_motion", False) is False and rec.applied == []
+
+
+def test_a_bad_alert_value_in_a_batch_applies_nothing_and_leaves_the_run_entry_alone(
+        make_server: Any, settings: Settings, startup_fake: dict[str, Any]) -> None:
+    server, rec = make_server()
+    status, _ = post_json(server, "/api/settings", {"launch_on_startup": True, "alert_thresholds": [5, 5]})
+    assert status == 400
+    assert startup_fake["calls"] == [] and rec.applied == []
+    assert settings.get("alert_thresholds") == [80, 90, 100]
+
+
+def test_the_alert_settings_reach_the_alert_engine_live(make_server: Any, settings: Settings) -> None:
+    from usage_monitor.data.alerts import AlertEngine
+
+    engine = AlertEngine(settings)
+    server, _ = make_server()
+    quiet = {"start": "00:00", "end": "23:59"}
+    assert post_json(server, "/api/settings", {"alert_thresholds": [20, 50], "alert_quiet_hours": quiet})[0] == 200
+    assert engine.evaluate(sample_state(percent=10.0)) == []                    # the baseline
+    assert engine.evaluate(sample_state(percent=30.0)) == []                    # 20 % was crossed, in quiet hours
+    assert post_json(server, "/api/settings", {"alert_quiet_hours": None})[0] == 200
+    assert [alert.title for alert in engine.evaluate(sample_state(percent=55.0))] == ["Session limit at 50%"]
+
+
+# ── Dev isolation ──────────────────────────────────────────────────────────────────
+
+def test_the_dev_environment_variable_makes_a_dev_server_whatever_the_flag_says(
+        make_server: Any, registry: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture) -> None:
+    """The flag comes from the caller; the variable comes from the shell that started the process. Either one
+    keeps launch_on_startup away from the sign-in entry that the installed copy owns."""
+    monkeypatch.setenv(server_mod.DEV_ENV, "1")
+    server, rec = make_server(dev=False)
+    assert server.dev is True
+    assert json.loads(request(server, "GET", "/api/state")[2])["dev"] is True
+    with caplog.at_level(logging.INFO, logger="usage_monitor.ui.server"):
+        assert post_json(server, "/api/settings", {"launch_on_startup": True})[0] == 200
+    assert registry["reads"] == 0 and registry["writes"] == [] and registry["deletes"] == 0
+    assert any("not touched" in record.getMessage() and "dev instance" in record.getMessage()
+               for record in caplog.records)
+    state = json.loads(request(server, "GET", "/api/state")[2])
+    assert state["settings"]["launch_on_startup"] is True and registry["reads"] == 0
+    assert rec.applied[-1] == {"launch_on_startup": True}
+
+
+@pytest.mark.parametrize("value", ["0", "", "true", "yes", "2"])
+def test_only_cum_dev_instance_1_counts_for_the_server(make_server: Any, monkeypatch: pytest.MonkeyPatch,
+                                                       value: str) -> None:
+    monkeypatch.setenv(server_mod.DEV_ENV, value)
+    server, _ = make_server(dev=False)
+    assert server.dev is False
+
+
+def test_a_dev_server_logs_that_the_run_entry_was_skipped(make_server: Any, registry: dict[str, Any],
+                                                          caplog: pytest.LogCaptureFixture) -> None:
+    server, _ = make_server(dev=True)
+    with caplog.at_level(logging.INFO, logger="usage_monitor.ui.server"):
+        post_json(server, "/api/settings", {"launch_on_startup": False})
+    assert any("start with Windows is off in memory only" in record.getMessage() for record in caplog.records)
+    assert registry["deletes"] == 0 and registry["value"] == '"C:/installed/ClaudeUsageMonitor.exe"'
+
+
+def test_apply_settings_is_the_post_without_the_http(make_server: Any, settings: Settings,
+                                                     themes_module: types.ModuleType) -> None:
+    server, rec = make_server()
+    assert server.apply_settings({"theme_id": "night_city"}) == {"theme_id": "night_city", "theme_variant": "cyan"}
+    assert settings.get("theme_id") == "night_city" and rec.applied[-1]["theme_id"] == "night_city"
+    for bad in ({"theme_id": "nope"}, [1], {"unknown": 1}, {"billing_day": 99}):
+        with pytest.raises(ValueError):
+            server.apply_settings(bad)
 
 
 # ── JSON encoding ───────────────────────────────────────────────────────────────────
@@ -1217,7 +2254,291 @@ def test_dashboard_api_rejects_bad_colours_without_touching_windows() -> None:
 
 def test_dashboard_api_does_not_expose_private_methods() -> None:
     exposed = {name for name in dir(dashboard.DashboardApi) if not name.startswith("_")}
-    assert exposed == {"get_token", "set_chrome", "open_external"}
+    assert exposed == {"get_token", "set_chrome", "open_external", "save_export"}
+
+
+def test_the_window_finder_has_a_public_name_and_keeps_the_old_one() -> None:
+    assert callable(dashboard.find_window_of) and dashboard._find_window_of is dashboard.find_window_of
+    assert dashboard.find_window_of(2**31 - 5) is None                          # no such process, no window
+
+
+# ── save_export: the export through the native save dialog ─────────────────────────
+
+class SaveWindow:
+    """A pywebview window double that answers the save dialog and remembers how it was asked."""
+
+    def __init__(self, answer: Any) -> None:
+        self.answer = answer
+        self.calls: list[dict[str, Any]] = []
+
+    def create_file_dialog(self, dialog_type: Any = None, directory: str = "", allow_multiple: bool = False,
+                           save_filename: str = "", file_types: Any = ()) -> Any:
+        self.calls.append({"dialog_type": dialog_type, "save_filename": save_filename,
+                           "file_types": tuple(file_types)})
+        return self.answer() if callable(self.answer) else self.answer
+
+
+@pytest.fixture
+def fake_webview(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
+    module = types.ModuleType("webview")
+    module.FileDialog = types.SimpleNamespace(OPEN=10, FOLDER=20, SAVE=30)  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "webview", module)
+    return module
+
+
+def saving_api(stats: StatsRig, answer: Any, token: str | None = None) -> tuple[dashboard.DashboardApi, SaveWindow]:
+    api = dashboard.DashboardApi(token or stats.server.token, f"http://127.0.0.1:{stats.server.port}")
+    window = SaveWindow(answer)
+    api._bind(window)
+    return api, window
+
+
+def test_save_export_writes_the_download_where_the_dialog_says(stats: StatsRig, tmp_path: Path,
+                                                               fake_webview: types.ModuleType) -> None:
+    target = tmp_path / "out" / "mine.csv"
+    target.parent.mkdir()
+    api, window = saving_api(stats, lambda: (str(target),))
+    result = api.save_export("csv")
+    assert result == {"ok": True, "path": str(target), "error": None}
+    assert target.read_bytes() == stats.get("/api/export?format=csv")[2]
+    call = window.calls[0]
+    assert call["dialog_type"] == 30
+    assert call["save_filename"] == f"claude-usage-daily-{NOW.astimezone().date().isoformat()}.csv"
+    assert call["file_types"] == ("CSV file (*.csv)", "All files (*.*)")
+    assert [entry.name for entry in target.parent.iterdir()] == ["mine.csv"], "no temporary file is left behind"
+
+
+def test_save_export_json_works_with_a_pywebview_that_only_has_the_old_constant(
+        stats: StatsRig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    old = types.ModuleType("webview")
+    old.SAVE_DIALOG = 30  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "webview", old)
+    target = tmp_path / "rollups.json"
+    api, window = saving_api(stats, target)                                    # a bare path string is fine too
+    assert api.save_export("json") == {"ok": True, "path": str(target), "error": None}
+    assert json.loads(target.read_bytes())["basis"] == analytics.BASIS
+    assert window.calls[0]["dialog_type"] == 30 and window.calls[0]["file_types"][0] == "JSON file (*.json)"
+    assert window.calls[0]["save_filename"].endswith(".json")
+
+
+@pytest.mark.parametrize("cancelled", [None, (), []])
+def test_a_cancelled_dialog_is_not_an_error_and_writes_nothing(stats: StatsRig, tmp_path: Path,
+                                                               fake_webview: types.ModuleType,
+                                                               cancelled: Any) -> None:
+    api, window = saving_api(stats, cancelled)
+    assert api.save_export("csv") == {"ok": False, "path": None, "error": None}
+    assert len(window.calls) == 1 and not list(tmp_path.glob("*.csv"))
+
+
+def test_a_name_without_an_extension_gets_the_formats(stats: StatsRig, tmp_path: Path,
+                                                      fake_webview: types.ModuleType) -> None:
+    api, _ = saving_api(stats, (str(tmp_path / "report"),))
+    result = api.save_export("json")
+    assert result["ok"] is True and result["path"] == str(tmp_path / "report.json")
+    assert (tmp_path / "report.json").is_file() and not (tmp_path / "report").exists()
+
+
+@pytest.mark.parametrize("fmt", ["xml", "", "CSV", "csv ", None, 7, "../x"])
+def test_save_export_only_knows_csv_and_json_and_does_not_ask_the_monitor_otherwise(
+        stats: StatsRig, fake_webview: types.ModuleType, fmt: Any) -> None:
+    api, window = saving_api(stats, lambda: pytest.fail("no dialog for a format that does not exist"))
+    result = api.save_export(fmt)
+    assert result == {"ok": False, "path": None, "error": "the format must be csv or json"}
+    assert window.calls == [] and stats.opened == []
+
+
+def test_the_dialog_is_shown_only_after_the_monitor_has_produced_the_export(stats: StatsRig, tmp_path: Path,
+                                                                            fake_webview: types.ModuleType) -> None:
+    """A refused or failed fetch must not first make the user pick a place to save nothing."""
+    api, window = saving_api(stats, lambda: (str(tmp_path / "x.csv"),), token="not the monitor's token")
+    result = api.save_export("csv")
+    assert result == {"ok": False, "path": None, "error": "the monitor answered 401"}
+    assert window.calls == [] and not (tmp_path / "x.csv").exists()
+
+
+def test_a_monitor_that_cannot_be_reached_is_an_error_not_an_exception(
+        tmp_path: Path, fake_webview: types.ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
+    class Unreachable:
+        def open(self, request: Any, timeout: float = 0) -> Any:
+            raise urllib.error.URLError(ConnectionRefusedError(10061, "nobody is listening"))
+
+    monkeypatch.setattr(dashboard, "_local_opener", lambda: Unreachable())    # a refused connect takes 2 s on Windows
+    api = dashboard.DashboardApi("tok", "http://127.0.0.1:9")
+    window = SaveWindow(lambda: (str(tmp_path / "x.csv"),))
+    api._bind(window)
+    assert api.save_export("csv") == {"ok": False, "path": None, "error": "the monitor could not be reached"}
+    assert window.calls == []
+
+
+def test_a_file_that_cannot_be_written_is_reported_with_its_name(stats: StatsRig, tmp_path: Path,
+                                                                 fake_webview: types.ModuleType) -> None:
+    api, _ = saving_api(stats, (str(tmp_path / "no such folder" / "x.csv"),))
+    result = api.save_export("csv")
+    assert result["ok"] is False and result["path"] is None and result["error"].startswith("could not write x.csv")
+
+
+def test_a_failed_write_leaves_the_file_the_user_chose_to_overwrite_as_it_was(
+        stats: StatsRig, tmp_path: Path, fake_webview: types.ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
+    target = tmp_path / "keep.csv"
+    target.write_bytes(b"precious")
+
+    def refuse(src: str, dst: Any) -> None:
+        raise PermissionError(13, "the file is open in another program")
+
+    monkeypatch.setattr(dashboard.os, "replace", refuse)
+    api, _ = saving_api(stats, (str(target),))
+    result = api.save_export("csv")
+    assert result["ok"] is False and "open in another program" in result["error"]
+    assert target.read_bytes() == b"precious"
+    assert [entry.name for entry in tmp_path.glob("keep*")] == ["keep.csv"], "the temporary file is removed"
+
+
+def test_an_export_that_is_too_big_or_a_base_that_is_not_the_monitors_is_said_so(
+        stats: StatsRig, tmp_path: Path, fake_webview: types.ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
+    api, window = saving_api(stats, lambda: (str(tmp_path / "x.csv"),))
+    monkeypatch.setattr(dashboard, "MAX_EXPORT_BYTES", 5)
+    assert api.save_export("csv") == {"ok": False, "path": None, "error": "the export is larger than 16 MB"}
+    elsewhere = dashboard.DashboardApi("tok", "http://example.com:80")
+    elsewhere._bind(window)
+    result = elsewhere.save_export("csv")
+    assert result["ok"] is False and "only read from the monitor on this machine" in result["error"]
+    assert window.calls == [] and not (tmp_path / "x.csv").exists()
+
+
+def test_save_export_before_the_window_exists_is_an_error(stats: StatsRig) -> None:
+    api = dashboard.DashboardApi(stats.server.token, f"http://127.0.0.1:{stats.server.port}")
+    assert api.save_export("csv") == {"ok": False, "path": None, "error": "the dashboard window is not ready"}
+
+
+def test_a_dialog_that_raises_becomes_an_error_for_the_page(stats: StatsRig, fake_webview: types.ModuleType,
+                                                            caplog: pytest.LogCaptureFixture) -> None:
+    def broken() -> Any:
+        raise RuntimeError("the dialog blew up")
+
+    api, _ = saving_api(stats, broken)
+    with caplog.at_level(logging.ERROR, logger="usage_monitor.ui.dashboard"):
+        assert api.save_export("csv") == {"ok": False, "path": None, "error": "could not save the export"}
+    assert "save_export failed" in caplog.text
+    assert api.save_export("xml")["error"] == "the format must be csv or json"   # and the next call still works
+
+
+def test_only_one_save_dialog_is_open_at_a_time(stats: StatsRig, tmp_path: Path,
+                                                fake_webview: types.ModuleType) -> None:
+    release, shown = threading.Event(), threading.Event()
+
+    def slow_dialog() -> Any:
+        shown.set()
+        assert release.wait(10)
+        return (str(tmp_path / "late.csv"),)
+
+    api, _ = saving_api(stats, slow_dialog)
+    first: list[dict[str, Any]] = []
+    worker = threading.Thread(target=lambda: first.append(api.save_export("csv")))
+    worker.start()
+    try:
+        assert shown.wait(5)
+        assert api.save_export("csv") == {"ok": False, "path": None, "error": "a save dialog is already open"}
+    finally:
+        release.set()
+        worker.join(10)
+    assert first and first[0]["ok"] is True
+    assert api.save_export("csv")["error"] != "a save dialog is already open"   # the lock was let go
+
+
+@pytest.mark.parametrize("base", [
+    "http://example.com:80", "http://localhost:5000", "http://127.0.0.1", "http://127.0.0.1:5000/",
+    "https://127.0.0.1:5000", "http://127.0.0.1:5000/api", "http://127.0.0.1.evil.example:5000",
+    "http://user@127.0.0.1:5000", "", "file:///C:/x",
+])
+def test_the_export_is_only_ever_requested_from_the_monitor_on_this_machine(base: str) -> None:
+    with pytest.raises(ValueError):
+        dashboard.fetch_export(base, "tok", "csv")
+    with pytest.raises(ValueError):
+        dashboard.fetch_export("http://127.0.0.1:5000", "tok", "xml")
+
+
+@contextlib.contextmanager
+def tiny_server(respond: Callable[[http.server.BaseHTTPRequestHandler], None]) -> Iterator[tuple[int, list[dict[str, str]]]]:
+    """A one-route HTTP server on loopback that records what it was asked and answers through ``respond``."""
+    seen: list[dict[str, str]] = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            seen.append({"path": self.path, "token": self.headers.get("X-Monitor-Token", ""),
+                         "host": self.headers.get("Host", "")})
+            respond(self)
+
+        def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+            pass
+
+    httpd = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
+    thread.start()
+    try:
+        yield httpd.server_address[1], seen
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(5)
+
+
+def answer_with(body: bytes, disposition: str | None = None) -> Callable[[http.server.BaseHTTPRequestHandler], None]:
+    def respond(handler: http.server.BaseHTTPRequestHandler) -> None:
+        handler.send_response(200)
+        handler.send_header("Content-Length", str(len(body)))
+        if disposition is not None:
+            handler.send_header("Content-Disposition", disposition)
+        handler.end_headers()
+        handler.wfile.write(body)
+
+    return respond
+
+
+def test_fetch_export_sends_the_token_and_takes_the_suggested_name() -> None:
+    respond = answer_with(b"date,requests\r\n", 'attachment; filename="claude-usage-daily-2026-01-02.csv"')
+    with tiny_server(respond) as (port, seen):
+        body, name = dashboard.fetch_export(f"http://127.0.0.1:{port}", "tok-1", "csv")
+    assert body == b"date,requests\r\n" and name == "claude-usage-daily-2026-01-02.csv"
+    assert seen == [{"path": "/api/export?format=csv", "token": "tok-1", "host": f"127.0.0.1:{port}"}]
+
+
+@pytest.mark.parametrize("header", [
+    'attachment; filename="../../evil.csv"', 'attachment; filename="claude-usage-daily-2026-01-02.exe"',
+    'attachment; filename="C:\\\\Windows\\\\x.csv"', 'attachment; filename="claude-usage-daily-2026-1-2.csv"',
+    "attachment", None,
+])
+def test_a_suggested_name_that_is_not_ours_is_replaced_by_one_made_here(header: str | None) -> None:
+    with tiny_server(answer_with(b"x", header)) as (port, _seen):
+        _body, name = dashboard.fetch_export(f"http://127.0.0.1:{port}", "tok", "json")
+    assert name == f"claude-usage-daily-{datetime.now().date().isoformat()}.json"
+
+
+def test_an_export_over_the_size_limit_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(dashboard, "MAX_EXPORT_BYTES", 10)
+    with tiny_server(answer_with(b"x" * 11)) as (port, _seen):
+        with pytest.raises(ValueError, match="larger than"):
+            dashboard.fetch_export(f"http://127.0.0.1:{port}", "tok", "csv")
+    with tiny_server(answer_with(b"x" * 10)) as (port, _seen):
+        assert dashboard.fetch_export(f"http://127.0.0.1:{port}", "tok", "csv")[0] == b"x" * 10
+
+
+def test_a_redirect_is_never_followed_so_the_token_stays_on_the_monitor() -> None:
+    with tiny_server(answer_with(b"elsewhere")) as (other_port, other_seen):
+        def redirect(handler: http.server.BaseHTTPRequestHandler) -> None:
+            handler.send_response(302)
+            handler.send_header("Location", f"http://127.0.0.1:{other_port}/steal")
+            handler.send_header("Content-Length", "0")
+            handler.end_headers()
+
+        with tiny_server(redirect) as (port, seen):
+            base = f"http://127.0.0.1:{port}"
+            with pytest.raises(urllib.error.HTTPError) as caught:
+                dashboard.fetch_export(base, "tok", "csv")
+            assert caught.value.code == 302
+            with pytest.raises(urllib.error.HTTPError):
+                dashboard._api_call(base, "tok", "GET", "/api/state")           # the settings calls are no different
+            assert len(seen) == 2
+    assert other_seen == []
 
 
 def _areas(*boxes: tuple[int, int, int, int]) -> list[Any]:
@@ -1820,11 +3141,13 @@ except Exception as exc:
 
 
 @ui_only
-def test_overview_cards_never_clip_their_content_in_the_real_web_view(tmp_path: Path) -> None:
+@pytest.mark.parametrize("theme", ["nostromo/amber", "night_city/edgerun", "gates/blue-light"])
+def test_overview_cards_never_clip_their_content_in_the_real_web_view(tmp_path: Path, theme: str) -> None:
     """The cost card used to cut the numerals of its two tiles off in the default window (a 1200 x 780 outer
     size leaves a 1184 x 741 page): the plan block had a line more than the approved design, and the cost
-    row had a fixed floor below its content. Measured in WebView2, the engine the dashboard really uses."""
-    server, settings = devserver.make_server("normal", 0, settings_dir=tmp_path / "dev")
+    row had a fixed floor below its content. Measured in WebView2, the engine the dashboard really uses,
+    for each theme (the page opens in the theme's own look, see _themed_shell)."""
+    server, settings = devserver.make_server("normal", 0, settings_dir=tmp_path / "dev", theme=theme)
     server.start()
     try:
         env = dict(os.environ, **REAL_PROFILE_ENV, CUM_APPDATA_DIR=str(tmp_path / "app"))
@@ -1840,7 +3163,7 @@ def test_overview_cards_never_clip_their_content_in_the_real_web_view(tmp_path: 
     assert run.returncode == 0, run.stderr[-800:]
     measured = json.loads(run.stdout.strip().splitlines()[-1])
     assert len(measured) == len(sizes)
-    assert measured[0]["plan"] == ["YOUR PLAN", "MAX 5X · $100 / MONTH"]        # two lines, as approved
+    assert [line.upper() for line in measured[0]["plan"]] == ["YOUR PLAN", "MAX 5X · $100 / MONTH"]   # two lines
     for size, result in zip(sizes, measured):
         assert result["vw"] > 1000, f"{size}: the page is in the one column layout"
         clipped = {card["name"]: card["over"] for card in result["cards"] if card["over"] > 0}

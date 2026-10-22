@@ -1,0 +1,771 @@
+/* Night City theme for the dashboard webui: the approved design (design/mockups/night_city/final.html), the
+   dashboard section, ported to live data and extended to every page. A Cyberpunk 2077 style HUD: chamfered
+   frames with a hairline edge and corner brackets, segmented RAM-cell bars, hazard stripes where something is
+   critical, signal plates for stamps, and a three-frame RGB split on a numeral when its value changes
+   (themes/night_city.js adds the class; this file owns the look).
+   Colours come only from the theme tokens that the local API sends as CSS custom properties (--bg-0, --fg,
+   --line, --bar, ...). The --nc-* names below are aliases of them, with Blackwall values as the fallback, so
+   every variant (Blackwall, Relic, Edgerun, Mox) works by token alone. Only structure differs by variant:
+   Blackwall selects with a cyan outline, the others with a signal plate, and Edgerun puts yellow plates behind
+   titles and the title bar (dark text on yellow). Motion is off under reduce_motion or prefers-reduced-motion. */
+
+@font-face { font-family: "Chakra Petch"; src: url("/static/fonts/chakrapetch/ChakraPetch-Medium.ttf") format("truetype"); font-weight: 500; font-display: block; }
+@font-face { font-family: "Chakra Petch"; src: url("/static/fonts/chakrapetch/ChakraPetch-SemiBold.ttf") format("truetype"); font-weight: 600; font-display: block; }
+@font-face { font-family: "Chakra Petch"; src: url("/static/fonts/chakrapetch/ChakraPetch-Bold.ttf") format("truetype"); font-weight: 700; font-display: block; }
+@font-face { font-family: "Rajdhani"; src: url("/static/fonts/rajdhani/Rajdhani-Medium.ttf") format("truetype"); font-weight: 500; font-display: block; }
+@font-face { font-family: "Rajdhani"; src: url("/static/fonts/rajdhani/Rajdhani-SemiBold.ttf") format("truetype"); font-weight: 600; font-display: block; }
+@font-face { font-family: "Rajdhani"; src: url("/static/fonts/rajdhani/Rajdhani-Bold.ttf") format("truetype"); font-weight: 700; font-display: block; }
+@font-face { font-family: "Share Tech Mono"; src: url("/static/fonts/sharetechmono/ShareTechMono-Regular.ttf") format("truetype"); font-weight: 400; font-display: block; }
+/* The percent sign of a big figure is drawn at under half its size (the approved 22 px against 48 px): the
+   same Chakra Petch face, restricted to U+0025 and shrunk by size-adjust. Put "NC Percent" first in a stack. */
+@font-face { font-family: "NC Percent"; src: url("/static/fonts/chakrapetch/ChakraPetch-Bold.ttf") format("truetype"); font-weight: 700; unicode-range: U+25; size-adjust: 46%; font-display: block; }
+
+:root {
+  color-scheme: dark;
+  /* aliases of the token set (the server sets the right-hand sides on :root; the fallbacks are Blackwall) */
+  --nc-bg-0: var(--bg-0, #070203);
+  --nc-bg-1: var(--bg-1, #120608);
+  --nc-bg-2: var(--bg-2, #1c0a0d);
+  --nc-panel: var(--panel, #140609);
+  --nc-track: var(--track, #4a1a1f);
+  --nc-fg: var(--fg, #ff8f7e);
+  --nc-fg-hi: var(--fg-hi, #ffd9cf);
+  --nc-ink-2: var(--ink-2, #ea8677);
+  --nc-ink-3: var(--ink-3, #b06c62);
+  --nc-line: var(--line, #ff3b30);
+  --nc-line-a: var(--line-a, #ff3b30a0);
+  --nc-hair: var(--hair, #ff3b3052);
+  --nc-accent: var(--accent, #ff4a3c);
+  --nc-ok: var(--ok, #ff5a4c);
+  --nc-warn: var(--warn, #ffb020);
+  --nc-signal: var(--signal, #ff3b30);
+  --nc-danger: var(--danger, #ff2e3d);
+  --nc-ink: var(--ink, #0a0304);
+  --nc-hz-a: var(--hz-a, #ff2e3d);
+  --nc-hz-b: var(--hz-b, #0a0304);
+  --nc-glow: var(--glow, #ff3b3073);
+  --nc-glow-accent: var(--glow-accent, #ff3b3080);
+  --nc-glow-danger: var(--glow-danger, #ff2e3d59);
+  --nc-scan: var(--scan, #00000026);
+  --nc-stale: var(--stale, #b06c62);
+  --nc-bar: var(--bar, #3ef0ff);
+  --nc-sel: var(--sel, #3ef0ff);
+  --nc-yg: var(--yg, #d6f55a);
+  --nc-cat-1: var(--cat-1, #ff8f7e);
+  --nc-cat-2: var(--cat-2, #3ef0ff);
+  --nc-cat-3: var(--cat-3, #ffb020);
+  --nc-cat-4: var(--cat-4, #b06c62);
+  --nc-wall-a: var(--wall-a, #3a0d12);
+  --nc-wall-c: var(--wall-c, #15060a);
+  --nc-page: var(--page, #050101);
+  --nc-hazard: repeating-linear-gradient(-45deg, var(--nc-hz-a) 0 2.83px, var(--nc-hz-b) 2.83px 5.66px);
+  /* a selected nav item, segment or tab: Blackwall's cyan outline on a dark tint; the other variants use
+     a solid signal plate with dark text (set under the variant blocks at the end) */
+  --nc-on-bg: color-mix(in srgb, var(--nc-sel) 10%, var(--nc-bg-0));
+  --nc-on-fg: var(--nc-sel);
+  --nc-on-line: var(--nc-sel);
+  /* the type stacks: Chakra Petch for numerals and headings, Rajdhani for labels, Share Tech Mono for data */
+  --f-display: var(--font-display, "Chakra Petch"), "Segoe UI", system-ui, sans-serif;
+  --f-label: var(--font-body, "Rajdhani"), "Segoe UI", system-ui, sans-serif;
+  --f-data: var(--font-mono, "Share Tech Mono"), Consolas, monospace;
+  --f-num: "NC Percent", var(--f-display);
+  /* charts.js reads this one in script: 0 draws solid bars (the segments are cut by a mask below) */
+  --chart-pips: 0;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: var(--nc-page); color: var(--nc-fg); font: 500 14px/1.35 var(--f-label); }
+button, input, select { font: inherit; color: inherit; }
+a { color: inherit; }
+ol, ul { margin: 0; padding: 0; }
+h1, h2, h3, p, figure, dl, dd { margin: 0; }
+:focus-visible { outline: 2px solid var(--nc-sel); outline-offset: 2px; }
+::selection { background: var(--nc-signal); color: var(--nc-ink); }
+
+/* the live pip: an eased 2.4 s pulse between full and 30 % (never a stepped blink) */
+@keyframes nc-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+/* the refresh hit: three frames of 50 ms, played once when a value changes, never looped */
+@keyframes nc-hit {
+  0%     { text-shadow: var(--nc-hit-1); animation-timing-function: step-end; }
+  33.33% { text-shadow: var(--nc-hit-2); animation-timing-function: step-end; }
+  66.66% { text-shadow: var(--nc-hit-3); animation-timing-function: step-end; }
+  100%   { text-shadow: var(--nc-hit-3); }
+}
+@keyframes nc-fade { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+.nc-hit {
+  --nc-hit-1: -2px 0 0 var(--nc-sel), 2px 0 0 var(--nc-danger);
+  --nc-hit-2: -1px 0 0 var(--nc-sel), 1px 0 0 var(--nc-danger);
+  --nc-hit-3: none;
+  animation: nc-hit 150ms linear 1 both;
+}
+.nm-cost .nm-big.h.nc-hit { --nc-hit-3: 0 0 16px var(--nc-glow); }
+
+/* ── screen: the window, wall light, scanlines ───────────────────────────────── */
+.nm-screen {
+  position: fixed; inset: 0; overflow: hidden; color: var(--nc-fg);
+  background:
+    radial-gradient(900px 520px at 80% -8%, var(--nc-wall-a) 0%, transparent 70%),
+    radial-gradient(640px 460px at -4% 112%, var(--nc-wall-c) 0%, transparent 72%),
+    linear-gradient(180deg, var(--nc-bg-2) 0%, var(--nc-bg-0) 62%);
+  --chart-mark: var(--nc-bar);
+  --chart-mark-2: var(--nc-cat-2);
+  --chart-hot: var(--nc-fg-hi);
+  --chart-line: var(--nc-bar);
+  --chart-text: var(--nc-ink-2);
+  --chart-text-strong: var(--nc-fg-hi);
+  --chart-track: var(--nc-track);
+  --chart-grid: var(--nc-hair);
+  --chart-limit: var(--nc-danger);
+}
+.nm-content { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.nm-scan { position: absolute; inset: 0; z-index: 71; pointer-events: none; background: repeating-linear-gradient(0deg, var(--nc-scan) 0 1px, transparent 1px 3px); }
+.nm-vig { display: none; }
+.nm-boot { display: none !important; }
+
+/* stale, offline and paused: the tones drop to the dim tokens (text stays readable), the glow goes out */
+.nm-screen.is-stale {
+  --nc-fg: var(--nc-ink-2); --nc-fg-hi: var(--nc-ink-2); --nc-accent: var(--nc-stale); --nc-ok: var(--nc-stale);
+  --nc-bar: var(--nc-stale); --nc-glow: transparent; --nc-glow-accent: transparent;
+  --chart-mark: var(--nc-stale); --chart-line: var(--nc-stale);
+}
+
+/* ── title bar ───────────────────────────────────────────────────────────────── */
+.nm-bar {
+  position: relative; z-index: 2; flex: none; height: 34px; display: flex; align-items: center; justify-content: space-between;
+  padding: 0 14px 0 12px; background: linear-gradient(90deg, var(--nc-bg-0), var(--nc-bg-2)); box-shadow: inset 0 -1px 0 var(--nc-line);
+  font: 600 12px/1 var(--f-label); letter-spacing: .12em; color: var(--nc-ink-2);
+}
+.nm-brand { display: flex; align-items: center; gap: 12px; font: 600 12px/1 var(--f-display); letter-spacing: .2em; text-transform: uppercase; color: var(--nc-fg-hi); white-space: nowrap; }
+.nm-brand::before {
+  content: "NC//USAGE"; display: inline-block; transform: skewX(-12deg); padding: 4px 9px 3px; background: var(--nc-signal); color: var(--nc-ink);
+  font: 700 12px/1 var(--f-label); letter-spacing: .14em;
+}
+.nm-brand svg, .nm-brand em { display: none; }
+.nm-bar-r { display: flex; align-items: center; gap: 18px; white-space: nowrap; text-transform: uppercase; }
+.nm-uplink { display: flex; align-items: center; gap: 8px; font-weight: 700; color: var(--nc-ok); }
+.nm-uplink.is-down { color: var(--nc-ink-2); }
+.nm-alive { display: block; flex: none; width: 6px; height: 6px; background: var(--nc-ok); box-shadow: 0 0 6px var(--nc-glow-accent); animation: nc-pulse 2.4s ease-in-out infinite; }
+.nm-alive.is-off { background: none; box-shadow: inset 0 0 0 1px var(--nc-stale); animation: none; }
+#data-age { font: 400 11px/1 var(--f-data); letter-spacing: .06em; color: var(--nc-ink-2); }
+
+/* ── controls: chamfered outline buttons (a 1 px frame cut at the top left), solid when selected ────────── */
+.nm-btn, .nm-seg button, .nm-refresh, .nm-sw button {
+  position: relative; isolation: isolate; height: 28px; padding: 0 12px; border: 0; background: transparent; cursor: pointer; white-space: nowrap;
+  font: 700 12px/1 var(--f-label); letter-spacing: .12em; text-transform: uppercase; color: var(--nc-ink-2);
+  --oc: var(--nc-line-a); --of: var(--nc-panel);
+}
+.nm-btn::before, .nm-seg button::before, .nm-refresh::before, .nm-sw button::before {
+  content: ""; position: absolute; inset: 0; z-index: -2; background: var(--oc);
+  clip-path: polygon(6px 0, 100% 0, 100% 100%, 0 100%, 0 6px);
+}
+.nm-btn::after, .nm-seg button::after, .nm-refresh::after, .nm-sw button::after {
+  content: ""; position: absolute; inset: 1px; z-index: -1; background: var(--of);
+  clip-path: polygon(5px 0, 100% 0, 100% 100%, 0 100%, 0 5px);
+}
+.nm-btn:hover:not(:disabled), .nm-seg button:hover:not(:disabled), .nm-refresh:hover:not(:disabled), .nm-sw button:hover { --oc: var(--nc-line); color: var(--nc-fg-hi); }
+.nm-btn:focus-visible, .nm-seg button:focus-visible, .nm-refresh:focus-visible, .nm-sw button:focus-visible { --oc: var(--nc-sel); --of: var(--nc-bg-2); color: var(--nc-fg-hi); outline: 1px solid var(--nc-sel); outline-offset: -3px; }
+.nm-btn.solid, .nm-seg button.on, .nm-sw button.on { --oc: var(--nc-on-line); --of: var(--nc-on-bg); color: var(--nc-on-fg); }
+.nm-btn:disabled, .nm-seg button:disabled, .nm-refresh:disabled { opacity: .45; cursor: default; }
+.nm-refresh { height: 20px; padding: 0 9px; font: 400 11px/1 var(--f-data); letter-spacing: .1em; color: var(--nc-fg-hi); }
+.nm-seg { display: inline-grid; grid-auto-flow: column; gap: 4px; }
+.nm-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* ── body: module nav and the page ───────────────────────────────────────────── */
+.nm-app { position: relative; z-index: 1; flex: 1; min-height: 0; display: grid; grid-template-columns: 200px minmax(0, 1fr); }
+.nm-nav {
+  position: relative; display: flex; flex-direction: column; min-height: 0; padding: 18px 0 16px; overflow: auto;
+  background: linear-gradient(180deg, var(--nc-bg-2), var(--nc-bg-0)); box-shadow: inset -1px 0 0 var(--nc-hair); scrollbar-width: thin; scrollbar-color: var(--nc-ink-3) transparent;
+}
+/* the heading block of the nav ("USAGE // MONITOR"): the MODULES kicker is replaced by it */
+.nm-nav > .nm-kick { margin: 0; padding: 0 18px; font-size: 0; line-height: 0; color: var(--nc-fg-hi); text-transform: uppercase; }
+.nm-nav > .nm-kick::before, .nm-nav > .nm-kick::after { display: block; font: 700 23px/1.02 var(--f-display); letter-spacing: .05em; color: var(--nc-fg-hi); }
+.nm-nav > .nm-kick::before { content: "Usage"; }
+.nm-nav > .nm-kick::after {
+  content: "// Monitor"; background: linear-gradient(90deg, var(--nc-signal) 0 1.18em, var(--nc-fg-hi) 1.18em);
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+}
+.nm-menu { list-style: none; display: flex; flex-direction: column; gap: 6px; margin: 24px 0 0; }
+.nm-menu li { margin-left: 10px; }
+.nm-menu a {
+  position: relative; isolation: isolate; display: flex; align-items: center; gap: 10px; width: 186px; height: 34px; padding: 0 16px 0 22px;
+  font: 600 15px/1 var(--f-label); letter-spacing: .14em; text-transform: uppercase; text-decoration: none; white-space: nowrap;
+  color: var(--nc-ink-2); background: var(--nc-bg-1); clip-path: polygon(12px 0, 100% 0, calc(100% - 12px) 100%, 0 100%);
+}
+.nm-menu a i { width: 18px; flex: none; font: 400 11px/1 var(--f-data); font-style: normal; letter-spacing: .04em; color: var(--nc-ink-3); }
+.nm-menu a:hover { color: var(--nc-fg-hi); background: var(--nc-bg-2); }
+.nm-menu a:focus-visible { outline: none; color: var(--nc-fg-hi); background: var(--nc-bg-2); box-shadow: inset 0 2px 0 var(--nc-sel), inset 0 -2px 0 var(--nc-sel); }
+.nm-menu a.on { background: var(--nc-on-bg); color: var(--nc-on-fg); }
+.nm-menu a.on i { color: var(--nc-on-fg); }
+.nm-menu a.on::before { content: ""; position: absolute; inset: 0; z-index: -2; background: var(--nc-on-line); clip-path: polygon(12px 0, 100% 0, calc(100% - 12px) 100%, 0 100%); }
+.nm-menu a.on::after { content: ""; position: absolute; inset: 1px; z-index: -1; background: var(--nc-on-bg); clip-path: polygon(11px 0, 100% 0, calc(100% - 11px) 100%, 0 100%); }
+.nm-health { margin: auto 18px 0; padding-top: 12px; box-shadow: inset 0 1px 0 var(--nc-hair); }
+/* decoration that night_city.js puts between the menu and the health block: the Blackwall reticle, the Edgerun code
+   matrix. It starts hidden (inline), shows here, and only when the window is tall enough to spare the room. */
+.nm-nav > .nc-deco { display: block !important; flex: none; pointer-events: none; user-select: none; }
+.nc-reticle, .nc-matrix { display: none; }
+.nc-reticle { width: 64px; height: 64px; margin: 18px 0 0 26px; color: var(--nc-line); }
+:root[data-variant="blackwall"] .nc-reticle { display: block; }
+.nc-matrix { margin: 18px 18px 0; }
+:root[data-variant="edgerun"] .nc-matrix { display: block; }
+.nc-matrix .mh { display: inline-block; padding: 2px 7px 1px; background: var(--nc-signal); color: var(--nc-ink); font: 700 11px/12px var(--f-label); letter-spacing: .14em; text-transform: uppercase; }
+.nc-mx { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; margin-top: 8px; }
+.nc-buf { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 10px; }
+.nc-mx i, .nc-buf i { display: block; height: 17px; font: 400 11px/17px var(--f-data); font-style: normal; text-align: center; color: var(--nc-yg); box-shadow: inset 0 0 0 1px var(--nc-hair); }
+.nc-mx i.hi, .nc-buf i.on { background: var(--nc-yg); color: var(--nc-ink); box-shadow: none; }
+.nc-buf i { height: 20px; line-height: 20px; box-shadow: inset 0 0 0 1px var(--nc-yg); }
+/* Room in the nav column of the default window (741 px of page): 110 px between the menu and the health block, 1 px more
+   for every px of window. The reticle needs 82 (64 and its 18 px margin), so it stays down to 712 and goes under 720. The
+   matrix needs 152 in full (fits from 783 px); under 786 px it keeps its first two rows and tighter margins (104 px, fits
+   from 735 px) and under 735 px it goes. */
+@media (max-height: 719px) { .nm-nav > .nc-deco { display: none !important; } }
+@media (max-height: 785px) {
+  .nc-matrix { margin-top: 12px; }
+  .nc-mx i:nth-child(n+11) { display: none; }
+  .nc-buf { margin-top: 8px; }
+}
+@media (max-height: 734px) { .nc-matrix { display: none !important; } }
+.nm-health .nm-kick, .nm-phos .nm-kick { margin: 0 0 6px; font: 400 11px/1.25 var(--f-data); letter-spacing: .1em; text-transform: uppercase; color: var(--nc-ink-3); }
+.nm-kv { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 5px 0; box-shadow: inset 0 -1px 0 var(--nc-hair); }
+.nm-kv:last-child { box-shadow: none; }
+.nm-kv span { font: 700 11px/1.2 var(--f-label); letter-spacing: .14em; text-transform: uppercase; color: var(--nc-ink-2); }
+.nm-kv b { font: 400 13px/1.2 var(--f-data); letter-spacing: .04em; color: var(--nc-fg-hi); text-align: right; text-transform: uppercase; }
+.nm-health .nm-kv b { font-size: 12px; }
+.nm-kv b.ok, .nm-kv b.is-down { display: flex; align-items: center; gap: 6px; color: var(--nc-ok); }
+.nm-phos { margin: 14px 18px 0; }
+.nm-sw { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+.nm-sw button { height: 24px; padding: 0 4px; font-size: 11px; letter-spacing: .1em; }
+
+.nm-main {
+  position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 14px; overflow: auto; padding: 16px 22px 14px;
+  scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: var(--nc-ink-3) var(--nc-bg-1);
+}
+.nm-main:focus { outline: none; }
+.nm-head { flex: none; display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding-bottom: 10px; box-shadow: inset 0 -1px 0 var(--nc-hair); }
+.nm-h1 { display: flex; align-items: center; font: 700 30px/1 var(--f-display); letter-spacing: .08em; text-transform: uppercase; color: var(--nc-fg-hi); white-space: nowrap; }
+/* the cursor block of the other themes becomes a pair of slanted signal bars after the title */
+.nm-cur { display: block; flex: none; width: 5px; height: 20px; margin-left: 16px; transform: skewX(-18deg); background: var(--nc-signal); box-shadow: 9px 0 0 var(--nc-signal), 18px 0 0 var(--nc-hair); }
+.nm-sub { max-width: 470px; text-align: right; font: 500 13px/1.3 var(--f-label); color: var(--nc-ink-2); }
+.nm-msg {
+  position: relative; flex: none; display: flex; align-items: center; min-height: 26px; padding: 5px 12px; background: var(--nc-ink);
+  box-shadow: inset 0 0 0 1px var(--nc-warn); font: 500 13px/1.35 var(--f-label); color: var(--nc-fg-hi);
+}
+.nm-msg::before, .nm-msg::after { content: ""; position: absolute; left: 0; right: 0; height: 2px; background: var(--nc-hazard); }
+.nm-msg::before { top: 0; }
+.nm-msg::after { bottom: 0; }
+.nm-msg b { margin-right: 10px; font: 700 12px/1.3 var(--f-label); letter-spacing: .12em; text-transform: uppercase; color: var(--nc-warn); white-space: nowrap; }
+.nm-hazard { flex: none; height: 4px; margin: -16px -22px 0; background: var(--nc-hazard); }
+.nm-hazard.is-off { display: none; }
+
+/* ── cards: a chamfer at the top left and bottom right, a hairline edge, corner brackets at the other two ──────── */
+.nm-card {
+  position: relative; min-width: 0; min-height: 0; padding: 1px; --cut: 14px; --fr: var(--nc-line-a); --br: var(--nc-accent); background: var(--fr);
+  clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+}
+.nm-card::before, .nm-card::after { content: ""; position: absolute; z-index: 3; width: 9px; height: 9px; pointer-events: none; border: 0 solid var(--br); }
+.nm-card::before { top: 4px; right: 4px; border-top-width: 2px; border-right-width: 2px; }
+.nm-card::after { bottom: 4px; left: 4px; border-bottom-width: 2px; border-left-width: 2px; }
+.nm-card.wide { grid-column: span 2; }
+.nm-card-in {
+  position: relative; height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; overflow: hidden; background: var(--nc-panel);
+  clip-path: polygon(calc(var(--cut) - .6px) 0, 100% 0, 100% calc(100% - var(--cut) + .6px), calc(100% - var(--cut) + .6px) 100%, 0 100%, 0 calc(var(--cut) - .6px));
+}
+.nm-card.is-warn { --fr: var(--nc-warn); --br: var(--nc-warn); }
+.nm-card.is-crit { --fr: var(--nc-danger); --br: var(--nc-danger); }
+.nm-card.is-real { --fr: var(--nc-signal); --br: var(--nc-signal); }
+.nm-card-t { display: flex; align-items: center; justify-content: space-between; column-gap: 10px; min-height: 16px; }
+.nm-pgrid .nm-card-t, .nm-chart-t { flex-wrap: wrap; row-gap: 0; }
+/* a note too long for a narrow card drops under the title where the card's height is free (the pages) and is cut
+   with an ellipsis where it is not (the overview's three fixed rows) */
+.nm-grid .nm-card-t:not(.nm-chart-t) .nm-meta-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.nm-tag, .nm-ttl { margin: 0; font: 700 13px/16px var(--f-label); letter-spacing: .16em; text-transform: uppercase; color: var(--nc-fg-hi); white-space: nowrap; }
+.nm-meta-t { margin-left: auto; font: 600 13px/16px var(--f-label); letter-spacing: .08em; text-transform: uppercase; color: var(--nc-ink-2); white-space: nowrap; }
+.nm-card.is-real .nm-meta-t { padding: 0 8px; background: var(--nc-signal); color: var(--nc-ink); transform: skewX(-12deg); font-weight: 700; letter-spacing: .12em; }
+.nm-card.is-warn .nm-card-t .nm-meta-t { color: var(--nc-warn); }
+.nm-card a { color: var(--nc-fg-hi); text-underline-offset: 3px; }
+
+/* ── figures ─────────────────────────────────────────────────────────────────── */
+.nm-big { font: 700 clamp(48px, 3.2vw, 62px)/1 var(--f-num); color: var(--nc-fg-hi); white-space: nowrap; }
+.nm-big.h { font-size: clamp(52px, 4vw, 72px); }
+.nm-big.m { font-size: clamp(28px, 2.1vw, 36px); }
+.nm-big.s { font-size: 20px; line-height: 1.1; }
+.nm-row2 { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; min-height: 0; }
+.nm-row2.is-base { align-items: baseline; }
+.nm-facts { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; text-align: right; white-space: nowrap; font: 400 11px/1.25 var(--f-data); letter-spacing: .04em; text-transform: uppercase; color: var(--nc-ink-2); }
+.nm-facts b { font-weight: 400; color: var(--nc-fg-hi); }
+.nm-chip {
+  position: relative; isolation: isolate; display: inline-flex; align-items: center; height: 14px; padding: 0 6px; white-space: nowrap;
+  font: 700 11px/1 var(--f-label); letter-spacing: .06em; text-transform: uppercase; color: var(--nc-accent); --oc: var(--nc-accent); --of: var(--nc-panel);
+}
+.nm-chip::before, .nm-chip::after { content: ""; position: absolute; z-index: -2; background: var(--oc); }
+.nm-chip::before { inset: 0; clip-path: polygon(5px 0, 100% 0, 100% 100%, 0 100%, 0 5px); }
+.nm-chip::after { inset: 1px; z-index: -1; background: var(--of); clip-path: polygon(4px 0, 100% 0, 100% 100%, 0 100%, 0 4px); }
+.nm-chip.is-ok { --oc: var(--nc-ok); color: var(--nc-ok); }
+.nm-chip.solid { --oc: var(--nc-bar); --of: var(--nc-bar); color: var(--nc-ink); }
+.nm-chip.solid.is-warn { --oc: var(--nc-warn); --of: var(--nc-warn); }
+.nm-chip.solid.is-crit { --oc: var(--nc-danger); --of: var(--nc-danger); }
+.nm-pace { display: flex; flex-direction: column; gap: 3px; font: 400 11px/1.25 var(--f-data); letter-spacing: .04em; text-transform: uppercase; color: var(--nc-ink-2); }
+.nm-pace b { font-weight: 400; color: var(--nc-fg-hi); }
+.nm-pace .fc b { color: var(--nc-fg-hi); }
+.nm-note { font: 600 12px/1.35 var(--f-label); letter-spacing: .04em; color: var(--nc-ink-2); }
+.nm-disc { font-weight: 500; font-size: 12px; letter-spacing: .02em; }
+.nm-lede { font: 500 14px/1.5 var(--f-label); color: var(--nc-fg); }
+.nm-story { font: 500 14px/1.45 var(--f-label); color: var(--nc-fg); }
+
+/* segmented RAM cells (cells and the plan ratio): equal cells with a 2 px gap, filled in the usage colour */
+.nm-cells { display: flex; gap: 2px; height: 10px; flex: none; }
+.nm-cells i { flex: 1 1 0; display: block; background: var(--nc-track); }
+.nm-cells i.on { background: var(--nc-bar); }
+.nm-cells i.part { background: linear-gradient(90deg, var(--nc-bar) var(--f, 0%), var(--nc-track) var(--f, 0%)); }
+.nm-cells.tall { height: 14px; }
+.nm-ratio { display: flex; gap: 3px; height: 12px; }
+.nm-ratio i { flex: 1 1 0; display: block; background: var(--nc-track); }
+.nm-ratio i.on { background: var(--nc-bar); }
+.nm-ratio i.part { background: linear-gradient(90deg, var(--nc-bar) var(--f, 0%), var(--nc-track) var(--f, 0%)); }
+.nm-card.is-warn .nm-cells i.on { background: var(--nc-warn); }
+.nm-card.is-warn .nm-cells i.part { background: linear-gradient(90deg, var(--nc-warn) var(--f, 0%), var(--nc-track) var(--f, 0%)); }
+.nm-card.is-warn .nm-row2 .nm-big, .nm-card.is-warn .nm-big-row .nm-big { color: var(--nc-warn); }
+.nm-card.is-crit .nm-cells i.on { background: var(--nc-hazard); }
+.nm-card.is-crit .nm-cells i.part { background: linear-gradient(90deg, var(--nc-hz-a) var(--f, 0%), var(--nc-track) var(--f, 0%)); }
+.nm-card.is-crit .nm-row2 .nm-big, .nm-card.is-crit .nm-big-row .nm-big { color: var(--nc-danger); text-shadow: 0 0 12px var(--nc-glow-danger); }
+
+/* the pace hairline: 3 px, the accent up to the elapsed share, with a tick at the end */
+.nm-rail { position: relative; flex: none; height: 3px; background: linear-gradient(90deg, var(--nc-accent) var(--t, 0%), var(--nc-track) var(--t, 0%)); }
+.nm-rail i { display: none; }
+.nm-rail b { position: absolute; top: -3px; left: calc(var(--t, 0%) - 1px); width: 2px; height: 9px; background: var(--nc-accent); }
+
+/* ── overview grid ───────────────────────────────────────────────────────────── */
+/* No row is ever shorter than its content (minmax(auto, ..) with min-height: auto on the cards): a limit card needs
+   about 194 px (it has a forecast line the approved card lacks, and its reset boxes may wrap in a narrow window), the
+   cost card about 283 and the last row 149. The flex weights are those heights, so no row is stretched beyond the
+   others when the window is just tall enough, and a window that is too short scrolls. */
+.nm-grid { flex: 1 1 auto; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: minmax(auto, 194fr) minmax(auto, 283fr) minmax(auto, 149fr); gap: 14px; }
+.nm-grid > .nm-card { min-height: auto; }
+.nm-grid .nm-card-in { padding-bottom: 12px; }
+/* a taller window does not hand its extra height to the cards: the grid stops growing at a sixth more than the default
+   window gives it (629 px), and the rest stays page. At 1920x1040 the bottom row of cards was half empty. */
+@media (min-width: 1100px) { .nm-grid { max-height: 725px; } }
+
+/* limit cards: title, the figure, the reset boxes, the pace hairline over the cells, the pace line and its forecast */
+.nm-grid > [data-limit] .nm-card-in { gap: 0; }
+.nm-grid > [data-limit] .nm-card-in > * { flex-shrink: 0; }
+.nm-grid > [data-limit] .nm-card-t { order: 1; margin-bottom: 4px; }
+.nm-grid > [data-limit] .nm-row2 { order: 2; display: flex; flex-wrap: wrap; align-items: baseline; justify-content: flex-start; column-gap: 10px; row-gap: 6px; margin-bottom: 12px; }
+.nm-grid > [data-limit] .nm-row2::after { content: ""; order: 1; flex: 0 0 100%; height: 0; }
+.nm-grid > [data-limit] .nm-big { order: 0; }
+.nm-grid > [data-limit] .nm-facts { display: contents; }
+.nm-grid > [data-limit] .nm-facts > .nm-chip { display: none; }
+.nm-grid > [data-limit] .nm-facts > span:not(.nm-chip) {
+  order: 2; padding: 1px 0 0; font: 400 11px/14px var(--f-data); letter-spacing: .04em; text-transform: uppercase; color: var(--nc-ink-2); white-space: nowrap;
+}
+/* "of 50% share" sits beside the figure, as a caption */
+.nm-grid > [data-limit] .nm-facts > span:first-child:not(.nm-chip):not(:has(b)) { order: 0; font: 700 12px/14px var(--f-label); letter-spacing: .12em; }
+.nm-grid > [data-limit] .nm-rail { order: 3; margin-top: auto; }
+.nm-grid > [data-limit] .nm-cells { order: 4; margin-top: 7px; }
+.nm-grid > [data-limit] .nm-pace {
+  order: 5; flex-direction: row; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 4px 8px; margin-top: 9px;
+}
+.nm-grid > [data-limit] .nm-pace > span:first-child { white-space: nowrap; letter-spacing: 0; }
+.nm-grid > [data-limit] .nm-pace > .fc { flex: 0 0 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* the pace verdict is the outline chip of the approved card (the facts chip says the same in fewer words) */
+.nm-pace > b {
+  position: relative; isolation: isolate; display: inline-flex; align-items: center; height: 14px; padding: 0 6px; white-space: nowrap;
+  font: 700 11px/1 var(--f-label); letter-spacing: .02em; color: var(--nc-accent); --oc: var(--nc-accent); --of: var(--nc-panel);
+}
+.nm-pace > b::before, .nm-pace > b::after { content: ""; position: absolute; z-index: -2; background: var(--oc); }
+.nm-pace > b::before { inset: 0; clip-path: polygon(5px 0, 100% 0, 100% 100%, 0 100%, 0 5px); }
+.nm-pace > b::after { inset: 1px; z-index: -1; background: var(--of); clip-path: polygon(4px 0, 100% 0, 100% 100%, 0 100%, 0 4px); }
+.nm-card-in:has(.nm-facts > .nm-chip.solid) .nm-pace > b { --oc: var(--nc-warn); color: var(--nc-warn); }
+/* a limit that is warning or critical says so in a chip after its name */
+.nm-card.is-warn > .nm-card-in > .nm-card-t::after, .nm-card.is-crit > .nm-card-in > .nm-card-t::after {
+  content: "WARN"; order: 2; margin-right: auto; padding: 1px 6px 0; font: 700 11px/13px var(--f-label); letter-spacing: .08em; background: var(--nc-warn); color: var(--nc-ink);
+  clip-path: polygon(5px 0, 100% 0, 100% 100%, 0 100%, 0 5px);
+}
+.nm-card.is-crit > .nm-card-in > .nm-card-t::after { content: "CRIT"; background: var(--nc-ink); color: var(--nc-hz-a); box-shadow: inset 7px 0 0 var(--nc-hz-a); padding-left: 12px; }
+.nm-card-t > .nm-tag, .nm-card-t > .nm-ttl { order: 1; }
+.nm-card-t > .nm-meta-t { order: 3; }
+.nm-card-t > .nm-chip, .nm-card-t > .nm-seg { order: 3; margin-left: auto; }
+
+/* cost card: a hazard strip along the top edge, as on the approved hero card */
+.nm-grid > #cost .nm-card-in { padding-top: 20px; }
+.nm-grid > #cost .nm-card-in::before { content: ""; position: absolute; left: 14px; right: 0; top: 0; height: 3px; background: var(--nc-hazard); }
+.nm-cost { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr); gap: 18px; }
+.nm-cost-l { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.nm-hero { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0; }
+.nm-hero > .nm-big.h { text-shadow: 0 0 16px var(--nc-glow); }
+.nm-plan { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; min-width: 0; }
+.nm-plan .nm-big.m {
+  display: inline-block; padding: 5px 14px 4px; transform: skewX(-12deg); background: var(--nc-signal); color: var(--nc-ink);
+  font: 700 22px/1 var(--f-display); letter-spacing: .02em; text-shadow: none;
+}
+.nm-plan .nm-facts { align-items: flex-start; gap: 2px; text-align: left; white-space: normal; font: 700 12px/1.2 var(--f-label); letter-spacing: .12em; }
+.nm-plan .nm-facts span + span { font: 400 11px/1.25 var(--f-data); letter-spacing: .04em; }
+.nm-cost-l > .nm-note { font: 400 11px/1.3 var(--f-data); letter-spacing: .04em; text-transform: uppercase; }
+.nm-cost-l > .nm-disc { font: 500 11px/1.35 var(--f-label); letter-spacing: .02em; text-transform: none; }
+.nm-tiles { margin-top: auto; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; padding-top: 10px; box-shadow: inset 0 1px 0 var(--nc-hair); }
+.nm-tile { padding-left: 10px; box-shadow: inset 2px 0 0 var(--nc-line-a); }
+.nm-tile small { display: block; font: 700 12px/1.3 var(--f-label); letter-spacing: .16em; text-transform: uppercase; color: var(--nc-fg-hi); }
+.nm-tile .nm-big { margin-top: 4px; }
+.nm-cost-r { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding-left: 18px; box-shadow: inset 1px 0 0 var(--nc-hair); }
+.nm-chart { position: relative; flex: 1; min-height: 130px; display: flex; align-items: flex-end; }
+.nm-chart-host { width: 100%; min-width: 0; }
+.nm-chart-t { padding: 0; }
+.nm-daily { min-height: 132px; }
+.nm-pending { width: 100%; align-self: center; text-align: center; padding: 10px; box-shadow: inset 0 0 0 1px var(--nc-hair); font: 400 11px/1.5 var(--f-data); letter-spacing: .1em; color: var(--nc-ink-2); text-transform: uppercase; }
+.nm-kpi { display: flex; flex-direction: column; gap: 6px; }
+.nm-kpi .nm-kl { font: 700 12px/1.2 var(--f-label); letter-spacing: .16em; text-transform: uppercase; color: var(--nc-fg-hi); }
+.nm-kpi.is-row { flex-direction: row; align-items: baseline; justify-content: space-between; gap: 10px; margin-top: auto; padding-top: 8px; box-shadow: inset 0 1px 0 var(--nc-hair); }
+.nm-mix { display: flex; flex-direction: column; gap: 9px; min-height: 0; }
+.nm-grid .nm-mix { flex: 1 1 auto; justify-content: space-between; }
+.nm-mrow { display: grid; grid-template-columns: 104px minmax(0, 1fr) 46px; align-items: center; gap: 10px; height: 18px; }
+.nm-mrow .k { font: 700 13px/1 var(--f-label); letter-spacing: .1em; text-transform: uppercase; color: var(--nc-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nm-mrow .v { font: 400 12px/1 var(--f-data); letter-spacing: .02em; color: var(--nc-fg-hi); text-align: right; }
+.nm-mrow .nm-cells { height: 10px; }
+#models .nm-mrow:nth-child(1) .nm-cells i.on { background: var(--nc-cat-1); }
+#models .nm-mrow:nth-child(2) .nm-cells i.on { background: var(--nc-cat-2); }
+#models .nm-mrow:nth-child(3) .nm-cells i.on { background: var(--nc-cat-3); }
+#models .nm-mrow:nth-child(4) .nm-cells i.on { background: var(--nc-cat-4); }
+#models .nm-mrow:nth-child(1) .nm-cells i.part { background: linear-gradient(90deg, var(--nc-cat-1) var(--f, 0%), var(--nc-track) var(--f, 0%)); }
+#models .nm-mrow:nth-child(2) .nm-cells i.part { background: linear-gradient(90deg, var(--nc-cat-2) var(--f, 0%), var(--nc-track) var(--f, 0%)); }
+#models .nm-mrow:nth-child(3) .nm-cells i.part { background: linear-gradient(90deg, var(--nc-cat-3) var(--f, 0%), var(--nc-track) var(--f, 0%)); }
+#models .nm-mrow:nth-child(4) .nm-cells i.part { background: linear-gradient(90deg, var(--nc-cat-4) var(--f, 0%), var(--nc-track) var(--f, 0%)); }
+#burn .nm-row2.is-base { align-items: flex-end; }
+#burn .nm-big.m { font-size: clamp(36px, 2.6vw, 52px); }
+#burn .nm-facts { gap: 2px; }
+#burn .cum-spark { flex: 1 1 44px; min-height: 44px; height: 44px; }
+
+/* ── other pages ─────────────────────────────────────────────────────────────── */
+.nm-pgrid { flex: none; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 14px; align-items: stretch; }
+.nm-pgrid > .nm-card { grid-column: span 6; min-height: 0; }
+.nm-pgrid > .span-3 { grid-column: span 3; }
+.nm-pgrid > .span-4 { grid-column: span 4; }
+.nm-pgrid > .span-5 { grid-column: span 5; }
+.nm-pgrid > .span-6 { grid-column: span 6; }
+.nm-pgrid > .span-7 { grid-column: span 7; }
+.nm-pgrid > .span-8 { grid-column: span 8; }
+.nm-pgrid > .wide, .nm-pgrid > .nm-card.wide { grid-column: 1 / -1; }
+.nm-pgrid .nm-card-in { height: auto; min-height: 100%; }
+.nm-big-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.nm-verdict { display: flex; align-items: center; gap: 8px; padding-bottom: 6px; }
+.nm-meter { display: flex; flex-direction: column; gap: 7px; }
+.nm-meter .nm-mrow { grid-template-columns: 112px minmax(0, 1fr) 48px; }
+/* time against use: the elapsed row is time (the accent, as the pace hairline is), only the used row takes the severity colour */
+.nm-card .nm-meter .nm-mrow:first-child .nm-cells i.on { background: var(--nc-accent); }
+.nm-card .nm-meter .nm-mrow:first-child .nm-cells i.part { background: linear-gradient(90deg, var(--nc-accent) var(--f, 0%), var(--nc-track) var(--f, 0%)); }
+.nm-line, .nm-hbars, .nm-calendar, .nm-matrix { width: 100%; min-width: 0; }
+.nm-line { margin: 2px 0; }
+.nm-table { width: 100%; border-collapse: collapse; font: 400 12px/1.2 var(--f-data); color: var(--nc-fg); }
+.nm-table th { padding: 4px 6px 6px 0; text-align: left; font: 700 11px/1.2 var(--f-label); letter-spacing: .14em; text-transform: uppercase; color: var(--nc-ink-2); white-space: nowrap; box-shadow: inset 0 -1px 0 var(--nc-line-a); }
+.nm-table td { padding: 7px 6px 7px 0; white-space: nowrap; box-shadow: inset 0 -1px 0 var(--nc-hair); letter-spacing: .02em; }
+.nm-table th.r, .nm-table td.r { text-align: right; padding-right: 0; }
+.nm-table td.v { font: 700 15px/1 var(--f-display); color: var(--nc-fg-hi); }
+.nm-table td.lead { font: 700 13px/1.2 var(--f-label); letter-spacing: .08em; color: var(--nc-fg); }
+.nm-table tbody th { padding: 7px 6px 7px 0; font: 700 13px/1.2 var(--f-label); letter-spacing: .08em; text-transform: none; color: var(--nc-fg); box-shadow: inset 0 -1px 0 var(--nc-hair); }
+.nm-table caption { text-align: left; }
+.nm-table.nm-fixed { table-layout: fixed; }
+.nm-table.nm-fixed .c-rank { width: 30px; }
+.nm-table.nm-fixed .c-folder { width: 24%; }
+.nm-table.nm-fixed .c-num { width: 104px; }
+.nm-trunc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nm-table td.nm-trunc { max-width: 0; }
+.nm-table tr.is-today td, .nm-table tr.is-today th { color: var(--nc-fg-hi); }
+.nm-table tr.is-today td.lead, .nm-table tr.is-today th.lead { color: var(--nc-fg-hi); box-shadow: inset 2px 0 0 var(--nc-signal), inset 0 -1px 0 var(--nc-hair); padding-left: 8px; }
+.nm-table-wrap { overflow-x: auto; }
+.nm-legend { display: flex; flex-direction: column; gap: 8px; }
+.nm-legend .nm-mrow { grid-template-columns: 170px minmax(0, 1fr) 64px; }
+.nm-kv-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }
+.nm-kv-grid .nm-kv { padding: 7px 0; }
+.nm-kv-grid .nm-kv b { font-size: 13px; }
+.nm-kv-grid.is-one { grid-template-columns: minmax(0, 1fr); }
+.nm-kv-grid.is-one .nm-kv { padding: 6px 0; }
+.nm-authors { margin-top: 6px; padding: 9px 0; }
+.nm-authors b { font: 700 14px/1.2 var(--f-display); letter-spacing: .06em; }
+.nm-tier { margin-top: 8px; font: 700 12px/1.3 var(--f-label); letter-spacing: .16em; text-transform: uppercase; color: var(--nc-fg-hi); }
+.nm-mode-k { margin-right: 6px; }
+
+/* settings controls */
+.nm-set { display: flex; flex-direction: column; gap: 0; }
+.nm-row-set { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 9px 0; box-shadow: inset 0 -1px 0 var(--nc-hair); }
+.nm-row-set:last-child { box-shadow: none; }
+.nm-row-set .t { font: 700 13px/1.2 var(--f-label); letter-spacing: .12em; color: var(--nc-fg-hi); text-transform: uppercase; }
+.nm-row-set .d { display: block; margin-top: 3px; font: 500 13px/1.35 var(--f-label); color: var(--nc-ink-2); }
+.nm-row-set.is-stack { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.nm-toggle { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; }
+.nm-toggle input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+.nm-toggle .box { position: relative; flex: none; width: 44px; height: 20px; background: var(--nc-line-a); clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px); }
+.nm-toggle .box::before { content: ""; position: absolute; inset: 1px; background: var(--nc-bg-0); clip-path: polygon(4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%, 0 4px); }
+.nm-toggle .box::after { content: ""; position: absolute; top: 5px; left: 5px; width: 14px; height: 10px; background: var(--nc-ink-3); }
+.nm-toggle input:checked + .box { background: var(--nc-bar); }
+.nm-toggle input:checked + .box::after { left: 25px; background: var(--nc-bar); box-shadow: 0 0 6px var(--nc-glow); }
+.nm-toggle input:focus-visible + .box { outline: 2px solid var(--nc-sel); outline-offset: 2px; clip-path: none; }
+.nm-toggle .lbl { min-width: 28px; font: 700 11px/1 var(--f-label); letter-spacing: .14em; color: var(--nc-ink-3); }
+.nm-toggle input:checked ~ .lbl { color: var(--nc-fg-hi); }
+.nm-toggle input:disabled + .box, .nm-toggle input:disabled ~ .lbl { opacity: .5; }
+/* fields: a 1 px frame, the top left corner cut and drawn as a line (clip-path alone would leave the cut open) */
+.nm-select, .nm-input {
+  height: 30px; min-width: 150px; padding: 0 10px; border: 0; border-radius: 0; appearance: none; color: var(--nc-fg-hi);
+  font: 600 13px/1 var(--f-label); letter-spacing: .08em; text-transform: uppercase;
+  background: linear-gradient(135deg, transparent 0 4.95px, var(--nc-line-a) 4.95px 5.95px, transparent 5.95px) top left / 9px 9px no-repeat, var(--nc-bg-0);
+  box-shadow: inset 0 0 0 1px var(--nc-line-a); clip-path: polygon(7px 0, 100% 0, 100% 100%, 0 100%, 0 7px);
+}
+.nm-select {
+  padding-right: 30px;
+  background:
+    linear-gradient(135deg, transparent 0 4.95px, var(--nc-line-a) 4.95px 5.95px, transparent 5.95px) top left / 9px 9px no-repeat,
+    linear-gradient(45deg, transparent 50%, var(--nc-fg) 50%) right 15px center / 5px 5px no-repeat,
+    linear-gradient(135deg, var(--nc-fg) 50%, transparent 50%) right 10px center / 5px 5px no-repeat,
+    var(--nc-bg-0);
+}
+.nm-input { width: 120px; min-width: 0; text-align: right; font: 400 14px/1 var(--f-data); letter-spacing: .04em; }
+.nm-input::placeholder { color: var(--nc-ink-3); opacity: 1; }
+.nm-select option { background: var(--nc-bg-0); color: var(--nc-fg); }
+.nm-select:hover:not(:disabled), .nm-input:hover:not(:disabled) { box-shadow: inset 0 0 0 1px var(--nc-line); }
+.nm-select:focus-visible, .nm-input:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--nc-sel); }
+.nm-input[aria-invalid="true"], .nm-select[aria-invalid="true"] { box-shadow: inset 0 0 0 2px var(--nc-danger); }
+.nm-input:disabled, .nm-select:disabled { opacity: .45; cursor: default; }
+.nm-input.is-time { width: 132px; padding: 0 8px; font-size: 14px; letter-spacing: 0; text-align: center; color-scheme: dark; }
+.nm-status { min-height: 14px; font: 400 11px/1.4 var(--f-data); letter-spacing: .08em; color: var(--nc-ink-2); text-transform: uppercase; }
+.nm-status.is-err { color: var(--nc-danger); }
+.nm-themes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.nm-theme {
+  position: relative; isolation: isolate; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 0; text-align: left; cursor: pointer; background: transparent; color: var(--nc-fg);
+  --oc: var(--nc-line-a); --of: var(--nc-bg-1);
+}
+.nm-theme::before, .nm-theme::after { content: ""; position: absolute; z-index: -2; background: var(--oc); }
+.nm-theme::before { inset: 0; clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); }
+.nm-theme::after { inset: 1px; z-index: -1; background: var(--of); clip-path: polygon(9.4px 0, 100% 0, 100% calc(100% - 9.4px), calc(100% - 9.4px) 100%, 0 100%, 0 9.4px); }
+.nm-theme:hover { --oc: var(--nc-line); }
+.nm-theme:focus-visible { --oc: var(--nc-sel); outline: 1px solid var(--nc-sel); outline-offset: -4px; }
+.nm-theme[aria-pressed="true"] { --oc: var(--nc-on-line); --of: var(--nc-bg-2); }
+.nm-theme[aria-pressed="true"]::after { inset: 2px; clip-path: polygon(8.6px 0, 100% 0, 100% calc(100% - 8.6px), calc(100% - 8.6px) 100%, 0 100%, 0 8.6px); }
+.nm-theme b { font: 700 14px/1.2 var(--f-display); letter-spacing: .12em; text-transform: uppercase; color: var(--nc-fg-hi); }
+.nm-theme small { font: 500 13px/1.35 var(--f-label); color: var(--nc-ink-2); }
+.nm-theme[aria-pressed="true"] b::after { content: "ACTIVE"; margin-left: 10px; padding: 1px 6px 0; vertical-align: 2px; background: var(--nc-signal); color: var(--nc-ink); font: 700 10px/12px var(--f-label); letter-spacing: .14em; display: inline-block; }
+.nm-swatches { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; }
+.nm-swatches i { display: block; height: 10px; box-shadow: inset 0 0 0 1px var(--nc-hair); }
+.nm-variants { display: flex; flex-wrap: wrap; gap: 6px; }
+.nm-links { display: flex; flex-direction: column; gap: 8px; }
+.nm-links a { font: 700 13px/1.3 var(--f-label); letter-spacing: .12em; text-transform: uppercase; color: var(--nc-fg-hi); text-decoration: underline; text-decoration-color: var(--nc-signal); text-decoration-thickness: 2px; text-underline-offset: 4px; cursor: pointer; }
+.nm-links a:hover { color: var(--nc-signal); }
+.nm-supp { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 4px 14px; list-style: none; }
+.nm-supp li { font: 500 13px/1.5 var(--f-label); color: var(--nc-fg); letter-spacing: .04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nm-supp li::before { content: "// "; color: var(--nc-signal); font-weight: 700; }
+
+/* stat tiles: a figure and its one-line explanation (shown in the tooltip on hover or focus) */
+.nm-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); gap: 14px 16px; align-content: start; }
+/* at most four across, whatever the card's width, and never narrower than a seven-digit figure needs */
+.nm-stats.is-quad { grid-template-columns: repeat(auto-fit, minmax(max(124px, calc((100% - 48px) / 4)), 1fr)); }
+.nm-stat { position: relative; display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 6px 8px 8px; margin: -6px -8px -8px; container-type: inline-size; box-shadow: inset 0 0 0 1px transparent; cursor: default; }
+.nm-stat:hover, .nm-stat:focus-visible { box-shadow: inset 0 0 0 1px var(--nc-line-a); background: var(--nc-bg-1); outline: none; }
+.nm-stat:focus-visible { box-shadow: inset 0 0 0 2px var(--nc-sel); }
+.nm-stat.is-wide { grid-column: 1 / -1; }
+.nm-stat.is-block { display: block; }
+.nm-stat-k { font: 700 11px/1.3 var(--f-label); letter-spacing: .16em; text-transform: uppercase; color: var(--nc-ink-2); }
+.nm-stat-v { font: 700 28px/1 var(--f-num); color: var(--nc-fg-hi); overflow-wrap: anywhere; }
+.nm-stat-v.is-big { font-size: 40px; line-height: .95; }
+/* a figure fits its tile: --n is its length in characters (set by the markup); text values wrap instead */
+.nm-stat-v:not(.is-text) { font-size: clamp(18px, calc(100cqw / (.66 * var(--n, 6))), 28px); }
+.nm-stat-v.is-big:not(.is-text) { font-size: clamp(22px, calc(100cqw / (.66 * var(--n, 5))), 40px); }
+.nm-stat-v.is-text { font-size: 22px; line-height: 1.1; }
+.nm-stat-s { font: 400 11px/1.35 var(--f-data); letter-spacing: .04em; color: var(--nc-ink-2); }
+.nm-stat .nm-cells { margin-top: 4px; }
+.nm-stat.is-block .nm-stat-k { margin-bottom: 6px; }
+.nm-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* the one tooltip: stat explanations and chart values */
+.nm-tip { position: fixed; z-index: 80; max-width: 340px; padding: 8px 12px; isolation: isolate; color: var(--nc-fg-hi); font: 500 13px/1.45 var(--f-label); letter-spacing: .02em; }
+.nm-tip::before, .nm-tip::after { content: ""; position: absolute; z-index: -2; }
+.nm-tip::before { inset: 0; background: var(--nc-line-a); clip-path: polygon(8px 0, 100% 0, 100% 100%, 0 100%, 0 8px); }
+.nm-tip::after { inset: 1px; z-index: -1; background: var(--nc-bg-0); clip-path: polygon(7px 0, 100% 0, 100% 100%, 0 100%, 0 7px); }
+
+/* toolbar, callouts and states */
+.nm-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 8px 12px; background: var(--nc-bg-1); box-shadow: inset 0 0 0 1px var(--nc-hair), inset 3px 0 0 var(--nc-signal); }
+.nm-toolbar-k { font: 700 12px/1 var(--f-label); letter-spacing: .16em; text-transform: uppercase; color: var(--nc-fg-hi); }
+.nm-toolbar-n { margin-left: auto; font: 400 11px/1.4 var(--f-data); letter-spacing: .06em; text-transform: uppercase; color: var(--nc-ink-2); }
+.nm-card-t .nm-seg button { height: 22px; padding: 0 8px; }
+.nm-callout { padding: 9px 12px; background: var(--nc-bg-1); box-shadow: inset 0 0 0 1px var(--nc-hair); font: 500 13px/1.45 var(--f-label); color: var(--nc-fg); }
+.nm-callout b { color: var(--nc-fg-hi); font-weight: 700; margin-right: 4px; }
+.nm-callout.is-warn { box-shadow: inset 0 0 0 1px var(--nc-hair), inset 4px 0 0 var(--nc-warn); padding-left: 16px; }
+.nm-loading { font: 400 11px/1.5 var(--f-data); letter-spacing: .12em; text-transform: uppercase; color: var(--nc-ink-2); }
+.nm-loading::after { content: ""; display: inline-block; width: 6px; height: 9px; margin-left: 8px; vertical-align: -1px; background: var(--nc-sel); animation: nc-pulse 2.4s ease-in-out infinite; }
+.nm-empty { font: 500 14px/1.5 var(--f-label); letter-spacing: .04em; color: var(--nc-ink-2); }
+.nm-error { padding: 8px 12px; background: var(--nc-bg-1); box-shadow: inset 0 0 0 1px var(--nc-hair), inset 3px 0 0 var(--nc-danger); font: 500 13px/1.45 var(--f-label); color: var(--nc-fg-hi); }
+.nm-err { padding: 5px 10px; background: var(--nc-bg-1); box-shadow: inset 0 0 0 1px var(--nc-hair), inset 3px 0 0 var(--nc-danger); font: 600 12px/1.4 var(--f-label); letter-spacing: .04em; color: var(--nc-fg-hi); }
+.nm-err::before { content: "ERR // "; color: var(--nc-danger); font-weight: 700; letter-spacing: .12em; }
+.nm-set > .nm-err { margin: 4px 0 8px; }
+
+/* ── history: odometer, comparison ───────────────────────────────────────────── */
+.nm-odo-row { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: 28px; align-items: center; }
+.nm-odo-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.nm-odo { display: flex; align-items: center; gap: 4px; font: 700 50px/1 var(--f-display); color: var(--nc-fg-hi); flex-wrap: nowrap; max-width: 100%; }
+.nm-od-d { position: relative; display: block; flex: none; width: .76em; height: 1.1em; overflow: hidden; background: var(--nc-bg-1); box-shadow: inset 0 0 0 1px var(--nc-line-a); }
+.nm-od-d::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, var(--nc-bg-0) 0%, transparent 26%, transparent 74%, var(--nc-bg-0) 100%); }
+.nm-od-d .strip { display: flex; flex-direction: column; transform: translateY(calc(var(--d, 0) * -1.1em)); }
+.nm-od-d .strip i { display: block; flex: none; height: 1.1em; line-height: 1.1em; text-align: center; font-style: normal; }
+.nm-od-sep { display: block; flex: none; align-self: flex-end; width: .22em; margin-bottom: .12em; text-align: center; color: var(--nc-ink-3); }
+.nm-odo-facts { display: flex; flex-wrap: wrap; gap: 6px 22px; font: 700 11px/1.3 var(--f-label); letter-spacing: .14em; text-transform: uppercase; color: var(--nc-ink-2); }
+.nm-odo-facts b { font: 700 18px/1 var(--f-display); letter-spacing: .02em; color: var(--nc-fg-hi); margin-right: 4px; }
+.nm-compare { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding-left: 28px; box-shadow: inset 1px 0 0 var(--nc-hair); }
+.nm-cmp-body { display: flex; flex-direction: column; gap: 6px; }
+.nm-cmp-body.is-in { animation: nc-fade .55s ease-out both; }
+.nm-cmp-n { font: 700 56px/.9 var(--f-num); color: var(--nc-fg-hi); overflow-wrap: anywhere; }
+.nm-cmp-u { font: 700 12px/1.3 var(--f-label); letter-spacing: .14em; text-transform: uppercase; color: var(--nc-bar); }
+.nm-cmp-t { font: 500 13px/1.45 var(--f-label); color: var(--nc-ink-2); }
+.nm-dots { display: flex; gap: 8px; }
+.nm-dots button { width: 14px; height: 10px; padding: 0; cursor: pointer; background: var(--nc-track); border: 0; transform: skewX(-18deg); }
+.nm-dots button:hover { background: var(--nc-line); }
+.nm-dots button[aria-pressed="true"] { background: var(--nc-bar); box-shadow: 0 0 6px var(--nc-glow); }
+.nm-od-d .strip { transition: transform 1.5s cubic-bezier(.2, .8, .25, 1); }
+
+/* ── settings: alert levels, quiet hours ─────────────────────────────────────── */
+.nm-levels { display: flex; flex-direction: column; gap: 10px; }
+.nm-chips { display: flex; flex-wrap: wrap; gap: 8px; min-height: 30px; align-items: center; }
+.nm-tchip { position: relative; isolation: isolate; display: inline-flex; align-items: stretch; --oc: var(--nc-line-a); }
+.nm-tchip::before { content: ""; position: absolute; inset: 0; z-index: -2; background: var(--oc); clip-path: polygon(6px 0, 100% 0, 100% 100%, 0 100%, 0 6px); }
+.nm-tchip::after { content: ""; position: absolute; inset: 1px; z-index: -1; background: var(--nc-bg-0); clip-path: polygon(5px 0, 100% 0, 100% 100%, 0 100%, 0 5px); }
+.nm-tchip b { padding: 5px 10px 4px; font: 700 16px/20px var(--f-display); color: var(--nc-fg-hi); }
+.nm-tchip button { width: 28px; cursor: pointer; background: transparent; color: var(--nc-ink-2); border: 0; box-shadow: inset 1px 0 0 var(--nc-line-a); font: 700 16px/1 var(--f-label); }
+.nm-tchip button:hover:not(:disabled) { background: var(--nc-signal); color: var(--nc-ink); }
+.nm-tchip button:disabled { cursor: default; opacity: .45; }
+.nm-addlevel { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.nm-addlevel .nm-input { width: 90px; }
+.nm-quiet { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.nm-quiet-to { font: 700 11px/1 var(--f-label); letter-spacing: .14em; text-transform: uppercase; color: var(--nc-ink-2); }
+.nm-set.is-off > .nm-row-set:not(:first-child) { opacity: .55; }
+.nm-colstack { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.nm-colstack > .nm-card { flex: 1 1 auto; grid-column: auto; }
+.nm-tokens { table-layout: fixed; }
+.nm-tokens tbody th { width: 56%; white-space: normal; }
+.nm-tokens td.v { font-size: 15px; }
+.nm-path { text-transform: none; letter-spacing: .02em; color: var(--nc-fg-hi); overflow-wrap: anywhere; }
+.nm-why { white-space: normal; }
+.nm-stack-wrap { margin: 4px 0 12px; }
+
+/* ── charts (charts.js sets the colours through the --chart-* variables on .nm-screen) ──────────────── */
+.cum-spark, .cum-stack, .cum-ring, .cum-heat { display: block; }
+.cum-spark { width: 100%; height: 58px; overflow: visible; }
+.cum-stack { width: 100%; height: 16px; }
+.cum-heat { width: 100%; height: auto; }
+.cum-t { font: 400 11px/1 var(--f-data); letter-spacing: .04em; text-transform: uppercase; }
+.cum-t.is-strong { fill: var(--nc-fg-hi); }
+.cum-cell, .cum-pip, .cum-track, .cum-mark, .cum-mark-2, .cum-hot { shape-rendering: crispEdges; }
+.cum-dot { filter: drop-shadow(0 0 3px var(--nc-glow)); }
+.cum-line { stroke-width: 1.6; filter: drop-shadow(0 0 3px var(--nc-glow)); }
+.cum-ring-focus { stroke-width: 1; }
+/* the segments of a horizontal bar are cut by a mask: cells of 7 px with a 2 px gap, the track and the fill alike */
+.cum-hbars .cum-track, .cum-hbars .cum-mark, .cum-hbars .cum-mark-2 {
+  -webkit-mask-image: repeating-linear-gradient(90deg, currentcolor 0 7px, transparent 7px 9px);
+  mask-image: repeating-linear-gradient(90deg, currentcolor 0 7px, transparent 7px 9px);
+}
+/* the daily columns: a muted salmon, today in the usage colour, the average as a dashed line */
+.cum-columns .cum-mark { fill: color-mix(in srgb, var(--nc-fg) 58%, var(--nc-panel)); }
+.cum-columns .cum-hot { fill: var(--nc-accent); }
+.cum-columns .cum-track { opacity: .12; }
+.cum-columns .cum-now { stroke: var(--nc-ink-2); stroke-dasharray: 4 3; }
+.cum-linechart .cum-now { stroke: var(--nc-sel); stroke-dasharray: 2 3; }
+.cum-grid { stroke-dasharray: 1 4; }
+.cum-grid.is-limit { stroke-dasharray: 6 3; opacity: .85; }
+.cum-dot.is-hollow { fill: none; stroke: var(--nc-bar); }
+.cum-cell.cum-l0 { fill: var(--nc-track); fill-opacity: .55; }
+.cum-cell.cum-l1, .cum-cell.cum-l2, .cum-cell.cum-l3, .cum-cell.cum-l4 { fill: var(--nc-fg); }
+.cum-cell.is-today { stroke: var(--nc-bar); stroke-width: 1.5; }
+
+/* ── reduced motion: nothing animates, the static frame shows ────────────────── */
+html[data-reduce-motion="1"] *, html[data-reduce-motion="1"] *::before, html[data-reduce-motion="1"] *::after { animation: none !important; transition: none !important; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* ── short windows: the default window is about 740 px tall inside its frame, a little less than the approved
+   mockup's 760. A one-line subtitle, tighter page padding and card gaps keep the overview from scrolling. ── */
+@media (min-width: 1001px) and (max-height: 790px) {
+  .nm-main { padding-top: 14px; padding-bottom: 12px; gap: 12px; }
+  .nm-hazard { margin-top: -14px; }
+  .nm-sub { max-width: 680px; }
+  .nm-grid { gap: 12px; grid-template-rows: minmax(auto, 182fr) minmax(auto, 258fr) minmax(auto, 143fr); }
+  .nm-grid .nm-card-in { padding-bottom: 10px; }
+  .nm-grid > #cost .nm-card-in { padding-top: 18px; }
+  .nm-grid .nm-mix { gap: 7px; }
+  .nm-grid > [data-limit] .nm-card-t { margin-bottom: 2px; }
+  .nm-grid > [data-limit] .nm-row2 { margin-bottom: 10px; }
+  .nm-grid > [data-limit] .nm-cells { margin-top: 6px; }
+  .nm-grid > [data-limit] .nm-pace { margin-top: 8px; }
+  .nm-cost-l { gap: 5px; }
+  .nm-hero { gap: 6px; }
+  .nm-plan .nm-big.m { padding: 3px 12px 2px; }
+  .nm-tile .nm-big { margin-top: 2px; }
+  .nm-tiles { padding-top: 8px; }
+}
+
+/* ── narrow windows: tighter card padding, then the nav above the page and the grid in one column ── */
+@media (min-width: 1001px) and (max-width: 1130px) {
+  .nm-card-in { padding-left: 13px; padding-right: 13px; }
+  .nm-grid .nm-card-in { padding-top: 12px; padding-bottom: 12px; }
+}
+@media (min-width: 1001px) and (max-width: 1130px) and (max-height: 790px) {
+  .nm-grid .nm-card-in { padding-bottom: 8px; }
+}
+@media (max-width: 1000px) {
+  .nm-app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .nm-nav { flex-direction: row; flex-wrap: wrap; align-items: center; padding: 10px 12px; box-shadow: inset 0 -1px 0 var(--nc-hair); overflow: visible; }
+  .nm-nav > .nm-kick, .nm-health, .nm-phos, .nm-nav > .nc-deco { display: none !important; }
+  .nm-menu { flex-direction: row; flex-wrap: wrap; gap: 4px; margin: 0; }
+  .nm-menu li { margin-left: 0; }
+  .nm-menu a { width: auto; height: 28px; padding: 0 16px; font-size: 13px; }
+  .nm-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; flex: none; }
+  .nm-card-in { height: auto; min-height: 0; }
+  .nm-card.wide { grid-column: auto; }
+  .nm-cost { grid-template-columns: minmax(0, 1fr); flex: none; }
+  .nm-chart { min-height: 150px; }
+  .nm-cost-r { padding-left: 0; box-shadow: none; }
+  .nm-pgrid, .nm-themes, .nm-kv-grid { grid-template-columns: minmax(0, 1fr); }
+  .nm-pgrid > * { grid-column: 1 / -1 !important; }
+  .nm-head { flex-direction: column; align-items: flex-start; }
+  .nm-sub { text-align: left; }
+  .nm-odo-row { grid-template-columns: minmax(0, 1fr); }
+  .nm-compare { padding-left: 0; box-shadow: none; }
+}
+/* mid-width windows: three across becomes two, and the wide pairs stack */
+@media (max-width: 1200px) {
+  .nm-pgrid > .span-3, .nm-pgrid > .span-4 { grid-column: span 6; }
+  .nm-pgrid > .span-5, .nm-pgrid > .span-7, .nm-pgrid > .span-8 { grid-column: 1 / -1; }
+}
+
+/* ── variants ────────────────────────────────────────────────────────────────── */
+/* Relic, Edgerun and Mox select with a solid signal plate and dark text; only Blackwall uses the cyan outline */
+:root:not([data-variant="blackwall"]) { --nc-on-bg: var(--nc-signal); --nc-on-fg: var(--nc-ink); --nc-on-line: var(--nc-signal); }
+/* Edgerun: a yellow title bar, yellow plates behind titles, dark text on every yellow surface */
+:root[data-variant="edgerun"] .nm-bar { background: var(--nc-signal); box-shadow: none; color: var(--nc-ink); }
+:root[data-variant="edgerun"] .nm-brand { color: var(--nc-ink); }
+:root[data-variant="edgerun"] .nm-brand::before { background: var(--nc-ink); color: var(--nc-signal); }
+:root[data-variant="edgerun"] .nm-bar .nm-uplink, :root[data-variant="edgerun"] .nm-bar #data-age { color: var(--nc-ink); }
+:root[data-variant="edgerun"] .nm-bar .nm-alive { background: var(--nc-ink); box-shadow: none; }
+:root[data-variant="edgerun"] .nm-bar .nm-alive.is-off { background: none; box-shadow: inset 0 0 0 1px var(--nc-ink); }
+:root[data-variant="edgerun"] .nm-refresh { --oc: var(--nc-ink); --of: var(--nc-signal); color: var(--nc-ink); }
+:root[data-variant="edgerun"] .nm-refresh:hover:not(:disabled) { --oc: var(--nc-ink); --of: var(--nc-ink); color: var(--nc-signal); }
+/* the plate hangs out of the 16 px title line (negative margins), so a card is as tall as in the other variants */
+:root[data-variant="edgerun"] .nm-tag, :root[data-variant="edgerun"] .nm-ttl { display: inline-block; margin: -3px 0 -2px; padding: 3px 8px 2px; background: var(--nc-signal); color: var(--nc-ink); }
+:root[data-variant="edgerun"] .nm-card.is-real .nm-ttl { background: var(--nc-ink); color: var(--nc-signal); box-shadow: inset 0 0 0 1px var(--nc-signal); }
+:root[data-variant="edgerun"] .nm-kv b, :root[data-variant="edgerun"] .nm-health .nm-kick { color: var(--nc-yg); }
+:root[data-variant="edgerun"] .nm-health .nm-kv b.ok, :root[data-variant="edgerun"] .nm-health .nm-kv b.is-down { color: var(--nc-ok); }
+:root[data-variant="edgerun"] .nm-health .nm-kick { color: var(--nc-yg); }
+:root[data-variant="edgerun"] .nm-tchip button:hover:not(:disabled) { background: var(--nc-signal); }
+:root[data-variant="edgerun"] .nm-chip.solid.is-crit { color: var(--nc-ink); }
+/* Edgerun: the approved TIME REMAINING bar in place of the two reset facts (a filled bar; the reset clock time is in its
+   tooltip). The other variants hide it. The label and the time left span the whole bar, each clipped to its own text and
+   painted from one hard-stop gradient: dark ink where the fill is behind a letter, the signal colour where the track is,
+   so both stay readable whether 100 % or 5 % of the window remains (the approved still only shows the middle). */
+:root[data-variant="edgerun"] .nm-grid > [data-limit] .nm-remain {
+  display: block; position: relative; order: 2; flex: none; height: 16px; margin-top: 6px; background: var(--nc-track); box-shadow: inset 0 0 0 1px var(--nc-hair);
+}
+:root[data-variant="edgerun"] .nm-remain::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: var(--r, 0%); background: var(--nc-signal); }
+:root[data-variant="edgerun"] .nm-remain .l, :root[data-variant="edgerun"] .nm-remain .v {
+  position: absolute; inset: 0; z-index: 1; text-transform: uppercase; color: transparent; white-space: nowrap; overflow: hidden;
+  background: linear-gradient(90deg, var(--nc-ink) var(--r, 0%), var(--nc-signal) var(--r, 0%)); -webkit-background-clip: text; background-clip: text;
+}
+:root[data-variant="edgerun"] .nm-remain .l { padding-left: 6px; font: 700 11px/16px var(--f-label); letter-spacing: .12em; }
+:root[data-variant="edgerun"] .nm-remain .v { padding-right: 6px; text-align: right; font: 400 11px/16px var(--f-data); letter-spacing: .04em; }
+:root[data-variant="edgerun"] .nm-grid > [data-limit] .nm-facts > span:not(.nm-chip):has(b),
+:root[data-variant="edgerun"] .nm-grid > [data-limit] .nm-facts > span:nth-child(2):not(.nm-chip) { display: none; }
+/* Blackwall: the reset boxes of the approved limit card, in 1 px red frames; the countdown in the accent */
+:root[data-variant="blackwall"] .nm-grid > [data-limit] .nm-facts > span:not(.nm-chip) { padding: 1px 5px 0; box-shadow: inset 0 0 0 1px var(--nc-line); }
+:root[data-variant="blackwall"] .nm-grid > [data-limit] .nm-facts > span:nth-child(2):not(.nm-chip):not(:has(b)) { color: var(--nc-accent); box-shadow: inset 0 0 0 1px var(--nc-accent); }
+:root[data-variant="blackwall"] .nm-grid > [data-limit] .nm-facts > span:first-child:not(.nm-chip):not(:has(b)) { padding: 1px 0 0; box-shadow: none; }

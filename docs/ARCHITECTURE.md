@@ -422,8 +422,9 @@ tools, productivity, effort, api_errors, web}`
   `projected_limit_at` (it is set only for `AT_RISK`, None for every other verdict).
 - `weekly` = `{percent, resets_at, window_start, elapsed_pct, pace_delta_pp, verdict,
   daily_budget_pct, even_daily_pct, projected_end_pct, points}`. Window = [resets_at − 7 d,
-  resets_at); `pace_delta_pp` = percent − elapsed_pct. Verdict `AHEAD` (> +5), `BEHIND`
-  (< −5), otherwise `ON_PACE`; `UNKNOWN` without a weekly limit. `daily_budget_pct` = (100 −
+  resets_at); `pace_delta_pp` = percent − elapsed_pct. Verdict `AHEAD` (> +10), `BEHIND`
+  (< −10), otherwise `ON_PACE` (`windows.PACE_BAND_POINTS`, the band every widget uses too);
+  `UNKNOWN` without a weekly limit. `daily_budget_pct` = (100 −
   percent) / max(days left, 1); `even_daily_pct` = 100/7; `projected_end_pct` = percent /
   elapsed fraction (None while elapsed < 5 %). Points are downsampled to one per hour.
 - `scoped` = one entry per scoped limit (for example the Fable weekly) with the `weekly`

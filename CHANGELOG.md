@@ -4,6 +4,14 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Fixed
+- **Gates accent:** a Windows accent close to the warning or critical colours (red, yellow) no longer draws normal usage in a severity colour. The accent is lifted once, in OKLCH, to be readable on the card in dark mode, and the widgets and the dashboard use that same colour; normal bars keep the theme's own accent where the lifted one would be mistaken for a severity colour.
+- **Nostromo:** stale, offline and sign-in text is readable (at least 4.5:1) in every phosphor; the name of a scoped limit gives way to its value on the widget and the tooltip instead of running into it; the taskbar strip scales to a short taskbar; the dashboard title bar keeps REFRESH on screen in a 720 px window.
+- **Night City:** the targeting reticle and the code matrix show in the default dashboard window, and Edgerun's limit cards have their TIME REMAINING bar.
+- **Dashboard:** the data-link row says OK only while the link is live; the plan multiple keeps growing past 24 months (one cell is then several months, and the caption says so); real money is shown in the account's own currency; chart labels fit the font in use and are cut in the middle, so similar folder names stay apart; the overview cards no longer stretch in a very tall window.
+- **Settings and data:** the plan price override is applied where a price is used instead of being written into the published state, and the pace verdict is the same 10 points on the widgets, in the reports and on the dashboard.
+- **Local API:** a client that hangs up mid-request is no longer logged as an error, and the statistics database can sit on a network share.
+
 ## [1.1.5] — 2026-07-26
 
 ### Fixed

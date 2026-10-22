@@ -38,7 +38,7 @@ from usage_monitor.render.skins import get_skin
 log = get_logger(__name__)
 
 SCALES: tuple[float, ...] = (1.0, 1.25, 1.5, 2.0)
-TASKBAR_HEIGHTS_AT_1X: tuple[int, ...] = (48, 40)
+TASKBAR_HEIGHTS_AT_1X: tuple[int, ...] = (48, 40, 36, 32, 30)
 TRAY_SIZES: tuple[int, ...] = (16, 20, 24, 32)
 SAMPLE_NOW = datetime(2026, 10, 21, 20, 12, tzinfo=timezone.utc)
 

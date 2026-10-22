@@ -41,7 +41,10 @@ from usage_monitor.render.model import (
     worst_severity,
 )
 from usage_monitor.render.skins import RenderOptions, coerce_options, get_skin
+from usage_monitor.render.skins import nostromo as nostromo_skin
 from usage_monitor.render.skins.nostromo import NostromoSkin, Palette
+
+MOCKUPS = Path(__file__).resolve().parents[1] / "design" / "mockups"
 
 # A fixed local clock: Wednesday 2026-10-21 16:12, the sample clock used across the mockups.
 NOW = datetime(2026, 10, 21, 16, 12).astimezone()
@@ -151,6 +154,52 @@ def test_stale_flag_and_message_per_status(status, stale, message):
 
 def test_expired_login_message_text_is_the_agreed_wording():
     assert STALE_MESSAGE_EXPIRED == "LOGIN EXPIRED - OPEN CLAUDE CODE"
+
+
+# ── Sign-in copy: the view model is neutral, each skin words it as its approved mockup ──────────
+
+NOSTROMO_AUTH_LINES = ["AUTH LINK LOST.", "OPEN CLAUDE CODE TO RESTORE."]
+
+
+def mockup_html(theme_id: str) -> str:
+    path = MOCKUPS / theme_id / "final.html"
+    if not path.is_file():
+        pytest.skip(f"{path} is not part of this checkout")
+    return path.read_text(encoding="utf-8")
+
+
+def test_nostromo_words_the_expired_sign_in_as_its_approved_mockup():
+    model = dump.sample_model("stale")
+    assert model.stale_message == STALE_MESSAGE_EXPIRED          # the neutral default stays in the model
+    text = nostromo_skin._message_text(model)
+    assert text == "\n".join(NOSTROMO_AUTH_LINES)
+    assert nostromo_skin._message_lines(text) == NOSTROMO_AUTH_LINES
+    assert "<br>".join(NOSTROMO_AUTH_LINES) in mockup_html("nostromo")
+
+
+def test_nostromo_keeps_the_neutral_text_where_it_has_no_wording_of_its_own():
+    no_login = dump.sample_model("no_credentials")
+    assert nostromo_skin._message_text(no_login) == STALE_MESSAGE_NO_LOGIN
+    assert nostromo_skin._message_lines(STALE_MESSAGE_NO_LOGIN) == ["NO LOGIN FOUND", "OPEN CLAUDE CODE"]
+    for name in ("normal3", "offline", "paused", "rate_limited", "loading"):
+        assert nostromo_skin._message_text(dump.sample_model(name)) is None, name
+
+
+def test_a_skin_wording_never_leaks_into_the_view_model():
+    for name in ("stale", "no_credentials"):
+        assert "AUTH LINK" not in (dump.sample_model(name).stale_message or "")
+
+
+def test_night_city_and_gates_word_the_expired_sign_in_as_their_approved_mockups():
+    from usage_monitor.render.skins import gates, night_city
+
+    stale = dump.sample_model("stale")
+    band = night_city._band_text(themes()["night_city"], stale)
+    assert band == "RELINK // OPEN CLAUDE CODE"
+    assert band.lower() in mockup_html("night_city").lower()
+    footer = "".join(run[0] for run in gates._footer_runs(stale))
+    assert footer == "Hmm, we lost touch. Sign in to Claude Code."
+    assert "Hmm, we lost touch.</b> Sign in to Claude Code." in mockup_html("gates")
 
 
 def test_no_usage_keeps_status_but_dashes_the_rows():
@@ -665,7 +714,8 @@ def test_a_part_lit_strip_cell_stays_main_too(severity, emphasis):
     palette = Palette.for_variant(theme, theme.variant("amber"))
     model = build_model(state(limit("session", 95.0, severity=severity), limit("weekly_all", 10.0)), NOW)
     scale = 2.0
-    image = get_skin("nostromo").render_taskbar(model, theme, theme.variant("amber"), 34, scale, {"text_fx": False})
+    image = get_skin("nostromo").render_taskbar(model, theme, theme.variant("amber"), round(34 * scale), scale,
+                                                {"text_fx": False})
     full, fraction = engine.split_segments(95.0, 10)         # 9 full cells and half of the tenth
     partial_w = round(fraction * 4)
     assert (full, partial_w) == (9, 2)
@@ -681,6 +731,60 @@ def test_stale_and_live_render_differently():
     live = skin.render_floating(dump.sample_model("normal2"), theme, variant, 1.0, None)
     stale = skin.render_floating(dump.sample_model("stale"), theme, variant, 1.0, None)
     assert live.tobytes() != stale.tobytes()
+
+
+def _auth_box_variants() -> tuple[Any, Any, Any]:
+    """The expired-sign-in model, the same box text arriving through a status the skin does not word
+    (so the model's text is drawn as given), and that status with the neutral expired text."""
+    stale = dump.sample_model("stale")
+    spelled = replace(stale, status=ApiStatus.NO_CREDENTIALS, stale_message="\n".join(NOSTROMO_AUTH_LINES))
+    neutral = replace(stale, status=ApiStatus.NO_CREDENTIALS, stale_message=STALE_MESSAGE_EXPIRED)
+    return stale, spelled, neutral
+
+
+def _box(image: Image.Image, top: float, scale: float) -> bytes:
+    n = nostromo_skin
+    return image.crop((round(n.LEFT * scale), round(top * scale), round(n.RIGHT * scale),
+                       round((top + n.MESSAGE_H) * scale))).tobytes()
+
+
+def test_the_floating_auth_box_draws_the_mockup_wording_not_the_neutral_one():
+    theme = nostromo()
+    variant = theme.variant("amber")
+    skin = get_skin("nostromo")
+    stale, spelled, neutral = _auth_box_variants()
+    box = {name: _box(skin.render_floating(m, theme, variant, 2.0, None), nostromo_skin.MESSAGE_TOP, 2.0)
+           for name, m in (("stale", stale), ("spelled", spelled), ("neutral", neutral))}
+    assert box["stale"] == box["spelled"]
+    assert box["stale"] != box["neutral"]
+
+
+def test_the_tooltip_auth_box_draws_the_mockup_wording_not_the_neutral_one():
+    theme = nostromo()
+    variant = theme.variant("amber")
+    skin = get_skin("nostromo")
+    stale, spelled, neutral = _auth_box_variants()
+    n = nostromo_skin
+    top = n.ROW_TOP + n.TOOLTIP_ROW_PITCH * (len(stale.rows) - 1) + n.TOOLTIP_INFO_OFFSET + 20
+    box = {name: _box(skin.render_tooltip(m, theme, variant, 2.0), top, 2.0)
+           for name, m in (("stale", stale), ("spelled", spelled), ("neutral", neutral))}
+    assert box["stale"] == box["spelled"]
+    assert box["stale"] != box["neutral"]
+
+
+def test_the_auth_box_fits_its_two_lines_at_every_scale():
+    """The mockup's second line is the longer one; it has to stay inside the dashed box."""
+    theme = nostromo()
+    variant = theme.variant("amber")
+    skin = get_skin("nostromo")
+    n = nostromo_skin
+    for scale in SCALES:
+        image = skin.render_floating(dump.sample_model("stale"), theme, variant, scale, {"text_fx": False})
+        pal = Palette.for_variant(theme, variant).stale_tones()
+        right_inside = round((n.RIGHT - 3) * scale)
+        for y in range(round((n.MESSAGE_TOP + 3) * scale), round((n.MESSAGE_TOP + n.MESSAGE_H - 3) * scale)):
+            r, g, b, a = image.getpixel((right_inside, y))
+            assert _near((r, g, b), pal.crt), (scale, y, (r, g, b))      # no text reaches the right edge
 
 
 def test_reduce_motion_keeps_the_alive_mark_lit():
@@ -715,6 +819,122 @@ def test_floating_render_is_fast_enough():
     assert per_frame_ms < 150, f"floating frame took {per_frame_ms:.1f} ms"
 
 
+# ── Scoped row labels: the name line stays clear of the value ─────────────────
+
+# A scoped limit is named for its model and WEEKLY, and qualified by its share. These realistic names used to run
+# under the percentage ("CLAUDE DESIGN WEEKLY OF 25% SHARE" put SHARE under the 33 %).
+STRESS_LABELS = [("CLAUDE DESIGN WEEKLY", 25.0), ("CLAUDE OPUS 4.8 WEEKLY", 100.0), ("CLAUDE SONNET 4.5 WEEKLY", 25.0)]
+
+
+def scoped_model(label: str, allowance: float, percent: float = 33.0, session: float = 13.0):
+    return build_model(state(
+        limit("session", session), limit("weekly_all", 2.0),
+        limit("weekly_scoped", percent, label=label, active=True, scope=label.split()[1].lower(),
+              allowance=allowance, resets_in=timedelta(days=3)),
+    ), NOW)
+
+
+@pytest.fixture
+def text_runs(monkeypatch):
+    """Every text run the canvas is asked for, as dicts of text, x, baseline, advance and align (logical px)."""
+    runs: list[dict[str, Any]] = []
+    original = engine.Canvas.text_layer
+
+    def spy(self, text, x, baseline, font, tracking=0.0, align="left"):
+        layer, advance = original(self, text, x, baseline, font, tracking, align)
+        runs.append({"text": text, "x": x, "baseline": baseline, "advance": advance, "align": align})
+        return layer, advance
+
+    monkeypatch.setattr(engine.Canvas, "text_layer", spy)
+    return runs
+
+
+def scoped_row_runs(runs: list[dict[str, Any]], pitch: float) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """(the name line's runs, the value run) of the third row."""
+    top = nostromo_skin.ROW_TOP + pitch * 2
+    line = [r for r in runs if r["align"] == "left" and top < r["baseline"] <= top + 12]
+    values = [r for r in runs if r["align"] == "right" and top - 4 < r["baseline"] <= top + 18
+              and r["text"].endswith("%") and r["text"][0].isdigit()]
+    assert len(values) == 1, values
+    return line, values[0]
+
+
+@pytest.mark.parametrize(("label", "allowance"), STRESS_LABELS)
+@pytest.mark.parametrize("surface", ["floating", "tooltip"])
+def test_a_long_scoped_label_ends_before_its_value(label, allowance, surface, text_runs):
+    theme, skin = nostromo(), get_skin("nostromo")
+    model = scoped_model(label, allowance)
+    if surface == "floating":
+        skin.render_floating(model, theme, theme.variant("amber"), 1.0, None)
+        pitch = nostromo_skin.ROW_PITCH
+    else:
+        skin.render_tooltip(model, theme, theme.variant("amber"), 1.0)
+        pitch = nostromo_skin.TOOLTIP_ROW_PITCH
+    line, value = scoped_row_runs(text_runs, pitch)
+    assert line and line[0]["text"].startswith("CLAUDE"), line
+    value_left = value["x"] - value["advance"]
+    end = max(r["x"] + r["advance"] for r in line)
+    assert end <= value_left - nostromo_skin.VALUE_CLEARANCE + 1e-6, (label, surface, end, value_left)
+    assert line[0]["x"] == nostromo_skin.LEFT
+
+
+@pytest.mark.parametrize(("label", "allowance"), STRESS_LABELS)
+def test_a_critical_value_chip_keeps_the_name_line_clear_too(label, allowance, text_runs):
+    theme = nostromo()
+    get_skin("nostromo").render_floating(scoped_model(label, allowance, percent=96.0), theme,
+                                         theme.variant("amber"), 1.0, None)
+    line, value = scoped_row_runs(text_runs, nostromo_skin.ROW_PITCH)
+    chip_left = value["x"] - value["advance"] - nostromo_skin.VALUE_CHIP_PAD / 2
+    assert max(r["x"] + r["advance"] for r in line) <= chip_left - nostromo_skin.VALUE_CLEARANCE + 1e-6
+
+
+def test_a_scoped_label_that_fits_is_drawn_whole(text_runs):
+    theme = nostromo()
+    get_skin("nostromo").render_floating(scoped_model("FABLE WEEKLY", 50.0, percent=4.0), theme,
+                                         theme.variant("amber"), 1.0, None)
+    line, _ = scoped_row_runs(text_runs, nostromo_skin.ROW_PITCH)
+    assert [r["text"] for r in line] == ["FABLE WEEKLY", "OF 50% SHARE"]
+    assert line[1]["x"] == pytest.approx(nostromo_skin.LEFT + line[0]["advance"] + nostromo_skin.QUALIFIER_GAP)
+
+
+@pytest.mark.parametrize(("label", "allowance", "expected"), [
+    ("FABLE WEEKLY", 50.0, ("FABLE WEEKLY", "OF 50% SHARE")),                         # whole
+    ("CLAUDE DESIGN WEEKLY", 25.0, ("CLAUDE DESIGN WEEKLY", "25%")),                   # the qualifier shrinks to the share
+    ("CLAUDE SONNET 4.5 HAIKU WEEKLY", 25.0, ("CLAUDE SONNET 4.5 HAIKU", "25%")),      # then the name drops WEEKLY
+])
+def test_the_name_line_gives_way_in_the_order_night_city_does(label, allowance, expected):
+    theme = nostromo()
+    cv = nostromo_skin._canvas(nostromo_skin.FLOAT_W, 126, 1.0, theme)
+    fonts = (cv.font(nostromo_skin.FONT_SEMI, nostromo_skin.LABEL_SIZE), cv.font(nostromo_skin.FONT_REG, nostromo_skin.LABEL_SIZE),
+             cv.font(nostromo_skin.FONT_VT, nostromo_skin.VALUE_SIZE))
+    row = scoped_model(label, allowance).rows[2]
+    assert nostromo_skin._name_line(cv, row, "33%", *fonts) == expected
+
+
+def test_a_name_too_long_for_any_form_is_cut_with_an_ellipsis():
+    theme = nostromo()
+    cv = nostromo_skin._canvas(nostromo_skin.FLOAT_W, 126, 1.0, theme)
+    semi, reg, vt = (cv.font(nostromo_skin.FONT_SEMI, nostromo_skin.LABEL_SIZE), cv.font(nostromo_skin.FONT_REG, nostromo_skin.LABEL_SIZE),
+                     cv.font(nostromo_skin.FONT_VT, nostromo_skin.VALUE_SIZE))
+    row = scoped_model("A VERY LONG MODEL NAME THAT KEEPS GOING FOR A WHILE WEEKLY", 25.0).rows[2]
+    name, qualifier = nostromo_skin._name_line(cv, row, "33%", semi, reg, vt)
+    assert name.endswith("\u2026") and name.startswith("A VERY LONG") and qualifier == "25%"
+    room = nostromo_skin.RIGHT - cv.advance("33%", vt) - nostromo_skin.VALUE_CLEARANCE - nostromo_skin.LEFT
+    used = cv.advance(name, semi, nostromo_skin.LABEL_TRACKING) + nostromo_skin.QUALIFIER_GAP + cv.advance(
+        qualifier, reg, nostromo_skin.QUALIFIER_TRACKING)
+    assert used <= room
+
+
+def test_the_session_and_weekly_rows_keep_their_fixed_qualifiers():
+    theme = nostromo()
+    cv = nostromo_skin._canvas(nostromo_skin.FLOAT_W, 126, 1.0, theme)
+    semi, reg, vt = (cv.font(nostromo_skin.FONT_SEMI, nostromo_skin.LABEL_SIZE), cv.font(nostromo_skin.FONT_REG, nostromo_skin.LABEL_SIZE),
+                     cv.font(nostromo_skin.FONT_VT, nostromo_skin.VALUE_SIZE))
+    rows = scoped_model("FABLE WEEKLY", 50.0).rows
+    assert nostromo_skin._name_line(cv, rows[0], "13%", semi, reg, vt) == ("SESSION", "5H")
+    assert nostromo_skin._name_line(cv, rows[1], "2%", semi, reg, vt) == ("WEEKLY", "7D")
+
+
 # ── Taskbar strip ─────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize(("height", "scale", "size"), [
@@ -730,6 +950,32 @@ def test_taskbar_strip_size_and_placement(height, scale, size):
     assert image.size == size
     assert alpha_extrema(image) == (0, 255)
     assert image.getchannel("A").crop((0, 0, size[0], 1)).getextrema() == (0, 0)   # strip is centred
+
+
+@pytest.mark.parametrize(("height", "scale"), [
+    (28, 1.0), (30, 1.0), (32, 1.0), (33, 1.0), (30, 1.25), (34, 1.25), (38, 1.25), (50, 1.5), (60, 2.0), (20, 1.0),
+])
+def test_the_strip_is_drawn_smaller_for_a_taskbar_shorter_than_it(height, scale):
+    """The 34 px strip (42 px at 125 %) used to be returned as it was, taller than the bar: the shell centres it,
+    so it overhung the bar or was cut by the screen edge. The frame is now exactly as tall as the bar."""
+    theme = nostromo()
+    image = get_skin("nostromo").render_taskbar(dump.sample_model("normal3"), theme, theme.variant("amber"),
+                                                height, scale, None)
+    assert image.height == height
+    assert image.width <= round(264 * scale)
+    assert alpha_extrema(image)[1] == 255
+    # the whole strip is there, not a crop of a bigger one: the top left and bottom right corners are chamfered
+    # away and the other two are square and solid
+    last_x, last_y = image.width - 1, height - 1
+    assert [image.getpixel(p)[3] for p in ((0, 0), (last_x, last_y), (0, last_y), (last_x, 0))] == [0, 0, 255, 255]
+
+
+@pytest.mark.parametrize(("height", "scale"), [(34, 1.0), (40, 1.0), (48, 1.0), (42, 1.25), (51, 1.5), (68, 2.0), (80, 2.0)])
+def test_the_strip_keeps_its_size_on_a_taskbar_as_tall_as_it_or_taller(height, scale):
+    theme = nostromo()
+    image = get_skin("nostromo").render_taskbar(dump.sample_model("normal3"), theme, theme.variant("amber"),
+                                                height, scale, None)
+    assert image.size == (round(264 * scale), height)
 
 
 @pytest.mark.parametrize("name", ALL_STATES)
@@ -845,7 +1091,8 @@ def test_dump_frames_writes_the_expected_files(tmp_path: Path):
     report = dump.dump_frames(tmp_path, themes=["nostromo"], variants=["amber"], states=["normal3", "critical"],
                               scales=[1.0, 2.0])
     variant_dir = tmp_path / "nostromo" / "amber"
-    assert report.files == 2 * 2 * (1 + 2 + 1) + 2 * 4      # floating + 2 strips + tooltip per state/scale, tray x4
+    strips = len(dump.TASKBAR_HEIGHTS_AT_1X)
+    assert report.files == 2 * 2 * (1 + strips + 1) + 2 * 4      # floating + the strips + tooltip per state/scale, tray x4
     assert (variant_dir / "floating_normal3_x1.png").is_file()
     assert (variant_dir / "floating_critical_x2.png").is_file()
     assert (variant_dir / "taskbar_normal3_h48_x1.png").is_file()

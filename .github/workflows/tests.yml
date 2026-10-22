@@ -22,3 +22,12 @@ jobs:
         run: pip install -r requirements-dev.txt
       - name: Run tests
         run: python -m pytest
+      # The dashboard scripts are tested by running them under node (tests/webui_checks.js). Those tests start a
+      # process, so the plain run skips them; without this step a broken app.js passed CI.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Run the dashboard script tests
+        env:
+          CUM_UI_TESTS: '1'
+        run: python -m pytest tests/test_webui.py

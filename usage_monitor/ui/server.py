@@ -4,6 +4,11 @@ A ThreadingHTTPServer on loopback and a random port. Every request must send a H
 127.0.0.1 or localhost with that port (a DNS-rebinding guard). Every /api/ route also needs the
 per-run X-Monitor-Token header. No CORS header is ever sent. A failing handler becomes a JSON
 error and a log line; nothing is raised into the server thread.
+
+The statistics routes (/api/analytics/<name>, /api/export) read through one extra, lazily opened
+Store of their own, so a report never touches the data service's connection. Reports are cached
+for a short while and computed one at a time; a request for a cached report never waits for one
+that is being computed.
 """
 from __future__ import annotations
 
@@ -15,29 +20,45 @@ import html
 import importlib
 import json
 import math
+import os
 import re
 import secrets
+import sqlite3
+import sys
 import threading
 import time
 import urllib.parse
 import urllib.request
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Hashable, Mapping
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
 from usage_monitor import paths
-from usage_monitor.data.models import MonitorState
+from usage_monitor.data import analytics
+from usage_monitor.data.models import MonitorState, PlanInfo, UsageSnapshot
+from usage_monitor.data.pricing import Pricing
+from usage_monitor.data.store import SCHEMA_VERSION, Store, StoreError
+from usage_monitor.data.usage_api import plan_from
 from usage_monitor.log import get_logger
 from usage_monitor.settings import DEFAULTS as SETTINGS_DEFAULTS
-from usage_monitor.settings import Settings
+from usage_monitor.settings import Settings, parse_clock
 from usage_monitor.ui import startup
 
 log = get_logger(__name__)
 
+DEV_ENV = "CUM_DEV_INSTANCE"
 TOKEN_HEADER = "X-Monitor-Token"
 MAX_BODY_BYTES = 64 * 1024
+ANALYTICS_NAMES = ("cost", "efficiency", "pacing", "history", "sessions")
+ANALYTICS_TTL_S = 20.0          # how long a computed report is served again without a new query
+ANALYTICS_CACHE_MAX = 64        # entries kept; the oldest go first
+EXPORT_FORMATS = {
+    "csv": "text/csv; charset=utf-8",
+    "json": "application/json; charset=utf-8",
+}
+EXPORT_FILE_PREFIX = "claude-usage-daily-"
 SUPPORTERS_URL = (
     "https://raw.githubusercontent.com/Godimas101/personal-projects/main/patreon/supporters.json"
 )
@@ -111,6 +132,28 @@ def _is_slug(value: Any) -> bool:
     return isinstance(value, str) and _SLUG.fullmatch(value) is not None
 
 
+_is_billing_day = _is_int(1, 31)         # the windows module takes 1..31 and clamps to short months
+_is_percent = _is_int(1, 100)
+_is_real_price = _is_real(0, 10_000)
+
+
+def _is_price(value: Any) -> bool:
+    """A plan price in USD: more than zero, at most 10 000. (null clears the override.)"""
+    return _is_real_price(value) and value > 0
+
+
+def _is_thresholds(value: Any) -> bool:
+    """1 to 5 different whole percentages from 1 to 100, the rule Settings applies to alert_thresholds."""
+    return (isinstance(value, list) and 1 <= len(value) <= 5
+            and all(_is_percent(item) for item in value) and len(set(value)) == len(value))
+
+
+def _is_quiet_hours(value: Any) -> bool:
+    """{"start": "HH:MM", "end": "HH:MM"} in 24-hour local time, nothing else."""
+    return (isinstance(value, dict) and set(value) == {"start", "end"}
+            and parse_clock(value["start"]) is not None and parse_clock(value["end"]) is not None)
+
+
 _is_bounds_x = _is_int(-32000, 32000)
 _is_bounds_w = _is_int(320, 8000)
 _is_bounds_h = _is_int(240, 8000)
@@ -144,12 +187,17 @@ SETTING_SPECS: dict[str, _Spec] = {
     "taskbar_text_fx": _Spec(_is_bool, True),
     "show_scoped_rows": _Spec(_one_of("auto", "always", "never"), "auto"),
     "hide_floating_in_fullscreen": _Spec(_is_bool, False),
-    "billing_day": _Spec(_nullable(_is_int(1, 31)), None),
-    "plan_price_override": _Spec(_nullable(_is_real(0, 10_000)), None),
+    "billing_day": _Spec(_nullable(_is_billing_day), None),
+    "plan_price_override": _Spec(_nullable(_is_price), None),
     "reduce_motion": _Spec(_is_bool, False),
     "check_updates": _Spec(_is_bool, True),
     "launch_on_startup": _Spec(_is_bool, False),          # lives in the Run entry, not the file
-    "notifications_enabled": _Spec(_is_bool, True),
+    "alerts_enabled": _Spec(_is_bool, True),
+    "alert_thresholds": _Spec(_is_thresholds, [80, 90, 100]),
+    "alert_on_threshold": _Spec(_is_bool, True),
+    "alert_on_reset": _Spec(_is_bool, True),
+    "alert_on_credits": _Spec(_is_bool, True),
+    "alert_quiet_hours": _Spec(_nullable(_is_quiet_hours), None),
     "dashboard_bounds": _Spec(_nullable(_is_bounds), None),
 }
 
@@ -238,6 +286,45 @@ def _css_vars(themes: Any, theme: Any, variant: Any) -> dict[str, str]:
         if isinstance(value, str) and re.fullmatch(r"[a-z0-9_-]+", name):
             css.setdefault("--" + name.replace("_", "-"), value)
     return css
+
+
+_SHELL_HTML_TAG = re.compile(r"<html\b[^>]*>")
+_SHELL_SCHEME_META = re.compile(r'(<meta name="color-scheme" content=")[^"]*(")')
+_SHELL_THEME_LINK = re.compile(r'<link id="theme-css"[^>]*>')
+_CSS_VAR_NAME = re.compile(r"--[a-z0-9-]+")
+_CSS_VAR_VALUE = re.compile(r"[^;{}<>\\\r\n]*")     # cannot end its declaration or leave the attribute
+
+
+def _themed_shell(text: str, view: Mapping[str, Any] | None) -> str:
+    """index.html with the active theme in it, so the very first paint is already that theme's.
+
+    The page applies the same things once its first state arrives (applyTheme in app.js). Without
+    this a Gates or Night City user sees the Nostromo shell for a frame or two first. Anything the
+    shell does not have a marker for is left alone, and so is a theme that cannot be resolved.
+    """
+    if not view:
+        return text
+    theme_id, variant = str(view.get("id", "")), str(view.get("variant", ""))
+    if not (_SLUG.fullmatch(theme_id) and _SLUG.fullmatch(variant)):
+        return text
+    scheme = "light" if view.get("mode") == "light" else "dark"
+    declarations = [f"color-scheme:{scheme}"]
+    declarations += [f"{name}:{value}" for name, value in (view.get("css_vars") or {}).items()
+                     if _CSS_VAR_NAME.fullmatch(str(name)) and _CSS_VAR_VALUE.fullmatch(str(value))]
+
+    def html_tag(match: re.Match[str]) -> str:
+        tag = match.group(0)
+        for attribute in ("data-theme", "data-variant", "style"):
+            tag = re.sub(rf'\s{attribute}="[^"]*"', "", tag)
+        style = html.escape(";".join(declarations), quote=True)
+        return f'{tag[:-1]} data-theme="{theme_id}" data-variant="{variant}" style="{style}">'
+
+    text = _SHELL_HTML_TAG.sub(html_tag, text, count=1)
+    text = _SHELL_SCHEME_META.sub(lambda m: m.group(1) + scheme + m.group(2), text, count=1)
+    if (view.get("assets") or {}).get("css"):
+        link = f'<link id="theme-css" rel="stylesheet" href="/static/themes/{theme_id}.css" data-theme="{theme_id}">'
+        text = _SHELL_THEME_LINK.sub(lambda m: link, text, count=1)
+    return text
 
 
 # ── Errors and small helpers ──────────────────────────────────────────────────────
@@ -330,12 +417,271 @@ class _Supporters:
             return dict(payload, cached=False)
 
 
+# ── Statistics: query parameters, report inputs and the cached reader ────────────────
+
+MAX_QUERY_FIELDS = 8
+CLOSE_WAIT_S = 2.0              # how long stop() waits for a report that is running
+_REQUIRED = object()
+
+
+@dataclasses.dataclass(frozen=True)
+class _Param:
+    """One query parameter of a statistics route: its default (or _REQUIRED) and how to read its text."""
+
+    default: Any
+    parse: Callable[[str], Any]     # raises ValueError for text that is not a valid value
+
+
+def _window_param(default: str) -> _Param:
+    def parse(text: str) -> str:
+        if text not in analytics.WINDOW_NAMES:
+            raise ValueError("expected one of " + ", ".join(analytics.WINDOW_NAMES))
+        return text
+
+    return _Param(default, parse)
+
+
+def _int_param(default: int, low: int, high: int) -> _Param:
+    def parse(text: str) -> int:
+        # ASCII digits only: int() would also take " 7", "+7", "7_0" and other scripts' digits.
+        if re.fullmatch(r"[0-9]{1,6}", text) is None or not low <= int(text) <= high:
+            raise ValueError(f"expected a whole number from {low} to {high}")
+        return int(text)
+
+    return _Param(default, parse)
+
+
+def _format_param(text: str) -> str:
+    if text not in EXPORT_FORMATS:
+        raise ValueError("expected " + " or ".join(EXPORT_FORMATS))
+    return text
+
+
+# Every report and the query parameters it accepts. Anything else in the query string is a 400.
+REPORT_PARAMS: dict[str, dict[str, _Param]] = {
+    "cost": {"window": _window_param("cycle")},
+    "efficiency": {"window": _window_param("month")},
+    "pacing": {},
+    "history": {"days": _int_param(371, 7, 800)},
+    "sessions": {"window": _window_param("week"), "limit": _int_param(25, 1, 200)},
+}
+EXPORT_PARAMS: dict[str, _Param] = {"format": _Param(_REQUIRED, _format_param)}
+
+
+def _read_params(query: str, spec: Mapping[str, _Param]) -> dict[str, Any]:
+    """The query string as {name: value} for every parameter in ``spec``, defaults filled in.
+
+    An unknown, repeated or unreadable parameter is a 400, so a typo never quietly answers with the
+    default (and never makes another cache entry).
+    """
+    try:
+        pairs = urllib.parse.parse_qsl(query, keep_blank_values=True, max_num_fields=MAX_QUERY_FIELDS,
+                                       errors="strict")
+    except ValueError:
+        raise _HttpError(400, "bad query string") from None
+    given: dict[str, str] = {}
+    for name, text in pairs:
+        if name not in spec:
+            raise _HttpError(400, f"unknown parameter: {name[:40]}")
+        if name in given:
+            raise _HttpError(400, f"repeated parameter: {name}")
+        given[name] = text
+    values: dict[str, Any] = {}
+    for name, param in spec.items():
+        if name in given:
+            try:
+                values[name] = param.parse(given[name])
+            except ValueError as exc:
+                raise _HttpError(400, f"invalid {name}: {exc}") from None
+        elif param.default is _REQUIRED:
+            raise _HttpError(400, f"missing parameter: {name}")
+        else:
+            values[name] = param.default
+    return values
+
+
+@dataclasses.dataclass(frozen=True)
+class _Inputs:
+    """What a report needs besides the database: the clock, the live usage reading, the plan and two settings."""
+
+    now: datetime
+    usage: UsageSnapshot | None
+    plan: PlanInfo
+    plan_price: float | None
+    billing_day: int | None
+
+
+def _live_usage(usage: UsageSnapshot | None, now: datetime) -> UsageSnapshot | None:
+    """``usage`` without the limits whose window is over, the rule the data service applies.
+
+    A reading from before an outage must not pin the session or the week to a period that has
+    ended: without the limit the windows module falls back to the clock and to the request history.
+    """
+    if usage is None:
+        return None
+    live = [limit for limit in usage.limits if limit.resets_at is not None and limit.resets_at > now]
+    return dataclasses.replace(usage, limits=live)
+
+
+def _window_of(store: Store, inputs: _Inputs, name: str) -> tuple[datetime | None, datetime | None]:
+    return analytics.resolve_window(name, store, now=inputs.now, usage=inputs.usage,
+                                    billing_day=inputs.billing_day)
+
+
+def _cost_report(store: Store, pricing: Pricing, inputs: _Inputs, params: Mapping[str, Any]) -> dict:
+    return analytics.cost_report(
+        store, pricing, now=inputs.now, usage=inputs.usage, plan=inputs.plan,
+        plan_price=inputs.plan_price, billing_day=inputs.billing_day, breakdown_window=params["window"])
+
+
+def _efficiency_report(store: Store, pricing: Pricing, inputs: _Inputs, params: Mapping[str, Any]) -> dict:
+    start, end = _window_of(store, inputs, params["window"])
+    return analytics.efficiency_report(store, start=start, end=end)
+
+
+def _pacing_report(store: Store, pricing: Pricing, inputs: _Inputs, params: Mapping[str, Any]) -> dict:
+    return analytics.pacing_report(store, now=inputs.now, usage=inputs.usage)
+
+
+def _history_report(store: Store, pricing: Pricing, inputs: _Inputs, params: Mapping[str, Any]) -> dict:
+    return analytics.history_report(store, now=inputs.now, days=params["days"])
+
+
+def _sessions_report(store: Store, pricing: Pricing, inputs: _Inputs, params: Mapping[str, Any]) -> dict:
+    start, end = _window_of(store, inputs, params["window"])
+    return analytics.sessions_report(store, pricing, start=start, end=end, limit=params["limit"])
+
+
+_REPORTS: dict[str, Callable[[Store, Pricing, _Inputs, Mapping[str, Any]], dict]] = {
+    "cost": _cost_report,
+    "efficiency": _efficiency_report,
+    "pacing": _pacing_report,
+    "history": _history_report,
+    "sessions": _sessions_report,
+}
+
+
+class _Reader:
+    """Reads the statistics database for the API: one Store of its own, one report at a time, a short cache.
+
+    The Store is opened on the first report, not at server start, through ``open_store`` (so the
+    data service's connection is never shared). A report that fails on SQLite closes the Store and
+    tries once more on a fresh one; a Store that cannot be opened is a 503 and is tried again on the
+    next request. Reports run under ``_store_lock``, so two dashboards cannot make the same
+    query twice; the cache has a lock of its own, so a request for a cached report never waits for
+    one that is being computed.
+    """
+
+    def __init__(self, open_store: Callable[[], Store] | None, pricing: Callable[[], Pricing],
+                 clock: Callable[[], float], ttl_s: float = ANALYTICS_TTL_S) -> None:
+        self._open_store = open_store
+        self._pricing = pricing
+        self._clock = clock
+        self._ttl_s = ttl_s
+        self._store_lock = threading.Lock()
+        self._store: Store | None = None
+        self._cache_lock = threading.Lock()
+        self._cache: dict[Hashable, tuple[float, bytes]] = {}
+
+    def read(self, key: Hashable, compute: Callable[[Store, Pricing], bytes]) -> tuple[bytes, bool]:
+        """The answer for ``key`` (``compute`` runs on the Store when it is not cached) and whether it was cached."""
+        if self._open_store is None:
+            raise _HttpError(501, "statistics are not available")
+        body = self._cached(key)
+        if body is not None:
+            return body, True
+        with self._store_lock:
+            body = self._cached(key)        # another request may have computed it while this one waited
+            if body is not None:
+                return body, True
+            began = time.perf_counter()
+            body = self._run_locked(compute)
+            self._remember(key, body)       # before the lock is let go, or the next waiter would compute it again
+            log.debug("statistics report %s computed in %.0f ms", key[0] if isinstance(key, tuple) else key,
+                      (time.perf_counter() - began) * 1000)
+        return body, False
+
+    def close(self) -> None:
+        """Close the Store, after a report that is running has finished (waits up to CLOSE_WAIT_S for it)."""
+        if not self._store_lock.acquire(timeout=CLOSE_WAIT_S):
+            log.warning("a statistics report is still running; its database closes when the process ends")
+            return
+        try:
+            self._discard_locked()
+        finally:
+            self._store_lock.release()
+
+    # Store handling (callers hold _store_lock)
+
+    def _run_locked(self, compute: Callable[[Store, Pricing], bytes]) -> bytes:
+        for _attempt in range(2):
+            store = self._store_locked()
+            try:
+                return compute(store, self._pricing())
+            except (sqlite3.Error, StoreError) as exc:
+                log.warning("a statistics query failed (%s); reopening the database", type(exc).__name__)
+                self._discard_locked()
+        raise _HttpError(503, "statistics are not available right now")
+
+    def _store_locked(self) -> Store:
+        if self._store is None:
+            assert self._open_store is not None
+            try:
+                self._store = self._open_store()
+            except (sqlite3.Error, StoreError, OSError) as exc:
+                log.warning("could not open the statistics database (%s: %s)", type(exc).__name__, str(exc)[:120])
+                raise _HttpError(503, "the statistics database could not be opened") from None
+        return self._store
+
+    def _discard_locked(self) -> None:
+        store, self._store = self._store, None
+        if store is None:
+            return
+        try:
+            store.close()
+        except Exception:  # a store that is being thrown away may well be broken
+            log.debug("closing the statistics store failed", exc_info=True)
+
+    # Cache
+
+    def _cached(self, key: Hashable) -> bytes | None:
+        with self._cache_lock:
+            entry = self._cache.get(key)
+            if entry is None:
+                return None
+            if self._clock() >= entry[0]:
+                del self._cache[key]
+                return None
+            return entry[1]
+
+    def _remember(self, key: Hashable, body: bytes) -> None:
+        now = self._clock()
+        with self._cache_lock:
+            for stale in [other for other, (expires, _body) in self._cache.items() if expires <= now]:
+                del self._cache[stale]
+            self._cache[key] = (now + self._ttl_s, body)
+            while len(self._cache) > ANALYTICS_CACHE_MAX:   # the oldest entry has the earliest expiry
+                del self._cache[min(self._cache, key=lambda other: self._cache[other][0])]
+
+
 # ── HTTP plumbing ─────────────────────────────────────────────────────────────────
 
 class _Httpd(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = False
     api: ApiServer
+
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        """Called by socketserver for an exception that left a handler (including one raised while the
+        request line was read, before ApiServer._handle runs). A browser that cancels a request is not an
+        error: on Windows that is a ConnectionResetError or ConnectionAbortedError (a socket timeout is the
+        same kind of event), and the default would print a traceback to stderr every time. Anything else is a
+        bug, logged with its traceback."""
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (ConnectionError, TimeoutError)):
+            log.debug("client closed the connection early: %s", type(exc).__name__)
+            return
+        log.exception("unhandled error while serving a request")
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -369,7 +715,14 @@ class _Handler(BaseHTTPRequestHandler):
 # ── The server ────────────────────────────────────────────────────────────────────
 
 class ApiServer:
-    """Serves the webui and the local JSON API. start() returns the bound port; stop() shuts it down."""
+    """Serves the webui and the local JSON API. start() returns the bound port; stop() shuts it down.
+
+    The statistics routes need ``analytics_store``, a callable that opens a Store on the usage
+    database (called on the first statistics request, and again after a failure); the server closes
+    what it returns. ``pricing_provider`` returns the data service's current pricing table (it is
+    only used for display names), ``clock`` is a monotonic clock in seconds (the caches' time) and
+    ``wall_clock`` the current time as an aware datetime.
+    """
 
     def __init__(
         self,
@@ -386,6 +739,9 @@ class ApiServer:
         supporters_url: str = SUPPORTERS_URL,
         supporters_opener: Callable[[str, float], bytes] | None = None,
         clock: Callable[[], float] | None = None,
+        analytics_store: Callable[[], Store] | None = None,
+        pricing_provider: Callable[[], Pricing | None] | None = None,
+        wall_clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._state_provider = state_provider
         self._settings = settings
@@ -393,12 +749,18 @@ class ApiServer:
         self._update_cb = dict(update_cb)
         self._on_settings_applied = on_settings_applied
         self._version = str(version)
-        self._dev = bool(dev)
+        # CUM_DEV_INSTANCE=1 makes a dev server whatever the caller says: the environment is how every
+        # process of a dev run (and a test shell) is told not to touch the installed copy's state.
+        self._dev = bool(dev) or os.environ.get(DEV_ENV) == "1"
         self._requested_port = int(port)
         self._webui_root = (webui_dir or default_webui_dir()).resolve()
         self._token = secrets.token_urlsafe(32)
-        self._supporters = _Supporters(supporters_url, supporters_opener or _default_opener,
-                                       clock or time.monotonic)
+        monotonic = clock or time.monotonic
+        self._wall_clock = wall_clock or (lambda: datetime.now(timezone.utc))
+        self._supporters = _Supporters(supporters_url, supporters_opener or _default_opener, monotonic)
+        self._pricing_provider = pricing_provider
+        self._fallback_pricing: Pricing | None = None
+        self._reader = _Reader(analytics_store, self._current_pricing, monotonic)
         self._lock = threading.Lock()
         self._httpd: _Httpd | None = None
         self._thread: threading.Thread | None = None
@@ -446,29 +808,35 @@ class ApiServer:
         httpd.server_close()
         if thread is not None:
             thread.join(timeout=5)
+        self._reader.close()
 
     # ── Dispatch ──
 
     def _handle(self, req: _Handler, method: str) -> None:
         try:
-            self._route(req, method)
-        except _HttpError as exc:
-            headers = {"Allow": exc.allow} if exc.allow else None
-            if exc.plain:
-                self._send(req, exc.status, exc.message.encode("utf-8"), "text/plain; charset=utf-8",
-                           headers, close=exc.close)
-            else:
-                self._send_json(req, exc.status, {"error": exc.message}, headers, close=exc.close)
-        except (BrokenPipeError, ConnectionResetError):
+            try:
+                self._route(req, method)
+            except _HttpError as exc:
+                headers = {"Allow": exc.allow} if exc.allow else None
+                if exc.plain:
+                    self._send(req, exc.status, exc.message.encode("utf-8"), "text/plain; charset=utf-8",
+                               headers, close=exc.close)
+                else:
+                    self._send_json(req, exc.status, {"error": exc.message}, headers, close=exc.close)
+        except (ConnectionError, TimeoutError):   # BrokenPipe, Reset and Aborted are all ConnectionErrors
             log.debug("client closed the connection early")
         except Exception:  # a failing handler is a 500 and a log line, never a raised exception
             log.exception("API request failed: %s %s", method, req.path.split("?", 1)[0])
-            self._send_json(req, 500, {"error": "internal error"})
+            try:
+                self._send_json(req, 500, {"error": "internal error"})
+            except OSError:   # the client is gone as well: nothing to tell it
+                log.debug("client closed the connection before the error reply")
 
     def _route(self, req: _Handler, method: str) -> None:
         if not self._host_allowed(req):
             raise _HttpError(403, "forbidden host", close=True)
-        path = urllib.parse.urlsplit(req.path).path
+        target = urllib.parse.urlsplit(req.path)
+        path = target.path
         if path == "/":
             self._only(method, "GET")
             self._send_index(req)
@@ -478,7 +846,7 @@ class ApiServer:
         elif path.startswith("/api/"):
             if not self._token_ok(req):
                 raise _HttpError(401, "missing or wrong token")
-            self._api(req, method, path)
+            self._api(req, method, path, target.query)
         else:
             raise _HttpError(404, "not found")
 
@@ -497,10 +865,18 @@ class ApiServer:
         if method != allowed:
             raise _HttpError(405, "method not allowed", allow=allowed)
 
-    def _api(self, req: _Handler, method: str, path: str) -> None:
-        if re.fullmatch(r"/api/analytics/[A-Za-z0-9_-]{1,40}", path):
+    def _api(self, req: _Handler, method: str, path: str, query: str = "") -> None:
+        if path.startswith("/api/analytics/"):
+            name = path[len("/api/analytics/"):]
+            if name not in ANALYTICS_NAMES:
+                raise _HttpError(404, "unknown report")
             self._only(method, "GET")
-            raise _HttpError(404, "not yet available")
+            self._get_analytics(req, name, query)
+            return
+        if path == "/api/export":
+            self._only(method, "GET")
+            self._get_export(req, query)
+            return
         if path.startswith("/api/update/"):
             operation = path[len("/api/update/"):]
             if operation not in UPDATE_OPERATIONS:
@@ -556,6 +932,7 @@ class ApiServer:
                               lambda m: m.group(1) + html.escape(self._token) + m.group(2), text, count=1)
         if count != 1:
             log.warning("index.html has no monitor-token meta tag")
+        text = _themed_shell(text, self._theme_view())
         self._send(req, 200, text.encode("utf-8"), "text/html; charset=utf-8",
                    {"Content-Security-Policy": _CSP})
 
@@ -590,7 +967,7 @@ class ApiServer:
         state = self._state_provider()
         payload = {
             "state": to_jsonable(state) if state is not None else None,
-            "model_names": _model_names(state),
+            "model_names": self._model_names(state),
             "settings": self._settings_view(),
             "theme": self._theme_view(),
             "version": self._version,
@@ -611,10 +988,86 @@ class ApiServer:
     def _get_supporters(self, req: _Handler) -> None:
         self._send_json(req, 200, self._supporters.get())
 
+    def _get_analytics(self, req: _Handler, name: str, query: str) -> None:
+        """One statistics report as JSON (shapes: docs/ARCHITECTURE.md, "Phase 2 - stats")."""
+        params = _read_params(query, REPORT_PARAMS[name])
+        inputs = self._report_inputs()
+        # The settings are in the key: a changed billing day or plan price must not wait out the cache.
+        key = (name, tuple(sorted(params.items())), inputs.billing_day, inputs.plan_price)
+        report = _REPORTS[name]
+        body, cached = self._reader.read(
+            key, lambda store, pricing: _encode(report(store, pricing, inputs, params)))
+        self._send(req, 200, body, _JSON, {"X-Cache": "HIT" if cached else "MISS"})
+
+    def _get_export(self, req: _Handler, query: str) -> None:
+        """The daily rollups as a CSV or JSON download."""
+        fmt = _read_params(query, EXPORT_PARAMS)["format"]
+        body, cached = self._reader.read(("export", fmt), lambda store, _pricing: _export_body(store, fmt))
+        local_day = self._wall_clock().astimezone().date().isoformat()
+        self._send(req, 200, body, EXPORT_FORMATS[fmt], {
+            "Content-Disposition": f'attachment; filename="{EXPORT_FILE_PREFIX}{local_day}.{fmt}"',
+            "X-Cache": "HIT" if cached else "MISS",
+        })
+
+    def _report_inputs(self) -> _Inputs:
+        now = self._wall_clock()
+        state = self._state_provider()
+        return _Inputs(
+            now=now,
+            usage=_live_usage(state.usage, now) if state is not None else None,
+            plan=state.plan if state is not None else plan_from(None, None),
+            plan_price=self._settings.get("plan_price_override"),
+            billing_day=self._settings.get("billing_day"),
+        )
+
+    def _current_pricing(self) -> Pricing:
+        """The data service's pricing table; until it has one, the bundled table, loaded once."""
+        if self._pricing_provider is not None:
+            try:
+                found = self._pricing_provider()
+            except Exception:  # a provider that fails is a provider with nothing yet
+                log.debug("the pricing provider failed", exc_info=True)
+                found = None
+            if found is not None:
+                return found
+        if self._fallback_pricing is None:
+            self._fallback_pricing = Pricing.load()
+        return self._fallback_pricing
+
+    def _model_names(self, state: MonitorState | None) -> dict[str, str]:
+        """Display names ("Opus 5.5") for every model id the state mentions. Unknown ids keep their own name."""
+        if state is None:
+            return {}
+        ids = set(state.unpriced_models)
+        for window in state.windows.values():
+            ids.update(window.by_model)
+        if not ids:
+            return {}
+        try:
+            pricing = self._current_pricing()
+            return {model: pricing.display_name(model) for model in sorted(ids)}
+        except Exception:  # pricing is cosmetic here; the raw id is still correct
+            log.debug("pricing unavailable for model names", exc_info=True)
+            return {model: model for model in sorted(ids)}
+
     # ── Write endpoints ──
 
     def _post_settings(self, req: _Handler) -> None:
-        body = self._json_body(req)
+        applied = self._apply_settings(self._json_body(req))
+        self._send_json(req, 200, {"ok": True, "applied": to_jsonable(applied),
+                                   "settings": self._settings_view()})
+
+    def apply_settings(self, body: Any) -> dict[str, Any]:
+        """What POST /api/settings does, for code in this process (the dev server's --theme).
+
+        Returns what was applied. A request the endpoint would refuse raises ValueError with its reason.
+        """
+        try:
+            return self._apply_settings(body)
+        except _HttpError as exc:
+            raise ValueError(exc.message) from None
+
+    def _apply_settings(self, body: Any) -> dict[str, Any]:
         if not isinstance(body, dict):
             raise _HttpError(400, "expected a JSON object of settings")
         values: dict[str, Any] = {}
@@ -634,13 +1087,12 @@ class ApiServer:
             applied["launch_on_startup"] = want
         if values:
             try:
-                self._settings.update(values)
+                self._settings.update(values)    # Settings' own rules, as a last line behind the specs
             except ValueError as exc:
                 raise _HttpError(400, str(exc)[:200]) from None
             applied.update(values)
         self._notify_applied(applied)
-        self._send_json(req, 200, {"ok": True, "applied": to_jsonable(applied),
-                                   "settings": self._settings_view()})
+        return applied
 
     def _post_refresh(self, req: _Handler) -> None:
         self._read_body(req)  # no body is expected; drain whatever was sent
@@ -697,6 +1149,8 @@ class ApiServer:
         """Write the Run entry, or only remember the choice in a dev instance (see __init__)."""
         if self._dev:
             self._dev_launch_on_startup = want
+            log.info("dev instance: start with Windows is %s in memory only; the sign-in entry was not touched",
+                     "on" if want else "off")
             return
         try:
             startup.set_enabled(want)
@@ -825,24 +1279,58 @@ def default_webui_dir() -> Path:
     return paths.resource_dir() / "usage_monitor" / "webui"
 
 
-_pricing_cache: Any = None
+def open_statistics_store(path: Path) -> Store:
+    """A Store on the usage database at ``path`` for the statistics routes, which only ever read.
+
+    Read-only in spirit: this never creates the file and never upgrades it, because a second Store
+    migrating a file at the same moment as its owner can make the loser fail. A file that is not there
+    yet, or not at this build's schema yet, belongs to the data service (it makes and upgrades it in
+    its first cycle). Until then this raises sqlite3.OperationalError, the routes answer 503 and the
+    next request tries again. A file from a newer build raises StoreError.
+    """
+    if not path.is_file():
+        raise sqlite3.OperationalError("the usage database has not been created yet")
+    found = _schema_version(path)
+    if found < SCHEMA_VERSION:
+        raise sqlite3.OperationalError(f"the usage database is at schema {found}, not yet upgraded")
+    return Store(path)
 
 
-def _model_names(state: MonitorState | None) -> dict[str, str]:
-    """Display names ("Opus 5.5") for every model id the state mentions. Unknown ids keep their own name."""
-    global _pricing_cache
-    if state is None:
-        return {}
-    ids = set(state.unpriced_models)
-    for window in state.windows.values():
-        ids.update(window.by_model)
-    if not ids:
-        return {}
+def _read_only_uri(path: Path) -> str:
+    """A SQLite URI that opens ``path`` read-only and never creates it.
+
+    A path on a network share (a UNC path, ``//server/share/...`` in posix form) has no ``file://server/...``
+    form: SQLite refuses the authority. It wants the path itself, which starts with two slashes, after an
+    empty authority: ``file:////server/share/...``. That is what keeps the statistics available when the app
+    data folder is redirected to a share.
+    """
+    absolute = Path(os.path.abspath(path))
+    posix = absolute.as_posix()
+    if posix.startswith("//"):
+        return "file://" + urllib.parse.quote(posix) + "?mode=ro"
+    return absolute.as_uri() + "?mode=ro"
+
+
+def _schema_version(path: Path) -> int:
+    """The schema version a database file records, read through a connection that cannot write (0 if none)."""
+    connection = sqlite3.connect(_read_only_uri(path), uri=True, timeout=5.0)
     try:
-        if _pricing_cache is None:
-            from usage_monitor.data.pricing import Pricing  # noqa: PLC0415
-            _pricing_cache = Pricing.load()
-        return {model: _pricing_cache.display_name(model) for model in sorted(ids)}
-    except Exception:  # pricing is cosmetic here; the raw id is still correct
-        log.debug("pricing unavailable for model names", exc_info=True)
-        return {model: model for model in sorted(ids)}
+        row = connection.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
+    finally:
+        connection.close()
+    try:
+        return int(row[0]) if row else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def _encode(payload: Any) -> bytes:
+    """A report as compact UTF-8 JSON. NaN and infinity never reach the page: to_jsonable makes them null."""
+    return json.dumps(to_jsonable(payload), ensure_ascii=False, separators=(",", ":"),
+                      allow_nan=False).encode("utf-8")
+
+
+def _export_body(store: Store, fmt: str) -> bytes:
+    """The daily rollups, one row per local day with requests, as CSV or JSON text."""
+    rows = analytics.daily_rollups(store)
+    return (analytics.export_csv(rows) if fmt == "csv" else analytics.export_json(rows)).encode("utf-8")

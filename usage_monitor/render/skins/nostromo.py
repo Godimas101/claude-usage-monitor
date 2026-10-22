@@ -57,9 +57,14 @@ SCAN_STRENGTH = 0.3
 
 TOOLTIP_ROW_PITCH = 50
 TOOLTIP_INFO_OFFSET = 34
+QUALIFIER_GAP = 6               # between a row's name and its qualifier ("5H", "OF 25% SHARE")
+VALUE_CLEARANCE = 8             # least space between the name line and the value
+VALUE_CHIP_PAD = 6.0            # a critical value sits in a chip 3 px wider than the digits on each side
+ELLIPSIS = "\u2026"
 
 STRIP_W = 264
 STRIP_H = 34
+STRIP_MIN_SCALE = 0.5           # the strip is drawn no smaller than this when the taskbar is shorter than it
 STRIP_CHAMFER = 8.0
 STRIP_DOT_X = 10
 STRIP_DOT_Y = 14
@@ -121,6 +126,13 @@ STATE_WORDS: dict[str, str] = {
     "loading": "ACQUIRING",
     "rate_limited": "THROTTLED",
     "no_credentials": "AUTH REQUIRED",
+}
+
+# The auth box wording the approved mockup gives (final.html, "stale3": two lines). The view model's
+# stale_message stays the neutral default for every status not listed here (a missing login has no
+# mockup wording yet, so it keeps the neutral text).
+STALE_MESSAGES: dict[ApiStatus, str] = {
+    ApiStatus.STALE: "AUTH LINK LOST.\nOPEN CLAUDE CODE TO RESTORE.",
 }
 
 
@@ -277,6 +289,43 @@ def _qualifier(row: Row) -> str | None:
     return f"OF {row.share_text}" if row.share_text else None
 
 
+def _short_qualifier(row: Row) -> str | None:
+    """The qualifier when the full one does not fit: a scoped limit's share on its own ("25%")."""
+    if row.key in ("session", "weekly") or not row.share_text:
+        return _qualifier(row)
+    return row.share_text.split()[0]
+
+
+def _name_line(cv: Canvas, row: Row, value: str, semi: Any, reg: Any, vt: Any,
+               chip: float = 0.0) -> tuple[str, str | None]:
+    """The row's name and qualifier, cut so the line ends VALUE_CLEARANCE px before the value (and before
+    its chip, which is ``chip`` px wider than the digits, when a critical row draws one).
+
+    A scoped limit is named for its model ("CLAUDE SONNET 4.5 WEEKLY") and qualified "OF 25% SHARE", which
+    together can be wider than the room the value leaves. They give way in the order Night City's rows do:
+    the qualifier shrinks to the share ("25%"), then the name loses its WEEKLY, then the name is cut with an
+    ellipsis, and only when even that cannot fit does the qualifier go. The value never moves.
+    """
+    room = RIGHT - cv.advance(value, vt) - chip - VALUE_CLEARANCE - LEFT
+
+    def fits(name: str, qualifier: str | None) -> bool:
+        used = cv.advance(name, semi, LABEL_TRACKING)
+        if qualifier:
+            used += QUALIFIER_GAP + cv.advance(qualifier, reg, QUALIFIER_TRACKING)
+        return used <= room
+
+    qualifier, short = _qualifier(row), _short_qualifier(row)
+    shorter = row.label.removesuffix(" WEEKLY").strip() or row.label
+    for name, kept in ((row.label, qualifier), (row.label, short), (shorter, short)):
+        if fits(name, kept):
+            return name, kept
+    cut = shorter
+    while len(cut) > 1 and not fits(cut.rstrip() + ELLIPSIS, short):
+        cut = cut[:-1]
+    cut = cut.rstrip() + ELLIPSIS
+    return (cut, short) if fits(cut, short) else (cut, None)
+
+
 def _age_text(model: WidgetModel) -> str | None:
     """The age after the status pill, shown while the values are live or last-known."""
     if model.age_text is None or model.status not in (ApiStatus.LIVE, ApiStatus.STALE, ApiStatus.RATE_LIMITED):
@@ -414,10 +463,25 @@ def _dashed_box(plan: _Plan, cv: Canvas, pal: Palette, x0: float, y0: float, x1:
     plan.mark(draw)
 
 
+def _message_text(model: WidgetModel) -> str | None:
+    """The wording of the dashed auth box: this skin's own for the statuses it words (the approved
+    mockup's), else the neutral text the view model carries. None when the model asks for no box."""
+    if not model.stale_message:
+        return None
+    return STALE_MESSAGES.get(model.status, model.stale_message)
+
+
+def _message_lines(text: str) -> list[str]:
+    """One or two lines: a line feed splits them, and so does the view model's "A - B" spelling."""
+    if "\n" in text:
+        return [part.strip() for part in text.split("\n")]
+    return [part.strip() for part in text.split(" - ")] if " - " in text else [text]
+
+
 def _message(plan: _Plan, cv: Canvas, pal: Palette, text: str, top: float, x0: float, x1: float, y1: float) -> None:
-    """Dashed auth box with one or two lines of 10 px SemiBold text. "A - B" splits into two lines."""
+    """Dashed auth box with one or two lines of 10 px SemiBold text (see _message_lines)."""
     _dashed_box(plan, cv, pal, x0, top, x1, y1)
-    lines = [part.strip() for part in text.split(" - ")] if " - " in text else [text]
+    lines = _message_lines(text)
     semi = cv.font(FONT_SEMI, LABEL_SIZE)
     for index, line in enumerate(lines[:2]):
         line_top = top + 2 + 12 * index
@@ -456,22 +520,23 @@ def _row_widget(plan: _Plan, cv: Canvas, pal: Palette, model: WidgetModel, row: 
     reg = cv.font(FONT_REG, LABEL_SIZE)
     vt = cv.font(FONT_VT, VALUE_SIZE)
 
-    # Name and qualifier share one 12 px line box.
-    name_layer, name_w = cv.text_layer(row.label, LEFT, cv.baseline_in_box(top, 12, semi), semi, LABEL_TRACKING)
+    # Name and qualifier share one 12 px line box, and end before the value.
+    chipped = emphasis == SEVERITY_CRITICAL and row.percent is not None
+    label, qualifier = _name_line(cv, row, _percent_text(row.percent), semi, reg, vt, VALUE_CHIP_PAD if chipped else 0.0)
+    name_layer, name_w = cv.text_layer(label, LEFT, cv.baseline_in_box(top, 12, semi), semi, LABEL_TRACKING)
     plan.stamp(name_layer, pal.main)
-    qualifier = _qualifier(row)
     if qualifier:
-        qual_layer, _ = cv.text_layer(qualifier, LEFT + name_w + 6, cv.baseline_in_box(top, 12, reg), reg,
+        qual_layer, _ = cv.text_layer(qualifier, LEFT + name_w + QUALIFIER_GAP, cv.baseline_in_box(top, 12, reg), reg,
                                       QUALIFIER_TRACKING)
         plan.stamp(qual_layer, pal.label)
 
     # Value: 22 px VT323, right edge at 266, line box from top - 4.
     value = _percent_text(row.percent)
     value_baseline = cv.baseline_in_box(top - 4, 22, vt)
-    if emphasis == SEVERITY_CRITICAL and row.percent is not None:
-        chip_w = cv.advance(value, vt) + 6
+    if chipped:
+        chip_w = cv.advance(value, vt) + VALUE_CHIP_PAD
         plan.mark(lambda c: c.fill_rect(RIGHT - chip_w, top - 4, RIGHT, top + 18, pal.bright))
-        layer, _ = cv.text_layer(value, RIGHT - 3, value_baseline, vt, align="right")
+        layer, _ = cv.text_layer(value, RIGHT - VALUE_CHIP_PAD / 2, value_baseline, vt, align="right")
         plan.stamp(layer, pal.ink)
     else:
         layer, _ = cv.text_layer(value, RIGHT, value_baseline, vt, align="right")
@@ -527,9 +592,9 @@ class NostromoSkin:
         rows = _visible_rows(model)
         for index, row in enumerate(rows):
             _row_widget(plan, cv, pal, model, row, index)
-        if model.stale_message:
-            _message(plan, cv, pal, model.stale_message, MESSAGE_TOP, LEFT, RIGHT,
-                     MESSAGE_TOP + MESSAGE_H)
+        message = _message_text(model)
+        if message:
+            _message(plan, cv, pal, message, MESSAGE_TOP, LEFT, RIGHT, MESSAGE_TOP + MESSAGE_H)
         plan.run(cv)
 
         if o.text_fx:
@@ -555,9 +620,10 @@ class NostromoSkin:
         plan.mark(lambda c: c.fill_rect(LEFT, RULE_Y, RIGHT, RULE_Y + 1, pal.rule))
         for index, row in enumerate(rows):
             _row_tooltip(plan, cv, pal, model, row, index)
-        if model.stale_message:
+        message = _message_text(model)
+        if message:
             top = last_top + TOOLTIP_INFO_OFFSET + 20
-            _message(plan, cv, pal, model.stale_message, top, LEFT, RIGHT, top + MESSAGE_H)
+            _message(plan, cv, pal, message, top, LEFT, RIGHT, top + MESSAGE_H)
         plan.run(cv)
         cv.scanlines(1, height - 1, SCAN_STRENGTH, clip=body)
         if not model.stale and worst_severity(rows) == SEVERITY_CRITICAL:
@@ -568,6 +634,8 @@ class NostromoSkin:
                        opts: RenderOptions | Mapping[str, Any] | None = None) -> Image.Image:
         o = coerce_options(opts)
         pal = _palette(theme, variant, model)
+        if round(STRIP_H * scale) > height_px:      # a bar shorter than the strip: draw it smaller, not overhanging
+            scale = max(height_px / STRIP_H, STRIP_MIN_SCALE)
         strip = _render_strip(model, pal, scale, o, theme)
         height = max(int(height_px), strip.height)
         out = Image.new("RGBA", (strip.width, height), TRANSPARENT)
@@ -599,11 +667,11 @@ def _row_tooltip(plan: _Plan, cv: Canvas, pal: Palette, model: WidgetModel, row:
     reg = cv.font(FONT_REG, LABEL_SIZE)
     vt = cv.font(FONT_VT, VALUE_SIZE)
 
-    name_layer, name_w = cv.text_layer(row.label, LEFT, cv.baseline_in_box(top, 12, semi), semi, LABEL_TRACKING)
+    label, qualifier = _name_line(cv, row, _exact_percent_text(row.percent), semi, reg, vt)
+    name_layer, name_w = cv.text_layer(label, LEFT, cv.baseline_in_box(top, 12, semi), semi, LABEL_TRACKING)
     plan.stamp(name_layer, pal.main)
-    qualifier = _qualifier(row)
     if qualifier:
-        qual_layer, _ = cv.text_layer(qualifier, LEFT + name_w + 6, cv.baseline_in_box(top, 12, reg), reg,
+        qual_layer, _ = cv.text_layer(qualifier, LEFT + name_w + QUALIFIER_GAP, cv.baseline_in_box(top, 12, reg), reg,
                                       QUALIFIER_TRACKING)
         plan.stamp(qual_layer, pal.label)
 

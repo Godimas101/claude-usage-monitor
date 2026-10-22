@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Literal
 
 from usage_monitor.data.models import ApiStatus, Limit, MonitorState, UsageSnapshot
+from usage_monitor.data.windows import PACE_BAND_POINTS
 
 ShowScoped = Literal["auto", "always", "never"]
 SHOW_SCOPED_MODES: tuple[str, ...] = ("auto", "always", "never")
@@ -19,7 +20,6 @@ SESSION_WINDOW_S = 5 * 60 * 60          # the session limit is a 5 h window
 WEEKLY_WINDOW_S = 7 * 24 * 60 * 60      # weekly and scoped limits are 7 d windows
 WARNING_PERCENT = 75.0                  # severity thresholds when the API gives none
 CRITICAL_PERCENT = 90.0
-PACE_BAND_POINTS = 10.0                 # within +/-10 points of the clock counts as on pace
 AUTO_SCOPED_MIN_PERCENT = 1.0           # "auto" shows a scoped row at 1 % or more, or when active
 
 STALE_MESSAGE_EXPIRED = "LOGIN EXPIRED - OPEN CLAUDE CODE"

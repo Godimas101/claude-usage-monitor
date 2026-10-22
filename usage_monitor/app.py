@@ -13,11 +13,15 @@ timer for the text that moves with the clock (the age readout, the time rails). 
 blinks on a second timer, only while a widget is visible, only for a theme that blinks, and never
 with reduce_motion or a locked session. Idle cost is a few wake-ups a second.
 
+Usage alerts: every state the UI thread picks up goes through data.alerts.AlertEngine, and each
+alert it returns is shown as a tray toast. The engine is told when a fullscreen app has the
+foreground, and holds the toast back then.
+
 Shutdown order: close the dashboard, stop the data service, stop the API server, remove the tray
 icon, destroy the windows, flush settings.
 
 Also here: SmokeTest, the --smoke-test run (see main.py), and the small pure helpers the tests cover
-(mutex_name, tray_tooltip, menu_items, blink_cycle, tick_delay_ms, AlertTracker, UpdateTracker).
+(mutex_name, tray_tooltip, menu_items, blink_cycle, tick_delay_ms, UpdateTracker).
 """
 from __future__ import annotations
 
@@ -42,9 +46,11 @@ from typing import Any
 
 import update_check
 import version
-from usage_monitor import themes
+from usage_monitor import paths, themes
+from usage_monitor.data.alerts import AlertEngine
 from usage_monitor.data.models import ApiStatus, MonitorState
 from usage_monitor.data.service import DataService
+from usage_monitor.data.store import Store
 from usage_monitor.log import get_logger, setup_logging
 from usage_monitor.render.model import WidgetModel, build_model
 from usage_monitor.render.skins import RenderOptions, get_skin
@@ -53,10 +59,10 @@ from usage_monitor.settings import Settings
 from usage_monitor.ui import platform as plat
 from usage_monitor.ui import startup, win32
 from usage_monitor.ui.dashboard import DashboardLauncher
-from usage_monitor.ui.dashboard import _find_window_of as dashboard_window_of
+from usage_monitor.ui.dashboard import find_window_of as dashboard_window_of
 from usage_monitor.ui.host import UIHost, signal_running_instance
 from usage_monitor.ui.menu import SEPARATOR, MenuItem, show_menu
-from usage_monitor.ui.server import SETTING_SPECS, ApiServer
+from usage_monitor.ui.server import DEV_ENV, SETTING_SPECS, ApiServer, open_statistics_store
 from usage_monitor.ui.tray import TrayIcon
 from usage_monitor.ui.widgets import (
     FloatingWidget,
@@ -68,13 +74,11 @@ from usage_monitor.ui.widgets import (
 
 log = get_logger(__name__)
 
-DEV_ENV = "CUM_DEV_INSTANCE"
 MUTEX_NAME = "Global\\ClaudeUsageMonitor"
 ERROR_ALREADY_EXISTS = 183
 
 TRAY_SIZES = (16, 20, 24, 32)       # 100 %, 125 %, 150 % and 200 % taskbars; others scale from these
 TICK_CAP_S = 30.0                   # the clock-driven redraw never waits longer than this
-RESET_JITTER_S = 600.0              # reset times this close are one limit window (the API jitters them)
 SERVICE_STOP_S = 3.0                # how long shutdown waits for a data cycle that is running
 DASHBOARD_CLOSE_S = 3.0             # how long shutdown waits for the dashboard to save its bounds
 SECOND_INSTANCE_WAIT_S = 3.0        # a second launch waits this long for the first one's window
@@ -353,51 +357,23 @@ class Blinker:
                 self._arm()
 
 
-# ── Alerts ────────────────────────────────────────────────────────────────────
+# ── Statistics ────────────────────────────────────────────────────────────────
 
-def same_window(a: datetime | None, b: datetime | None) -> bool:
-    """Whether two reset times belong to one limit window.
-
-    The usage API reports the same reset with a different fraction of a second on every fetch
-    (one real window read ...800.06 and then ...800.16, another ...799.89 and then ...800.39), so
-    equal times are not a usable test. Windows are 5 hours or longer, hence a 10 minute margin.
-    """
-    if a is None or b is None:
-        return a is b
-    return abs((a - b).total_seconds()) < RESET_JITTER_S
+def analytics_store() -> Store:
+    """A Store on the usage database for the API's statistics routes, separate from the data service's.
+    It never creates or upgrades the file (see server.open_statistics_store): the data service does."""
+    return open_statistics_store(paths.db_path())
 
 
-class AlertTracker:
-    """Decides when a limit has newly become critical, so one notice shows per window.
-
-    The first model with numbers only seeds the tracker: a limit that is already critical when the
-    monitor starts does not raise a notice. A row alerts once for each reset window it goes
-    critical in (see same_window), and again after it has dropped below critical.
-    """
-
-    def __init__(self) -> None:
-        self._alerted: dict[str, datetime | None] = {}
-        self._primed = False
-
-    def check(self, model: WidgetModel) -> list[str]:
-        """Messages for the limits that just went critical (usage numbers only)."""
-        if model.stale or all(row.percent is None for row in model.rows):
-            return []
-        messages: list[str] = []
-        for row in model.rows:
-            if row.percent is None:
-                continue
-            if row.severity != "critical":
-                self._alerted.pop(row.key, None)
-                continue
-            if row.key in self._alerted and same_window(self._alerted[row.key], row.resets_at):
-                continue
-            self._alerted[row.key] = row.resets_at
-            if self._primed:
-                resets = f" Resets {row.resets_text}." if row.resets_text else ""
-                messages.append(f"{row.label} is at {_percent_text(row.percent)}.{resets}")
-        self._primed = True
-        return messages
+def service_pricing(service: Any) -> Any:
+    """The data service's pricing table, or None while it has none (the service loads it in its first
+    cycle). DataService has no public accessor for it yet: a ``pricing`` attribute is preferred, else
+    the ``_pricing`` it keeps."""
+    for name in ("pricing", "_pricing"):
+        found = getattr(service, name, None)
+        if found is not None:
+            return found
+    return None
 
 
 # ── Updates ───────────────────────────────────────────────────────────────────
@@ -529,7 +505,7 @@ class MonitorApp:
         self._resolved: tuple[Any, Any] | None = None
         self._tray_key: Any = None
         self._tick_timer: int | None = None
-        self._alerts = AlertTracker()
+        self._alerts: AlertEngine | None = None     # built with the settings, in _build
         self._failures: dict[str, int] = {}
         self._torn_down = False
         self._unsubscribers: list[Callable[[], None]] = []
@@ -581,6 +557,7 @@ class MonitorApp:
         settings, host = self.settings, self.host
         assert host is not None
         self.updates = UpdateTracker(settings, self._update_check_fn)
+        self._alerts = AlertEngine(settings)
         self.service = self._service_factory(settings)
         self._unsubscribers.append(self.service.subscribe(self._on_service_state))
         self.server = ApiServer(
@@ -595,6 +572,8 @@ class MonitorApp:
             },
             version=version.APP_VERSION,
             dev=self.dev,
+            analytics_store=analytics_store,
+            pricing_provider=lambda: service_pricing(self.service),
         )
         self.server.start()
         self.launcher = DashboardLauncher(self.server, settings)
@@ -811,7 +790,7 @@ class MonitorApp:
             return
         self._state = state
         self._refresh()
-        self._raise_alerts()
+        self._raise_alerts(state)
 
     def _on_setting(self, key: str, _value: Any) -> None:
         """Settings listener, on whichever thread changed the setting."""
@@ -982,13 +961,30 @@ class MonitorApp:
             self.stats.rendered["tray"] += 1
         tray.set_tooltip(tray_tooltip(ctx.model, dev=self.dev))
 
-    def _raise_alerts(self) -> None:
-        ctx = self._ctx
-        if ctx is None or self.tray is None:
+    def _raise_alerts(self, state: MonitorState) -> None:
+        """Show a tray toast for each alert the engine finds in ``state``. UI thread. Nothing in here
+        raises: a failing check or toast must not cost the redraw that has already happened."""
+        engine, tray = self._alerts, self.tray
+        if engine is None or tray is None:
             return
-        messages = self._alerts.check(ctx.model)
-        if messages and setting(self.settings, "notifications_enabled"):
-            self.tray.notify("Claude usage", " ".join(messages))
+        try:
+            alerts = engine.evaluate(state, suppressed=self._fullscreen())
+        except Exception:  # the engine promises not to raise; this path does not depend on the promise
+            log.exception("alert evaluation failed")
+            return
+        for alert in alerts:
+            try:
+                tray.notify(alert.title, alert.message)
+            except Exception:
+                log.exception("could not show a %s alert", alert.kind)
+
+    def _fullscreen(self) -> bool:
+        """Whether a fullscreen app has the foreground, when a toast would land on top of it."""
+        try:
+            return bool(self._plat.is_fullscreen_foreground())
+        except Exception:  # an unreadable foreground is no reason to lose an alert
+            log.debug("could not tell whether a fullscreen app is in front", exc_info=True)
+            return False
 
     # ── Animation and the clock ──
 
@@ -1111,13 +1107,25 @@ class SmokeTest:
 
     A probe thread starts once the message loop runs. It reads the page and /api/state through the
     real server with the per-run token, changes settings the way the dashboard does (theme switches,
-    widget toggles), opens the dashboard child for about five seconds and closes it, and takes
-    snapshots of the live windows. The report holds counts, ports, statuses and error text, never
-    usage content or tokens. The exit code is 0 when no errors were recorded.
+    widget toggles), opens the dashboard child for about five seconds and closes it, reads every
+    statistics route and both exports, and takes snapshots of the live windows. The report holds
+    counts, ports, statuses, sizes and error text, never usage content or tokens. The exit code is 0
+    when no errors were recorded.
     """
 
     DASHBOARD_OPEN_S = 5.0
     DASHBOARD_CLOSE_WAIT_S = 6.0
+    DATABASE_WAIT_S = 20.0
+    # The routes the analytics step reads and the top-level keys each JSON answer must have.
+    ANALYTICS_ROUTES: tuple[tuple[str, tuple[str, ...]], ...] = (
+        ("/api/analytics/cost", ("windows", "plan", "value", "monthly", "breakdowns")),
+        ("/api/analytics/efficiency", ("cache", "thinking", "tools", "productivity")),
+        ("/api/analytics/pacing", ("session", "weekly", "scoped")),
+        ("/api/analytics/history", ("days", "hour_weekday", "streaks", "odometer")),
+        ("/api/analytics/sessions", ("sessions",)),
+        ("/api/export?format=json", ("rows",)),
+        ("/api/export?format=csv", ()),             # a download, not JSON: only the status and size count
+    )
 
     def __init__(self, seconds: float, report_path: str | Path) -> None:
         self.seconds = max(5.0, float(seconds))
@@ -1168,6 +1176,7 @@ class SmokeTest:
             (3.0, "windows", self._step_windows),
             (5.0, "live_settings", self._step_live_settings),
             (13.0, "dashboard", self._step_dashboard),
+            (26.0, "analytics", self._step_analytics),
         ]
         try:
             for offset, name, step in schedule:
@@ -1380,6 +1389,46 @@ class SmokeTest:
             raise RuntimeError(f"the dashboard did not close when asked: {result}")
         return result
 
+    def _step_analytics(self) -> dict[str, Any]:
+        """Read every statistics route and both downloads as the dashboard does, and check their shape.
+
+        Nothing but statuses, sizes and timings goes into the report.
+        """
+        self._wait_for(self._statistics_ready, self.DATABASE_WAIT_S)
+        results: dict[str, Any] = {}
+        problems: list[str] = []
+        for route, keys in self.ANALYTICS_ROUTES:
+            began = time.monotonic()
+            status, body = self._call("GET", route)
+            results[route] = {"status": status, "bytes": len(body),
+                              "ms": round((time.monotonic() - began) * 1000)}
+            if status != 200:
+                problems.append(f"GET {route} answered {status}")
+            elif keys:
+                problem = self._shape_problem(route, body, keys)
+                if problem:
+                    problems.append(problem)
+        if problems:
+            raise RuntimeError("; ".join(problems))
+        return results
+
+    def _statistics_ready(self) -> bool:
+        """Whether the statistics answer yet. The data service makes and upgrades the database in its first
+        cycle, and until then the routes say 503 (they never create it themselves)."""
+        try:
+            return self._call("GET", "/api/analytics/pacing")[0] == 200
+        except OSError:
+            return False
+
+    @staticmethod
+    def _shape_problem(route: str, body: bytes, keys: tuple[str, ...]) -> str | None:
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except ValueError:
+            return f"GET {route} did not answer JSON"
+        missing = [key for key in keys if not isinstance(payload, dict) or key not in payload]
+        return f"GET {route} lacks {', '.join(missing)}" if missing else None
+
     @staticmethod
     def _wait_for(done: Callable[[], bool], timeout: float) -> bool:
         deadline = time.monotonic() + timeout
@@ -1448,17 +1497,17 @@ def run_smoke_test(seconds: float, report_path: str | Path) -> int:
 
 
 __all__ = [
-    "AlertTracker",
     "Blinker",
     "MonitorApp",
     "SingleInstance",
     "SmokeTest",
     "UpdateTracker",
+    "analytics_store",
     "blink_cycle",
     "menu_items",
     "mutex_name",
     "run_smoke_test",
-    "same_window",
+    "service_pricing",
     "tick_delay_ms",
     "tray_tooltip",
 ]

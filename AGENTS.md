@@ -49,8 +49,8 @@ Tokens live in `usage_monitor/themes/<id>.json` and feed both the Pillow skins a
 Settings: `theme_id`, `theme_variant`, `theme_mode`, `reduce_motion`. Theme changes apply live.
 
 - **Nostromo** (default): amber phosphor on CRT black, the shipped identity — *preserve it*. Variants
-  amber (default), green, white, red, blue, cyan, orange, purple. The only theme with its own skin
-  today and the only one that blinks; the other two render through its skin until theirs land.
+  amber (default), green, white, red, blue, cyan, orange, purple. The only theme whose widgets blink
+  (the alive mark). Every theme has a skin of its own in `usage_monitor/render/skins/`.
 - **Night City**: Blackwall (default), Relic, Edgerun, Mox; chamfered frames, RAM-meter tray icon.
 - **Gates**: Fluent surfaces; accents (system by default) in light, dark or system mode; Windows
   fonts, never bundled.
@@ -93,6 +93,10 @@ python main.py            (console: Ctrl+C quits, errors print)     or    launch
 - `CUM_UI_TESTS=1 python -m pytest` — adds the tests that create real windows, tray icons or
   processes. They need an interactive desktop, park widgets off-screen and use a fake data service.
   A new test that opens a window, a tray icon or a process must be gated the same way.
+- The dashboard scripts (`app.js`, `charts.js`) are tested by running them under node:
+  `tests/webui_checks.js` loads them with a fake DOM and the test hook at the end of `app.js`, and
+  `tests/test_webui.py` asserts on what they return. They start node, so they are gated with
+  `CUM_UI_TESTS=1`; `tests.yml` runs that file once more with it set, so CI covers them.
 
 ## DELETE ME/ convention
 

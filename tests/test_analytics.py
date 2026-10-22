@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone, tzinfo
 import pytest
 
 from usage_monitor.data import analytics as an
+from usage_monitor.data import windows
 from usage_monitor.data.models import (
     ApiErrorEvent,
     CodeChange,
@@ -34,6 +35,7 @@ from usage_monitor.data.models import (
 )
 from usage_monitor.data.pricing import Pricing
 from usage_monitor.data.store import Store
+from usage_monitor.render import model as widget_model
 
 UTC = timezone.utc
 M = 1_000_000
@@ -592,6 +594,26 @@ def test_weekly_pace_verdicts(percent, verdict, delta):
     assert report["verdict"] == verdict
     assert report["pace_delta_pp"] == pytest.approx(delta)
     assert report["elapsed_pct"] == pytest.approx(4 / 7 * 100)
+
+
+@pytest.mark.parametrize(("delta", "verdict", "pace"), [
+    (7.0, "ON_PACE", "on_pace"), (-7.0, "ON_PACE", "on_pace"), (10.0, "ON_PACE", "on_pace"),
+    (11.0, "AHEAD", "ahead"), (-11.0, "BEHIND", "behind"),
+])
+def test_the_pacing_report_and_the_widgets_call_the_same_pace_the_same_thing(delta, verdict, pace):
+    """A weekly limit 7 points ahead of the clock read ON PACE on the floating widget and the overview card (band
+    10) and AHEAD, in the warning tone, on the Limits page (the report's band was 5)."""
+    resets = dt(10, 23, 12)                        # 3 days after NOW, so 4 of 7 days have passed
+    elapsed = 4 / 7
+    percent = elapsed * 100 + delta
+    report = an.pacing_report(Store(":memory:"), now=NOW,
+                              usage=usage_at(NOW, weekly_limit(percent, resets)))["weekly"]
+    assert report["verdict"] == verdict
+    assert widget_model.pace_for(percent, elapsed) == pace
+
+
+def test_there_is_one_pace_band():
+    assert an._PACE_BAND == widget_model.PACE_BAND_POINTS == windows.PACE_BAND_POINTS == 10.0
 
 
 def test_weekly_pace_budget_projection_and_downsampled_points():
@@ -1285,12 +1307,12 @@ def test_by_folder_merges_spellings_that_differ_only_in_case_on_windows(monkeypa
     monkeypatch.setattr(an, "_repo_root", lambda cwd: cwd)
     store = Store(":memory:")
     store.add_items([
-        rec("C1", dt(10, 1), inp=M, project="hub", cwd="d:\Games\Mod"),
-        rec("C2", dt(10, 2), inp=2 * M, project="hub", cwd="D:\Games\Mod"),
+        rec("C1", dt(10, 1), inp=M, project="hub", cwd=r"d:\Games\Mod"),
+        rec("C2", dt(10, 2), inp=2 * M, project="hub", cwd=r"D:\Games\Mod"),
         rec("C3", dt(10, 3), inp=M, project="hub", cwd="D:/Games/Mod"),
     ], PRICING)
     rows = folder_rows(store)
     store.close()
     assert len(rows) == 1 and rows[0]["requests"] == 3 and rows[0]["name"] == "Mod"
-    assert rows[0]["folder"] == "D:\Games\Mod"          # the spelling that carried the most cost
+    assert rows[0]["folder"] == r"D:\Games\Mod"          # the spelling that carried the most cost
     assert rows[0]["share"] == pytest.approx(1.0)

@@ -53,7 +53,7 @@ BURN_MINUTES = win.DEFAULT_BURN_MINUTES
 SESSION_LOOKBACK_START = 2 * win.SESSION_LENGTH
 SESSION_LOOKBACK_MAX = timedelta(days=14)
 # Changing one of these settings changes the next cycle, so it wakes the loop. Other keys do not.
-WAKE_KEYS = frozenset({"poll_interval_ms", "ingest_interval_s", "billing_day", "plan_price_override"})
+WAKE_KEYS = frozenset({"poll_interval_ms", "ingest_interval_s", "billing_day"})
 PAUSED_DETAIL = "Paused"
 LOADING_DETAIL = "Loading usage"
 
@@ -397,7 +397,7 @@ class DataService:
             status_detail=detail,
             usage=snapshot,
             usage_fetched_at=snapshot.fetched_at if snapshot is not None else None,
-            plan=self._effective_plan(),
+            plan=self._plan,
             windows=windows,
             burn=self._burn,
             unpriced_models=list(self._unpriced),
@@ -418,12 +418,6 @@ class DataService:
             return None
         live = [limit for limit in snapshot.limits if limit.resets_at is not None and limit.resets_at > now]
         return UsageSnapshot(fetched_at=snapshot.fetched_at, limits=live)
-
-    def _effective_plan(self) -> PlanInfo:
-        override = self._settings.get("plan_price_override")
-        if override is None:
-            return self._plan
-        return dataclasses.replace(self._plan, monthly_price_usd=float(override))
 
     def _ingest_interval(self) -> timedelta:
         seconds = _positive(self._settings.get("ingest_interval_s"), DEFAULTS["ingest_interval_s"])

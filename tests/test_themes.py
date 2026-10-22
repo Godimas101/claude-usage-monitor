@@ -23,6 +23,7 @@ from PIL import ImageFont
 
 from usage_monitor import paths, themes
 from usage_monitor.settings import Settings
+from usage_monitor.themes import colour
 
 SHIPPED = paths.resource_dir() / "usage_monitor" / "themes"
 FONTS = paths.resource_dir() / "usage_monitor" / "webui" / "fonts"
@@ -309,9 +310,12 @@ def test_resolve_every_gates_accent_mode_and_injected_reader(
     if accent != "system":
         assert variant == shipped_variant
         return
-    assert variant.colors["accent"] == "#123456"
-    assert variant.colors["accent_alt"] == ("#1b334a" if chosen == "dark" else "#597189")
-    assert variant.colors["glow"] == "#123456" + shipped_variant.colors["glow"][7:]
+    # #123456 is too dark for the dark window, so it is lifted there; the light window keeps it
+    lifted = "#7a9fc7" if chosen == "dark" else "#123456"
+    assert variant.colors["accent"] == lifted
+    assert variant.colors["accent_alt"] == ("#647d99" if chosen == "dark" else "#597189")
+    assert variant.colors["glow"] == lifted + shipped_variant.colors["glow"][7:]
+    assert variant.extras["accent_fill"] == lifted
     for role in ROLES:
         if role not in ("accent", "accent_alt", "glow"):
             assert variant.colors[role] == shipped_variant.colors[role], role
@@ -323,17 +327,19 @@ def test_system_accent_values_for_dark_and_light(shipped: dict[str, themes.Theme
         accent_provider=lambda: "#123456",
     )
     assert dark.id == "system-dark"
-    assert dark.colors["accent"] == "#123456"
-    assert dark.colors["accent_alt"] == "#1b334a"
-    assert dark.colors["glow"] == "#1234565c"
-    assert dark.extras["accent_soft"] == "#12345624"
-    assert dark.extras["accent_tint"] == "#12345614"
+    assert dark.colors["accent"] == "#7a9fc7"            # lifted to OKLCH lightness 0.69, hue and chroma kept
+    assert dark.colors["accent_alt"] == "#647d99"
+    assert dark.colors["glow"] == "#7a9fc75c"
+    assert dark.extras["accent_soft"] == "#7a9fc724"
+    assert dark.extras["accent_tint"] == "#7a9fc714"
+    assert dark.extras["accent_fill"] == "#7a9fc7"
 
     _, light = themes.resolve(
         {"theme_id": "gates", "theme_variant": "system", "theme_mode": "system"},
         accent_provider=lambda: "#123456", light_provider=lambda: True,
     )
     assert light.id == "system-light"
+    assert light.colors["accent"] == "#123456"           # already below lightness 0.60: unchanged
     assert light.colors["accent_alt"] == "#597189"
     assert light.colors["glow"] == "#12345647"
     assert light.extras["accent_soft"] == "#12345624"
@@ -345,7 +351,7 @@ def test_windows_accent_strings_are_normalised(reported: str) -> None:
         {"theme_id": "gates", "theme_variant": "system", "theme_mode": "dark"},
         accent_provider=lambda: reported,
     )
-    assert variant.colors["accent"] == "#abcdef"
+    assert variant.colors["accent"] == "#abcdef"       # already light enough for the dark window
 
 
 def test_resolving_the_system_accent_leaves_the_cached_theme_unchanged() -> None:
@@ -413,7 +419,7 @@ def test_default_readers_come_from_the_platform_module_when_it_exists(
     settings, _ = _gates_system("system")
     _, variant = themes.resolve(settings)
     assert variant.id == "system-light"
-    assert variant.colors["accent"] == "#abcdef"
+    assert variant.colors["accent"] == "#6484a3"         # a pale accent is darkened for the light window
 
 
 def test_live_variant_is_what_choosing_the_variant_applies(shipped: dict[str, themes.Theme]) -> None:
@@ -426,7 +432,8 @@ def test_live_variant_is_what_choosing_the_variant_applies(shipped: dict[str, th
             {"theme_id": "gates", "theme_variant": "system", "theme_mode": mode},
             accent_provider=lambda: "#D0000C",
         )[1]
-        assert listed == applied and listed.colors["accent"] == "#d0000c"
+        assert listed == applied
+        assert listed.colors["accent"] == ("#ff5145" if mode == "dark" else "#d0000c")
     fixed = gates.variant("blue-dark")
     assert themes.live_variant(gates, fixed, accent_provider=lambda: "#d0000c") is fixed
     amber = nostromo.variant("amber")
@@ -560,9 +567,135 @@ def test_css_variables_follow_the_system_accent() -> None:
     settings, kwargs = _gates_system("dark", accent="#123456")
     theme, variant = themes.resolve(settings, **kwargs)
     css = themes.css_variables(theme, variant)
-    assert css["--accent"] == "#123456"
-    assert css["--accent-alt"] == "#1b334a"
-    assert css["--accent-soft"] == "#12345624"
+    assert css["--accent"] == "#7a9fc7"
+    assert css["--accent-alt"] == "#647d99"
+    assert css["--accent-soft"] == "#7a9fc724"
+    assert css["--accent-fill"] == "#7a9fc7"
+
+
+# ── Stale ─────────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("theme_id", ["nostromo", "night_city"])
+def test_the_stale_colour_is_readable_on_every_surface_it_is_drawn_on(
+    theme_id: str, shipped: dict[str, themes.Theme]
+) -> None:
+    """Stale, offline, rate-limited, no-credentials and loading draw every tone, the big numeral and the sign-in
+    banner in this one colour, so it has to pass the 4.5:1 text floor on its own variant's window and cards.
+    Nostromo's red was 2.4:1 and its amber 3.6:1. (Gates draws stale text in text_3 and uses the stale colour
+    for bars and the lamp only, which need 3:1.)"""
+    for variant in shipped[theme_id].variants:
+        stale = variant.colors["stale"][:7]
+        for role in ("bg", "surface", "surface_alt"):
+            backdrop = variant.colors[role][:7]
+            assert colour.contrast_ratio(stale, backdrop) >= 4.5, (theme_id, variant.id, role)
+
+
+def test_stale_stays_dimmer_than_live_text_in_every_nostromo_variant(shipped: dict[str, themes.Theme]) -> None:
+    for variant in shipped["nostromo"].variants:
+        live, stale = variant.colors["text_dim"], variant.colors["stale"]
+        assert colour.relative_luminance(stale) < colour.relative_luminance(live), variant.id
+        assert colour.relative_luminance(stale) < colour.relative_luminance(variant.colors["text"]), variant.id
+
+
+def test_nostromo_css_defaults_to_the_amber_stale_token(shipped: dict[str, themes.Theme]) -> None:
+    css = (SHIPPED.parent / "webui" / "themes" / "nostromo.css").read_text(encoding="utf-8")
+    assert f"--stale: {shipped['nostromo'].variant('amber').colors['stale']};" in css
+
+
+# ── The usable system accent ──────────────────────────────────────────────────
+
+# The 48 swatches of Windows Settings > Personalization > Colors.
+WINDOWS_SWATCHES = (
+    "#ffb900 #ff8c00 #f7630c #ca5010 #da3b01 #ef6950 #d13438 #ff4343 "
+    "#e74856 #e81123 #ea005e #c30052 #e3008c #bf0077 #c239b3 #9a0089 "
+    "#0078d4 #0063b1 #8e8cd8 #6b69d6 #8764b8 #744da9 #b146c2 #881798 "
+    "#0099bc #2d7d9a #00b7c3 #038387 #00b294 #018574 #00cc6a #10893e "
+    "#7a7574 #5d5a58 #68768a #515c6b #567c73 #486860 #498205 #107c10 "
+    "#767676 #4c4a48 #69797e #4a5459 #647c64 #525e54 #847545 #7e735f"
+).split()
+
+
+def _system(accent: str, mode: str) -> tuple[themes.Theme, themes.Variant]:
+    settings = {"theme_id": "gates", "theme_variant": "system", "theme_mode": mode}
+    return themes.resolve(settings, accent_provider=lambda: accent)
+
+
+def _severity(theme: themes.Theme, variant: themes.Variant) -> dict[str, str]:
+    """Every colour that means ok, warn, alert or stale in this variant's mode."""
+    tokens = theme.extras["modes"][variant.mode]
+    found = {role: variant.colors[role] for role in ("ok", "warn", "alert", "stale")}
+    found.update({name: tokens[name] for name in ("usage_warn", "usage_alert")})
+    return {name: value[:7] for name, value in found.items()}
+
+
+def _cards(theme: themes.Theme, variant: themes.Variant) -> dict[str, str]:
+    """What the usage bars and marks are drawn on: the widget card and the dashboard card."""
+    return {"widget": theme.extras["modes"][variant.mode]["widget_bg"][:7], "surface": variant.colors["surface"]}
+
+
+def test_there_are_48_stock_windows_swatches() -> None:
+    assert len(WINDOWS_SWATCHES) == 48 and len(set(WINDOWS_SWATCHES)) == 48
+
+
+@pytest.mark.parametrize("mode", ["dark", "light"])
+def test_no_stock_windows_accent_draws_normal_usage_in_a_severity_colour(mode: str) -> None:
+    """The accent colours normal-severity fills. With the owner's red (#d0000c) a 12 % bar was the colour of a
+    93 % one. Whatever Windows hands over, the fill stays 25 dE76 away from ok, warn, alert, the two usage
+    bar colours and stale, and the chrome accent and the fill both reach 3:1 on the cards."""
+    json_accent = themes.get_theme("gates").variant(f"system-{mode}").colors["accent"]
+    kept = 0
+    for swatch in WINDOWS_SWATCHES:
+        theme, variant = _system(swatch, mode)
+        fill, chrome = variant.extras["accent_fill"], variant.colors["accent"]
+        assert fill in (chrome, json_accent), (swatch, mode)
+        kept += fill == chrome
+        for name, severity in _severity(theme, variant).items():
+            assert colour.delta_e76(fill, severity) >= 25, (swatch, mode, name)
+        for name, card in _cards(theme, variant).items():
+            assert colour.contrast_ratio(fill, card) >= 3.0, (swatch, mode, name)
+            assert colour.contrast_ratio(chrome, card) >= 3.0, (swatch, mode, name)
+        for key in ("accent_soft", "accent_tint"):
+            assert variant.extras[key].startswith(fill), (swatch, mode, key)
+        assert variant.colors["glow"].startswith(chrome), (swatch, mode)
+    assert 10 < kept < 48          # most reds, oranges, greens and greys fall back; the blues and purples stay
+
+
+@pytest.mark.parametrize("mode", ["dark", "light"])
+def test_the_json_system_accent_is_itself_clear_of_every_severity_colour(mode: str) -> None:
+    theme = themes.get_theme("gates")
+    variant = theme.variant(f"system-{mode}")
+    for name, severity in _severity(theme, variant).items():
+        assert colour.delta_e76(variant.colors["accent"], severity) >= 25, name
+
+
+def test_a_separated_accent_is_its_own_fill_and_a_colliding_one_falls_back_to_the_json_accent() -> None:
+    _, blue = _system("#0078d4", "light")
+    assert blue.extras["accent_fill"] == blue.colors["accent"] == "#0078d4"
+    _, red_dark = _system("#d0000c", "dark")
+    assert (red_dark.colors["accent"], red_dark.extras["accent_fill"]) == ("#ff5145", "#60cdff")
+    _, red_light = _system("#d0000c", "light")
+    assert (red_light.colors["accent"], red_light.extras["accent_fill"]) == ("#d0000c", "#0067c0")
+    # the tints behind a fill follow the fill, the glow of the selection follows the chrome accent
+    assert red_dark.extras["accent_soft"] == "#60cdff24" and red_dark.extras["accent_tint"] == "#60cdff14"
+    assert red_dark.colors["glow"] == "#ff51455c"
+    assert red_dark.colors["accent_alt"] == "#519ec1"       # the second series is drawn from the fill, like the first
+
+
+@pytest.mark.parametrize("variant_id", [f"{a}-{m}" for a in ACCENTS if a != "system" for m in ("dark", "light")])
+def test_the_designed_accents_are_inside_the_bounds_and_the_lift_leaves_them_alone(
+    variant_id: str, shipped: dict[str, themes.Theme]
+) -> None:
+    variant = shipped["gates"].variant(variant_id)
+    cards = [variant.colors["surface"], shipped["gates"].extras["modes"][variant.mode]["widget_bg"]]
+    assert colour.lift_accent(variant.colors["accent"], variant.mode, cards) == variant.colors["accent"]
+
+
+def test_gates_css_defaults_to_the_json_accents() -> None:
+    """Before /api/state answers, the stylesheet shows the system variants' own values."""
+    css = (SHIPPED.parent / "webui" / "themes" / "gates.css").read_text(encoding="utf-8")
+    for mode in ("dark", "light"):
+        accent = themes.get_theme("gates").variant(f"system-{mode}").colors["accent"]
+        assert f"--accent: {accent};" in css and f"--accent-fill: {accent};" in css, mode
 
 
 # ── Fonts ─────────────────────────────────────────────────────────────────────

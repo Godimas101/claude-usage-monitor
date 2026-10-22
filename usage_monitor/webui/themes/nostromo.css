@@ -2,7 +2,8 @@
    section 2e "dashboard", ported to live data. Colours come from the theme tokens that the local API
    sends as CSS custom properties (--bg, --text, --accent, ...). The short names used below (--main,
    --bright, --hot, --label, --ghost, ...) are aliases of those tokens, so the approved rules keep
-   their original names. Motion is off under reduce_motion or prefers-reduced-motion. */
+   their original names. Motion is off under reduce_motion or prefers-reduced-motion. The statistics pages
+   (cost, nerds, history, limits) use the stat / toolbar / chart rules in the last sections. */
 
 @font-face { font-family: "Michroma"; src: url("/static/fonts/michroma/Michroma-Regular.ttf") format("truetype"); font-weight: 400; font-display: block; }
 @font-face { font-family: "IBM Plex Mono"; src: url("/static/fonts/ibmplexmono/IBMPlexMono-Regular.ttf") format("truetype"); font-weight: 400; font-display: block; }
@@ -29,7 +30,7 @@
   --glow-soft: #ffb30038;
   --crt-deep: #030303;
   --tray-track: #e8a02085;
-  --stale: #8c6220;
+  --stale: #9f7434;
   --glow: #ffb30099;
   /* shared, never themed */
   --scan-d: #00000038;
@@ -39,14 +40,17 @@
   --f-body: "IBM Plex Mono", Consolas, monospace;
   --f-read: "VT323", Consolas, monospace;
   --f-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  /* charts.js reads this one in script: 1 draws bars as separate pips, as the approved design does */
+  --chart-pips: 1;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: var(--main); font-family: var(--f-body); }
 button, input, select { font: inherit; color: inherit; }
 a { color: inherit; }
 ol, ul { margin: 0; padding: 0; }
-h1, h2, h3, p, figure { margin: 0; }
+h1, h2, h3, p, figure, dl, dd { margin: 0; }
 :focus-visible { outline: 1px solid var(--bright); outline-offset: 2px; }
 
 @keyframes nm-blink { 0%, 84% { opacity: 1; } 85%, 100% { opacity: .18; } }
@@ -56,6 +60,15 @@ h1, h2, h3, p, figure { margin: 0; }
 .nm-screen {
   position: fixed; inset: 0; overflow: hidden;
   background: radial-gradient(120% 95% at 50% 42%, var(--plate) 0%, var(--crt) 58%, var(--crt-deep) 100%);
+  --chart-mark: var(--main);
+  --chart-mark-2: var(--label);
+  --chart-hot: var(--hot);
+  --chart-line: var(--bright);
+  --chart-text: var(--label);
+  --chart-text-strong: var(--main);
+  --chart-track: var(--ghost);
+  --chart-grid: var(--ghost);
+  --chart-limit: var(--label);
 }
 .nm-content { position: absolute; inset: 0; display: flex; flex-direction: column; animation: nm-flick 9s steps(1) infinite; }
 .nm-scan { position: absolute; inset: 0; z-index: 71; pointer-events: none;
@@ -99,7 +112,7 @@ h1, h2, h3, p, figure { margin: 0; }
   border-bottom: 1px dotted var(--ghost); font: 600 11px/1 var(--f-body); letter-spacing: .1em; color: var(--label); }
 .nm-kv:last-child { border-bottom: 0; }
 .nm-kv b { font: 400 22px/18px var(--f-read); letter-spacing: .02em; color: var(--bright); text-align: right; }
-.nm-kv b.ok { display: flex; align-items: center; gap: 6px; }
+.nm-kv b.ok, .nm-kv b.is-down { display: flex; align-items: center; gap: 6px; }
 .nm-phos { margin-top: 14px; }
 .nm-sw { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
 .nm-sw button { font: 600 11px/1 var(--f-body); letter-spacing: .06em; padding: 6px 0; cursor: pointer;
@@ -109,7 +122,8 @@ h1, h2, h3, p, figure { margin: 0; }
 
 .nm-main { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 14px; overflow: auto;
   padding: 18px 22px 16px; background-image: linear-gradient(var(--ghost) 1px, transparent 1px), linear-gradient(90deg, var(--ghost) 1px, transparent 1px);
-  background-size: 48px 48px; background-position: -1px -1px; background-attachment: local; }
+  background-size: 48px 48px; background-position: -1px -1px; background-attachment: local;
+  scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: var(--label) var(--crt-2); }
 .nm-main:focus { outline: none; }
 .nm-head { flex: none; display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
 .nm-h1 { font: 400 26px/1 var(--f-display); letter-spacing: .16em; color: var(--main); text-shadow: 0 0 12px var(--glow-soft), 0 0 2px var(--glow); white-space: nowrap; }
@@ -122,13 +136,14 @@ h1, h2, h3, p, figure { margin: 0; }
 .nm-hazard.is-off { display: none; }
 
 /* ── overview grid (approved 3-column layout) ─────────────────────────────────── */
-/* Rows follow the approved 180 / 276 / 146 proportions. The first and last rows have a fixed floor (their
-   content fits it). The cost row's floor is its own content (minmax(auto, ...) with min-height: auto on
-   its card), so a short or narrow window scrolls the page instead of cutting the tiles' numerals off.
-   Its bottom padding is 8 px, the space the approved 276 px row leaves under the tiles. The grid's
-   min-height is the three floors at the default width (170 + about 276 + 140) plus the two 14 px gaps. */
-.nm-grid { flex: 1 1 auto; min-height: 614px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
-  grid-template-rows: minmax(170px, 180fr) minmax(auto, 276fr) minmax(140px, 146fr); gap: 14px; }
+/* Rows follow the approved 196 / 276 / 146 proportions. The first and last rows have a fixed floor, the height
+   their content needs (the limit cards need 201 px: each has a forecast line the approved 180 px card lacks). The
+   cost row's floor is its own content (minmax(auto, ...) with min-height: auto on its card), so a short or
+   narrow window scrolls the page instead of cutting the tiles' numerals off. Its bottom padding is 8 px, the
+   space the approved 276 px row leaves under the tiles. The grid's min-height is the three floors (201 + about
+   274 + 140) plus the two 14 px gaps. A short window gets the tighter rhythm further down. */
+.nm-grid { flex: 1 1 auto; min-height: 643px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: minmax(201px, 196fr) minmax(auto, 276fr) minmax(140px, 146fr); gap: 14px; }
 .nm-grid > #cost { min-height: auto; }
 .nm-grid > #cost .nm-card-in { padding-bottom: 8px; }
 .nm-card { position: relative; min-width: 0; min-height: 0; background: var(--edge); padding: 1px;
@@ -137,24 +152,35 @@ h1, h2, h3, p, figure { margin: 0; }
 .nm-card-in { position: relative; height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 12px 16px;
   overflow: hidden; clip-path: polygon(13.4px 0, 100% 0, 100% calc(100% - 13.4px), calc(100% - 13.4px) 100%, 0 100%, 0 13.4px);
   background: linear-gradient(180deg, var(--plate) 0%, var(--crt) 100%); }
-.nm-card-t { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 16px; }
+.nm-card-t { display: flex; align-items: center; justify-content: space-between; column-gap: 8px; min-height: 16px; }
+/* A note too long for a narrow card drops under the title where the card's height is free (the pages and the daily
+   chart) and is cut with an ellipsis where it is not (the overview's three fixed rows). */
+.nm-pgrid .nm-card-t, .nm-chart-t { flex-wrap: wrap; row-gap: 0; }
+.nm-grid .nm-card-t:not(.nm-chart-t) .nm-meta-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .nm-tag { background: var(--main); color: var(--crt); font: 600 11px/16px var(--f-body); letter-spacing: .14em; padding: 0 8px; text-transform: uppercase; white-space: nowrap; }
-.nm-ttl { font: 600 11px/16px var(--f-body); letter-spacing: .14em; text-transform: uppercase; color: var(--main); white-space: nowrap; }
-.nm-meta-t { font: 400 11px/16px var(--f-body); letter-spacing: .1em; text-transform: uppercase; color: var(--label); white-space: nowrap; }
+.nm-ttl { font: 600 11px/16px var(--f-body); letter-spacing: .14em; text-transform: uppercase; color: var(--main); white-space: nowrap; margin: 0; }
+.nm-meta-t { font: 400 11px/16px var(--f-body); letter-spacing: .1em; text-transform: uppercase; color: var(--label); white-space: nowrap; margin-left: auto; }
 .nm-row2 { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; min-height: 0; }
 .nm-big { font: 400 66px/.8 var(--f-read); color: var(--bright); white-space: nowrap; text-shadow: 0 0 2px var(--glow), 0 0 14px var(--glow-soft); }
 .nm-big.h { font-size: 88px; color: var(--hot); }
+/* The cost figure fits the left column: --n is its length in characters (set by the markup), the plan text beside it
+   keeps about 184px, and below the floor the plan text wraps instead of crossing into the chart. */
+.nm-cost .nm-big.h { font-size: clamp(52px, calc((100cqw - 184px) / (.41 * var(--n, 4))), clamp(58px, 6.9vw, 88px)); }
 .nm-big.m { font-size: 44px; line-height: .9; color: var(--hot); }
 .nm-big.s { font-size: 22px; line-height: 1; color: var(--hot); text-shadow: 0 0 2px var(--glow), 0 0 6px var(--glow-soft); }
 .nm-facts { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; text-align: right; white-space: nowrap;
   font: 600 11px/1.2 var(--f-body); letter-spacing: .1em; text-transform: uppercase; color: var(--label); }
 .nm-facts b { font: 400 22px/1 var(--f-read); letter-spacing: .02em; color: var(--main); }
+.nm-remain { display: none; }       /* the time left as a bar is Night City's Edgerun; here the RESETS and IN facts say it */
 .nm-chip { display: inline-block; border: 1px solid var(--rule-strong); padding: 2px 6px; font: 600 11px/1.2 var(--f-body);
   letter-spacing: .12em; color: var(--bright); text-transform: uppercase; white-space: nowrap; }
 .nm-chip.solid { background: var(--bright); border-color: var(--bright); color: var(--crt); }
 .nm-chip.is-ok { color: var(--main); }
 .nm-pace { display: flex; flex-direction: column; gap: 3px; font: 400 11px/1.2 var(--f-body); letter-spacing: .08em; text-transform: uppercase; color: var(--label); white-space: nowrap; }
 .nm-pace b { font-weight: 600; color: var(--main); }
+.nm-pace .fc { font-weight: 600; letter-spacing: .06em; }
+.nm-pace .fc b { color: var(--hot); }
+.nm-row2.is-base { align-items: baseline; }
 .nm-cells { display: flex; gap: 2px; height: 10px; flex: none; }
 .nm-cells i { flex: 1 1 0; display: block; background: var(--ghost); }
 .nm-cells i.on { background: var(--main); box-shadow: 0 0 3px var(--glow-soft); }
@@ -176,9 +202,10 @@ h1, h2, h3, p, figure { margin: 0; }
 
 /* cost card */
 .nm-cost { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr); gap: 18px; }
-.nm-cost-l { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.nm-cost-l { display: flex; flex-direction: column; gap: 6px; min-width: 0; container-type: inline-size; }
 .nm-hero { display: flex; align-items: flex-end; gap: 20px; min-width: 0; }
 .nm-plan { display: flex; flex-direction: column; gap: 6px; padding-bottom: 4px; min-width: 0; }
+.nm-plan .nm-facts { align-items: flex-start; text-align: left; white-space: normal; text-wrap: balance; }
 .nm-ratio { display: flex; gap: 3px; height: 12px; }
 .nm-ratio i { flex: 1 1 0; display: block; background: var(--ghost); }
 .nm-ratio i.on { background: var(--main); box-shadow: 0 0 3px var(--glow-soft); }
@@ -187,30 +214,31 @@ h1, h2, h3, p, figure { margin: 0; }
 .nm-tile small { display: block; font: 600 10px/1.3 var(--f-body); letter-spacing: .12em; text-transform: uppercase; color: var(--label); }
 .nm-tile .nm-big { margin-top: 6px; }
 .nm-cost-r { display: flex; flex-direction: column; gap: 6px; min-width: 0; border-left: 1px solid var(--ghost); padding-left: 18px; }
-.nm-chart { position: relative; flex: 1; min-height: 130px; }
-.nm-days { position: absolute; left: 0; right: 66px; top: 0; bottom: 16px; display: grid; grid-template-columns: repeat(30, minmax(0, 1fr)); align-items: end; }
-.nm-col { display: flex; flex-direction: column-reverse; gap: 2px; align-items: center; height: 100%; justify-content: flex-start; }
-.nm-col i { display: block; width: 8px; height: 5px; background: var(--ghost); }
-.nm-col i.on { background: var(--main); }
-.nm-col.today i.on { background: var(--hot); box-shadow: 0 0 4px var(--glow); }
-.nm-pending { position: absolute; inset: 0 0 16px 0; display: flex; align-items: center; justify-content: center; text-align: center;
-  border: 1px dashed var(--ghost); font: 600 11px/1.5 var(--f-body); letter-spacing: .12em; color: var(--label); text-transform: uppercase; padding: 10px; }
-.nm-axis { position: absolute; left: 0; right: 66px; bottom: 0; display: flex; justify-content: space-between; font: 600 10px/1 var(--f-body); letter-spacing: .1em; color: var(--label); }
+.nm-chart { position: relative; flex: 1; min-height: 130px; display: flex; align-items: flex-end; }
+.nm-chart-host { width: 100%; min-width: 0; }
+.nm-pending { width: 100%; align-self: center; text-align: center; border: 1px dashed var(--ghost); padding: 10px;
+  font: 600 11px/1.5 var(--f-body); letter-spacing: .12em; color: var(--label); text-transform: uppercase; }
 .nm-kpi { display: flex; flex-direction: column; gap: 5px; }
 .nm-kpi .nm-kl { font: 600 10px/1.2 var(--f-body); letter-spacing: .12em; text-transform: uppercase; color: var(--label); }
+.nm-kpi.is-row { flex-direction: row; align-items: baseline; justify-content: space-between; gap: 10px; margin-top: auto;
+  padding-top: 6px; border-top: 1px solid var(--ghost); }
 .nm-mix { display: flex; flex-direction: column; gap: 7px; min-height: 0; }
 .nm-mrow { display: grid; grid-template-columns: 104px minmax(0, 1fr) 46px; align-items: center; gap: 10px; height: 18px; }
 .nm-mrow .k { font: 600 11px/1 var(--f-body); letter-spacing: .08em; color: var(--label); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nm-mrow .v { font: 400 22px/1 var(--f-read); color: var(--hot); text-align: right; }
 .nm-mrow .nm-cells { height: 9px; }
-.nm-burn-sv { display: block; width: 100%; height: 58px; overflow: visible; }
-.nm-burn-sv line, .nm-burn-sv polyline, .nm-burn-sv circle { vector-effect: non-scaling-stroke; }
-.nm-mark { fill: none; stroke: var(--main); stroke-width: 1; }
+.cum-spark circle { vector-effect: non-scaling-stroke; }
 
 /* ── other pages (same language, denser) ──────────────────────────────────────── */
-.nm-pgrid { flex: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: stretch; }
-.nm-pgrid > .nm-card { min-height: 170px; }
-.nm-pgrid > .nm-card.wide { grid-column: 1 / -1; }
+.nm-pgrid { flex: none; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 14px; align-items: stretch; }
+.nm-pgrid > .nm-card { grid-column: span 6; min-height: 0; }
+.nm-pgrid > .span-3 { grid-column: span 3; }
+.nm-pgrid > .span-4 { grid-column: span 4; }
+.nm-pgrid > .span-5 { grid-column: span 5; }
+.nm-pgrid > .span-6 { grid-column: span 6; }
+.nm-pgrid > .span-7 { grid-column: span 7; }
+.nm-pgrid > .span-8 { grid-column: span 8; }
+.nm-pgrid > .wide, .nm-pgrid > .nm-card.wide { grid-column: 1 / -1; }
 .nm-pgrid .nm-card-in { height: auto; min-height: 100%; }
 .nm-big-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .nm-table { width: 100%; border-collapse: collapse; font: 400 12px/1.2 var(--f-body); color: var(--main); }
@@ -220,6 +248,15 @@ h1, h2, h3, p, figure { margin: 0; }
 .nm-table th.r, .nm-table td.r { text-align: right; padding-right: 0; }
 .nm-table td.v { font: 400 22px/1 var(--f-read); color: var(--hot); }
 .nm-table td.lead { color: var(--main); font-weight: 600; letter-spacing: .06em; }
+.nm-table tbody th { font: 600 12px/1.2 var(--f-body); letter-spacing: .06em; text-transform: none; color: var(--main);
+  padding: 6px 6px 6px 0; border-bottom: 1px dotted var(--ghost); }
+.nm-table caption { text-align: left; }
+.nm-table.nm-fixed { table-layout: fixed; }
+.nm-table.nm-fixed .c-rank { width: 30px; }
+.nm-table.nm-fixed .c-folder { width: 24%; }
+.nm-table.nm-fixed .c-num { width: 104px; }
+.nm-trunc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nm-table td.nm-trunc { max-width: 0; }
 .nm-table tr.is-today td { color: var(--hot); }
 .nm-table-wrap { overflow-x: auto; }
 .nm-stack { display: flex; height: 16px; gap: 2px; }
@@ -228,13 +265,13 @@ h1, h2, h3, p, figure { margin: 0; }
 .nm-stack i.dim { background: var(--ghost); }
 .nm-legend { display: flex; flex-direction: column; gap: 8px; }
 .nm-legend .nm-mrow { grid-template-columns: 170px minmax(0, 1fr) 64px; }
-.nm-future { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; border: 1px dashed var(--label);
-  background: var(--crt-2); }
-.nm-future b { font: 600 11px/1.2 var(--f-body); letter-spacing: .16em; color: var(--main); text-transform: uppercase; }
-.nm-future p { font: 400 12px/1.5 var(--f-body); letter-spacing: .04em; color: var(--label); }
 .nm-kv-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }
 .nm-kv-grid .nm-kv { padding: 7px 0; }
 .nm-kv-grid .nm-kv b { font-size: 18px; line-height: 18px; }
+.nm-authors { margin-top: 6px; padding: 9px 0; }
+.nm-authors b { font-size: 18px; line-height: 18px; }
+.nm-tier { margin-top: 8px; }
+.nm-mode-k { margin-right: 6px; }
 .nm-pill { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border: 1px solid var(--rule-strong);
   font: 600 10px/1 var(--f-body); letter-spacing: .12em; color: var(--bright); text-transform: uppercase; }
 
@@ -243,7 +280,8 @@ h1, h2, h3, p, figure { margin: 0; }
 .nm-row-set { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 9px 0; border-bottom: 1px dotted var(--ghost); }
 .nm-row-set:last-child { border-bottom: 0; }
 .nm-row-set .t { font: 600 12px/1.2 var(--f-body); letter-spacing: .08em; color: var(--main); text-transform: uppercase; }
-.nm-row-set .d { font: 400 11px/1.4 var(--f-body); letter-spacing: .03em; color: var(--label); margin-top: 3px; }
+.nm-row-set .d { display: block; font: 400 11px/1.4 var(--f-body); letter-spacing: .03em; color: var(--label); margin-top: 3px; }
+.nm-row-set.is-stack { grid-template-columns: minmax(0, 1fr); gap: 10px; }
 .nm-toggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
 .nm-toggle input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
 .nm-toggle .box { position: relative; width: 44px; height: 20px; border: 1px solid var(--edge); background: var(--crt); flex: none; }
@@ -281,7 +319,7 @@ h1, h2, h3, p, figure { margin: 0; }
 .nm-links { display: flex; flex-direction: column; gap: 8px; }
 .nm-links a { font: 600 12px/1.3 var(--f-body); letter-spacing: .08em; color: var(--main); text-decoration: underline; text-decoration-color: var(--rule-strong); text-underline-offset: 3px; cursor: pointer; }
 .nm-links a:hover { color: var(--hot); }
-.nm-supp { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px 14px; list-style: none; }
+.nm-supp { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 4px 14px; list-style: none; }
 .nm-supp li { font: 400 12px/1.5 var(--f-body); color: var(--main); letter-spacing: .04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nm-supp li::before { content: "> "; color: var(--label); }
 .nm-hero-big { font: 400 88px/.8 var(--f-read); color: var(--hot); text-shadow: 0 0 2px var(--glow), 0 0 14px var(--glow-soft); }
@@ -300,7 +338,31 @@ h1, h2, h3, p, figure { margin: 0; }
 
 .nm-empty { font: 400 14px/1.6 var(--f-body); color: var(--label); letter-spacing: .05em; text-transform: uppercase; }
 
-/* ── narrow windows: stack the nav above the page and the grid into one column ── */
+/* ── short windows: the default window is about 740 px tall inside its frame, a little less than the approved
+   mockup's 760. One line for the subtitle, tighter page padding and card gaps (the limit cards then need 187 px
+   and the whole overview 630) let it fit without scrolling, and the top row never overlaps its own header. ── */
+@media (min-width: 1001px) and (max-height: 790px) {
+  .nm-main { padding-top: 14px; padding-bottom: 12px; gap: 12px; }
+  .nm-hazard { margin-top: -14px; }
+  .nm-sub { max-width: 680px; }
+  .nm-grid { min-height: 630px; grid-template-rows: minmax(188px, 196fr) minmax(auto, 276fr) minmax(140px, 146fr); }
+  .nm-grid .nm-card-in { gap: 6px; }
+  .nm-grid .nm-row2 .nm-facts { gap: 3px; }
+  .nm-grid .nm-pace { gap: 2px; }
+}
+
+/* A tall window does not hand its extra height to the cards. The three rows share the grid's height, and on a maximised
+   window that made every card half empty (281 px tall at 1920x1040, with 80 to 90 px of nothing under the content).
+   Above the width where the cards stay at their normal height the grid stops growing at a sixth more than the default
+   window gives it (641 px) and the rest of the window stays page. */
+@media (min-width: 1100px) {
+  .nm-grid { max-height: 740px; }
+}
+
+/* ── narrow windows: tighter card padding, then the nav above the page and the grid in one column ── */
+@media (min-width: 1001px) and (max-width: 1100px) {
+  .nm-card-in { padding-left: 13px; padding-right: 13px; }
+}
 @media (max-width: 1000px) {
   .nm-app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
   .nm-nav { flex-direction: row; flex-wrap: wrap; align-items: center; border-right: 0; border-bottom: 1px solid var(--edge); padding: 10px 12px; }
@@ -316,19 +378,150 @@ h1, h2, h3, p, figure { margin: 0; }
   .nm-chart { min-height: 150px; }
   .nm-cost-r { border-left: 0; padding-left: 0; }
   .nm-pgrid, .nm-themes, .nm-kv-grid { grid-template-columns: minmax(0, 1fr); }
+  .nm-pgrid > * { grid-column: 1 / -1 !important; }
   .nm-head { flex-direction: column; align-items: flex-start; }
   .nm-sub { text-align: left; }
+  .nm-odo-row { grid-template-columns: minmax(0, 1fr); }
+  .nm-compare { border-left: 0; padding-left: 0; }
+}
+/* The window can be 720 px wide. The title bar is one row that does not wrap, and at that width it was 55 px too long:
+   REFRESH, the only manual control, was cut off. The caption after the title and the data age go (the uplink pill
+   already says whether the data is live), which frees about 155 px. */
+@media (max-width: 800px) {
+  .nm-brand em, #data-age { display: none; }
+}
+/* mid-width windows: three across becomes two, and the wide pairs stack */
+@media (max-width: 1200px) {
+  .nm-pgrid > .span-3, .nm-pgrid > .span-4 { grid-column: span 6; }
+  .nm-pgrid > .span-5, .nm-pgrid > .span-7, .nm-pgrid > .span-8 { grid-column: 1 / -1; }
 }
 
-/* SVG helpers from charts.js */
-.cum-spark, .cum-bars, .cum-stack, .cum-ring, .cum-heat { display: block; }
+/* SVG helpers from charts.js (charts.js sets the colours through classes; these are Nostromo's shapes) */
+.cum-spark, .cum-stack, .cum-ring, .cum-heat { display: block; }
 .cum-spark { width: 100%; height: 58px; overflow: visible; }
 .cum-stack { width: 100%; height: 16px; }
-.cum-bars { width: 100%; height: 80px; }
 .cum-heat { width: 100%; height: auto; }
+.cum-t { font-family: var(--f-body); font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
+.cum-cell, .cum-pip, .cum-track, .cum-mark, .cum-mark-2, .cum-hot { shape-rendering: crispEdges; }
+.cum-dot { filter: drop-shadow(0 0 3px var(--glow)); }
+.cum-line { filter: drop-shadow(0 0 2px var(--glow-soft)); stroke-width: 1.4; }
+.cum-ring-focus { stroke-width: 1; }
 .nm-stack-wrap { margin: 4px 0 12px; }
-.nm-future { grid-column: 1 / -1; }
 
 /* reduced motion: no animation anywhere; the static ON frame shows */
 html[data-reduce-motion="1"] *, html[data-reduce-motion="1"] *::before, html[data-reduce-motion="1"] *::after { animation: none !important; transition: none !important; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* ── stat tiles: a figure and its one-line explanation (shown in the tooltip on hover or focus) ──────── */
+.nm-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); gap: 14px 16px; align-content: start; }
+/* at most four across, whatever the card's width, and never narrower than a seven-digit figure needs */
+.nm-stats.is-quad { grid-template-columns: repeat(auto-fit, minmax(max(124px, calc((100% - 48px) / 4)), 1fr)); }
+.nm-stat { position: relative; display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 6px 8px 8px; margin: -6px -8px -8px; container-type: inline-size;
+  border: 1px solid transparent; cursor: default; }
+.nm-stat:hover, .nm-stat:focus-visible { border-color: var(--edge); background: var(--crt-2); outline: none; }
+.nm-stat:focus-visible { border-color: var(--bright); box-shadow: 0 0 0 1px var(--bright); }
+.nm-stat.is-wide { grid-column: 1 / -1; }
+.nm-stat.is-block { display: block; }
+.nm-stat-k { font: 600 10px/1.3 var(--f-body); letter-spacing: .12em; text-transform: uppercase; color: var(--label); }
+.nm-stat-v { font: 400 30px/1 var(--f-read); color: var(--hot); overflow-wrap: anywhere; text-shadow: 0 0 2px var(--glow), 0 0 8px var(--glow-soft); }
+.nm-stat-v.is-big { font-size: 44px; line-height: .9; }
+/* a figure fits its tile: --n is its length in characters (set by the markup); text values wrap instead */
+.nm-stat-v:not(.is-text) { font-size: clamp(20px, calc(100cqw / (.42 * var(--n, 6))), 30px); }
+.nm-stat-v.is-big:not(.is-text) { font-size: clamp(24px, calc(100cqw / (.42 * var(--n, 5))), 44px); }
+.nm-stat-s { font: 400 11px/1.35 var(--f-body); letter-spacing: .04em; color: var(--label); }
+.nm-stat .nm-cells { margin-top: 4px; }
+.nm-stat.is-block .nm-stat-k { margin-bottom: 6px; }
+.nm-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* the one tooltip: stat explanations and chart values */
+.nm-tip { position: fixed; z-index: 60; max-width: 340px; padding: 8px 11px; background: var(--crt); border: 1px solid var(--main);
+  box-shadow: 0 0 12px var(--glow-soft), 0 6px 18px var(--shade); color: var(--hot); font: 400 12px/1.5 var(--f-body); letter-spacing: .03em; }
+
+/* ── toolbar, callouts and states ────────────────────────────────────────────────────────────────── */
+.nm-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 8px 12px; border: 1px dashed var(--edge); background: var(--crt-2); }
+.nm-toolbar-k { font: 600 11px/1 var(--f-body); letter-spacing: .14em; text-transform: uppercase; color: var(--main); }
+.nm-toolbar-n { margin-left: auto; font: 400 11px/1.4 var(--f-body); letter-spacing: .06em; text-transform: uppercase; color: var(--label); }
+.nm-card-t .nm-seg button { height: 22px; padding: 0 8px; }
+.nm-callout { padding: 9px 12px; border: 1px solid var(--rule-strong); background: var(--crt-2); font: 400 12px/1.5 var(--f-body); letter-spacing: .03em; color: var(--label); }
+.nm-callout b { color: var(--hot); font-weight: 600; margin-right: 4px; }
+.nm-callout.is-warn { border-left: 4px solid var(--bright); }
+.nm-loading { font: 600 11px/1.5 var(--f-body); letter-spacing: .12em; text-transform: uppercase; color: var(--label); }
+.nm-loading::after { content: ""; display: inline-block; width: .5em; height: .9em; margin-left: 6px; vertical-align: -.1em; background: var(--bright);
+  animation: nm-blink 1s steps(1) infinite; }
+.nm-error { padding: 8px 10px; border: 1px dashed var(--label); font: 400 12px/1.5 var(--f-body); letter-spacing: .03em; color: var(--hot); }
+.nm-err { padding: 5px 9px; border: 1px dashed var(--bright); background: var(--crt-2); font: 600 11px/1.4 var(--f-body); letter-spacing: .05em; color: var(--hot); }
+.nm-err::before { content: "! "; color: var(--bright); }
+.nm-card.is-real { background: var(--bright); }
+.nm-card.is-real .nm-ttl { color: var(--hot); }
+.nm-card.is-warn .nm-card-t .nm-meta-t { color: var(--main); }
+.nm-card a { color: var(--hot); text-underline-offset: 3px; }
+
+/* ── limits: verdict, story, time against usage, the readings chart ─────────────────────────────── */
+.nm-verdict { display: flex; align-items: center; gap: 8px; padding-bottom: 6px; }
+.nm-chip.is-warn { background: var(--bright); border-color: var(--bright); color: var(--ink); }
+.nm-chip.is-crit { background: var(--hot); border-color: var(--hot); color: var(--ink); }
+.nm-story { font: 400 12px/1.5 var(--f-body); letter-spacing: .03em; color: var(--label); }
+.nm-meter { display: flex; flex-direction: column; gap: 7px; }
+.nm-meter .nm-mrow { grid-template-columns: 112px minmax(0, 1fr) 48px; }
+.nm-line, .nm-hbars, .nm-calendar, .nm-matrix { width: 100%; min-width: 0; }
+.nm-line { margin: 2px 0; }
+
+/* ── history: odometer, comparison, calendar ─────────────────────────────────────────────────────── */
+.nm-odo-row { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: 28px; align-items: center; }
+.nm-odo-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.nm-odo { display: flex; align-items: center; gap: 4px; font: 400 64px/1 var(--f-read); color: var(--hot); flex-wrap: nowrap; max-width: 100%; }
+.nm-od-d { position: relative; display: block; flex: none; width: .56em; height: 1.1em; overflow: hidden; background: var(--crt-2); border: 1px solid var(--edge);
+  text-shadow: 0 0 2px var(--glow), 0 0 10px var(--glow-soft); }
+.nm-od-d::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(180deg, var(--shade) 0%, transparent 28%, transparent 72%, var(--shade) 100%); }
+.nm-od-d .strip { display: flex; flex-direction: column; transform: translateY(calc(var(--d, 0) * -1.1em)); }
+.nm-od-d .strip i { display: block; flex: none; height: 1.1em; line-height: 1.1em; text-align: center; font-style: normal; }
+.nm-od-sep { display: block; flex: none; align-self: flex-end; width: .22em; margin-bottom: .12em; text-align: center; color: var(--label); }
+.nm-odo-facts { display: flex; flex-wrap: wrap; gap: 6px 22px; font: 600 11px/1.3 var(--f-body); letter-spacing: .1em; text-transform: uppercase; color: var(--label); }
+.nm-odo-facts b { font: 400 22px/1 var(--f-read); letter-spacing: .02em; color: var(--hot); margin-right: 3px; }
+.nm-compare { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding-left: 28px; border-left: 1px dotted var(--ghost); }
+.nm-cmp-body { display: flex; flex-direction: column; gap: 6px; }
+.nm-cmp-body.is-in { animation: nm-fade .55s ease-out both; }
+.nm-cmp-n { font: 400 66px/.85 var(--f-read); color: var(--bright); text-shadow: 0 0 2px var(--glow), 0 0 14px var(--glow-soft); overflow-wrap: anywhere; }
+.nm-cmp-u { font: 600 12px/1.3 var(--f-body); letter-spacing: .12em; text-transform: uppercase; color: var(--main); }
+.nm-cmp-t { font: 400 12px/1.5 var(--f-body); letter-spacing: .03em; color: var(--label); }
+.nm-dots { display: flex; gap: 8px; }
+.nm-dots button { width: 14px; height: 14px; padding: 0; cursor: pointer; background: var(--crt); border: 1px solid var(--edge); }
+.nm-dots button:hover { border-color: var(--main); }
+.nm-dots button[aria-pressed="true"] { background: var(--main); border-color: var(--main); box-shadow: 0 0 4px var(--glow); }
+@keyframes nm-fade { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+.nm-od-d .strip { transition: transform 1.5s cubic-bezier(.2, .8, .25, 1); }
+
+/* ── settings: alert levels, quiet hours, inline validation ─────────────────────────────────────── */
+.nm-levels { display: flex; flex-direction: column; gap: 10px; }
+.nm-chips { display: flex; flex-wrap: wrap; gap: 8px; min-height: 30px; align-items: center; }
+.nm-tchip { display: inline-flex; align-items: stretch; border: 1px solid var(--rule-strong); background: var(--crt); }
+.nm-tchip b { padding: 3px 10px 1px; font: 400 22px/24px var(--f-read); color: var(--hot); }
+.nm-tchip button { width: 28px; cursor: pointer; background: transparent; color: var(--label); border: 0; border-left: 1px solid var(--rule-strong); font: 600 16px/1 var(--f-body); }
+.nm-tchip button:hover:not(:disabled) { background: var(--main); color: var(--crt); }
+.nm-tchip button:disabled { cursor: default; opacity: .45; }
+.nm-addlevel { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.nm-addlevel .nm-input { width: 90px; }
+.nm-quiet { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.nm-quiet-to { font: 600 11px/1 var(--f-body); letter-spacing: .1em; text-transform: uppercase; color: var(--label); }
+.nm-input.is-time { width: 112px; font-size: 20px; text-align: center; color-scheme: dark; }
+.nm-input[aria-invalid="true"], .nm-select[aria-invalid="true"] { border-color: var(--bright); box-shadow: 0 0 0 1px var(--bright); }
+.nm-input:disabled, .nm-select:disabled, .nm-btn:disabled { opacity: .45; cursor: default; }
+.nm-toggle input:disabled ~ .box { opacity: .5; }
+.nm-toggle input:disabled ~ .lbl { opacity: .5; }
+.nm-set.is-off > .nm-row-set:not(:first-child) { opacity: .55; }
+.nm-set > .nm-err { margin: 4px 0 8px; }
+
+/* ── small additions from the first review ──────────────────────────────────────────────────────── */
+.nm-kv-grid.is-one { grid-template-columns: minmax(0, 1fr); }
+.nm-kv-grid.is-one .nm-kv { padding: 6px 0; }
+.nm-stat-v.is-text { font-size: 24px; line-height: 1.1; }
+.nm-colstack { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.nm-colstack > .nm-card { flex: 1 1 auto; grid-column: auto; }
+.nm-tokens { table-layout: fixed; }
+.nm-tokens tbody th { width: 56%; white-space: normal; }
+.nm-tokens td.v { font-size: 20px; }
+.nm-path { text-transform: none; letter-spacing: .02em; color: var(--main); overflow-wrap: anywhere; }
+.nm-chart-t { padding: 0; }
+.nm-daily { min-height: 132px; }
+.nm-why { white-space: normal; }

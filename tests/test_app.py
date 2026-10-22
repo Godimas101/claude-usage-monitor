@@ -15,10 +15,13 @@ import functools
 import json
 import logging
 import os
+import re
+import sqlite3
 import sys
 import tempfile
 import threading
 import time
+import types
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -34,8 +37,10 @@ import main as entry
 import usage_monitor.app as app_mod
 import version
 from usage_monitor import themes
+from usage_monitor.data.alerts import AlertEngine
+from usage_monitor.data.store import Store
+from usage_monitor.settings import DEFAULTS as SETTINGS_DEFAULTS
 from usage_monitor.app import (
-    AlertTracker,
     Blinker,
     MonitorApp,
     SingleInstance,
@@ -49,7 +54,6 @@ from usage_monitor.app import (
     menu_items,
     mutex_name,
     release_url,
-    same_window,
     tick_delay_ms,
     tray_tooltip,
 )
@@ -1544,73 +1548,7 @@ def test_a_failing_toggle_callback_still_keeps_the_blinker_going():
 
 # ── Alerts ────────────────────────────────────────────────────────────────────
 
-def alert_model(session: float, weekly: float = 2.0, *, status: m.ApiStatus = m.ApiStatus.LIVE,
-                resets_in_hours: float = 3.0):
-    state = sample_state("normal3", NOW)
-    state.usage.limits[0].percent = session
-    state.usage.limits[0].resets_at = NOW + timedelta(hours=resets_in_hours)
-    state.usage.limits[1].percent = weekly
-    state.status = status
-    return build_model(state, NOW)
-
-
-def test_a_limit_going_critical_raises_one_notice_for_its_window():
-    tracker = AlertTracker()
-    assert tracker.check(alert_model(50)) == []                         # seeds
-    assert tracker.check(alert_model(89.9)) == []
-    notice = tracker.check(alert_model(91))
-    assert len(notice) == 1 and notice[0].startswith("SESSION is at 91%.") and "Resets" in notice[0]
-    assert tracker.check(alert_model(93)) == []                         # still the same window: not again
-    assert tracker.check(alert_model(97)) == []
-
-
-def test_a_limit_already_critical_at_startup_does_not_raise_a_notice():
-    tracker = AlertTracker()
-    assert tracker.check(alert_model(95)) == []
-    assert tracker.check(alert_model(96)) == []
-
-
-def test_a_new_window_alerts_again_and_so_does_a_recovery_then_a_new_peak():
-    tracker = AlertTracker()
-    tracker.check(alert_model(10))
-    assert tracker.check(alert_model(92, resets_in_hours=3))
-    assert tracker.check(alert_model(92, resets_in_hours=3)) == []
-    assert tracker.check(alert_model(95, resets_in_hours=8)), "a new reset time is a new window"
-    tracker.check(alert_model(5, resets_in_hours=8))
-    assert tracker.check(alert_model(91, resets_in_hours=8)), "after dropping below critical it can alert again"
-
-
-def test_reset_times_that_wobble_by_a_fraction_of_a_second_are_one_window():
-    """Real API values: one window read ...800.159781 on a fetch and ...800.061255 on the next."""
-    base = NOW + timedelta(hours=3)
-    assert same_window(base, base + timedelta(seconds=0.1))
-    assert same_window(base, base - timedelta(seconds=0.5))
-    assert same_window(None, None)
-    assert not same_window(base, None) and not same_window(None, base)
-    assert not same_window(base, base + timedelta(hours=5)), "the next 5 hour window is a new one"
-
-
-def test_a_critical_limit_does_not_alert_again_when_the_api_wobbles_its_reset_time():
-    tracker = AlertTracker()
-    tracker.check(alert_model(10))
-    assert tracker.check(alert_model(92)), "the first critical reading alerts"
-    for wobble_s in (0.1, -0.4, 0.3, -0.2, 0.5):                         # fetch after fetch, same window
-        assert tracker.check(alert_model(93, resets_in_hours=3 + wobble_s / 3600)) == []
-
-
-def test_the_weekly_limit_alerts_too_and_both_can_in_one_notice():
-    tracker = AlertTracker()
-    tracker.check(alert_model(10, 10))
-    notice = tracker.check(alert_model(95, 93))
-    assert len(notice) == 2 and notice[0].startswith("SESSION") and notice[1].startswith("WEEKLY")
-
-
-def test_stale_or_empty_data_raises_nothing_and_does_not_seed():
-    tracker = AlertTracker()
-    assert tracker.check(alert_model(95, status=m.ApiStatus.STALE)) == []
-    assert tracker.check(sample_model("loading")) == []
-    assert tracker.check(alert_model(40)) == []                         # the first live model seeds
-    assert tracker.check(alert_model(94))
+# (the alert engine has its own tests in test_alerts.py; the wiring is tested with the wired app below)
 
 
 # ── Updates ───────────────────────────────────────────────────────────────────
@@ -1969,6 +1907,79 @@ def test_the_server_is_given_the_real_callbacks(wired):
     assert kwargs["update_cb"]["info"]() is None
 
 
+def test_the_statistics_store_is_a_new_connection_on_the_usage_database(wired, isolated_env):
+    """The server opens its own Store on the file the data service writes, and only when the first
+    statistics request comes. (The fake service here writes nothing, so the test makes the file.)"""
+    factory = wired.app.server.kwargs["analytics_store"]
+    assert factory is app_mod.analytics_store
+    Store(isolated_env / "usage.db").close()
+    first, second = factory(), factory()
+    try:
+        assert first is not second and first.table_counts()["requests"] == 0
+    finally:
+        first.close()
+        second.close()
+
+
+def test_the_statistics_store_never_creates_the_database(isolated_env):
+    """Only the data service makes usage.db: a statistics request that came first would race its migration."""
+    with pytest.raises(sqlite3.OperationalError, match="not been created"):
+        app_mod.analytics_store()
+    assert list(isolated_env.glob("usage.db*")) == []
+
+
+def test_the_statistics_store_never_upgrades_the_database(isolated_env):
+    """A database from before this build's schema is the data service's to upgrade; opening a Store on it
+    would migrate it from the API's thread and could collide with the service's own migration."""
+    db = isolated_env / "usage.db"
+    Store(db).close()
+    connection = sqlite3.connect(db)
+    connection.execute("UPDATE meta SET value = '2' WHERE key = 'schema_version'")
+    connection.commit()
+    connection.close()
+    with pytest.raises(sqlite3.OperationalError, match="schema 2"):
+        app_mod.analytics_store()
+    connection = sqlite3.connect(db)
+    try:
+        assert connection.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone() == ("2",)
+    finally:
+        connection.close()                                                      # still 2: nothing migrated it
+
+
+def test_the_statistics_store_refuses_an_empty_file_and_a_newer_schema(isolated_env):
+    from usage_monitor.data.store import StoreError
+
+    isolated_env.mkdir(parents=True, exist_ok=True)
+    db = isolated_env / "usage.db"
+    db.write_bytes(b"")
+    with pytest.raises(sqlite3.OperationalError):                                # no meta table yet: mid-creation
+        app_mod.analytics_store()
+    db.unlink()
+    Store(db).close()
+    connection = sqlite3.connect(db)
+    connection.execute("UPDATE meta SET value = '99' WHERE key = 'schema_version'")
+    connection.commit()
+    connection.close()
+    with pytest.raises(StoreError):
+        app_mod.analytics_store()
+
+
+def test_the_server_reads_the_pricing_table_from_the_data_service(wired):
+    provider = wired.app.server.kwargs["pricing_provider"]
+    assert provider() is None                                     # the fake service has loaded none
+    wired.service._pricing = "the table the service keeps"
+    assert provider() == "the table the service keeps"
+    wired.service.pricing = "a public accessor wins when the service grows one"
+    assert provider() == "a public accessor wins when the service grows one"
+    assert app_mod.service_pricing(object()) is None
+
+
+def test_the_window_finder_the_app_uses_is_the_dashboards_public_one():
+    from usage_monitor.ui import dashboard
+
+    assert app_mod.dashboard_window_of is dashboard.find_window_of is dashboard._find_window_of
+
+
 def test_a_state_from_the_data_thread_is_marshalled_to_the_ui_thread_once(wired):
     posted = len(wired.host.posted)
     done = threading.Event()
@@ -2138,7 +2149,11 @@ def test_a_windows_colour_change_re_resolves_the_theme(wired, monkeypatch):
     first = app._ctx.variant.colors["accent"]
     monkeypatch.setattr(plat, "windows_accent_hex", lambda: "#12ab34")
     wired.host.emit("settings", "ImmersiveColorSet")
-    assert app._ctx.variant.colors["accent"] == "#12ab34" != first
+    # the accent in use is the new Windows accent made readable on a dark card (lifted in lightness), not the old one
+    expected = themes.resolve({"theme_id": "gates", "theme_variant": "system", "theme_mode": "dark"},
+                              accent_provider=lambda: "#12ab34", light_provider=lambda: False)[1]
+    assert app._ctx.variant.colors["accent"] == expected.colors["accent"] != first
+    assert app._ctx.variant.extras["accent_fill"] == expected.extras["accent_fill"]
     wired.host.emit("settings", "app")                                       # the app's own broadcasts are ignored here
 
 
@@ -2247,21 +2262,180 @@ def test_a_blink_leaves_the_published_numbers_alone_between_ticks(wired):
     assert app._ctx.model.rows is model_before.rows or app._ctx.model.rows == model_before.rows
 
 
-def test_an_alert_toast_follows_the_notifications_setting(wired):
-    wired.service.publish(sample_state("normal3", NOW))
-    wired.host.run_posted()
-    wired.service.publish(sample_state("critical", NOW))
-    wired.host.run_posted()
-    assert [t for t, _ in wired.tray.notices] == ["Claude usage"]
-    assert wired.tray.notices[0][1].startswith("SESSION is at 93%.")
-    wired.settings.set("notifications_enabled", False)
-    wired.host.run_posted()
-    state = sample_state("normal3", NOW)
+def usage_state(session: float, weekly: float = 2.0, *, now: datetime = NOW, resets_in_hours: float = 3.0,
+                status: m.ApiStatus = m.ApiStatus.LIVE, spend: m.Spend | None = None) -> m.MonitorState:
+    """A published state: SESSION and WEEKLY at the given percents, the session window ending in some hours."""
+    state = sample_state("normal3", now)
+    state.usage.limits[0].percent = session
+    state.usage.limits[0].resets_at = now + timedelta(hours=resets_in_hours)
+    state.usage.limits[1].percent = weekly
+    state.usage.spend = spend
+    state.status = status
+    return state
+
+
+def publish(wired, state) -> list[tuple[str, str]]:
+    """Publish ``state`` from the data thread, let the UI thread pick it up, return the toasts it raised."""
+    before = len(wired.tray.notices)
     wired.service.publish(state)
     wired.host.run_posted()
-    wired.service.publish(sample_state("critical", NOW))
-    wired.host.run_posted()
-    assert len(wired.tray.notices) == 1
+    return wired.tray.notices[before:]
+
+
+def test_the_app_checks_alerts_with_the_alert_engine_built_on_its_settings(wired):
+    assert isinstance(wired.app._alerts, AlertEngine)
+    wired.settings.set("alert_thresholds", [40])
+    assert publish(wired, usage_state(10)) == []                                   # the baseline
+    assert [title for title, _ in publish(wired, usage_state(45))] == ["Session limit at 40%"]
+
+
+def test_an_alert_toast_shows_the_alerts_title_and_message(wired):
+    publish(wired, usage_state(13))
+    toasts = publish(wired, usage_state(85))
+    assert [title for title, _ in toasts] == ["Session limit at 80%"]
+    assert re.fullmatch(r"Resets \d{1,2}:\d{2} (AM|PM)", toasts[0][1])
+    assert wired.tray.notices == toasts
+
+
+def test_each_threshold_crossing_is_one_toast_and_a_level_already_passed_is_not_repeated(wired):
+    publish(wired, usage_state(13))
+    assert [t for t, _ in publish(wired, usage_state(85))] == ["Session limit at 80%"]
+    assert publish(wired, usage_state(86)) == [] and publish(wired, usage_state(89.9)) == []
+    assert [t for t, _ in publish(wired, usage_state(93))] == ["Session limit at 90%"]
+    assert [t for t, _ in publish(wired, usage_state(100))] == ["Session limit at 100%"]
+    assert publish(wired, usage_state(100)) == [] and publish(wired, usage_state(104)) == []
+    assert len(wired.tray.notices) == 3
+
+
+def test_a_limit_that_is_already_high_when_the_app_starts_does_not_toast(wired):
+    assert publish(wired, usage_state(95)) == []                                   # the first reading is the baseline
+    assert publish(wired, usage_state(96)) == []
+    assert wired.tray.notices == []
+
+
+def test_the_weekly_limit_toasts_with_its_reset_day(wired):
+    publish(wired, usage_state(5, weekly=60))
+    toasts = publish(wired, usage_state(5, weekly=82))
+    assert [title for title, _ in toasts] == ["Weekly limit at 80%"]
+    assert re.fullmatch(r"Resets (Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2}:\d{2} (AM|PM)", toasts[0][1])
+
+
+def test_a_new_window_after_a_high_reading_toasts_the_reset(wired):
+    publish(wired, usage_state(92, resets_in_hours=1))
+    publish(wired, usage_state(93, resets_in_hours=1))
+    toasts = publish(wired, usage_state(4, resets_in_hours=5))
+    assert [title for title, _ in toasts] == ["Session limit reset"]
+    assert publish(wired, usage_state(5, resets_in_hours=5)) == []
+
+
+def test_credits_in_use_toast_once_a_day(wired):
+    publish(wired, usage_state(5, spend=m.Spend(enabled=True, used=1.0, limit=50.0, currency="USD")))
+    toasts = publish(wired, usage_state(5, spend=m.Spend(enabled=True, used=2.5, limit=50.0, currency="USD")))
+    assert [title for title, _ in toasts] == ["Usage credits in use"] and "2.50" in toasts[0][1]
+    assert publish(wired, usage_state(5, spend=m.Spend(enabled=True, used=3.5, limit=50.0, currency="USD"))) == []
+
+
+def test_a_fullscreen_app_in_front_holds_the_toast_back_for_good(wired):
+    publish(wired, usage_state(13))
+    wired.plat.fullscreen = True
+    assert publish(wired, usage_state(85)) == []                                   # crossed behind the game
+    wired.plat.fullscreen = False
+    assert publish(wired, usage_state(86)) == []                                   # and not toasted in a burst later
+    assert [t for t, _ in publish(wired, usage_state(93))] == ["Session limit at 90%"]   # the next level still is
+
+
+def test_the_engine_is_told_about_the_fullscreen_app_on_every_state(wired, monkeypatch):
+    seen: list[bool] = []
+    real = wired.app._alerts.evaluate
+    monkeypatch.setattr(wired.app._alerts, "evaluate",
+                        lambda state, *, suppressed=False: seen.append(suppressed) or real(state, suppressed=suppressed))
+    publish(wired, usage_state(13))
+    wired.plat.fullscreen = True
+    publish(wired, usage_state(14))
+    wired.plat.fullscreen = False
+    publish(wired, usage_state(15))
+    assert seen == [False, True, False]
+
+
+def test_a_foreground_check_that_fails_does_not_cost_the_alert(wired, monkeypatch):
+    def broken() -> bool:
+        raise OSError("no foreground window")
+
+    publish(wired, usage_state(13))
+    monkeypatch.setattr(wired.plat, "is_fullscreen_foreground", broken)
+    assert [t for t, _ in publish(wired, usage_state(85))] == ["Session limit at 80%"]
+
+
+def test_the_alert_settings_apply_to_the_next_state(wired):
+    settings = wired.settings
+    publish(wired, usage_state(13))
+    settings.set("alerts_enabled", False)
+    assert publish(wired, usage_state(85)) == []                                   # the master switch
+    settings.set("alerts_enabled", True)
+    settings.set("alert_on_threshold", False)
+    assert publish(wired, usage_state(93)) == []                                   # the threshold kind alone
+    settings.set("alert_on_threshold", True)
+    settings.set("alert_thresholds", [95, 99])
+    assert publish(wired, usage_state(94)) == []                                   # raised above the reading
+    assert [t for t, _ in publish(wired, usage_state(97))] == ["Session limit at 95%"]
+
+
+def test_quiet_hours_hold_the_toast_back(wired):
+    wired.settings.set("alert_quiet_hours", {"start": "00:00", "end": "23:59"})
+    publish(wired, usage_state(13))
+    assert publish(wired, usage_state(85)) == []
+    wired.settings.set("alert_quiet_hours", None)
+    assert [t for t, _ in publish(wired, usage_state(93))] == ["Session limit at 90%"]
+
+
+def test_alerts_come_from_live_data_only(wired):
+    assert publish(wired, usage_state(95, status=m.ApiStatus.STALE)) == []
+    nothing_yet = usage_state(0, status=m.ApiStatus.LOADING)
+    nothing_yet.usage = None
+    assert publish(wired, nothing_yet) == []
+    publish(wired, usage_state(40))                                                # the first live reading seeds
+    assert [t for t, _ in publish(wired, usage_state(94))] == ["Session limit at 90%"]
+
+
+def test_a_toast_that_fails_does_not_stop_the_others_or_the_redraw(wired, caplog):
+    def refuse(title, body):
+        raise OSError("the shell refused the balloon")
+
+    publish(wired, usage_state(13, weekly=10))
+    wired.tray.notify = refuse
+    rendered = wired.app.stats.snapshot()["rendered"]["floating"]
+    with caplog.at_level(logging.ERROR, logger="usage_monitor.app"):
+        wired.service.publish(usage_state(93, weekly=95))                          # two limits cross at once
+        wired.host.run_posted()
+    assert sum("could not show a threshold alert" in r.getMessage() for r in caplog.records) == 2
+    assert wired.app.stats.snapshot()["rendered"]["floating"] == rendered + 1      # the redraw came first
+
+
+def test_an_engine_that_raises_is_logged_and_the_ui_carries_on(wired, caplog):
+    def boom(state, *, suppressed=False):
+        raise RuntimeError("engine bug")
+
+    wired.app._alerts.evaluate = boom
+    with caplog.at_level(logging.ERROR, logger="usage_monitor.app"):
+        assert publish(wired, usage_state(85)) == []
+    assert "alert evaluation failed" in caplog.text
+    assert wired.tray.tooltips[-1] == "Claude usage - session 85% - weekly 2% (dev)"   # still redrawn
+
+
+def test_both_limits_crossing_at_once_are_two_toasts(wired):
+    publish(wired, usage_state(13, weekly=10))
+    toasts = publish(wired, usage_state(93, weekly=95))
+    assert sorted(title for title, _ in toasts) == ["Session limit at 90%", "Weekly limit at 90%"]
+
+
+def test_there_is_no_notifications_setting_any_more():
+    from usage_monitor.ui.server import SETTING_SPECS
+
+    assert "notifications_enabled" not in SETTING_SPECS
+    assert "notifications_enabled" not in SETTINGS_DEFAULTS
+    assert {"alerts_enabled", "alert_thresholds", "alert_on_threshold", "alert_on_reset", "alert_on_credits",
+            "alert_quiet_hours"} <= set(SETTING_SPECS)
+    assert not hasattr(app_mod, "AlertTracker") and not hasattr(app_mod, "same_window")
 
 
 def test_clicking_the_toast_opens_the_dashboard(wired):
@@ -2481,6 +2655,63 @@ def test_the_smoke_summary_holds_numbers_and_words_but_not_usage_content():
 
 def test_a_short_smoke_run_still_gets_a_minimum_length():
     assert SmokeTest(1, "x.json").seconds == 5.0
+
+
+def test_the_smoke_analytics_step_reads_every_statistics_route_and_keeps_only_sizes(monkeypatch, tmp_path):
+    from usage_monitor.ui.server import ApiServer
+
+    db = tmp_path / "usage.db"
+    Store(db).close()
+    settings = Settings(tmp_path / "s.json", save_delay_s=0.0)
+    server = ApiServer(lambda: None, settings, refresh_cb=None, update_cb={}, version="t", dev=True,
+                       analytics_store=lambda: Store(db))
+    server.start()
+    smoke = SmokeTest(45, tmp_path / "r.json")
+    smoke._app = types.SimpleNamespace(server=server)
+    monkeypatch.setattr(SmokeTest, "DATABASE_WAIT_S", 0.0)
+    try:
+        result = smoke._step_analytics()
+    finally:
+        server.stop()
+        settings.close()
+    assert set(result) == {route for route, _keys in SmokeTest.ANALYTICS_ROUTES}
+    assert len(result) == 7 and all(item["status"] == 200 and set(item) == {"status", "bytes", "ms"}
+                                    for item in result.values())
+    json.dumps(result)                                                         # and it can go into the report
+
+
+def test_the_smoke_analytics_step_fails_naming_each_route_that_does_not_answer(monkeypatch, tmp_path):
+    from usage_monitor.ui.server import ApiServer
+
+    settings = Settings(tmp_path / "s.json", save_delay_s=0.0)
+    server = ApiServer(lambda: None, settings, refresh_cb=None, update_cb={}, version="t", dev=True)
+    server.start()                                                             # no statistics store: every route is a 501
+    smoke = SmokeTest(45, tmp_path / "r.json")
+    smoke._app = types.SimpleNamespace(server=server)
+    monkeypatch.setattr(SmokeTest, "DATABASE_WAIT_S", 0.0)
+    try:
+        with pytest.raises(RuntimeError) as caught:
+            smoke._step_analytics()
+    finally:
+        server.stop()
+        settings.close()
+    assert str(caught.value).count("answered 501") == 7 and "/api/analytics/cost" in str(caught.value)
+
+
+def test_the_smoke_shape_check_names_what_is_missing():
+    check = SmokeTest._shape_problem
+    assert check("/r", b'{"a": 1, "b": 2}', ("a", "b")) is None
+    assert check("/r", b'{"a": 1}', ("a", "b", "c")) == "GET /r lacks b, c"
+    assert check("/r", b"<html>", ("a",)) == "GET /r did not answer JSON"
+    assert check("/r", b"[1]", ("a",)) == "GET /r lacks a"
+
+
+def test_the_analytics_step_runs_after_the_dashboard_step_in_a_full_smoke_run():
+    """The probe schedule is inside _probe; read it from the source so a re-ordering is noticed."""
+    import inspect
+
+    source = inspect.getsource(SmokeTest._probe)
+    assert source.index('"dashboard"') < source.index('"analytics"')
 
 
 # ── Real windows (CUM_UI_TESTS=1) ─────────────────────────────────────────────

@@ -14,13 +14,22 @@ Selection (resolve)
                  theme_variant once, and after that the old name is never read again.
 
 Gates accents. A Gates variant id is "<accent>-<dark|light>". For the "system" accent the live
-Windows accent replaces the accent tokens, and the other tokens are derived from that colour:
-  accent        the live accent
-  accent_alt    the accent moved 30 % of the way toward the variant's surface colour. This
+Windows accent replaces the accent tokens, and the other tokens are derived from that colour. The
+accent is made usable once, here, and the Pillow skin and the dashboard CSS both read the result:
+  accent        the live accent lifted to read on the variant's window (colour.lift_accent): OKLCH
+                lightness at least 0.69 on dark, at most 0.60 on light, then 3:1 against the card and
+                the surface. The 12 designed accents are inside those bounds and stay as they are.
+  accent_fill   the colour of normal-severity fills (usage bars, chart marks, the plan multiple), an
+                extra token. It is ``accent`` while that stays at least SYSTEM_ACCENT_SEPARATION
+                (CIE76) away from every severity colour (ok, warn, alert, usage_warn, usage_alert,
+                stale). Otherwise the variant's own JSON accent stands in, because a red or grey
+                accent would draw normal usage in the colour of a critical or stale one. ``accent``
+                itself stays the system colour for chrome (title glyph, selection, swatch ring).
+  accent_alt    ``accent_fill`` moved 30 % of the way toward the variant's surface colour. This
                 reproduces 11 of the 12 shipped fixed-accent values exactly. green-dark is one
                 level out in one channel.
-  glow          the accent with the variant's own glow alpha (5c on dark, 47 on light)
-  accent_soft, accent_tint (extras)   the accent with each token's own alpha byte
+  glow          ``accent`` with the variant's own glow alpha (5c on dark, 47 on light)
+  accent_soft, accent_tint (extras)   ``accent_fill`` with each token's own alpha byte
 The mode "system" asks AppsUseLightTheme. Both readers are keyword arguments of resolve(), so
 tests can inject them. By default they come from usage_monitor.ui.platform. When that module
 is missing or a read fails, the JSON values are used.
@@ -46,6 +55,7 @@ from typing import Any, Protocol
 
 from usage_monitor.log import get_logger
 from usage_monitor.paths import resource_dir
+from usage_monitor.themes import colour
 
 log = get_logger(__name__)
 
@@ -64,8 +74,14 @@ V1_NAME_TO_VARIANT: dict[str, str] = {
     "Default": "amber", "Red": "red", "Blue": "blue", "Green": "green",
     "Purple": "purple", "Cyan": "cyan", "Orange": "orange", "White": "white",
 }
-# Gates system accent: accent_alt sits this fraction of the way from the accent to the surface.
+# Gates system accent: accent_alt sits this fraction of the way from the fill accent to the surface.
 SYSTEM_ACCENT_ALT_MIX = 0.30
+# The usable system accent must be at least this far (CIE76 dE) from every severity colour to draw
+# normal usage. The approved designed accents are 21 or more away from them; 25 leaves a margin.
+SYSTEM_ACCENT_SEPARATION = 25.0
+# The roles, and the per-mode extras (theme.extras["modes"][mode]), that mean a severity or a stale state.
+_SEVERITY_ROLES = ("ok", "warn", "alert", "stale")
+_SEVERITY_MODE_TOKENS = ("usage_warn", "usage_alert")
 
 _TOP_KEYS = (
     "id", "name", "tagline", "fonts", "shape", "effects", "bar", "widget", "variants", "extras",
@@ -380,7 +396,7 @@ def live_variant(
     dashboard's theme picker, so a swatch matches what choosing it gives.
     """
     if theme.id == GATES_ID and variant.id.startswith("system-"):
-        return _with_system_accent(variant, _system_accent(accent_provider))
+        return _with_system_accent(theme, variant, _system_accent(accent_provider))
     return variant
 
 
@@ -440,7 +456,7 @@ def _gates_variant(
         mode = "light" if _system_is_light(light_provider) else "dark"
     variant = theme.variant(f"{accent}-{mode}")
     if accent == "system":
-        variant = _with_system_accent(variant, _system_accent(accent_provider))
+        variant = _with_system_accent(theme, variant, _system_accent(accent_provider))
     return variant
 
 
@@ -474,19 +490,36 @@ def _normal_accent(raw: object) -> str | None:
     return None
 
 
-def _with_system_accent(variant: Variant, accent: str | None) -> Variant:
+def _with_system_accent(theme: Theme, variant: Variant, accent: str | None) -> Variant:
     """The variant with the live accent in place of its accent tokens (see the module docstring)."""
     if accent is None:
         return variant
+    mode = _variant_mode(variant)
+    modes = theme.extras.get("modes") if isinstance(theme.extras, dict) else None
+    mode_tokens = modes.get(mode) if isinstance(modes, dict) and isinstance(modes.get(mode), dict) else {}
+    cards = [variant.colors["surface"], mode_tokens.get("widget_bg", variant.colors["surface"])]
+    usable = colour.lift_accent(accent, mode, cards)
+    severity = [variant.colors[role] for role in _SEVERITY_ROLES]
+    severity += [mode_tokens[token] for token in _SEVERITY_MODE_TOKENS if isinstance(mode_tokens.get(token), str)]
+    separated = colour.min_separation(usable, severity) >= SYSTEM_ACCENT_SEPARATION
+    fill = usable if separated else variant.colors["accent"][:7]
     colors = dict(variant.colors)
-    colors["accent"] = accent
-    colors["accent_alt"] = _mix(accent, colors["surface"], SYSTEM_ACCENT_ALT_MIX)
-    colors["glow"] = accent + _alpha_suffix(colors["glow"])
+    colors["accent"] = usable
+    colors["accent_alt"] = _mix(fill, colors["surface"], SYSTEM_ACCENT_ALT_MIX)
+    colors["glow"] = usable + _alpha_suffix(colors["glow"])
     extras = dict(variant.extras)
+    extras["accent_fill"] = fill
     for key in ("accent_soft", "accent_tint"):
         if key in extras:
-            extras[key] = accent + _alpha_suffix(extras[key])
+            extras[key] = fill + _alpha_suffix(extras[key])
     return replace(variant, colors=colors, extras=extras)
+
+
+def _variant_mode(variant: Variant) -> str:
+    """"dark" or "light": the variant's own mode, else the one its window colour suggests."""
+    if variant.mode in ("dark", "light"):
+        return variant.mode
+    return "light" if colour.relative_luminance(variant.colors["bg"]) > 0.4 else "dark"
 
 
 def _alpha_suffix(value: str) -> str:

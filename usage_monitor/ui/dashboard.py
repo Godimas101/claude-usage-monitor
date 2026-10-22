@@ -7,23 +7,29 @@ in that child: a pywebview window on the local API URL, with the window caption 
 theme and a saved position that is off every screen pulled back onto one. When pywebview or WebView2
 is missing, the same URL opens in the default browser instead and the exit code says so. The child
 talks to the API over HTTP with the per-run token it receives in the CUM_DASHBOARD_TOKEN
-environment variable.
+environment variable, to 127.0.0.1 only and without following a redirect. Its js_api object
+(DashboardApi) is what the page can call: the token, the window chrome, a link opener and
+save_export, which writes a daily-rollup download through the native save dialog.
 """
 from __future__ import annotations
 
 import argparse
+import contextlib
 import ctypes
 import json
 import os
 import re
 import subprocess
 import sys
+import tempfile
 import threading
+import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
 from collections.abc import Callable, Sequence
 from ctypes import wintypes
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +60,14 @@ GRAB_HEIGHT = 28
 EXTERNAL_HOSTS = frozenset({"github.com", "patreon.com", "www.patreon.com"})
 _HEX_COLOUR = re.compile(r"#[0-9a-fA-F]{6}")
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+# save_export: the formats /api/export offers, the largest download taken, and what a safe name looks like.
+EXPORT_FORMATS = ("csv", "json")
+MAX_EXPORT_BYTES = 16 * 1024 * 1024
+EXPORT_TIMEOUT_S = 20.0
+_EXPORT_NAME = re.compile(r"claude-usage-daily-\d{4}-\d{2}-\d{2}\.(?:csv|json)")
+_LOOPBACK_BASE = re.compile(r"http://127\.0\.0\.1:[0-9]{1,5}")
+_EXPORT_FILTERS = {"csv": "CSV file (*.csv)", "json": "JSON file (*.json)"}
 
 SW_RESTORE = 9
 DWMWA_USE_IMMERSIVE_DARK_MODE = 20
@@ -118,8 +132,12 @@ def _window_title(user32: Any, hwnd: int) -> str:
     return buffer.value
 
 
-def _find_window_of(pid: int) -> int | None:
-    """The visible dashboard window owned by process ``pid``, or None. FindWindowW first, then a scan."""
+def find_window_of(pid: int) -> int | None:
+    """The visible dashboard window owned by process ``pid``, or None. FindWindowW first, then a scan.
+
+    Looked up by owner, not by title alone: a second monitor (an installed copy beside a dev build)
+    can have a window with the same title, and FindWindowW names only one of them.
+    """
     user32 = _user32()
     hwnd = user32.FindWindowW(None, WINDOW_TITLE)
     if hwnd and _window_pid(user32, hwnd) == pid:
@@ -142,11 +160,14 @@ def _find_window_of(pid: int) -> int | None:
     return found[0] if found else None
 
 
+_find_window_of = find_window_of     # the name this function had while it was private
+
+
 def focus_window(pid: int) -> bool:
     """Bring the dashboard window of process ``pid`` to the front. False when no such window is found."""
     if sys.platform != "win32":
         return False
-    hwnd = _find_window_of(pid)
+    hwnd = find_window_of(pid)
     if hwnd is None:
         return False
     user32 = _user32()
@@ -284,18 +305,83 @@ def _external_allowed(url: Any) -> bool:
     return parts.scheme == "https" and (parts.hostname or "") in EXTERNAL_HOSTS
 
 
-class DashboardApi:
-    """The methods the page can call as pywebview.api.<name>. Names starting with _ are not exposed."""
+def _export_result(*, ok: bool = False, path: str | None = None, error: str | None = None) -> dict[str, Any]:
+    return {"ok": ok, "path": path, "error": error}
 
-    def __init__(self, token: str) -> None:
+
+class DashboardApi:
+    """The methods the page can call as pywebview.api.<name>. Names starting with _ are not exposed.
+
+    ``base`` is the monitor's address, http://127.0.0.1:<port>, which save_export reads the export from.
+    """
+
+    def __init__(self, token: str, base: str = "") -> None:
         self._token = token
+        self._base = base
         self._window: Any = None
+        self._saving = threading.Lock()
 
     def _bind(self, window: Any) -> None:
         self._window = window
 
     def get_token(self) -> str:
         return self._token
+
+    def save_export(self, fmt: str) -> dict[str, Any]:
+        """Save the daily rollups ("csv" or "json") where the user says, through the native save dialog.
+
+        Returns {"ok", "path", "error"}. A cancelled dialog is ok False with no error. The page
+        names only the format: the monitor produces the data, and the user's dialog choice is the
+        only path written to.
+        """
+        if not self._saving.acquire(blocking=False):
+            return _export_result(error="a save dialog is already open")
+        try:
+            return self._save_export(fmt)
+        except Exception:  # the page gets an answer, never a stack trace
+            log.exception("save_export failed")
+            return _export_result(error="could not save the export")
+        finally:
+            self._saving.release()
+
+    def _save_export(self, fmt: str) -> dict[str, Any]:
+        if fmt not in EXPORT_FORMATS:
+            return _export_result(error="the format must be csv or json")
+        if self._window is None:
+            return _export_result(error="the dashboard window is not ready")
+        try:
+            body, name = fetch_export(self._base, self._token, fmt)
+        except urllib.error.HTTPError as exc:
+            log.warning("the monitor refused the export (HTTP %d)", exc.code)
+            return _export_result(error=f"the monitor answered {exc.code}")
+        except ValueError as exc:       # our own words: a base that is not the monitor's, an export that is too big
+            log.warning("the export was refused: %s", exc)
+            return _export_result(error=str(exc))
+        except OSError as exc:
+            log.warning("could not fetch the export: %s", type(exc).__name__)
+            return _export_result(error="the monitor could not be reached")
+        chosen = self._ask_where(name, fmt)
+        if chosen is None:
+            return _export_result()
+        path = Path(chosen)
+        if not path.suffix:
+            path = path.with_suffix("." + fmt)
+        try:
+            _write_atomic(path, body)
+        except OSError as exc:
+            reason = exc.strerror or type(exc).__name__
+            log.warning("could not write the export: %s", reason)
+            return _export_result(error=f"could not write {path.name}: {reason}")
+        log.info("export saved (%s, %d bytes)", fmt, len(body))
+        return _export_result(ok=True, path=str(path))
+
+    def _ask_where(self, name: str, fmt: str) -> str | None:
+        """The path chosen in the native save dialog, or None when the user cancelled it."""
+        chosen = self._window.create_file_dialog(
+            _save_dialog_type(), save_filename=name, file_types=(_EXPORT_FILTERS[fmt], "All files (*.*)"))
+        if isinstance(chosen, (list, tuple)):
+            chosen = chosen[0] if chosen else None
+        return str(chosen) if chosen else None
 
     def set_chrome(self, caption_hex: str, text_hex: str, border_hex: str, dark: bool) -> bool:
         """Colour the native caption, caption text and border from the theme. False when unsupported."""
@@ -323,7 +409,7 @@ class DashboardApi:
         return bool(webbrowser.open(url))
 
     def _hwnd(self) -> int | None:
-        return _native_handle(self._window) or _find_window_of(os.getpid())
+        return _native_handle(self._window) or find_window_of(os.getpid())
 
 
 def _native_handle(window: Any) -> int | None:
@@ -346,9 +432,61 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     return args
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuses every redirect (urllib then raises the 3xx as an HTTPError), so the token header
+    cannot follow an answer to some other address."""
+
+    def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> None:
+        return None
+
+
 def _local_opener() -> urllib.request.OpenerDirector:
     # ProxyHandler({}) so a system proxy never captures a request to 127.0.0.1.
-    return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
+
+
+def _export_name(fmt: str) -> str:
+    """The file name the monitor suggests for a download made today (local date)."""
+    return f"claude-usage-daily-{date.today().isoformat()}.{fmt}"
+
+
+def fetch_export(base: str, token: str, fmt: str, *, timeout: float = EXPORT_TIMEOUT_S) -> tuple[bytes, str]:
+    """GET /api/export from the monitor on this machine: (body, the file name it suggests).
+
+    Only http://127.0.0.1:<port> is ever called. ValueError for another address, an unknown format
+    or an answer over MAX_EXPORT_BYTES; OSError (HTTPError and URLError included) when the monitor
+    cannot be reached or says no.
+    """
+    if _LOOPBACK_BASE.fullmatch(base) is None or fmt not in EXPORT_FORMATS:
+        raise ValueError("the export is only read from the monitor on this machine")
+    request = urllib.request.Request(f"{base}/api/export?format={fmt}", headers={"X-Monitor-Token": token})
+    with _local_opener().open(request, timeout=timeout) as response:
+        body = response.read(MAX_EXPORT_BYTES + 1)
+        suggested = response.headers.get_filename() or ""
+    if len(body) > MAX_EXPORT_BYTES:
+        raise ValueError("the export is larger than 16 MB")
+    return body, suggested if _EXPORT_NAME.fullmatch(suggested) else _export_name(fmt)
+
+
+def _save_dialog_type() -> Any:
+    """pywebview's "save file" dialog constant: FileDialog.SAVE, or the older SAVE_DIALOG when there is no FileDialog."""
+    import webview  # noqa: PLC0415  (pywebview is optional at import time)
+    kinds = getattr(webview, "FileDialog", None)
+    return kinds.SAVE if kinds is not None else webview.SAVE_DIALOG
+
+
+def _write_atomic(path: Path, data: bytes) -> None:
+    """Write ``data`` to ``path`` through a temporary file beside it, so a failed write leaves any
+    file the user chose to overwrite as it was."""
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+        os.replace(tmp_name, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_name)
+        raise
 
 
 def _api_call(base: str, token: str, method: str, path: str, body: Any = None, timeout: float = 5.0) -> Any:
@@ -489,7 +627,7 @@ def dashboard_main(argv: list[str] | None = None) -> int:
         webbrowser.open(url)
         return EXIT_BROWSER_FALLBACK
 
-    api = DashboardApi(token)
+    api = DashboardApi(token, base)
     try:
         window = webview.create_window(
             WINDOW_TITLE, url, js_api=api, min_size=MIN_SIZE, background_color="#090909",

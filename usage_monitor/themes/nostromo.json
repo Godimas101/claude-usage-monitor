@@ -73,7 +73,7 @@
         "alert": "#ffe6a8",
         "track": "#2a1c08",
         "glow": "#ffb30099",
-        "stale": "#8c6220"
+        "stale": "#9f7434"
       }
     },
     {
@@ -97,7 +97,7 @@
         "alert": "#dcffe9",
         "track": "#0e2f1b",
         "glow": "#50ff9699",
-        "stale": "#3f7a57"
+        "stale": "#4e8a66"
       }
     },
     {
@@ -145,7 +145,7 @@
         "alert": "#ffd9cf",
         "track": "#2a0b08",
         "glow": "#ff3c2899",
-        "stale": "#7d3a32"
+        "stale": "#ae665c"
       }
     },
     {
@@ -169,7 +169,7 @@
         "alert": "#e6f8ff",
         "track": "#122834",
         "glow": "#5ac8ff8f",
-        "stale": "#4f7388"
+        "stale": "#5c8196"
       }
     },
     {
@@ -193,7 +193,7 @@
         "alert": "#e8ffff",
         "track": "#0e2a2e",
         "glow": "#46e6f099",
-        "stale": "#3f7f84"
+        "stale": "#46868b"
       }
     },
     {
@@ -217,7 +217,7 @@
         "alert": "#ffe0c4",
         "track": "#2e1808",
         "glow": "#ff8c3299",
-        "stale": "#7d5233"
+        "stale": "#9e7151"
       }
     },
     {
@@ -241,7 +241,7 @@
         "alert": "#f2e8ff",
         "track": "#1f1530",
         "glow": "#b478ff94",
-        "stale": "#6f5a8f"
+        "stale": "#8570a7"
       }
     }
   ],

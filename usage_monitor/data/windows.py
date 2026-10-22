@@ -20,6 +20,11 @@ _log = logging.getLogger("usage_monitor." + __name__.split(".")[-1])
 SESSION_LENGTH = timedelta(hours=5)
 WEEK_LENGTH = timedelta(days=7)
 DEFAULT_BURN_MINUTES = 30
+# Pace: usage within this many points of the elapsed share of its window is "on pace", more is "ahead" and less
+# is "behind". One number for every surface (the widgets, the dashboard's overview card, the pacing report and
+# the Limits page), so a limit never reads ON PACE in one place and AHEAD in another. app.js keeps a copy
+# (PACE_BAND), which tests/test_webui.py compares with this one.
+PACE_BAND_POINTS = 10.0
 # Output tokens per minute: below the first bound is SLOW, zero is IDLE, the last band is open.
 _VELOCITY_BANDS: tuple[tuple[float, str], ...] = ((500, "SLOW"), (1500, "NORMAL"), (3000, "FAST"))
 
