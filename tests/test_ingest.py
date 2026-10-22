@@ -4,6 +4,7 @@ from __future__ import annotations
 import builtins
 import json
 import os
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -391,3 +392,191 @@ def test_unreadable_file_keeps_no_bookmark_so_the_next_run_retries_it(store, pro
     assert second.errors == []
     assert second.files_read == 1
     assert requests(store) == 2
+
+
+# ── Reads that fail part way (a read that did not finish must not move the bookmark) ──
+
+class FlakyFile:
+    """Wraps a binary file and raises OSError when it reaches the second line of a read."""
+
+    def __init__(self, real) -> None:
+        self._real = real
+
+    def __enter__(self) -> "FlakyFile":
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self._real.close()
+
+    def fileno(self) -> int:
+        return self._real.fileno()
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        return self._real.seek(offset, whence)
+
+    def __iter__(self):
+        for number, raw in enumerate(self._real):
+            if number == 1:
+                raise OSError(5, "read broke off")
+            yield raw
+
+
+def test_an_open_that_fails_after_the_probe_keeps_the_bookmark_and_is_retried(store, projects, monkeypatch):
+    f = main_file(projects)
+    put(f, assistant("m1"), assistant("m2"))
+    run(store, [projects])
+    add(f, assistant("m3"))
+    blocked = {"on": True}
+    real_open = builtins.open
+
+    def denying_open(file, *args, **kwargs):
+        if blocked["on"] and same_path(file, f):
+            raise PermissionError(13, "denied")
+        return real_open(file, *args, **kwargs)
+
+    monkeypatch.setattr(tx, "open", denying_open, raising=False)  # the reader's own open, after the probe
+    first = run(store, [projects])
+    assert first.errors == [f"PermissionError on {f.name}"]
+    assert first.files_read == 0
+    assert requests(store) == 2
+
+    blocked["on"] = False
+    second = run(store, [projects])
+    assert second.errors == []
+    assert second.files_read == 1
+    assert requests(store) == 3
+
+
+def test_a_read_that_breaks_off_part_way_keeps_the_bookmark_and_is_retried(store, projects, monkeypatch):
+    f = main_file(projects)
+    put(f, assistant("m1"))
+    run(store, [projects])
+    add(f, assistant("m2"), assistant("m3"))
+    real_open = builtins.open
+
+    def breaking_open(file, *args, **kwargs):
+        handle = real_open(file, *args, **kwargs)
+        return FlakyFile(handle) if same_path(file, f) else handle
+
+    monkeypatch.setattr(tx, "open", breaking_open, raising=False)
+    first = run(store, [projects])
+    assert first.errors == [f"OSError on {f.name}"]
+    assert first.files_read == 0
+    assert requests(store) == 1  # the line read before the break was not committed
+
+    monkeypatch.setattr(tx, "open", real_open, raising=False)
+    second = run(store, [projects])
+    assert second.errors == []
+    assert requests(store) == 3
+
+
+def test_a_new_file_whose_read_breaks_off_is_read_in_full_on_the_next_run(store, projects, monkeypatch):
+    f = main_file(projects)
+    put(f, assistant("m1"), assistant("m2"))
+    real_open = builtins.open
+
+    def breaking_open(file, *args, **kwargs):
+        handle = real_open(file, *args, **kwargs)
+        return FlakyFile(handle) if same_path(file, f) else handle
+
+    monkeypatch.setattr(tx, "open", breaking_open, raising=False)
+    first = run(store, [projects])
+    assert first.errors == [f"OSError on {f.name}"]
+    assert store.known_files() == []
+    assert requests(store) == 0
+
+    monkeypatch.setattr(tx, "open", real_open, raising=False)
+    second = run(store, [projects])
+    assert second.errors == []
+    assert requests(store) == 2
+
+
+# ── Entries that cannot be examined are reported ──────────────────────────────────
+
+def test_an_entry_that_cannot_be_examined_is_reported_in_the_result(store, projects, monkeypatch):
+    class Denied:
+        name = "hidden.jsonl"
+        path = str(projects / "hidden.jsonl")
+
+        def is_dir(self, follow_symlinks: bool = True) -> bool:
+            raise PermissionError(13, "denied")
+
+        def is_file(self, follow_symlinks: bool = True) -> bool:
+            raise PermissionError(13, "denied")
+
+    class Listing:
+        def __enter__(self):
+            return [Denied()]
+
+        def __exit__(self, *exc_info: object) -> None:
+            return None
+
+    monkeypatch.setattr(os, "scandir", lambda folder: Listing())
+    result = run(store, [projects])
+    assert result.errors == ["PermissionError examining hidden.jsonl"]
+    assert result.files_scanned == 0
+
+
+# ── Regression: a file rewritten in place into a larger one is not read from the old bookmark ──
+
+def test_a_file_rewritten_into_a_larger_one_is_read_from_the_start(store, projects):
+    f = main_file(projects)
+    put(f, assistant("a1"), assistant("a2"))
+    run(store, [projects])
+    put(f, assistant("c1"), assistant("c2"), assistant("c3"))  # rewritten in place, now larger
+    result = run(store, [projects])
+    assert result.files_read == 1
+    assert result.errors == []
+    assert requests(store) == 5  # a1, a2 kept; c1, c2 and c3 all read, not just the tail of the file
+
+
+def test_records_appended_after_a_removal_that_regrows_the_file_are_stored(store, projects):
+    f = main_file(projects)
+    put(f, assistant("a1"), assistant("a2"))
+    run(store, [projects])
+    put(f, assistant("a2"), assistant("a3"), assistant("a4"))  # a1 removed in place, then two appended
+    run(store, [projects])
+    assert requests(store) == 4
+
+
+def test_a_bookmark_without_a_recorded_tail_still_reads_only_the_appended_bytes(store, projects):
+    f = main_file(projects)
+    put(f, assistant("m1"), assistant("m2"))
+    run(store, [projects])
+    path = store.known_files()[0]
+    store.save_file_state(replace(store.file_state(path), tail=None))  # as a bookmark from before this check
+    extra = assistant("m3")
+    add(f, extra)
+    result = run(store, [projects])
+    assert result.bytes_read == len(extra)
+    assert requests(store) == 3
+
+
+# ── A file removed between the walk and the read is skipped without an error ──
+
+def test_a_file_removed_after_the_walk_is_skipped_without_an_error(store, projects, monkeypatch):
+    f = main_file(projects)
+    put(f, assistant("m1"))
+    real_read_new = tx.read_new
+
+    def vanished(path, offset, ctx, **kwargs):
+        if same_path(path, f):
+            raise FileNotFoundError(2, "gone")
+        return real_read_new(path, offset, ctx, **kwargs)
+
+    monkeypatch.setattr(tx, "read_new", vanished)
+    result = run(store, [projects])
+    assert result.errors == []
+    assert result.files_read == 0
+    assert requests(store) == 0
+
+
+# ── A value SQLite could not hold does not block the rest of its file ─────────────────
+
+def test_values_sqlite_could_not_hold_do_not_block_the_rest_of_their_file(store, projects):
+    f = main_file(projects)
+    huge = assistant("big", out=2 ** 63).replace(b"\"cwd\": \"C:/work/demo\"", b"\"cwd\": \"C:/bad\\ud800\"")
+    put(f, assistant("g1"), assistant("bad2", inp=2 ** 63), huge, assistant("g2"))
+    result = run(store, [projects])
+    assert result.errors == []
+    assert requests(store) == 4

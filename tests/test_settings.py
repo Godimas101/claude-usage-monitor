@@ -510,3 +510,65 @@ def test_concurrent_writers_all_land_and_each_change_is_announced_once(tmp_path:
             assert s[f"counter_{n}"] == 199
     finally:
         s.close()
+
+
+# ── Regression: absurd intervals, unreadable files, re-entrant listeners ─────────────
+
+@pytest.mark.parametrize("key", ["ingest_interval_s", "poll_interval_ms"])
+def test_an_absurd_interval_is_refused_by_set_and_by_load(tmp_path, key):
+    s = Settings(tmp_path / "settings.json", save_delay_s=60)
+    with pytest.raises(ValueError):
+        s.set(key, 1e308)
+    s.close()
+    path = tmp_path / "loaded.json"
+    path.write_text(json.dumps({key: 1e308}), encoding="utf-8")
+    assert Settings(path)[key] == DEFAULTS[key]
+
+
+def test_an_unreadable_settings_file_is_neither_replaced_nor_treated_as_missing(tmp_path, monkeypatch):
+    path = tmp_path / "settings.json"
+    original = b'{"poll_interval_ms": 1234, "skip_version": "2.0.1", "theme": "Night City"}'
+    path.write_bytes(original)
+    real_read_bytes = Path.read_bytes
+    blocked = {"on": True}
+
+    def denied(self: Path) -> bytes:
+        if blocked["on"] and self == path:
+            raise PermissionError(13, "denied")
+        return real_read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", denied)
+    s = Settings(path, save_delay_s=60)
+    s.set("show_taskbar", False)
+    s.close()  # the save is refused while the file cannot be read
+    assert real_read_bytes(path) == original
+
+    blocked["on"] = False
+    s.set("skip_version", "2.0.2")
+    s.close()
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["poll_interval_ms"] == 1234 and data["theme"] == "Night City"  # the file's values survive
+    assert data["show_taskbar"] is False and data["skip_version"] == "2.0.2"  # the changes made meanwhile too
+
+
+def test_a_listener_that_sets_the_same_key_does_not_reorder_what_the_others_see(tmp_path):
+    s = Settings(tmp_path / "settings.json", save_delay_s=60)
+    seen: dict[str, list[Any]] = {"first": [], "second": []}
+
+    def first(key: str, value: Any) -> None:
+        if key == "theme":
+            seen["first"].append(value)
+        if key == "theme" and value == "A":
+            s.set("theme", "B")  # a change made while the change to A is still being delivered
+
+    def second(key: str, value: Any) -> None:
+        if key == "theme":
+            seen["second"].append(value)
+
+    s.on_change(first)
+    s.on_change(second)
+    s.set("theme", "A")
+    assert seen["second"] == ["A", "B"]
+    assert seen["first"] == ["A", "B"]
+    assert s.get("theme") == "B"
+    s.close()

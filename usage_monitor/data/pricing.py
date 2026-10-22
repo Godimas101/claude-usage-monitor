@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from usage_monitor.data.models import CostBreakdown, RequestRecord
+from usage_monitor.data.netread import read_capped
 from usage_monitor.log import get_logger
 
 log = get_logger(__name__)
@@ -32,6 +33,7 @@ _MAX_RATE = 1000.0                  # USD per million tokens
 _MAX_MULTIPLIER = 100.0
 _MIN_MODELS = 5
 _MAX_REMOTE_BYTES = 512 * 1024
+_REMOTE_BUDGET_S = 10.0             # the whole download must finish within this
 _MAX_MEMO = 1024                    # raw model strings remembered per Pricing
 _MISSING = object()
 
@@ -122,7 +124,7 @@ class Pricing:
         text = target.read_text(encoding="utf-8-sig")
         try:
             data = json.loads(text)
-        except ValueError as exc:
+        except (ValueError, RecursionError) as exc:  # nesting too deep to parse is not a valid table either
             raise ValueError(f"{target.name} is not valid JSON: {exc}") from exc
         return cls.from_dict(data)
 
@@ -362,11 +364,11 @@ def _compile(row: PriceRow, cw: Mapping[str, float]) -> _Compiled:
 # ── Remote refresh ───────────────────────────────────────────────────────────────
 
 def _fetch(url: str, timeout: float) -> bytes:
-    """Default opener: one anonymous HTTPS GET, reading at most one byte past the size cap."""
+    """Default opener: one anonymous HTTPS GET. The body is capped in size and in time."""
     request = urllib.request.Request(
         url, headers={"Accept": "application/json", "User-Agent": "claude-usage-monitor"})
     with urllib.request.urlopen(request, timeout=timeout) as response:
-        return response.read(_MAX_REMOTE_BYTES + 1)
+        return read_capped(response, _MAX_REMOTE_BYTES + 1, _REMOTE_BUDGET_S)
 
 
 def _write_atomic(path: Path, data: bytes) -> None:

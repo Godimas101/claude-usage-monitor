@@ -513,8 +513,9 @@ def test_negative_offset_reads_from_the_start(main_ctx):
     assert tx.read_new(MAIN, -5, main_ctx) == tx.read_new(MAIN, 0, main_ctx)
 
 
-def test_missing_file_returns_nothing_and_keeps_the_offset(tmp_path, main_ctx):
-    assert tx.read_new(tmp_path / "gone.jsonl", 42, main_ctx) == ([], 42)
+def test_missing_file_raises_so_the_caller_keeps_its_bookmark(tmp_path, main_ctx):
+    with pytest.raises(FileNotFoundError):
+        tx.read_new(tmp_path / "gone.jsonl", 42, main_ctx)
 
 
 # ── prefilter equivalence ─────────────────────────────────────────────────────
@@ -549,3 +550,50 @@ def test_scan_stats_for_main_fixture(main_ctx):
     assert st.synthetic == 1
     assert st.no_timestamp == 0 and st.no_key == 0 and st.malformed == 0
     assert st.prefiltered > 0
+
+
+# ── Values the store can hold, and timestamps it can convert back (regression) ──────
+
+def usage_record(*, usage=None, **top) -> str:
+    """An assistant record with the given usage block. Top-level fields come from ``top``."""
+    rec = {
+        "type": "assistant",
+        "uuid": "u-edge",
+        "sessionId": SESSION,
+        "timestamp": "2026-07-14T10:00:00Z",
+        "requestId": "req_E",
+        "cwd": "C:/work/demo",
+        "message": {
+            "id": "msg_E",
+            "model": "claude-opus-5-5",
+            "content": [],
+            "usage": usage if usage is not None else {"input_tokens": 1, "output_tokens": 5},
+        },
+    }
+    rec.update(top)
+    return json.dumps(rec)
+
+
+@pytest.mark.parametrize("stamp", ["1900-01-01T00:00:00Z", "0001-01-01T00:00:00Z", "1969-12-31T23:59:59Z"])
+def test_timestamps_before_1970_are_not_read(stamp):
+    assert tx._parse_ts(stamp) is None
+
+
+def test_the_epoch_itself_is_read():
+    assert tx._parse_ts("1970-01-01T00:00:00Z") == datetime(1970, 1, 1, tzinfo=UTC)
+
+
+def test_a_count_past_2_to_the_53_is_clamped_so_the_record_is_kept(main_ctx):
+    items = tx.parse_line(usage_record(usage={"input_tokens": 2**63, "output_tokens": 5}), main_ctx)
+    request = of_type(items, RequestRecord)[0]
+    assert request.input_tokens == 2**53
+    assert request.output_tokens == 5
+
+
+def test_a_lone_surrogate_from_a_json_escape_is_replaced_in_text_fields(main_ctx):
+    items = tx.parse_line(usage_record(cwd="C:/bad\ud800dir", gitBranch="main\udc00"), main_ctx)
+    request = of_type(items, RequestRecord)[0]
+    assert request.cwd == "C:/bad?dir"
+    assert request.git_branch == "main?"
+    request.cwd.encode("utf-8")
+    request.git_branch.encode("utf-8")

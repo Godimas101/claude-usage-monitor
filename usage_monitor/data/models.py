@@ -153,6 +153,7 @@ class FileState:
     size: int                          # file size when last read
     mtime: float
     offset: int                        # bytes consumed, always at a line boundary
+    tail: str | None = None            # SHA-256 of the bytes just before offset; None when not recorded
 
 
 # ── Pricing ───────────────────────────────────────────────────────────────────

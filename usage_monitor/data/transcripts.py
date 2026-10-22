@@ -45,6 +45,9 @@ SYNTHETIC_MODEL = "<synthetic>"
 UNKNOWN_MODEL = "unknown"
 _CHUNK = 64 * 1024
 _FRACTION = re.compile(r"\.(\d+)")
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+# Counts above this are clamped. Each is still exact as a float, so sums of them stay exact too.
+MAX_COUNT = 2 ** 53
 
 # Every item-producing line contains at least one of these JSON tokens (quotes included),
 # so a line without any of them is skipped before json.loads. A token must exist for every
@@ -124,7 +127,8 @@ def read_new(
     * ``offset`` beyond EOF means the file was truncated or replaced: nothing is read and the
       returned offset is the last line boundary within the current size. The ingestor sees
       size < bookmark and re-reads from 0 (the store dedupes). A negative offset reads from 0.
-    * A file that cannot be opened yields ([], offset) and a debug log line.
+    * A file that cannot be opened or read to its end raises OSError. Nothing is returned for it,
+      so the caller keeps its bookmark and reads the file again on a later run.
     """
     return _scan(Path(path), offset, ctx, prefilter=True, stats=stats)
 
@@ -142,33 +146,25 @@ def _scan(
     items: list[TranscriptItem] = []
     start = max(offset, 0)
     consumed = 0
-    try:
-        fh = open(path, "rb")
-    except OSError as exc:
-        log.debug("transcript %s not readable (%s); offset kept", path.name, type(exc).__name__)
-        return items, start
-    with fh:
-        try:
-            size = os.fstat(fh.fileno()).st_size
-            if offset > size:
-                end = _last_boundary(fh, size)
-                log.debug("transcript %s shrank below offset; offset reset to %d", path.name, end)
-                return items, end
-            fh.seek(start)
-            for raw in fh:
-                if not raw.endswith(b"\n"):
-                    break  # partial line still being written; it is read on a later call
-                consumed += len(raw)
-                body = raw.rstrip(b"\r\n")
-                if not body.strip(b" \t"):
-                    continue
-                local.lines += 1
-                if prefilter and _PREFILTER_RX_BYTES.search(body) is None:
-                    local.prefiltered += 1
-                    continue
-                items.extend(_decode_items(body.decode("utf-8", errors="replace"), ctx, local))
-        except OSError as exc:
-            log.debug("transcript %s: read stopped early (%s)", path.name, type(exc).__name__)
+    with open(path, "rb") as fh:  # OSError propagates: the caller keeps its bookmark
+        size = os.fstat(fh.fileno()).st_size
+        if offset > size:
+            end = _last_boundary(fh, size)
+            log.debug("transcript %s shrank below offset; offset reset to %d", path.name, end)
+            return items, end
+        fh.seek(start)
+        for raw in fh:
+            if not raw.endswith(b"\n"):
+                break  # partial line still being written; it is read on a later call
+            consumed += len(raw)
+            body = raw.rstrip(b"\r\n")
+            if not body.strip(b" \t"):
+                continue
+            local.lines += 1
+            if prefilter and _PREFILTER_RX_BYTES.search(body) is None:
+                local.prefiltered += 1
+                continue
+            items.extend(_decode_items(body.decode("utf-8", errors="replace"), ctx, local))
     local.items = len(items)
     if local.malformed:
         log.debug("transcript %s: %d malformed line(s) skipped", path.name, local.malformed)
@@ -504,9 +500,11 @@ def _parse_ts(value: object) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     try:
-        return parsed.astimezone(timezone.utc)
+        utc = parsed.astimezone(timezone.utc)
     except (OverflowError, OSError, ValueError):
         return None
+    # Older dates are never real transcript times, and the store cannot always turn them back.
+    return utc if utc >= _EPOCH else None
 
 
 def _fromiso(text: str) -> datetime:
@@ -533,11 +531,20 @@ def _blocks(msg: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _str(value: object) -> str | None:
-    return value if isinstance(value, str) and value else None
+    return _storable(value) if isinstance(value, str) and value else None
 
 
 def _text(value: object) -> str | None:
-    return value if isinstance(value, str) and value.strip() else None
+    return _storable(value) if isinstance(value, str) and value.strip() else None
+
+
+def _storable(text: str) -> str:
+    """The text with lone surrogates replaced. A JSON escape such as \\ud800 decodes to one, and SQLite refuses it."""
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return text.encode("utf-8", "replace").decode("utf-8")
+    return text
 
 
 def _present(value: object) -> bool:
@@ -547,7 +554,7 @@ def _present(value: object) -> bool:
 def _count_or_none(value: object) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         return None
-    return value
+    return min(value, MAX_COUNT)
 
 
 def _count(value: object) -> int:

@@ -44,7 +44,7 @@ from usage_monitor.log import get_logger
 
 log = get_logger(__name__)
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 SNAPSHOT_RETENTION = timedelta(days=180)
 _IN_CHUNK = 500             # bound parameters per IN (...) query
 _REPRICE_CHUNK = 5000       # requests repriced per transaction
@@ -142,8 +142,12 @@ def _create_v1(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
 
 
+def _add_tail_to_file_state(conn: sqlite3.Connection) -> None:
+    conn.execute("ALTER TABLE file_state ADD COLUMN tail TEXT")
+
+
 # Forward migrations: _MIGRATIONS[n] upgrades a version n-1 database to version n.
-_MIGRATIONS: dict[int, Any] = {1: _create_v1}
+_MIGRATIONS: dict[int, Any] = {1: _create_v1, 2: _add_tail_to_file_state}
 
 _RECORD_SELECT = ", ".join(_RECORD_FIELDS)
 _REQUEST_UPSERT_SQL = (
@@ -173,10 +177,15 @@ _COMPACTION_SQL = ("INSERT OR IGNORE INTO compactions (uuid, session_id, ts, tri
                    "post_tokens) VALUES (?, ?, ?, ?, ?, ?)")
 _API_ERROR_SQL = "INSERT OR IGNORE INTO api_errors (uuid, session_id, ts) VALUES (?, ?, ?)"
 
+
+# Token sums are REAL: SQLite's integer SUM fails with "integer overflow" once the total passes 2**63.
 _AGGREGATES = (
-    "COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), "
-    "COALESCE(SUM(cache_read_tokens), 0), COALESCE(SUM(cache_write_5m_tokens), 0), "
-    "COALESCE(SUM(cache_write_1h_tokens), 0), COALESCE(SUM(thinking_tokens), 0), "
+    "COUNT(*), COALESCE(SUM(CAST(input_tokens AS REAL)), 0), "
+    "COALESCE(SUM(CAST(output_tokens AS REAL)), 0), "
+    "COALESCE(SUM(CAST(cache_read_tokens AS REAL)), 0), "
+    "COALESCE(SUM(CAST(cache_write_5m_tokens AS REAL)), 0), "
+    "COALESCE(SUM(CAST(cache_write_1h_tokens AS REAL)), 0), "
+    "COALESCE(SUM(CAST(thinking_tokens AS REAL)), 0), "
     "COALESCE(SUM(cost_total), 0.0), COALESCE(SUM(nocache_cost), 0.0), "
     "COALESCE(SUM(CASE WHEN priced = 0 THEN 1 ELSE 0 END), 0)"
 )
@@ -184,6 +193,7 @@ _AGGREGATES = (
 _LATEST_TS = "latest_usage_ts"
 _LATEST_RAW = "latest_usage_raw"
 _PRICING_VERSION = "pricing_version"
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 
 # ── Store ─────────────────────────────────────────────────────────────────────────
@@ -258,18 +268,18 @@ class Store:
     # ── Ingest bookkeeping ───────────────────────────────────────────────────────
 
     def file_state(self, path: str) -> FileState | None:
-        rows = self._rows("SELECT path, size, mtime, offset FROM file_state WHERE path = ?", (path,))
+        rows = self._rows("SELECT path, size, mtime, offset, tail FROM file_state WHERE path = ?", (path,))
         return _file_state(rows[0]) if rows else None
 
     def file_states(self) -> dict[str, FileState]:
         return {row["path"]: _file_state(row) for row in self._rows(
-            "SELECT path, size, mtime, offset FROM file_state")}
+            "SELECT path, size, mtime, offset, tail FROM file_state")}
 
     def save_file_state(self, st: FileState) -> None:
         with self.transaction():
             self._conn.execute(
-                "INSERT OR REPLACE INTO file_state (path, size, mtime, offset) VALUES (?, ?, ?, ?)",
-                (st.path, st.size, st.mtime, st.offset))
+                "INSERT OR REPLACE INTO file_state (path, size, mtime, offset, tail) VALUES (?, ?, ?, ?, ?)",
+                (st.path, st.size, st.mtime, st.offset, st.tail))
 
     def known_files(self) -> list[str]:
         return [row[0] for row in self._rows("SELECT path FROM file_state ORDER BY path")]
@@ -282,7 +292,10 @@ class Store:
     # ── Writes ───────────────────────────────────────────────────────────────────
 
     def add_items(self, items: Iterable[TranscriptItem], pricing: Pricing) -> dict[str, int]:
-        """Store one batch in a single transaction. Returns the submitted count per item kind."""
+        """Store one batch in a single transaction. Returns the stored count per item kind.
+
+        A row that SQLite refuses is skipped and logged, so it cannot block the rest of the batch.
+        """
         groups: dict[str, list[Any]] = {}
         for item in items:
             kind = _KIND_BY_TYPE.get(type(item))
@@ -292,25 +305,20 @@ class Store:
             groups.setdefault(kind, []).append(item)
         if not groups:
             return {}
+        stored: dict[str, int] = {}
         with self.transaction():
             self._ensure_pricing_version(pricing.version)
-            if "request" in groups:
-                self._upsert_requests(groups["request"], pricing)
-            if "tool_call" in groups:
-                self._conn.executemany(_TOOL_CALL_SQL, [_tool_call_row(i) for i in groups["tool_call"]])
-            if "code_change" in groups:
-                self._conn.executemany(_CODE_CHANGE_SQL, [_code_change_row(i) for i in groups["code_change"]])
-            if "git_event" in groups:
-                self._conn.executemany(_GIT_EVENT_SQL, [_git_event_row(i) for i in groups["git_event"]])
-            if "pull_request" in groups:
-                self._conn.executemany(_PULL_REQUEST_SQL, [_pull_request_row(i) for i in groups["pull_request"]])
-            if "session_meta" in groups:
-                self._conn.executemany(_TITLE_SQL, [_title_row(i) for i in groups["session_meta"]])
-            if "compaction" in groups:
-                self._conn.executemany(_COMPACTION_SQL, [_compaction_row(i) for i in groups["compaction"]])
-            if "api_error" in groups:
-                self._conn.executemany(_API_ERROR_SQL, [_api_error_row(i) for i in groups["api_error"]])
-        return {kind: len(group) for kind, group in groups.items()}
+            for kind, group in groups.items():
+                if kind == "request":
+                    refused = self._upsert_requests(group, pricing)
+                else:
+                    sql, row_of = _ROW_WRITES[kind]
+                    refused = self._insert_rows(sql, [row_of(item) for item in group])
+                stored[kind] = len(group) - refused
+        skipped = sum(len(groups[kind]) - count for kind, count in stored.items())
+        if skipped:
+            log.warning("store: %d item(s) that SQLite cannot store were skipped", skipped)
+        return stored
 
     def reprice(self, pricing: Pricing) -> int:
         """Recompute the cost columns of every request under ``pricing``. Returns the row count."""
@@ -472,7 +480,8 @@ class Store:
         # Only a fresh database takes a version here; a changed one waits for reprice().
         self._conn.execute("INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?)", (_PRICING_VERSION, version))
 
-    def _upsert_requests(self, records: list[RequestRecord], pricing: Pricing) -> None:
+    def _upsert_requests(self, records: list[RequestRecord], pricing: Pricing) -> int:
+        """Upsert one batch of requests. Returns how many rows SQLite refused."""
         batch: dict[str, RequestRecord] = {}
         for rec in records:
             earlier = batch.get(rec.key)
@@ -482,7 +491,32 @@ class Store:
         for key, rec in batch.items():
             old = stored.get(key)
             rows.append(_request_row(rec if old is None else _merge(old, rec), pricing))
-        self._conn.executemany(_REQUEST_UPSERT_SQL, rows)
+        return self._insert_rows(_REQUEST_UPSERT_SQL, rows)
+
+    def _insert_rows(self, sql: str, rows: list[tuple[Any, ...]]) -> int:
+        """Run ``sql`` once per row and return how many rows SQLite refused to bind.
+
+        The batch runs first, which is the normal path. Only when it fails is each row run alone,
+        so one value that cannot be bound (an integer past 64 bits, a lone surrogate) skips just its row.
+        """
+        if not rows:
+            return 0
+        self._conn.execute("SAVEPOINT store_rows")
+        try:
+            self._conn.executemany(sql, rows)
+        except (OverflowError, UnicodeEncodeError):
+            self._conn.execute("ROLLBACK TO store_rows")
+            self._conn.execute("RELEASE store_rows")
+        else:
+            self._conn.execute("RELEASE store_rows")
+            return 0
+        refused = 0
+        for row in rows:
+            try:
+                self._conn.execute(sql, row)
+            except (OverflowError, UnicodeEncodeError):  # raised while binding, before anything runs
+                refused += 1
+        return refused
 
     def _stored_requests(self, keys: list[str]) -> dict[str, RequestRecord]:
         found: dict[str, RequestRecord] = {}
@@ -592,6 +626,18 @@ def _api_error_row(item: ApiErrorEvent) -> tuple[Any, ...]:
     return (item.uuid, item.session_id, _to_epoch(item.ts))
 
 
+# Statement and row builder for each item kind that is stored one row per item.
+_ROW_WRITES: dict[str, tuple[str, Any]] = {
+    "tool_call": (_TOOL_CALL_SQL, _tool_call_row),
+    "code_change": (_CODE_CHANGE_SQL, _code_change_row),
+    "git_event": (_GIT_EVENT_SQL, _git_event_row),
+    "pull_request": (_PULL_REQUEST_SQL, _pull_request_row),
+    "session_meta": (_TITLE_SQL, _title_row),
+    "compaction": (_COMPACTION_SQL, _compaction_row),
+    "api_error": (_API_ERROR_SQL, _api_error_row),
+}
+
+
 def _window(start: datetime | None, end: datetime | None,
             subagent: bool | None) -> tuple[str, list[Any]]:
     clauses: list[str] = []
@@ -618,7 +664,8 @@ def _totals(values: tuple[Any, ...]) -> TokenTotals:
 
 
 def _file_state(row: sqlite3.Row) -> FileState:
-    return FileState(path=row["path"], size=row["size"], mtime=row["mtime"], offset=row["offset"])
+    return FileState(path=row["path"], size=row["size"], mtime=row["mtime"], offset=row["offset"],
+                     tail=row["tail"])
 
 
 def _limit_json(item: Limit) -> dict[str, Any]:
@@ -673,7 +720,8 @@ def _to_epoch_or_none(value: datetime | None) -> float | None:
 
 
 def _from_epoch(value: float) -> datetime:
-    return datetime.fromtimestamp(value, timezone.utc)
+    # Arithmetic, not datetime.fromtimestamp: that fails on Windows for dates before 1970 and after 3000.
+    return _EPOCH + timedelta(seconds=value)
 
 
 def _from_epoch_or_none(value: float | None) -> datetime | None:
