@@ -10,9 +10,11 @@ import io
 import json
 import logging
 import os
+import threading
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -680,3 +682,108 @@ def test_a_failing_parser_section_does_not_sink_the_snapshot(monkeypatch):
 def test_unreadable_credentials_path_is_absent_not_fatal(tmp_path):
     info, token = ua.read_credentials(tmp_path)  # a directory, not a file
     assert info.present is False and token is None
+
+
+# ── Regression: deep JSON, overflowing times, half-written files, redirects, slow bodies ──
+
+def test_deeply_nested_credentials_are_unreadable_not_fatal(tmp_path):
+    path = tmp_path / ".credentials.json"
+    path.write_text("[" * 100_000 + "]" * 100_000, encoding="utf-8")
+    info, token = ua.read_credentials(path)
+    assert info.present is False and token is None
+
+
+def test_a_reset_time_that_overflows_on_conversion_is_unknown_not_an_error():
+    assert ua._parse_ts("9999-12-31T23:30:00-05:00") is None
+
+
+def test_an_out_of_range_reset_time_drops_only_that_limit():
+    raw = {"limits": [
+        {"kind": "session", "percent": 42, "resets_at": "2026-10-22T02:39:59Z"},
+        {"kind": "weekly_all", "percent": 10, "resets_at": "9999-12-31T23:30:00-05:00"},
+    ]}
+    snapshot = ua.parse_usage(raw, T0)
+    assert snapshot.session is not None and snapshot.session.percent == 42
+    assert snapshot.weekly is not None and snapshot.weekly.resets_at is None
+
+
+def test_inspect_credentials_tells_a_half_written_file_from_a_signed_out_one(tmp_path):
+    half = tmp_path / "half.json"
+    half.write_text('{"claudeAiOauth": {"accessToken": ', encoding="utf-8")
+    assert ua.inspect_credentials(half)[2] is False
+    signed_out = tmp_path / "out.json"
+    signed_out.write_text('{"mcpOAuth": {}}', encoding="utf-8")
+    assert ua.inspect_credentials(signed_out)[2] is True
+    assert ua.inspect_credentials(tmp_path / "gone.json")[2] is True
+
+
+def test_a_half_written_credentials_file_keeps_the_last_status(tmp_path):
+    path = write_credentials(tmp_path / ".credentials.json")
+    client, opener = make_client(path, ok())
+    assert client.fetch(T0).status is ApiStatus.LIVE
+    path.write_text('{"claudeAiOauth": {"accessT', encoding="utf-8")  # Claude Code is mid-write
+    result = client.fetch(T0 + secs(60))
+    assert result.status is ApiStatus.LIVE and result.fresh is False
+    assert opener.calls == 1
+
+
+def test_a_half_written_credentials_file_does_not_clear_an_active_backoff(tmp_path):
+    path = write_credentials(tmp_path / ".credentials.json")
+    client, opener = make_client(path, http_error(429))
+    assert client.fetch(T0).status is ApiStatus.RATE_LIMITED
+    assert client.next_allowed_at == T0 + secs(60)
+    path.write_text('{"claudeAiOauth": {"accessT', encoding="utf-8")
+    result = client.fetch(T0 + secs(61))
+    assert result.status is ApiStatus.RATE_LIMITED
+    assert client.next_allowed_at == T0 + secs(60)
+    assert opener.calls == 1
+
+
+def test_a_usage_body_that_trickles_in_is_offline_once_the_time_budget_is_spent(tmp_path, monkeypatch):
+    monkeypatch.setattr(ua, "BODY_BUDGET_S", 0.0, raising=False)
+    path = write_credentials(tmp_path / ".credentials.json")
+    client, _opener = make_client(path, ok())
+    result = client.fetch(T0)
+    assert result.status is ApiStatus.OFFLINE
+    assert "timed out" in result.detail
+
+
+def _serve(status: int, location: str | None = None):
+    """A loopback HTTP server that answers every GET with the given status.
+
+    Returns (server, list of Authorization headers it received).
+    """
+    seen: list[str | None] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            seen.append(self.headers.get("Authorization"))
+            self.send_response(status)
+            if location is not None:
+                self.send_header("Location", location)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *args: object) -> None:
+            return None
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, seen
+
+
+def test_the_bearer_token_is_not_sent_to_a_redirect_target(tmp_path, monkeypatch):
+    monkeypatch.setenv("no_proxy", "127.0.0.1,localhost")  # keep the loopback servers off any proxy
+    target, target_seen = _serve(200)
+    origin, origin_seen = _serve(302, location=f"http://127.0.0.1:{target.server_address[1]}/collect")
+    try:
+        monkeypatch.setattr(ua, "USAGE_URL", f"http://127.0.0.1:{origin.server_address[1]}/api/oauth/usage")
+        path = write_credentials(tmp_path / ".credentials.json")
+        result = ua.UsageClient(path).fetch(T0)  # the client's own opener, not an injected one
+        assert result.status is ApiStatus.OFFLINE
+        assert len(origin_seen) == 1
+        assert target_seen == []
+    finally:
+        for server in (origin, target):
+            server.shutdown()
+            server.server_close()

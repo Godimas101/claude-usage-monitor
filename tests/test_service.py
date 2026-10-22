@@ -136,6 +136,7 @@ class FakeClient:
     def __init__(self, *outcomes: FetchResult | BaseException) -> None:
         self._outcomes = list(outcomes) or [NO_SIGN_IN]
         self.calls: list[datetime] = []
+        self.next_allowed_at: datetime | None = None
 
     def fetch(self, now: datetime) -> FetchResult:
         self.calls.append(now)
@@ -647,3 +648,171 @@ def test_the_plan_comes_from_the_sign_in_and_the_price_override_wins(make, setti
     settings.set("plan_price_override", None)
     restored = next_state(states)
     assert restored.plan.monthly_price_usd == 100.0
+
+
+# ── Regression: retries, sign-in changes, paused start, window isolation, restarts ──────
+
+class BackingOffClient:
+    """Fails its first fetch as a network error would, and sets its backoff gate the way UsageClient does."""
+
+    def __init__(self, first: FetchResult, then: FetchResult, wait: timedelta) -> None:
+        self._first = first
+        self._then = then
+        self._wait = wait
+        self.next_allowed_at: datetime | None = None
+        self.calls: list[datetime] = []
+
+    def fetch(self, now: datetime) -> FetchResult:
+        self.calls.append(now)
+        if len(self.calls) == 1:
+            self.next_allowed_at = now + self._wait
+            return self._first
+        self.next_allowed_at = None
+        return self._then
+
+
+class BlockingClient:
+    """Holds its first fetch until the test releases it, so a stop can time out while a cycle runs."""
+
+    def __init__(self) -> None:
+        self.entered = threading.Event()
+        self.release = threading.Event()
+        self.next_allowed_at: datetime | None = None
+
+    def fetch(self, now: datetime) -> FetchResult:
+        self.entered.set()
+        self.release.wait(5)
+        return NO_SIGN_IN
+
+
+def test_every_published_state_has_the_documented_windows_including_the_first(make, projects):
+    write_transcript(projects, request_line("m1", NOW - timedelta(minutes=10)))
+    service = make(Clock())
+    states = watch(service)
+    service.start()
+    published = []
+    while True:
+        state = next_state(states, want=lambda s: True)
+        published.append(state)
+        if not state.ingest.running:
+            break
+    assert any(state.ingest.running for state in published)
+    for state in published:
+        assert {"session", "today", "week", "month", "all"} <= set(state.windows)
+
+
+def test_a_paused_start_reports_the_plan_from_the_sign_in(make, isolated_folders):
+    write_sign_in(isolated_folders, mtime=1_800_000_000.0)
+    service = make(Clock(), pause_check=lambda: True)
+    states = watch(service)
+    service.start()
+    paused = next_state(states, want=lambda s: s.status is ApiStatus.PAUSED)
+    assert (paused.plan.name, paused.plan.monthly_price_usd) == ("Max 5x", 100.0)
+
+
+def test_a_failed_usage_fetch_is_retried_when_its_backoff_ends_not_at_the_next_poll(make):
+    offline = FetchResult(status=ApiStatus.OFFLINE, detail="Usage API unreachable (network error)",
+                          snapshot=None, fresh=False)
+    client = BackingOffClient(offline, live(NOW), wait=timedelta(seconds=30))
+    clock = Clock()
+    service = make(clock, usage_client=client)  # the settings fixture polls once an hour
+    service._cycle()
+    assert service.state.status is ApiStatus.OFFLINE
+    clock.advance(timedelta(seconds=30))
+    service._cycle()
+    assert len(client.calls) == 2
+    assert service.state.status is ApiStatus.LIVE
+
+
+def test_a_sign_in_written_after_a_start_without_one_fetches_at_once(make, isolated_folders):
+    (isolated_folders / ".credentials.json").write_text(json.dumps({"mcpOAuth": {}}), encoding="utf-8")
+    client = FakeClient(NO_SIGN_IN, live(NOW))
+    service = make(Clock(), usage_client=client)
+    service._cycle()
+    assert len(client.calls) == 1
+    write_sign_in(isolated_folders, mtime=1_800_000_500.0)
+    service._cycle()
+    assert len(client.calls) == 2
+    assert service.state.status is ApiStatus.LIVE
+
+
+def test_signing_out_with_the_file_kept_resets_the_plan_to_unknown(make, isolated_folders):
+    path = write_sign_in(isolated_folders, mtime=1_800_000_000.0)
+    service = make(Clock(), usage_client=FakeClient(NO_SIGN_IN))
+    service._cycle()
+    assert service.state.plan.name == "Max 5x"
+    path.write_text(json.dumps({"mcpOAuth": {}}), encoding="utf-8")
+    os.utime(path, (1_800_000_500.0, 1_800_000_500.0))
+    service._cycle()
+    assert service.state.plan.name == "Unknown plan"
+
+
+def test_a_half_written_sign_in_keeps_the_plan_and_does_not_force_a_fetch(make, isolated_folders):
+    path = write_sign_in(isolated_folders, mtime=1_800_000_000.0)
+    client = FakeClient(live(NOW))
+    service = make(Clock(), usage_client=client)
+    service._cycle()
+    assert len(client.calls) == 1
+    path.write_text('{"claudeAiOauth": {"accessT', encoding="utf-8")  # Claude Code is mid-write
+    os.utime(path, (1_800_000_500.0, 1_800_000_500.0))
+    service._cycle()
+    assert service.state.plan.name == "Max 5x"
+    assert len(client.calls) == 1
+
+
+def test_one_window_that_cannot_be_computed_does_not_stop_the_others(make, projects, monkeypatch):
+    write_transcript(projects, request_line("m1", NOW - timedelta(minutes=10)))
+    real_window = svc._window
+
+    def failing_week(store, pricing, name, bounds):
+        if name == "week":
+            raise OSError("disk I/O error")
+        return real_window(store, pricing, name, bounds)
+
+    monkeypatch.setattr(svc, "_window", failing_week)
+    service = make(Clock())
+    service._cycle()
+    assert service.state.windows["today"].totals.requests == 1
+    assert service.state.windows["all"].totals.requests == 1
+
+
+def test_the_wait_between_cycles_stays_within_a_day_whatever_the_setting(make, monkeypatch):
+    service = make(Clock())
+    absurd = {"ingest_interval_s": 1e308, "poll_interval_ms": 1e308}
+    monkeypatch.setattr(service._settings, "get", lambda key, default=None: absurd.get(key, default))
+    assert service._ingest_interval() <= timedelta(days=1)
+    assert service._poll_interval() <= timedelta(days=1)
+
+
+def test_start_after_a_stop_that_timed_out_while_busy_keeps_the_loop_running(make):
+    client = BlockingClient()
+    service = make(Clock(), usage_client=client)
+    states = watch(service)
+    service.start()
+    assert client.entered.wait(5)
+    service.stop(timeout=0.01)     # the cycle is still running, so the stop returns with the thread busy
+    service.start()                # the stop has not taken effect yet; the loop must keep going
+    client.release.set()
+    next_state(states)             # the cycle that was running finishes and publishes
+    service.refresh_now()
+    next_state(states)             # and a later cycle publishes too: the loop kept going
+    service.stop(timeout=5)
+
+
+def test_start_after_a_stop_requested_by_a_subscriber_starts_a_new_loop(make):
+    service = make(Clock())
+
+    def stop_on_first(_state: MonitorState) -> None:
+        service.stop(timeout=5)
+
+    service.subscribe(stop_on_first)
+    service.start()
+    old = service._thread
+    assert old is not None
+    old.join(5)
+    assert not old.is_alive()
+    states = watch(service)
+    service.start()
+    service.refresh_now()
+    next_state(states)
+    service.stop(timeout=5)

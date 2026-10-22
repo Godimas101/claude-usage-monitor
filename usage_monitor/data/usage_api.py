@@ -29,6 +29,7 @@ from usage_monitor.data.models import (
     Spend,
     UsageSnapshot,
 )
+from usage_monitor.data.netread import read_capped
 from usage_monitor.log import get_logger
 from usage_monitor.paths import credentials_path as _credentials_path
 
@@ -42,6 +43,7 @@ NETWORK_BACKOFF_BASE_S = 30.0   # first wait after a network error, non-2xx or u
 BACKOFF_CAP_S = 900.0           # 15 min
 RETRY_AFTER_CAP_S = 86_400.0    # sanity bound on a server-supplied Retry-After
 MAX_BODY_BYTES = 2_000_000
+BODY_BUDGET_S = 10.0            # the whole body must arrive within this, not just each socket read
 
 _KIND_WINDOW_S = {"session": 18_000, "weekly_all": 604_800, "weekly_scoped": 604_800}
 _LEGACY_RESERVED = frozenset({
@@ -58,33 +60,53 @@ Shares = dict[int, tuple[float | None, float | None]]
 T = TypeVar("T")
 
 
+class _NoRedirects(urllib.request.HTTPRedirectHandler):
+    """Refuses every redirect, so a 3xx comes back as an HTTP error and the bearer token is never resent."""
+
+    def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> None:
+        return None
+
+
+_DEFAULT_OPENER: Opener = urllib.request.build_opener(_NoRedirects).open
+
+
 # ── Credentials and plan ──────────────────────────────────────────────────────
 
 def read_credentials(path: Path | None = None) -> tuple[CredentialsInfo, str | None]:
     """Read the Claude sign-in block: (info, access token or None). Never logs the token."""
+    info, token, _readable = inspect_credentials(path)
+    return info, token
+
+
+def inspect_credentials(path: Path | None = None) -> tuple[CredentialsInfo, str | None, bool]:
+    """As read_credentials, plus ``readable``: False when the file exists but cannot be read or parsed.
+
+    Such a file is often one Claude Code is in the middle of writing. Its info then says "absent"
+    only for lack of anything better, so a caller keeps its last state instead of acting on it.
+    """
     target = Path(path) if path is not None else _credentials_path()
     try:
         mtime = target.stat().st_mtime
     except FileNotFoundError:
-        return _absent(None), None
+        return _absent(None), None, True
     except OSError as exc:
         log.warning("credentials file could not be read (%s)", type(exc).__name__)
-        return _absent(None), None
+        return _absent(None), None, False
     try:
         data = json.loads(target.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, RecursionError) as exc:  # nesting too deep to parse counts as bad JSON
         log.warning("credentials file could not be read (%s)", type(exc).__name__)
-        return _absent(mtime), None
+        return _absent(mtime), None, False
     block = data.get("claudeAiOauth") if isinstance(data, dict) else None
     if not isinstance(block, dict):
-        return _absent(mtime), None
+        return _absent(mtime), None, True
     info = CredentialsInfo(
         present=True,
         expires_at=_expires_at(block.get("expiresAt")),
         mtime=mtime,
         plan=plan_from(_text(block.get("subscriptionType")), _text(block.get("rateLimitTier"))),
     )
-    return info, _text(block.get("accessToken"))
+    return info, _text(block.get("accessToken")), True
 
 
 def plan_from(subscription_type: str | None, rate_limit_tier: str | None) -> PlanInfo:
@@ -158,7 +180,7 @@ def _parse_limits(raw: dict) -> list[Limit]:
 def _limits_from_list(items: list, shares: Shares) -> list[Limit]:
     limits: list[Limit] = []
     for index, entry in enumerate(items):
-        limit = _limit_from_entry(entry)
+        limit = _guarded(f"limits[{index}]", lambda entry=entry: _limit_from_entry(entry), None)
         if limit is None:
             log.debug("usage limits[%d] skipped (no kind or percent)", index)
             continue
@@ -336,7 +358,7 @@ def _parse_ts(value: Any) -> datetime | None:
     text = _FRACTION.sub(lambda m: "." + (m.group(1) + "000000")[:6], text, count=1)
     try:
         return _as_utc(datetime.fromisoformat(text))
-    except ValueError:
+    except (ValueError, OverflowError, OSError):  # year 9999 with a west offset overflows when made UTC
         return None
 
 
@@ -358,6 +380,7 @@ class UsageClient:
     429: RATE_LIMITED, Retry-After if sent, else 60 s doubling to 15 min.
     Network error, 5xx, other non-2xx, unusable body: OFFLINE, 30 s doubling to 15 min.
     200: LIVE, backoff reset. Missing sign-in: NO_CREDENTIALS, re-checked on every fetch.
+    A sign-in file that is unreadable (mid-write, say) keeps the status and backoff as they were.
     """
 
     def __init__(self, credentials_path: Path | None = None, *, timeout: float = 10,
@@ -365,7 +388,7 @@ class UsageClient:
                  user_agent: str | None = None) -> None:
         self._path = credentials_path
         self._timeout = timeout
-        self._opener: Opener = opener or urllib.request.urlopen
+        self._opener: Opener = opener or _DEFAULT_OPENER
         self._user_agent = user_agent or f"ClaudeUsageMonitor/{version}"
         self._lock = threading.Lock()
         self._base_detail = "Loading usage"
@@ -389,7 +412,9 @@ class UsageClient:
         if self.next_allowed_at is not None and now < self.next_allowed_at:
             log.debug("usage API backing off until %s", _clock(self.next_allowed_at))
             return self._result(fresh=False)
-        info, token = read_credentials(self._path)
+        info, token, readable = inspect_credentials(self._path)
+        if not readable:  # probably mid-write: keep the status and the backoff, try again next time
+            return self._result(fresh=False)
         if not info.present or not token:
             self._stale_mtime = None
             self._failures = 0
@@ -421,7 +446,7 @@ class UsageClient:
             code = _status_code(response)
             if not 200 <= code < 300:
                 return self._on_status(code, getattr(response, "headers", None), now, mtime)
-            body = response.read(MAX_BODY_BYTES + 1)
+            body = read_capped(response, MAX_BODY_BYTES + 1, BODY_BUDGET_S)
         except (OSError, http.client.HTTPException) as exc:
             return self._on_network_error(exc, token, now)
         finally:

@@ -70,8 +70,15 @@ def _is_number(v: Any) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
-def _is_positive(v: Any) -> bool:
-    return _is_number(v) and v > 0
+MAX_INTERVAL_S = 86_400  # one day. Longer waits are useless, and a huge one overflows the timers
+
+
+def _is_seconds(v: Any) -> bool:
+    return _is_number(v) and 1 <= v <= MAX_INTERVAL_S
+
+
+def _is_poll_ms(v: Any) -> bool:
+    return _is_number(v) and 1_000 <= v <= MAX_INTERVAL_S * 1000
 
 
 def _is_version(v: Any) -> bool:
@@ -94,7 +101,7 @@ def _is_price(v: Any) -> bool:
 
 _RULES: dict[str, Callable[[Any], bool]] = {
     "settings_version": _is_version,
-    "poll_interval_ms": _is_positive,
+    "poll_interval_ms": _is_poll_ms,
     "position": _is_position,
     "show_floating": _is_bool,
     "show_taskbar": _is_bool,
@@ -107,7 +114,7 @@ _RULES: dict[str, Callable[[Any], bool]] = {
     "taskbar_text_fx": _is_bool,
     "billing_day": _is_billing_day,
     "plan_price_override": _is_price,
-    "ingest_interval_s": _is_positive,
+    "ingest_interval_s": _is_seconds,
 }
 
 
@@ -142,15 +149,22 @@ def _same(a: Any, b: Any) -> bool:
 
 # ── File I/O ──────────────────────────────────────────────────────────────────
 
+class _Unreadable(OSError):
+    """The settings file exists but cannot be read right now, for example because another program holds it."""
+
+
 def _read_file(path: Path) -> dict[str, Any] | None:
-    """The stored object, or None when there is no usable file (missing, unreadable, corrupt)."""
+    """The stored object, or None when there is no usable file (missing or corrupt).
+
+    Raises _Unreadable when the file exists but cannot be read. Such a file is left alone, since
+    treating it as missing would overwrite it with defaults on the next save.
+    """
     try:
         raw = path.read_bytes()
     except FileNotFoundError:
         return None
     except OSError as exc:
-        log.warning("cannot read settings %s (%s); using defaults", path, exc)
-        return None
+        raise _Unreadable(f"cannot read settings {path} ({exc})") from exc
     try:
         # utf-8-sig tolerates a byte-order mark left by a hand edit.
         data = json.loads(raw.decode("utf-8-sig"))
@@ -233,10 +247,11 @@ def _merge(stored: dict[str, Any] | None) -> tuple[dict[str, Any], bool]:
 class Settings:
     """Thread-safe settings with change listeners and one debounced, atomic save.
 
-    Listeners run on the thread that made the change, in order, one change at a time. A
-    listener must not block waiting for another thread that calls set(), because that
-    thread would wait on the dispatch lock. Pending saves run on daemon timers; call close()
-    before exit to flush them.
+    Listeners run on the thread that made the change, one change at a time, and every listener
+    sees the changes in the order they were applied. A change that a listener makes is delivered
+    once the listeners of the change in progress have run. A listener must not block waiting for
+    another thread that calls set(), because that thread would wait on the dispatch lock. Pending
+    saves run on daemon timers; call close() before exit to flush them.
     """
 
     def __init__(self, path: Path | None = None, save_delay_s: float = 0.75) -> None:
@@ -246,11 +261,19 @@ class Settings:
         self._dispatch_lock = threading.RLock()  # keeps each change and its notifications in order
         self._save_lock = threading.Lock()       # one disk write at a time
         self._listeners: list[tuple[object, Callable[[str, Any], None]]] = []
+        self._dispatching = False  # True while listeners run; guarded by _dispatch_lock
+        self._queued: list[tuple[str, Any]] = []  # changes made by listeners; guarded by _dispatch_lock
         self._timer: threading.Timer | None = None
         self._timer_token: object | None = None
         self._version = 0        # bumped by every change to a persisted key
         self._saved_version = 0  # the version written by the last successful save
-        stored = _read_file(self._path)
+        self._blocked = False    # the file exists but could not be read: saves wait until it can be
+        self._held: set[str] = set()  # keys changed while blocked; they win over the file once it reads
+        try:
+            stored = _read_file(self._path)
+        except _Unreadable as exc:
+            log.warning("%s; using defaults and leaving the file alone until it can be read", exc)
+            stored, self._blocked = None, True
         self._data, needs_upgrade = _merge(stored)
         if stored is not None and needs_upgrade:
             self._write_to_disk()
@@ -285,7 +308,10 @@ class Settings:
         with self._dispatch_lock:
             with self._lock:
                 changes = self._apply_locked(items)
-            self._dispatch(changes)
+            if self._dispatching:  # a listener made this change: deliver it after the current one
+                self._queued.extend(changes)
+            else:
+                self._dispatch(changes)
         if any(not key.startswith("_") for key, _ in changes):
             self._schedule_save()
 
@@ -332,19 +358,28 @@ class Settings:
             changes.append((key, new))
             if not key.startswith("_"):
                 self._version += 1
+                if self._blocked:
+                    self._held.add(key)
         return changes
 
     def _dispatch(self, changes: list[tuple[str, Any]]) -> None:
-        if not changes:
-            return
-        with self._lock:
-            listeners = list(self._listeners)
-        for key, value in changes:
-            for _token, callback in listeners:
-                try:
-                    callback(key, _isolate(key, value))
-                except Exception:  # a broken listener must not stop the others or the caller
-                    log.exception("settings listener failed on key %r", key)
+        """Notify the listeners of ``changes``, then of whatever they changed in turn. Caller holds _dispatch_lock."""
+        self._dispatching = True
+        try:
+            pending = changes
+            while pending:
+                with self._lock:
+                    listeners = list(self._listeners)
+                for key, value in pending:
+                    for _token, callback in listeners:
+                        try:
+                            callback(key, _isolate(key, value))
+                        except Exception:  # a broken listener must not stop the others or the caller
+                            log.exception("settings listener failed on key %r", key)
+                pending, self._queued = self._queued, []
+        finally:
+            self._dispatching = False
+            self._queued = []
 
     def _schedule_save(self) -> None:
         with self._lock:
@@ -371,6 +406,8 @@ class Settings:
 
     def _write_to_disk(self) -> None:
         with self._save_lock:  # serialised, so an older snapshot can never land after a newer one
+            if self._blocked and not self._unblock():
+                return  # the file still cannot be read, so it is left as it is; the next save retries
             with self._lock:
                 payload = self._persistable_locked()
                 version = self._version
@@ -384,3 +421,19 @@ class Settings:
 
     def _persistable_locked(self) -> dict[str, Any]:
         return {key: _copy(value) for key, value in self._data.items() if not key.startswith("_")}
+
+    def _unblock(self) -> bool:
+        """Read the file again. When it reads, its values are merged with the changes made meanwhile."""
+        try:
+            stored = _read_file(self._path)
+        except _Unreadable:
+            return False
+        state, _needs_upgrade = _merge(stored)
+        with self._lock:
+            for key in self._held:
+                state[key] = self._data[key]
+            self._data = state
+            self._held.clear()
+            self._blocked = False
+        log.info("settings file %s can be read again; saving over it", self._path)
+        return True

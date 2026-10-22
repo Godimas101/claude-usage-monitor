@@ -624,3 +624,21 @@ def test_refresh_with_the_default_opener_fails_closed_when_offline(tmp_path, mon
 
     monkeypatch.setattr(pricing.urllib.request, "urlopen", offline)
     assert refresh_remote(REMOTE_URL, tmp_path / "pricing.json") is False
+
+
+# ── Regression: deep JSON and slow bodies ───────────────────────────────────────
+
+def test_a_deeply_nested_pricing_file_is_a_bad_table_not_a_crash(tmp_path):
+    cached = tmp_path / "pricing.json"
+    cached.write_text("[" * 100_000 + "]" * 100_000, encoding="utf-8")
+    with pytest.raises(ValueError):
+        Pricing.load(cached)
+    assert load_best(BUNDLED_PATH, cached).version == Pricing.load().version
+
+
+def test_a_remote_body_that_trickles_in_is_cut_off_by_the_time_budget(monkeypatch):
+    monkeypatch.setattr(pricing, "_REMOTE_BUDGET_S", 0.0, raising=False)
+    monkeypatch.setattr(pricing.urllib.request, "urlopen",
+                        lambda request, timeout: _FakeResponse(b"{}"))
+    with pytest.raises(TimeoutError):
+        pricing._fetch(REMOTE_URL, 4)

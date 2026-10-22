@@ -33,9 +33,9 @@ from usage_monitor.data.models import (
 )
 from usage_monitor.data.pricing import BUNDLED_PATH, Pricing, load_best, refresh_remote
 from usage_monitor.data.store import Store
-from usage_monitor.data.usage_api import FetchResult, UsageClient, plan_from, read_credentials
+from usage_monitor.data.usage_api import FetchResult, UsageClient, inspect_credentials, plan_from
 from usage_monitor.log import get_logger
-from usage_monitor.settings import DEFAULTS, Settings
+from usage_monitor.settings import DEFAULTS, MAX_INTERVAL_S, Settings
 
 log = get_logger(__name__)
 
@@ -46,6 +46,8 @@ PRICING_REFRESH_EVERY = timedelta(hours=24)
 MIN_INGEST_S = 15.0
 MIN_POLL_S = 60.0
 PAUSED_RECHECK_S = 10.0
+ERROR_RETRY_S = 60.0                 # the wait after a cycle that raised
+WINDOW_NAMES = ("session", "today", "week", "month", "all")  # always in MonitorState.windows
 PROGRESS_PUBLISH_S = 0.5             # ingest progress is published at most this often
 BURN_MINUTES = win.DEFAULT_BURN_MINUTES
 SESSION_LOOKBACK_START = 2 * win.SESSION_LENGTH
@@ -102,6 +104,7 @@ class DataService:
         self._plan: PlanInfo = plan_from(None, None)
         self._creds_seen = False
         self._creds_mtime: float | None = None
+        self._creds_pending = False  # a sign-in change seen while paused; the next active cycle fetches for it
         self._last_fetch: FetchResult | None = None
         self._last_fetch_at: datetime | None = None
         self._last_ingest_at: datetime | None = None
@@ -117,12 +120,20 @@ class DataService:
     # ── Public API ──
 
     def start(self) -> None:
-        """Start the service thread. The first cycle runs at once. A call while it runs does nothing."""
+        """Start the service thread. The first cycle runs at once.
+
+        While the loop is still running, a call only cancels a stop that has not taken effect yet
+        (one that timed out, or came from a subscriber), so the loop carries on.
+        """
         with self._lock:
-            if self._thread is not None:
+            if self._thread is not None and self._thread.is_alive():
+                self._stopping = False
+                if self._unsubscribe_settings is None:
+                    self._unsubscribe_settings = self._settings.on_change(self._on_setting)
                 return
             self._stopping = False
-            self._unsubscribe_settings = self._settings.on_change(self._on_setting)
+            if self._unsubscribe_settings is None:
+                self._unsubscribe_settings = self._settings.on_change(self._on_setting)
             self._thread = threading.Thread(target=self._run, name=THREAD_NAME, daemon=True)
             self._thread.start()
         log.info("data service started")
@@ -170,16 +181,31 @@ class DataService:
     # ── The loop ──
 
     def _run(self) -> None:
+        me = threading.current_thread()
         try:
-            while not self._stopping:
+            while self._keep_running(me):
                 self._wake.clear()
                 delay = self._safe_cycle()
-                if self._stopping:
-                    break
                 self._wake.wait(delay)
         finally:
-            self._close_store()
+            with self._lock:
+                self._retire_locked(me)
         log.info("data service stopped")
+
+    def _keep_running(self, me: threading.Thread) -> bool:
+        """False once a stop was requested. Then the store is closed and this thread's handle cleared
+        under one lock hold, so a start() that follows can only begin a new thread after this one has
+        let go of the store."""
+        with self._lock:
+            if not self._stopping:
+                return True
+            self._retire_locked(me)
+            return False
+
+    def _retire_locked(self, me: threading.Thread) -> None:
+        self._close_store()
+        if self._thread is me:
+            self._thread = None
 
     def _safe_cycle(self) -> float:
         """Run one cycle. Any exception is logged and recorded, and the loop carries on."""
@@ -189,18 +215,21 @@ class DataService:
             self._cycle_error = f"{type(exc).__name__}: {exc}"[:200]
             log.exception("data cycle failed; the loop retries at the next interval")
             self._publish_best_effort()
-            return self._ingest_interval().total_seconds()
+            return ERROR_RETRY_S
 
     def _cycle(self) -> float:
         """One pass over the data. Returns the number of seconds to wait before the next one."""
         now = self._now()
         if self._is_paused():
+            if self._check_credentials():
+                self._creds_pending = True  # the change is acted on by the first cycle that is not paused
             self._publish(self._build_state(now, status=ApiStatus.PAUSED, detail=PAUSED_DETAIL))
             return PAUSED_RECHECK_S
         forced = self._take_force()
         ingest_every = self._ingest_interval()
-        creds_changed = self._check_credentials()
-        if forced or creds_changed or _due(self._last_fetch_at, self._poll_interval(), now):
+        creds_changed = self._check_credentials() or self._creds_pending
+        self._creds_pending = False
+        if forced or creds_changed or self._fetch_due(now):
             self._fetch(now)
         if forced or _due(self._last_ingest_at, ingest_every, now):
             self._ingest_once(now)
@@ -223,22 +252,22 @@ class DataService:
         return forced
 
     def _check_credentials(self) -> bool:
-        """True when the sign-in file changed since the last check. Keeps the plan from it.
+        """True when the sign-in file was read because it changed (or for the first time): fetch at once.
 
-        The token is read by read_credentials and dropped at once; nothing here keeps or logs it.
+        A readable file sets the plan, "Unknown plan" included when it holds no sign-in. A file that
+        cannot be read, perhaps because Claude Code is writing it, changes nothing; the next cycle
+        reads it again. The token is read by inspect_credentials and dropped at once.
         """
         path = paths.credentials_path()
         mtime = _mtime(path)
         if self._creds_seen and mtime == self._creds_mtime:
             return False
-        info, _token = read_credentials(path)
-        changed = self._creds_seen
-        if info.present or mtime is None:
-            self._creds_seen, self._creds_mtime = True, mtime
-            self._plan = info.plan
-        # Otherwise the file exists but could not be read, perhaps mid-write by Claude Code. The
-        # old plan stays and the next cycle reads the file again.
-        return changed
+        info, _token, readable = inspect_credentials(path)
+        if not readable:
+            return False
+        self._creds_seen, self._creds_mtime = True, mtime
+        self._plan = info.plan
+        return True
 
     def _fetch(self, now: datetime) -> None:
         result = self._client.fetch(now)
@@ -246,6 +275,17 @@ class DataService:
         if result.fresh and result.snapshot is not None:
             store, _pricing = self._open()
             store.save_usage_snapshot(result.snapshot)
+
+    def _fetch_due(self, now: datetime) -> bool:
+        """Whether the usage API should be asked now.
+
+        After a failure the client's backoff gate says when to retry, which can be well before the
+        next poll, so the retry is due when the gate opens. After a fresh answer the poll interval applies.
+        """
+        gate = self._client.next_allowed_at
+        if self._last_fetch is not None and not self._last_fetch.fresh and gate is not None:
+            return now >= gate or (self._last_fetch_at is not None and now < self._last_fetch_at)
+        return _due(self._last_fetch_at, self._poll_interval(), now)
 
     def _ingest_once(self, now: datetime) -> None:
         store, pricing = self._open()
@@ -273,7 +313,7 @@ class DataService:
     def _refresh_store_values(self, now: datetime) -> None:
         store, pricing = self._open()
         self._windows = _compute_windows(store, pricing, now, self._live_usage(now),
-                                         self._settings.get("billing_day"))
+                                         self._settings.get("billing_day"), self._windows)
         recent = store.recent_requests(now - timedelta(minutes=BURN_MINUTES))
         self._burn = win.burn_rate(recent, now, BURN_MINUTES)
         self._unpriced = store.unpriced_models()
@@ -345,13 +385,17 @@ class DataService:
             status = fetch.status if fetch is not None else ApiStatus.LOADING
         if detail is None:
             detail = fetch.detail if fetch is not None else LOADING_DETAIL
+        # Every documented window is always present, so a consumer never meets a missing key. A window
+        # not computed yet reads as empty.
+        windows = {name: WindowStats(name=name, start=None, end=None) for name in WINDOW_NAMES}
+        windows.update(self._windows)
         return MonitorState(
             status=status,
             status_detail=detail,
             usage=snapshot,
             usage_fetched_at=snapshot.fetched_at if snapshot is not None else None,
             plan=self._effective_plan(),
-            windows=dict(self._windows),
+            windows=windows,
             burn=self._burn,
             unpriced_models=list(self._unpriced),
             ingest=dataclasses.replace(self._ingest, last_error=self._cycle_error or self._ingest_error),
@@ -380,11 +424,11 @@ class DataService:
 
     def _ingest_interval(self) -> timedelta:
         seconds = _positive(self._settings.get("ingest_interval_s"), DEFAULTS["ingest_interval_s"])
-        return timedelta(seconds=max(MIN_INGEST_S, seconds))
+        return timedelta(seconds=min(max(MIN_INGEST_S, seconds), MAX_INTERVAL_S))
 
     def _poll_interval(self) -> timedelta:
         ms = _positive(self._settings.get("poll_interval_ms"), DEFAULTS["poll_interval_ms"])
-        return timedelta(seconds=max(MIN_POLL_S, ms / 1000.0))
+        return timedelta(seconds=min(max(MIN_POLL_S, ms / 1000.0), MAX_INTERVAL_S))
 
     def _now(self) -> datetime:
         value = self._clock()
@@ -437,7 +481,10 @@ def _due(last: datetime | None, every: timedelta, now: datetime) -> bool:
 def _positive(value: Any, default: float) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return float(default)
-    number = float(value)
+    try:
+        number = float(value)
+    except OverflowError:  # an integer too large for a float
+        return float(default)
     return number if math.isfinite(number) and number > 0 else float(default)
 
 
@@ -449,17 +496,26 @@ def _mtime(path: Path) -> float | None:
 
 
 def _compute_windows(store: Store, pricing: Pricing, now: datetime, usage: UsageSnapshot | None,
-                     billing_day: Any) -> dict[str, WindowStats]:
-    found = {
-        "session": _window(store, pricing, "session", _session_bounds(store, now, usage)),
-        "today": _window(store, pricing, "today", win.today(now)),
-        "week": _window(store, pricing, "week", win.week(now, usage)),
-        "month": _window(store, pricing, "month", win.month(now)),
-    }
-    cycle = win.cycle(now, billing_day)
-    if cycle is not None:
-        found["cycle"] = _window(store, pricing, "cycle", cycle)
-    found["all"] = _window(store, pricing, "all", (store.first_request_ts(), None))
+                     billing_day: Any, previous: dict[str, WindowStats]) -> dict[str, WindowStats]:
+    """Every window that is open now. A window that fails keeps its previous value; the others still count."""
+    specs: list[tuple[str, Callable[[], tuple[datetime | None, datetime | None] | None]]] = [
+        ("session", lambda: _session_bounds(store, now, usage)),
+        ("today", lambda: win.today(now)),
+        ("week", lambda: win.week(now, usage)),
+        ("month", lambda: win.month(now)),
+        ("cycle", lambda: win.cycle(now, billing_day)),
+        ("all", lambda: (store.first_request_ts(), None)),
+    ]
+    found: dict[str, WindowStats] = {}
+    for name, bounds_of in specs:
+        try:
+            bounds = bounds_of()
+            if bounds is not None:
+                found[name] = _window(store, pricing, name, bounds)
+        except Exception:  # thread boundary: one window must not freeze the rest of the publish
+            log.exception("window %s could not be computed; its last value is kept", name)
+            if name in previous:
+                found[name] = previous[name]
     return found
 
 

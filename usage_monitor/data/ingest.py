@@ -5,7 +5,8 @@ stored bookmark. Only what changed is read:
 
 * new file                       read from byte 0
 * same size and mtime            skipped without opening the file
-* grown                          read from the bookmark (the last complete line)
+* grown                          read from the bookmark (the last complete line), when the bytes
+                                 before the bookmark are unchanged
 * shrunk or rewritten in place   read from byte 0; the store dedupes, so a re-read is safe
 * gone from a root that was scanned completely
                                  bookmark forgotten; the stored items stay
@@ -16,6 +17,7 @@ and is retried on the next run.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import time
 from collections.abc import Callable, Iterable
@@ -32,6 +34,7 @@ from usage_monitor.log import get_logger
 log = get_logger(__name__)
 
 TRANSCRIPT_SUFFIX = ".jsonl"
+TAIL_BYTES = 4096  # the bytes before a bookmark that identify it: an append never changes them
 
 # path -> (the root it was found under, its stat taken during the walk)
 _Found = dict[str, tuple[str, os.stat_result]]
@@ -85,15 +88,18 @@ class Ingestor:
 
     def _sync_file(self, path: str, root: str, stat: os.stat_result, state: FileState | None,
                    result: IngestResult) -> None:
-        start = _start_offset(state, stat.st_size, stat.st_mtime)
-        if start is None:
-            return
-        try:
-            _probe(path)  # an unreadable file keeps its bookmark, so the next run retries it
+        try:  # a read that raises keeps the old bookmark, so the next run retries the file
+            start = _start_offset(path, state, stat.st_size, stat.st_mtime)
+            if start is None:
+                return
             ctx = tx.file_context(Path(path), Path(root))
             items, end = tx.read_new(Path(path), start, ctx)
-            bookmark = FileState(path=path, size=stat.st_size, mtime=stat.st_mtime, offset=end)
+            bookmark = FileState(path=path, size=stat.st_size, mtime=stat.st_mtime, offset=end,
+                                 tail=_tail_digest(path, end))
             counts = self._commit(items, bookmark)
+        except FileNotFoundError:  # removed after the walk: nothing to read, and the next walk forgets it
+            log.debug("ingest: %s vanished during the run", os.path.basename(path))
+            return
         except Exception as exc:  # one bad file must not stop the run; it is retried next time
             message = f"{type(exc).__name__} on {os.path.basename(path)}"
             result.errors.append(message)
@@ -154,7 +160,7 @@ def _walk(root: str, found: _Found, errors: list[str]) -> bool:
         try:
             with os.scandir(folder) as listing:
                 for entry in listing:
-                    if not _take(entry, root, found, pending):
+                    if not _take(entry, root, found, pending, errors):
                         complete = False
         except OSError as exc:
             if folder == root and isinstance(exc, FileNotFoundError):
@@ -164,14 +170,16 @@ def _walk(root: str, found: _Found, errors: list[str]) -> bool:
     return complete
 
 
-def _take(entry: os.DirEntry[str], root: str, found: _Found, pending: list[str]) -> bool:
+def _take(entry: os.DirEntry[str], root: str, found: _Found, pending: list[str], errors: list[str]) -> bool:
     """Sort one directory entry into the walk. False when the entry could not be examined."""
     try:
         if entry.is_dir(follow_symlinks=False):
             pending.append(entry.path)
         elif entry.name.lower().endswith(TRANSCRIPT_SUFFIX) and entry.is_file():
             found[entry.path] = (root, entry.stat())
-    except OSError:
+    except OSError as exc:
+        errors.append(f"{type(exc).__name__} examining {entry.name}")
+        log.debug("ingest: cannot examine %s (%s)", entry.name, type(exc).__name__)
         return False
     return True
 
@@ -189,21 +197,35 @@ def _under_any(path: str, roots: list[str]) -> bool:
 
 # ── Per-file decisions ────────────────────────────────────────────────────────────
 
-def _start_offset(state: FileState | None, size: int, mtime: float) -> int | None:
+def _start_offset(path: str, state: FileState | None, size: int, mtime: float) -> int | None:
     """Byte offset to read from, or None when the file is unchanged since its last read."""
     if state is None:
         return 0
     if size == state.size and mtime == state.mtime:
         return None
-    if size > state.size and state.offset <= size:
+    if size > state.size and state.offset <= size and _prefix_intact(path, state):
         return state.offset
     return 0
 
 
-def _probe(path: str) -> None:
-    """Raise OSError when the file cannot be opened, before any bookmark is touched."""
-    with open(path, "rb"):
-        pass
+def _prefix_intact(path: str, state: FileState) -> bool:
+    """False when the bytes before the bookmark changed: the file was rewritten, not appended to.
+
+    A bookmark with no recorded tail, from before this check, is trusted as it always was.
+    """
+    if state.tail is None or state.offset == 0:
+        return True
+    return _tail_digest(path, state.offset) == state.tail
+
+
+def _tail_digest(path: str, end: int) -> str | None:
+    """SHA-256 of the up to TAIL_BYTES bytes that end at ``end``. None at the start of the file."""
+    if end <= 0:
+        return None
+    begin = max(0, end - TAIL_BYTES)
+    with open(path, "rb") as handle:
+        handle.seek(begin)
+        return hashlib.sha256(handle.read(end - begin)).hexdigest()
 
 
 def _report(progress: Callable[[int, int], None] | None, done: int, total: int) -> None:

@@ -103,10 +103,10 @@ def file_store(tmp_path):
 
 # ── Open, schema and migrations ───────────────────────────────────────────────────
 
-def test_new_database_is_schema_v1_wal_with_foreign_keys_off(tmp_path):
+def test_new_database_is_schema_v2_wal_with_foreign_keys_off(tmp_path):
     path = tmp_path / "usage.db"
     with Store(path) as s:
-        assert s.schema_version() == 1
+        assert s.schema_version() == 2
         assert s.table_counts()["requests"] == 0
         assert s._rows("PRAGMA foreign_keys")[0][0] == 0
     assert raw(path, "PRAGMA journal_mode")[0][0] == "wal"
@@ -119,7 +119,7 @@ def test_reopening_keeps_data_and_does_not_migrate_again(tmp_path):
     with Store(path) as s:
         s.add_items([make_rec()], PRICING)
     with Store(path) as s:
-        assert s.schema_version() == 1
+        assert s.schema_version() == 2
         assert s.totals(None, None).requests == 1
 
 
@@ -138,16 +138,16 @@ def test_forward_migration_runs_once_per_new_version(tmp_path, monkeypatch):
     path = tmp_path / "usage.db"
     Store(path).close()
 
-    def create_v2(conn: sqlite3.Connection) -> None:
-        conn.execute("CREATE TABLE demo_v2 (x INTEGER)")
+    def create_v3(conn: sqlite3.Connection) -> None:
+        conn.execute("CREATE TABLE demo_v3 (x INTEGER)")
 
-    monkeypatch.setitem(store_mod._MIGRATIONS, 2, create_v2)
-    monkeypatch.setattr(store_mod, "SCHEMA_VERSION", 2)
+    monkeypatch.setitem(store_mod._MIGRATIONS, 3, create_v3)
+    monkeypatch.setattr(store_mod, "SCHEMA_VERSION", 3)
     with Store(path) as s:
-        assert s.schema_version() == 2
-        assert s.table_counts()["demo_v2"] == 0
-    with Store(path) as s:  # already at 2: nothing runs again
-        assert s.schema_version() == 2
+        assert s.schema_version() == 3
+        assert s.table_counts()["demo_v3"] == 0
+    with Store(path) as s:  # already at 3: nothing runs again
+        assert s.schema_version() == 3
 
 
 def test_context_manager_closes_and_close_is_idempotent(tmp_path):
@@ -504,3 +504,40 @@ def test_store_lock_serialises_writers_and_other_connections_read(tmp_path):
     t.join()
     assert seen == [100]
     s.close()
+
+
+# ── Values SQLite cannot take, and sums past int64 (regression) ─────────────────────
+
+def test_totals_add_up_past_the_int64_range(store):
+    store.add_items([make_rec("m1|r1", out=2**62), make_rec("m2|r2", out=2**62)], PRICING)
+    total = store.totals(None, None)
+    assert total.output == 2**63
+    assert total.requests == 2
+    assert store.totals_by_model(None, None)[OPUS].output == 2**63
+
+
+def test_a_row_sqlite_cannot_store_is_skipped_and_the_rest_of_the_batch_is_kept(store):
+    batch = [make_rec("m1|r1"), make_rec("m2|r2", inp=2**63), make_rec("m3|r3")]
+    assert store.add_items(batch, PRICING) == {"request": 2}
+    assert store.totals(None, None).requests == 2
+
+
+def test_a_lone_surrogate_row_is_skipped_and_the_rest_of_the_batch_is_kept(store):
+    bad = replace(make_rec("m2|r2"), cwd="C:/bad\ud800")
+    assert store.add_items([make_rec("m1|r1"), bad, make_rec("m3|r3")], PRICING) == {"request": 2}
+    assert store.totals(None, None).requests == 2
+
+
+def test_requests_dated_before_1970_are_stored_and_read_back(store):
+    early = datetime(1900, 1, 1, tzinfo=UTC)
+    store.add_items([make_rec("m0|r0", ts=early), make_rec("m1|r1")], PRICING)
+    assert store.first_request_ts() == early
+    assert store.totals(None, None).requests == 2
+
+
+# ── The tail of a bookmark is stored with it (regression) ────────────────────────────
+
+def test_a_bookmark_keeps_its_tail_fingerprint(file_store):
+    file_store.save_file_state(FileState("/p/a.jsonl", 120, 1.5, 100, tail="abc123"))
+    assert file_store.file_state("/p/a.jsonl") == FileState("/p/a.jsonl", 120, 1.5, 100, tail="abc123")
+    assert file_store.file_states()["/p/a.jsonl"].tail == "abc123"

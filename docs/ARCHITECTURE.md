@@ -81,6 +81,12 @@ Keys starting with `_` are runtime-only and never persisted (v1 convention). Unk
 are preserved. Thread-safe. v1 files load as-is (same path, same keys) and gain
 `settings_version: 2` plus new defaults: `billing_day` (None), `plan_price_override` (None),
 `ingest_interval_s` (60). v1 `poll_interval_ms` keeps working.
+Value rules: `ingest_interval_s` in [1, 86400], `poll_interval_ms` in [1000, 86400000];
+`set()` raises `ValueError` for a bad value and `load` falls back to the default. A change
+made inside a listener is queued and delivered after the current one, so every listener sees
+changes in apply order. An unreadable (as opposed to missing) settings file is never
+overwritten: the object runs on defaults, blocks saves and retries the read on each save,
+then merges the file's values under the changes made meanwhile.
 
 ### `data/pricing.py` + `pricing.json`
 ```python
@@ -113,7 +119,11 @@ parse_line(line: str, ctx: FileContext) -> list[TranscriptItem]      # never rai
 read_new(path: Path, offset: int, ctx: FileContext) -> tuple[list[TranscriptItem], int]
 ```
 `read_new` reads from `offset` to the last complete line and returns the new offset (a line
-boundary). A cheap substring prefilter skips lines that can't produce an item; it must be
+boundary). It raises `OSError` when the file cannot be opened or read to its end (the
+ingestor then keeps the bookmark and commits nothing); `FileNotFoundError` for a file that
+vanished after the directory walk is skipped quietly. Counts are clamped to 2**53 and lone
+surrogates replaced, so odd values do not block a file. Timestamps before 1970 are rejected.
+A cheap substring prefilter skips lines that can't produce an item; it must be
 proven equivalent to a full parse on real data.
 
 | Record | Item |
@@ -165,6 +175,9 @@ class Store:
 - `usage_snapshots` keeps compact numbers per fetch (session/weekly percent + resets + a
   compact JSON of all limits); the latest full raw response lives in `meta`. Snapshots older
   than 180 days are pruned.
+- Schema version 2 (adds `file_state.tail`) through a forward migration. Token sums are
+  computed as REAL (no int64 overflow). `add_items` binds the batch first and only falls back
+  to row-by-row inside a savepoint when SQLite refuses a value, logging the skipped rows.
 - One connection per `Store`, guarded by a lock. Readers in other threads open their own
   `Store` on the same file (WAL makes that safe).
 
@@ -174,7 +187,7 @@ class Ingestor:
     def __init__(self, store: Store, pricing: Pricing, roots: list[Path] | None = None): ...
     def run(self, progress: Callable[[int, int], None] | None = None) -> IngestResult
 ```
-New file → read from 0. Grown → read appended bytes. Same size + mtime → skip without opening.
+New file → read from 0. Grown → read appended bytes, unless the 4 KiB before the bookmark no longer hash to `FileState.tail` (rewritten → read from 0). Same size + mtime → skip without opening.
 Smaller than the bookmark → re-read from 0 (dedupe makes it safe). Missing → `forget_file`.
 Commit per file so an interrupted backfill resumes. Targets: no-change pass < 0.5 s for 4K
 files; 2 GB backfill < 60 s.
@@ -183,6 +196,7 @@ files; 2 GB backfill < 60 s.
 ```python
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 read_credentials(path: Path | None = None) -> tuple[CredentialsInfo, str | None]   # token never logged
+inspect_credentials(path: Path | None = None) -> tuple[CredentialsInfo, str | None, bool]  # + readable
 plan_from(subscription_type: str | None, rate_limit_tier: str | None) -> PlanInfo
 parse_usage(raw: dict, fetched_at: datetime) -> UsageSnapshot                      # never raises
 class UsageClient:
@@ -194,7 +208,11 @@ class UsageClient:
   don't retry until `.credentials.json` changes (mtime). 429 → `RATE_LIMITED`, honour
   `Retry-After`, else exponential backoff 60 s → 15 min. Network / 5xx → `OFFLINE`,
   backoff 30 s → 15 min. 200 → `LIVE`, backoff reset.
-- Never writes to `.credentials.json`.
+- Never writes to `.credentials.json`. A readable file is authoritative (missing sign-in →
+  "Unknown plan"); an unreadable or half-written one keeps the current plan and backoff.
+- Redirects are refused (a 3xx is an error → `OFFLINE`), so the bearer token never follows a
+  redirect. Response bodies are read through `data/netread.read_capped` (size cap plus a 10 s
+  total time budget); a trickling body → `OFFLINE` "timed out". Pricing downloads use the same.
 - `parse_usage` prefers `limits[]`, attaches `weekly_scoped_shares` by `limit_index`, maps
   legacy `five_hour` / `seven_day` onto session / weekly (`locked_reason`, `*_dollars`), and
   falls back to legacy windows when `limits[]` is absent. Null codename windows are ignored.
@@ -209,8 +227,8 @@ burn_rate(recent: list[tuple[datetime, int, float]], now: datetime, window_minut
 ```
 `now` is aware. Day/month/cycle boundaries are local midnight. Week = the weekly limit's
 window `[resets_at − 7 d, resets_at)` when known, else the last 7 days. Session = the session
-limit's window `[resets_at − 5 h, resets_at)` when known, else a 5-hour block starting at the
-first request after a ≥5 h gap (floored to the hour). Velocity from output tok/min:
+limit's window `[resets_at − 5 h, resets_at)` when known, else a 5-hour block: a block starts
+at the first request and at any request at or past the open block's end, floored to the hour. Velocity from output tok/min:
 0 IDLE, <500 SLOW, <1500 NORMAL, <3000 FAST, else VERY FAST.
 
 ### `data/service.py`
@@ -228,7 +246,11 @@ One background thread. Each cycle: ingest (every `ingest_interval_s`, default 60
 when due (`poll_interval_ms`, min 60 s, subject to client backoff; immediately when the
 credentials file changes) → snapshot saved → windows + burn computed → `MonitorState`
 published to subscribers **on the service thread** (UIs marshal to their own thread).
-`pause_check()` true → status `PAUSED`, no work. Reprices the store when the pricing
+Every `MonitorState` carries the `session`, `today`, `week`, `month` and `all` keys (empty
+until computed); each window is computed separately and a failing one keeps its last value.
+After a failed fetch the next one is due at the client's `next_allowed_at`. Intervals are
+clamped to one day; a cycle that raises waits `ERROR_RETRY_S` (60 s).
+`pause_check()` true → status `PAUSED`, no work (the credentials file is still watched). Reprices the store when the pricing
 version changes; refreshes remote pricing at most daily.
 
 ## Phase 3 target (v2.0) — summary
