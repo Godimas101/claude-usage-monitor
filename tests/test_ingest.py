@@ -4,6 +4,7 @@ from __future__ import annotations
 import builtins
 import json
 import os
+import sqlite3
 from dataclasses import replace
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from usage_monitor import paths
 from usage_monitor.data import transcripts as tx
 from usage_monitor.data.ingest import IngestResult, Ingestor
 from usage_monitor.data.pricing import Pricing
+from usage_monitor.data import store as store_mod
 from usage_monitor.data.store import Store
 
 PRICING = Pricing.load()
@@ -580,3 +582,60 @@ def test_values_sqlite_could_not_hold_do_not_block_the_rest_of_their_file(store,
     result = run(store, [projects])
     assert result.errors == []
     assert requests(store) == 4
+
+
+# ── Git activity and tool errors from shell commands ──────────────────────────────
+
+def shell_call(tool_id: str, command: str, *, mid: str = "m_git") -> bytes:
+    rec = {
+        "type": "assistant", "uuid": f"u-{tool_id}", "sessionId": SESSION,
+        "timestamp": "2026-10-20T10:05:00Z", "requestId": f"req_{mid}", "cwd": "C:/work/demo",
+        "message": {"id": mid, "model": MODEL,
+                    "content": [{"type": "tool_use", "id": tool_id, "name": "Bash",
+                                 "input": {"command": command}}],
+                    "usage": {"input_tokens": 1, "output_tokens": 2}},
+    }
+    return (json.dumps(rec) + "\n").encode("utf-8")
+
+
+def failed_result(tool_id: str) -> bytes:
+    rec = {"type": "user", "uuid": f"u-r-{tool_id}", "sessionId": SESSION,
+           "timestamp": "2026-10-20T10:06:00Z",
+           "message": {"role": "user", "content": [
+               {"type": "tool_result", "tool_use_id": tool_id, "is_error": True, "content": "nope"}]}}
+    return (json.dumps(rec) + "\n").encode("utf-8")
+
+
+def test_shell_git_ops_and_tool_errors_are_stored(store, projects):
+    put(main_file(projects), shell_call("toolu_c", "git commit -m x && git push"),
+        shell_call("toolu_l", "ls"), failed_result("toolu_c"))
+    result = run(store, [projects])
+    assert result.items["tool_error"] == 1
+    assert [tuple(r) for r in store.query("SELECT tool_use_id, git_ops FROM tool_calls ORDER BY 1")] == [
+        ("toolu_c", "commit+push"), ("toolu_l", None)]
+    assert [r[0] for r in store.query("SELECT tool_use_id FROM tool_errors")] == ["toolu_c"]
+
+
+def test_a_v2_database_is_backfilled_by_the_next_ingest_without_double_counting(tmp_path, projects):
+    f = main_file(projects)
+    put(f, shell_call("toolu_c", "git commit -m x"), failed_result("toolu_c"))
+    db = tmp_path / "old.db"
+    conn = sqlite3.connect(db)                    # what the previous build left: schema 2, bookmark set
+    conn.isolation_level = None
+    conn.execute(store_mod._SCHEMA_META)
+    store_mod._create_v1(conn)
+    store_mod._add_tail_to_file_state(conn)
+    conn.execute("INSERT INTO meta (key, value) VALUES ('schema_version', '2')")
+    conn.execute("INSERT INTO tool_calls (tool_use_id, name, request_key, session_id, ts, is_subagent)"
+                 " VALUES ('toolu_c', 'Bash', 'm_git|req_m_git', ?, 1.0, 0)", (SESSION,))
+    conn.execute("INSERT INTO file_state (path, size, mtime, offset, tail) VALUES (?, ?, ?, ?, NULL)",
+                 (str(f.absolute()), f.stat().st_size, f.stat().st_mtime, f.stat().st_size))
+    conn.close()
+    with Store(db) as migrated:                   # opens as schema 3 with the bookmark gone
+        assert migrated.schema_version() == 3 and migrated.known_files() == []
+        result = run(migrated, [projects])
+        assert result.files_read == 1
+        assert [tuple(r) for r in migrated.query("SELECT tool_use_id, git_ops FROM tool_calls")] == [
+            ("toolu_c", "commit")]
+        assert migrated.query("SELECT COUNT(*) FROM tool_errors")[0][0] == 1
+        assert requests(migrated) == 1

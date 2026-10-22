@@ -202,7 +202,7 @@ def _limit_from_entry(entry: Any) -> Limit | None:
         group=_text(entry.get("group")),
         percent=percent,
         severity=_text(entry.get("severity")),
-        resets_at=_parse_ts(entry.get("resets_at")),
+        resets_at=_parse_reset(entry.get("resets_at")),
         is_active=entry.get("is_active") is True,
         label=_label(kind, model, surface),
         scope_model=model,
@@ -240,7 +240,7 @@ def _legacy_window(key: Any, value: Any) -> Limit | None:
         group=group,
         percent=percent,
         severity=None,
-        resets_at=_parse_ts(value.get("resets_at")),
+        resets_at=_parse_reset(value.get("resets_at")),
         is_active=False,  # legacy windows carry no is_active; left False rather than guessed
         label=_label(kind, scope, None),
         scope_model=scope,
@@ -361,6 +361,25 @@ def _parse_ts(value: Any) -> datetime | None:
     except (ValueError, OverflowError, OSError):  # year 9999 with a west offset overflows when made UTC
         return None
 
+
+
+def _parse_reset(value: Any) -> datetime | None:
+    """A limit's resets_at, rounded to the nearest minute.
+
+    The API reports the same window end with sub-second jitter between fetches
+    (07:39:59.89 one time, 07:40:00.39 the next), which would otherwise look like
+    a new window to anything that compares reset times.
+    """
+    ts = _parse_ts(value)
+    if ts is None:
+        return None
+    floor = ts.replace(second=0, microsecond=0)
+    if ts.second < 30:
+        return floor
+    try:
+        return floor + timedelta(minutes=1)
+    except OverflowError:  # the last minute of year 9999
+        return floor
 
 # ── Client ────────────────────────────────────────────────────────────────────
 

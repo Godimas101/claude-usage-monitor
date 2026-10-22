@@ -14,6 +14,7 @@ import contextlib
 import copy
 import json
 import os
+import re
 import tempfile
 import threading
 import time
@@ -29,7 +30,7 @@ log = get_logger(__name__)
 SETTINGS_VERSION = 2
 
 # Every key the app reads, with its default. The v1 keys keep their v1 defaults.
-# settings_version, billing_day, plan_price_override and ingest_interval_s are v2 additions.
+# settings_version, billing_day, plan_price_override, ingest_interval_s and the alert_* keys are v2 additions.
 DEFAULTS: dict[str, Any] = {
     "settings_version": SETTINGS_VERSION,
     "poll_interval_ms": 15 * 60 * 1000,
@@ -46,6 +47,12 @@ DEFAULTS: dict[str, Any] = {
     "billing_day": None,
     "plan_price_override": None,
     "ingest_interval_s": 60,
+    "alerts_enabled": True,
+    "alert_thresholds": [80, 90, 100],
+    "alert_on_threshold": True,
+    "alert_on_reset": True,
+    "alert_on_credits": True,
+    "alert_quiet_hours": None,
 }
 
 _MISSING = object()
@@ -99,6 +106,31 @@ def _is_price(v: Any) -> bool:
     return v is None or (_is_number(v) and v >= 0)
 
 
+_CLOCK = re.compile(r"([01]\d|2[0-3]):[0-5]\d")
+
+
+def parse_clock(value: Any) -> int | None:
+    """Minutes after local midnight for a strict 24-hour "HH:MM" string, else None."""
+    if not isinstance(value, str) or _CLOCK.fullmatch(value) is None:
+        return None
+    hours, minutes = value.split(":")
+    return int(hours) * 60 + int(minutes)
+
+
+def _is_thresholds(v: Any) -> bool:
+    """1 to 5 distinct whole percentages in 1..100."""
+    # Item types are checked before distinctness: set() raises TypeError on unhashable items.
+    return (isinstance(v, list) and 1 <= len(v) <= 5
+            and all(_is_int(t) and 1 <= t <= 100 for t in v) and len(set(v)) == len(v))
+
+
+def _is_quiet_hours(v: Any) -> bool:
+    if v is None:
+        return True
+    return (isinstance(v, dict) and set(v) == {"start", "end"}
+            and parse_clock(v["start"]) is not None and parse_clock(v["end"]) is not None)
+
+
 _RULES: dict[str, Callable[[Any], bool]] = {
     "settings_version": _is_version,
     "poll_interval_ms": _is_poll_ms,
@@ -115,6 +147,12 @@ _RULES: dict[str, Callable[[Any], bool]] = {
     "billing_day": _is_billing_day,
     "plan_price_override": _is_price,
     "ingest_interval_s": _is_seconds,
+    "alerts_enabled": _is_bool,
+    "alert_thresholds": _is_thresholds,
+    "alert_on_threshold": _is_bool,
+    "alert_on_reset": _is_bool,
+    "alert_on_credits": _is_bool,
+    "alert_quiet_hours": _is_quiet_hours,
 }
 
 

@@ -572,3 +572,129 @@ def test_a_listener_that_sets_the_same_key_does_not_reorder_what_the_others_see(
     assert seen["first"] == ["A", "B"]
     assert s.get("theme") == "B"
     s.close()
+
+
+# ── Alert settings (data/alerts.py) ───────────────────────────────────────────
+
+ALERT_KEYS = ("alerts_enabled", "alert_thresholds", "alert_on_threshold", "alert_on_reset",
+              "alert_on_credits", "alert_quiet_hours")
+
+
+def test_alert_defaults(tmp_path: Path) -> None:
+    s = Settings(tmp_path / "settings.json")
+    try:
+        assert s["alerts_enabled"] is True
+        assert s["alert_thresholds"] == [80, 90, 100]
+        assert s["alert_on_threshold"] is True
+        assert s["alert_on_reset"] is True
+        assert s["alert_on_credits"] is True
+        assert s["alert_quiet_hours"] is None
+    finally:
+        s.close()
+
+
+@pytest.mark.parametrize("key, value", [
+    ("alerts_enabled", False),
+    ("alert_thresholds", [5]),
+    ("alert_thresholds", [100, 1, 50, 80, 90]),
+    ("alert_on_threshold", False),
+    ("alert_on_reset", False),
+    ("alert_on_credits", False),
+    ("alert_quiet_hours", None),
+    ("alert_quiet_hours", {"start": "22:00", "end": "07:00"}),
+    ("alert_quiet_hours", {"start": "00:00", "end": "23:59"}),
+])
+def test_valid_alert_values_are_accepted(tmp_path: Path, key: str, value: Any) -> None:
+    s = Settings(tmp_path / "settings.json", save_delay_s=60)
+    try:
+        s.set(key, value)
+        assert s[key] == value
+    finally:
+        s.close()
+
+
+@pytest.mark.parametrize("key, value", [
+    ("alerts_enabled", "yes"),
+    ("alerts_enabled", 1),
+    ("alert_thresholds", []),
+    ("alert_thresholds", [80, 90, 95, 97, 98, 99]),  # six entries
+    ("alert_thresholds", [80, 80]),                  # not distinct
+    ("alert_thresholds", [0]),
+    ("alert_thresholds", [101]),
+    ("alert_thresholds", [True]),
+    ("alert_thresholds", [80.0]),
+    ("alert_thresholds", ["90"]),
+    ("alert_thresholds", [[80]]),                    # unhashable items: refused, not a TypeError
+    ("alert_thresholds", [{}]),
+    ("alert_thresholds", [80, [1]]),
+    ("alert_thresholds", 90),
+    ("alert_on_threshold", None),
+    ("alert_on_reset", "no"),
+    ("alert_on_credits", 0),
+    ("alert_quiet_hours", "22:00-07:00"),
+    ("alert_quiet_hours", {"start": "22:00"}),
+    ("alert_quiet_hours", {"start": "22:00", "end": "07:00", "days": "all"}),
+    ("alert_quiet_hours", {"start": "24:00", "end": "07:00"}),
+    ("alert_quiet_hours", {"start": "7:00", "end": "08:00"}),
+    ("alert_quiet_hours", {"start": "09:60", "end": "10:00"}),
+    ("alert_quiet_hours", {"start": 2200, "end": 700}),
+    ("alert_quiet_hours", []),
+])
+def test_invalid_alert_values_are_refused_and_nothing_is_applied(tmp_path: Path, key: str, value: Any) -> None:
+    s = Settings(tmp_path / "settings.json", save_delay_s=60)
+    try:
+        with pytest.raises(ValueError):
+            s.set(key, value)
+        assert s[key] == DEFAULTS[key]
+    finally:
+        s.close()
+
+
+def test_invalid_alert_values_on_disk_fall_back_to_defaults(tmp_path: Path) -> None:
+    path = tmp_path / "settings.json"
+    write_json(path, {
+        "alerts_enabled": "no",
+        "alert_thresholds": [150],
+        "alert_on_threshold": 1,
+        "alert_on_reset": None,
+        "alert_on_credits": "off",
+        "alert_quiet_hours": {"start": "25:00", "end": "07:00"},
+    })
+    s = Settings(path)
+    try:
+        for key in ALERT_KEYS:
+            assert s[key] == DEFAULTS[key]
+            assert type(s[key]) is type(DEFAULTS[key])
+    finally:
+        s.close()
+
+
+@pytest.mark.parametrize("bad", [[[80]], [{"a": 1}], [80, [1]], [[]]])
+def test_unhashable_thresholds_on_disk_fall_back_to_the_default(tmp_path: Path, bad: Any) -> None:
+    path = tmp_path / "settings.json"
+    write_json(path, {"alert_thresholds": bad, "alerts_enabled": False})
+    s = Settings(path)
+    try:
+        assert s["alert_thresholds"] == DEFAULTS["alert_thresholds"]
+        assert s["alerts_enabled"] is False  # the rest of the file still loads
+    finally:
+        s.close()
+
+
+def test_valid_alert_values_on_disk_are_kept(tmp_path: Path) -> None:
+    path = tmp_path / "settings.json"
+    write_json(path, {
+        "alerts_enabled": False,
+        "alert_thresholds": [50, 75],
+        "alert_on_reset": False,
+        "alert_quiet_hours": {"start": "23:00", "end": "06:30"},
+    })
+    s = Settings(path)
+    try:
+        assert s["alerts_enabled"] is False
+        assert s["alert_thresholds"] == [50, 75]
+        assert s["alert_on_reset"] is False
+        assert s["alert_quiet_hours"] == {"start": "23:00", "end": "06:30"}
+        assert s["alert_on_threshold"] is True  # not on disk: default
+    finally:
+        s.close()
