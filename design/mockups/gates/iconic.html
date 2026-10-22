@@ -1,0 +1,1245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gates · Iconic · Claude Usage Monitor</title>
+<style>
+/* ============================================================================
+   0. TOKENS. Lift this whole block into the app theme. Every colour used by
+   the components below is a custom property defined here.
+
+   Mode:     data-theme="dark" | "light" on a surface. No attribute = follow OS.
+   Variant:  data-variant="blue|teal|purple|rose|orange|green" on a surface.
+             No attribute = System accent (Windows default blue).
+   Metrics:  --w-* are integer px so Pillow can use them unchanged.
+   ============================================================================ */
+:root {
+  color-scheme: light dark;
+
+  /* type: Windows 11 system fonts only, never bundled */
+  --f-display: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --f-text: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --f-icon: "Segoe Fluent Icons", "Segoe MDL2 Assets";
+
+  /* radii: 8 for cards and flyouts, 4 for controls, pills at half height */
+  --r-card: 8px;
+  --r-ctl: 4px;
+  --r-pill: 9px;
+
+  /* widget metrics (px) */
+  --w-w: 288px;
+  --w-h: 128px;
+  --w-px: 14px;
+  --w-py: 12px;
+  --w-row: 18px;
+  --w-gap: 10px;
+  --w-label: 76px;
+  --w-value: 34px;
+  --w-col: 10px;
+}
+
+:root, .surface {
+  /* accent: a variant sets the pair, the mode picks one */
+  --accent-l: #0067C0;
+  --accent-d: #60CDFF;
+  --accent: light-dark(var(--accent-l), var(--accent-d));
+  --accent-on: light-dark(#FFFFFF, #000000);
+  --accent-soft: color-mix(in srgb, var(--accent) 18%, transparent);
+  --accent-tint: color-mix(in srgb, var(--accent) 8%, transparent);
+
+  /* status and state */
+  --success: light-dark(#0F7B0F, #6CCB5F);
+  --caution: light-dark(#9D5D00, #FCE100);
+  --caution-fill: light-dark(#9D5D00, #FCE100);
+  --critical: light-dark(#C42B1C, #FF99A4);
+  --critical-fill: light-dark(#C42B1C, #FF5F5F);
+  --close-hover: #C42B1C;
+  --on-close: #FFFFFF;
+
+  /* layers: Mica base, content layer, cards, flyouts, controls */
+  --mica: light-dark(#F3F3F3, #202020);
+  --panel: light-dark(#F9F9F9, #272727);
+  --layer: light-dark(#FBFBFB, #2B2B2B);
+  --card: light-dark(#FFFFFF, #2E2E2E);
+  --control: light-dark(#FFFFFF, #3A3A3A);
+  --control-hover: light-dark(#F6F6F6, #444444);
+  --subtle: light-dark(rgba(0,0,0,0.04), rgba(255,255,255,0.06));
+  --cell-empty: light-dark(rgba(0,0,0,0.05), rgba(255,255,255,0.07));
+  --stroke: light-dark(rgba(0,0,0,0.08), rgba(255,255,255,0.09));
+  --stroke-card: light-dark(rgba(0,0,0,0.06), rgba(255,255,255,0.07));
+  --stroke-input: light-dark(rgba(0,0,0,0.33), rgba(255,255,255,0.54));
+  --hl: light-dark(rgba(255,255,255,0), rgba(255,255,255,0.16));
+  --shadow-flyout: light-dark(0 8px 16px rgba(0,0,0,0.14), 0 8px 16px rgba(0,0,0,0.34));
+  --shadow-line: light-dark(0 0 2px rgba(0,0,0,0.12), 0 0 2px rgba(0,0,0,0.40));
+  --shadow-card: light-dark(0 1px 2px rgba(0,0,0,0.12), 0 0 0 rgba(0,0,0,0));
+
+  /* text */
+  --text-1: light-dark(#1B1B1B, #FFFFFF);
+  --text-2: light-dark(#5D5D5D, #C8C8C8);
+  --text-3: light-dark(#6E6E6E, #9D9D9D);
+  --text-dis: light-dark(#A8A8A8, #5C5C5C);
+
+  /* tracks and the time-elapsed line */
+  --track: light-dark(rgba(0,0,0,0.10), rgba(255,255,255,0.12));
+  --time: light-dark(rgba(0,0,0,0.50), rgba(255,255,255,0.56));
+  --time-track: light-dark(rgba(0,0,0,0.07), rgba(255,255,255,0.08));
+
+  /* taskbar and tray */
+  --tb-bg: light-dark(#F3F3F3, #202020);
+  --tb-rule: light-dark(rgba(0,0,0,0.06), rgba(255,255,255,0.07));
+  --tb-hover: light-dark(rgba(0,0,0,0.05), rgba(255,255,255,0.07));
+  --tray-ink: light-dark(#1B1B1B, #FFFFFF);
+  --tray-track: light-dark(rgba(27,27,27,0.36), rgba(255,255,255,0.42));
+
+  /* ring icons read these; each host sets them */
+  --ring-ink: var(--accent);
+  --ring-track: var(--track);
+}
+
+[data-theme="dark"]  { color-scheme: dark; }
+[data-theme="light"] { color-scheme: light; }
+
+.surface[data-variant="blue"]   { --accent-l: #1B5FD0; --accent-d: #5B9DFF; }
+.surface[data-variant="teal"]   { --accent-l: #018574; --accent-d: #4DD6C2; }
+.surface[data-variant="purple"] { --accent-l: #6F4FA8; --accent-d: #B39AE6; }
+.surface[data-variant="rose"]   { --accent-l: #C10E74; --accent-d: #FF8AC5; }
+.surface[data-variant="orange"] { --accent-l: #C84F0C; --accent-d: #FF9F5A; }
+.surface[data-variant="green"]  { --accent-l: #107C10; --accent-d: #6CCB5F; }
+
+/* ============================================================================
+   1. BOARD. Presentation chrome for this file only, not part of the app.
+   ============================================================================ */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; }
+i { font-style: normal; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; }
+body {
+  --board-bg: #141414;
+  --board-text: #E6E6E6;
+  --board-dim: #9A9A9A;
+  --board-rule: rgba(255,255,255,0.09);
+  --wall-a: rgba(38,112,150,0.55);
+  --wall-b: rgba(124,72,164,0.42);
+  --wall-c: rgba(16,70,104,0.95);
+  --wall-d: #1C2C3B;
+  --wall-e: #0E1822;
+  --wall-f: #070B10;
+  background: var(--board-bg);
+  color: var(--board-text);
+  color-scheme: dark;
+  font-family: var(--f-text);
+  -webkit-font-smoothing: antialiased;
+}
+.board { width: 1280px; margin: 0 auto; padding: 36px 28px 64px; }
+.board-head .kicker { font: 600 12px/16px var(--f-text); color: var(--board-dim); }
+.board-head h1 { margin: 6px 0 8px; font: 600 28px/36px var(--f-display); }
+.board-head p { margin: 0; max-width: 1000px; font: 400 14px/20px var(--f-text); color: var(--board-dim); }
+.sec { margin-top: 44px; }
+.sec-h { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; padding-bottom: 10px; border-bottom: 1px solid var(--board-rule); }
+.sec-h .num { font: 600 12px/16px var(--f-text); color: var(--board-dim); }
+.sec-h h2 { margin: 0; font: 600 20px/28px var(--f-display); }
+.sec-h .note { margin-left: auto; font: 400 12px/16px var(--f-text); color: var(--board-dim); }
+.capt { font: 400 12px/16px var(--f-text); color: var(--board-dim); margin: 14px 0 8px; }
+.capt:first-of-type { margin-top: 0; }
+
+/* wallpaper: dark, photo-like, built from gradients only */
+.desk {
+  position: relative; overflow: hidden; border-radius: var(--r-card);
+  background-image:
+    radial-gradient(60% 90% at 12% 18%, var(--wall-a), transparent 62%),
+    radial-gradient(45% 70% at 88% 22%, var(--wall-b), transparent 65%),
+    radial-gradient(70% 80% at 55% 115%, var(--wall-c), transparent 70%),
+    linear-gradient(165deg, var(--wall-d) 0%, var(--wall-e) 58%, var(--wall-f) 100%);
+}
+.desk.is-light {
+  --wall-a: rgba(120,180,230,0.55);
+  --wall-b: rgba(230,170,210,0.35);
+  --wall-c: rgba(160,200,235,0.80);
+  --wall-d: #E9F1F8;
+  --wall-e: #D8E4EF;
+  --wall-f: #C9D7E4;
+  --board-text: #1B1B1B;
+  --board-dim: #5D5D5D;
+}
+.desk-1x { width: 1224px; height: 232px; }
+.desk-1x .at { position: absolute; left: 48px; top: 52px; }
+.zoom { width: 960px; height: 440px; }
+.zoom .at { position: absolute; left: 48px; top: 28px; transform: scale(3); transform-origin: 0 0; }
+.states { display: grid; grid-template-columns: repeat(3, 312px); gap: 22px 24px; }
+.tile { width: 312px; }
+.tile .desk { width: 312px; height: 152px; display: grid; place-items: center; }
+.tile .capt { margin: 0 0 8px; }
+
+/* ============================================================================
+   2. FLOATING WIDGET (288 x 128, Quick Settings card, 8 px radius)
+   Pillow: RGBA card, supersample x4 then downsample. Rounded rect r=8, 1 px
+   stroke, 1 px top highlight, accent wash, 2 px time lines, 4 px bars r=2,
+   6 px dot with blur glow, 3 px menu dots, TTF text. No backdrop, no filters.
+   ============================================================================ */
+.widget {
+  position: relative; overflow: hidden; isolation: isolate;
+  width: var(--w-w); height: var(--w-h);
+  padding: var(--w-py) var(--w-px);
+  border-radius: var(--r-card);
+  border: 1px solid var(--stroke);
+  background: var(--layer);
+  box-shadow: var(--shadow-flyout), var(--shadow-line);
+  color: var(--text-1);
+  font: 400 12px/18px var(--f-text);
+  --ring-ink: var(--accent);
+  --ring-track: var(--track);
+}
+.widget::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 1px;
+  background: linear-gradient(90deg, transparent 6%, var(--hl) 50%, transparent 94%);
+}
+.widget::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(150deg, var(--accent-tint) 0%, transparent 42%);
+}
+.widget > * { position: relative; z-index: 1; }
+
+.w-head { display: flex; align-items: center; gap: 8px; height: 18px; }
+.w-title { font: 600 12px/18px var(--f-text); color: var(--text-1); white-space: nowrap; }
+.w-spacer { flex: 1; }
+.w-ico { flex: none; width: 14px; font: 400 14px/18px var(--f-icon); color: var(--accent); text-align: center; }
+
+.dot {
+  display: inline-block; flex: none; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--success); box-shadow: 0 0 4px var(--success);
+  animation: alive 2.4s ease-in-out infinite;
+}
+@keyframes alive {
+  0%, 100% { box-shadow: 0 0 3px var(--success); }
+  50% { box-shadow: 0 0 6px var(--success), 0 0 0 3px color-mix(in srgb, var(--success) 14%, transparent); }
+}
+.w-pill {
+  display: inline-flex; align-items: center; gap: 5px; height: 18px;
+  padding: 0 8px 0 7px; border-radius: var(--r-pill);
+  font: 600 10px/18px var(--f-text);
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 16%, transparent);
+}
+.w-pill.is-stale { color: var(--text-3); background: var(--track); }
+.w-pill.is-stale .dot { background: var(--text-3); box-shadow: none; animation: none; }
+.w-pill.is-offline { color: var(--critical); background: color-mix(in srgb, var(--critical) 16%, transparent); }
+.w-pill.is-offline .dot { background: var(--critical); box-shadow: none; animation: none; }
+.w-pill.is-paused { color: var(--text-2); background: var(--track); }
+.w-pill.is-paused .dot { background: var(--text-2); box-shadow: none; animation: none; }
+.w-more { display: inline-flex; align-items: center; justify-content: center; gap: 2px; width: 20px; height: 18px; border-radius: var(--r-ctl); }
+.w-more i { width: 3px; height: 3px; border-radius: 50%; background: var(--text-2); }
+
+.w-rows { display: flex; flex-direction: column; gap: var(--w-gap); margin-top: 10px; }
+.w-row {
+  display: grid; align-items: center; height: var(--w-row);
+  grid-template-columns: var(--w-label) 1fr var(--w-value);
+  column-gap: var(--w-col);
+}
+.w-lbl { font: 400 12px/18px var(--f-text); color: var(--text-2); white-space: nowrap; }
+.w-val { font: 600 12px/18px var(--f-text); color: var(--text-1); text-align: right; font-variant-numeric: tabular-nums; }
+.w-track { position: relative; height: 4px; border-radius: 2px; background: var(--track); }
+.w-track::before {
+  content: ""; position: absolute; left: 0; right: 0; top: -4px; height: 2px; border-radius: 1px;
+  background: var(--time-track);
+}
+.w-time {
+  position: absolute; left: 0; top: -4px; height: 2px; border-radius: 1px;
+  width: calc(var(--t) * 1%); background: var(--time);
+}
+.w-fill {
+  position: absolute; left: 0; top: 0; height: 4px; border-radius: 2px;
+  width: calc(var(--p) * 1%); background: var(--accent);
+}
+.w-share { position: absolute; left: 50%; top: -3px; width: 1px; height: 10px; background: var(--text-3); }
+
+.w-foot {
+  position: relative; height: 18px; margin-top: 10px; overflow: hidden; white-space: nowrap;
+  font: 400 11px/18px var(--f-text); color: var(--text-3);
+}
+.w-foot b { font-weight: 600; color: var(--text-2); }
+.w-foot .hot { font-weight: 600; color: var(--caution); }
+.w-foot .crit { font-weight: 600; color: var(--critical); }
+
+.widget.is-warn .w-fill { background: var(--caution-fill); }
+.widget.is-crit .w-fill {
+  background: var(--critical-fill);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--critical-fill) 55%, transparent);
+}
+.widget.is-crit .w-row:first-child .w-val { color: var(--critical); }
+.widget.is-dim::after { background: none; }
+.widget.is-dim .w-lbl, .widget.is-dim .w-val { color: var(--text-3); }
+.widget.is-dim .w-fill { background: var(--text-dis); }
+.widget.is-dim .w-time { background: var(--text-dis); }
+
+/* ============================================================================
+   3. TASKBAR STRIP (248 x 40 inside a 48 px bar, sits left of the clock)
+   Pillow: rounded rect r=4 hover fill, two 4 px bars, 6 px dot with glow.
+   ============================================================================ */
+.tbstrip {
+  display: flex; align-items: center; gap: 8px;
+  width: 248px; height: 40px; padding: 0 10px;
+  border-radius: var(--r-ctl);
+  background: var(--tb-hover);
+  font: 400 11px/13px var(--f-text); color: var(--tray-ink);
+  --ring-ink: var(--tray-ink);
+  --ring-track: var(--tray-track);
+}
+.tb-rows { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.tb-row { display: grid; align-items: center; height: 15px; grid-template-columns: 18px 1fr 32px; column-gap: 8px; }
+.tb-lbl { font: 600 10px/15px var(--f-text); color: var(--text-3); }
+.tb-val { font: 600 11px/15px var(--f-text); color: var(--tray-ink); text-align: right; font-variant-numeric: tabular-nums; }
+.tb-track { position: relative; height: 4px; border-radius: 2px; background: var(--tray-track); }
+.tb-track::before {
+  content: ""; position: absolute; left: 0; right: 0; top: -4px; height: 2px; border-radius: 1px;
+  background: var(--time-track);
+}
+.tb-time {
+  position: absolute; left: 0; top: -4px; height: 2px; border-radius: 1px;
+  width: calc(var(--t) * 1%); background: var(--time);
+}
+.tb-fill {
+  position: absolute; left: 0; top: 0; height: 4px; border-radius: 2px;
+  width: calc(var(--p) * 1%); background: var(--accent);
+}
+.tbstrip .dot { margin-left: 2px; }
+
+/* ============================================================================
+   4. TASKBAR HOST AND TRAY ICON
+   Tray icon: monochrome ring, track + arc, stroke widths 2 / 3 / 4 at 16 / 24
+   / 32 px. Pillow: arc() with width, or pieslice() for the fill.
+   ============================================================================ */
+.ring .rk { fill: none; stroke: var(--ring-track); }
+.ring .ra { fill: none; stroke: var(--ring-ink); }
+
+.taskbar {
+  position: relative; overflow: hidden;
+  width: 1224px; height: 48px;
+  background: var(--tb-bg);
+  border-top: 1px solid var(--tb-rule);
+  color: var(--text-1);
+  font: 400 12px/15px var(--f-text);
+  --ring-ink: var(--tray-ink);
+  --ring-track: var(--tray-track);
+}
+.tb-center { position: absolute; left: 50%; top: 4px; transform: translateX(-50%); display: flex; gap: 4px; }
+.tb-btn {
+  position: relative; display: grid; place-items: center;
+  width: 40px; height: 40px; border-radius: var(--r-ctl);
+}
+.tb-btn.is-active::after {
+  content: ""; position: absolute; left: 50%; bottom: 3px; width: 16px; height: 3px; margin-left: -8px;
+  border-radius: 2px; background: var(--accent);
+}
+.tb-g { font-family: var(--f-icon); font-size: 16px; line-height: 1; color: var(--tray-ink); }
+.tb-start svg { width: 16px; height: 16px; fill: var(--tray-ink); }
+.tb-tray { position: absolute; right: 6px; top: 4px; height: 40px; display: flex; align-items: center; gap: 2px; }
+.tb-ico { display: grid; place-items: center; width: 32px; height: 40px; border-radius: var(--r-ctl); }
+.tb-ico .tb-g { font-size: 14px; }
+.tb-tray .tbstrip { margin: 0 6px; }
+.tb-clock {
+  display: flex; flex-direction: column; align-items: flex-end; justify-content: center;
+  height: 40px; padding: 0 10px; white-space: nowrap;
+  font: 400 12px/15px var(--f-text); color: var(--text-1);
+}
+
+.tb-zoom {
+  position: relative; overflow: hidden; width: 800px; height: 168px;
+  border-radius: var(--r-card); background: var(--tb-bg);
+  border: 1px solid var(--tb-rule);
+}
+.tb-zoom .tbstrip { position: absolute; left: 28px; top: 24px; transform: scale(3); transform-origin: 0 0; }
+
+.tray-bar {
+  position: relative; display: flex; width: 600px; padding: 14px 16px 12px;
+  background: var(--tb-bg); border: 1px solid var(--tb-rule); border-radius: var(--r-card);
+  --ring-ink: var(--tray-ink);
+  --ring-track: var(--tray-track);
+}
+.tray-col { flex: 1; display: flex; flex-direction: column; gap: 10px; }
+.tray-col .lab { font: 400 11px/14px var(--f-text); color: var(--text-3); }
+.tray-set { display: flex; align-items: flex-end; gap: 14px; height: 32px; }
+.tray-set svg { display: block; }
+.tray-set.is-warn { --ring-ink: var(--caution-fill); }
+.tray-set.is-crit { --ring-ink: var(--critical-fill); }
+.tray-set.is-stale { --ring-ink: var(--text-3); }
+
+/* ============================================================================
+   5. DASHBOARD (Settings-app layout, 1200 x 760). Any CSS/SVG is fine here.
+   ============================================================================ */
+.window {
+  position: relative; overflow: hidden;
+  width: 1200px; height: 760px;
+  border-radius: var(--r-card);
+  border: 1px solid var(--stroke);
+  background: var(--mica);
+  color: var(--text-1);
+  font: 400 14px/20px var(--f-text);
+  box-shadow: var(--shadow-flyout);
+}
+.window::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(80% 50% at 0% 0%, var(--accent-tint), transparent 70%);
+}
+.wm-bar { position: relative; display: flex; align-items: center; height: 32px; }
+.wm-app { width: 16px; height: 16px; margin-left: 12px; }
+.wm-name { margin-left: 8px; font: 400 12px/32px var(--f-text); color: var(--text-1); }
+.wm-caps { margin-left: auto; display: flex; }
+.wm-cap {
+  width: 46px; height: 32px; display: grid; place-items: center;
+  font-family: var(--f-icon); font-size: 10px; color: var(--text-1);
+}
+.wm-cap.is-close:hover { background: var(--close-hover); color: var(--on-close); }
+
+.wm-body { position: relative; display: grid; grid-template-columns: 248px 1fr; height: 726px; }
+.nav { display: flex; flex-direction: column; gap: 8px; padding: 6px 8px 12px 12px; }
+.nav-search {
+  display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px;
+  border-radius: var(--r-ctl); background: var(--control);
+  border-bottom: 1px solid var(--stroke-input);
+  font: 400 13px/32px var(--f-text); color: var(--text-3);
+}
+.nav-search .ico { font: 400 12px/1 var(--f-icon); color: var(--text-2); }
+.nav-profile { display: flex; align-items: center; gap: 12px; height: 60px; padding: 0 12px; margin-top: 4px; border-radius: var(--r-card); }
+.avatar {
+  display: grid; place-items: center; width: 36px; height: 36px; flex: none;
+  border-radius: 50%; background: var(--accent); color: var(--accent-on);
+  font: 400 16px/1 var(--f-icon);
+}
+.nav-profile b { display: block; font: 600 14px/20px var(--f-text); color: var(--text-1); }
+.nav-profile small { display: block; font: 400 12px/16px var(--f-text); color: var(--text-3); }
+.nav-list { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.nav-item {
+  position: relative; display: flex; align-items: center; gap: 14px;
+  height: 36px; padding: 0 12px; border-radius: var(--r-ctl);
+  font: 400 14px/20px var(--f-text); color: var(--text-1);
+}
+.nav-item .ico { width: 16px; text-align: center; font: 400 16px/1 var(--f-icon); color: var(--text-1); }
+.nav-item.is-current { background: var(--control); }
+.nav-item.is-current::before {
+  content: ""; position: absolute; left: 0; top: 10px; width: 3px; height: 16px;
+  border-radius: 2px; background: var(--accent);
+}
+.nav-item.is-sep { margin-top: 10px; }
+
+.content {
+  position: relative; display: flex; flex-direction: column; overflow: hidden;
+  margin: 0 8px 8px 0; padding: 22px 24px 16px;
+  border-radius: var(--r-card); border: 1px solid var(--stroke-card);
+  background: var(--panel);
+}
+.page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
+.page-head h1 { margin: 0; font: 600 28px/36px var(--f-display); color: var(--text-1); }
+.page-head p { margin: 2px 0 0; font: 400 14px/20px var(--f-text); color: var(--text-2); }
+.head-actions { display: flex; align-items: center; gap: 8px; }
+.live {
+  display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 12px;
+  border-radius: 14px; font: 600 12px/28px var(--f-text); color: var(--success);
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+}
+.btn {
+  display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px;
+  border: 1px solid var(--stroke); border-radius: var(--r-ctl);
+  background: var(--control); color: var(--text-1); font: 400 14px/20px var(--f-text);
+}
+.btn .ico { font: 400 12px/1 var(--f-icon); }
+
+.grid {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: 146px 196px 212px; gap: 12px; margin-top: 16px;
+}
+.card {
+  position: relative; min-width: 0; display: flex; flex-direction: column; gap: 10px;
+  padding: 14px 16px; border-radius: var(--r-card);
+  background: var(--card); border: 1px solid var(--stroke-card); box-shadow: var(--shadow-card);
+}
+.card.span-2 { grid-column: span 2; }
+.card-h { display: flex; align-items: center; gap: 8px; font: 600 14px/20px var(--f-text); color: var(--text-1); }
+.card-h .ico { font: 400 14px/1 var(--f-icon); color: var(--accent); }
+.card-h .meta { margin-left: auto; font: 400 12px/16px var(--f-text); color: var(--text-3); white-space: nowrap; }
+.big-row { display: flex; align-items: baseline; gap: 8px; }
+.big { font: 600 40px/44px var(--f-display); color: var(--text-1); font-variant-numeric: tabular-nums; }
+.unit { font: 400 14px/20px var(--f-text); color: var(--text-2); }
+.chip {
+  margin-left: auto; align-self: center; display: inline-flex; align-items: center;
+  height: 22px; padding: 0 9px; border-radius: 11px; white-space: nowrap;
+  font: 600 12px/22px var(--f-text);
+}
+.chip.ok { color: var(--success); background: color-mix(in srgb, var(--success) 16%, transparent); }
+.chip.acc { color: var(--accent); background: var(--accent-soft); }
+.chip.neu { color: var(--text-2); background: var(--subtle); }
+.chip-row { display: flex; align-items: center; gap: 10px; }
+.chip-row .chip { margin-left: 0; }
+.pace { position: relative; height: 4px; margin-top: 8px; border-radius: 2px; background: var(--track); }
+.pace::before {
+  content: ""; position: absolute; left: 0; right: 0; top: -6px; height: 2px; border-radius: 1px;
+  background: var(--time-track);
+}
+.pace .t { position: absolute; left: 0; top: -6px; height: 2px; border-radius: 1px; width: calc(var(--t) * 1%); background: var(--time); }
+.pace .f { position: absolute; left: 0; top: 0; height: 4px; border-radius: 2px; width: calc(var(--p) * 1%); background: var(--accent); }
+.pace .share { position: absolute; left: 50%; top: -4px; width: 2px; height: 12px; border-radius: 1px; background: var(--text-2); }
+.pace-meta {
+  display: flex; justify-content: space-between; align-items: center;
+  font: 400 12px/16px var(--f-text); color: var(--text-2);
+}
+.lg-t { display: inline-block; width: 14px; height: 2px; border-radius: 1px; background: var(--time); vertical-align: middle; margin-right: 6px; }
+
+.cost-body { display: grid; grid-template-columns: 1fr 292px; column-gap: 20px; flex: 1; min-height: 0; }
+.cost-l { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.sub { font: 400 12px/16px var(--f-text); color: var(--text-2); }
+.cmp {
+  display: grid; grid-template-columns: 112px 1fr 64px; align-items: center; column-gap: 10px;
+  font: 400 12px/16px var(--f-text); color: var(--text-2);
+}
+.cmp b { font: 600 12px/16px var(--f-text); color: var(--text-1); text-align: right; font-variant-numeric: tabular-nums; }
+.bar { position: relative; height: 6px; border-radius: 3px; background: var(--track); }
+.bar i { display: block; height: 100%; border-radius: 3px; width: calc(var(--p) * 1%); background: var(--accent); }
+.cmp .bar { height: 8px; border-radius: 4px; }
+.cmp .bar i { border-radius: 4px; background: var(--text-dis); }
+.cmp .bar i.hot { background: var(--accent); }
+.cost-r { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.spark-h { display: flex; justify-content: space-between; font: 400 12px/16px var(--f-text); color: var(--text-3); }
+.spark { display: block; width: 292px; height: 60px; }
+.cost-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.stat b { display: block; font: 600 18px/24px var(--f-text); color: var(--text-1); font-variant-numeric: tabular-nums; }
+.stat span { display: block; font: 400 12px/16px var(--f-text); color: var(--text-2); }
+.foot-note { font: 400 11px/16px var(--f-text); color: var(--text-3); }
+
+.eff-body { display: flex; flex-direction: column; gap: 8px; }
+.ring-row { display: flex; align-items: center; gap: 14px; }
+.ring-w { position: relative; width: 44px; height: 44px; flex: none; }
+.ring-w svg { display: block; width: 44px; height: 44px; transform: rotate(-90deg); }
+.ring-w .rt { fill: none; stroke: var(--track); stroke-width: 5; }
+.ring-w .rv { fill: none; stroke: var(--accent); stroke-width: 5; stroke-linecap: round; }
+.ring-w b {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  font: 600 11px/1 var(--f-text); color: var(--text-1); font-variant-numeric: tabular-nums;
+}
+.k { font: 400 12px/16px var(--f-text); color: var(--text-2); }
+.k b { font: 600 12px/16px var(--f-text); color: var(--text-1); margin-left: 6px; font-variant-numeric: tabular-nums; }
+.burn { display: flex; flex-direction: column; gap: 2px; }
+.burn-row { display: flex; align-items: center; gap: 10px; }
+.burn-v { font: 600 20px/24px var(--f-text); color: var(--text-1); font-variant-numeric: tabular-nums; }
+.burn-v small { font: 400 12px/16px var(--f-text); color: var(--text-2); margin-left: 4px; }
+.burn .chip { margin-left: 0; }
+.burn-usd { font: 400 12px/16px var(--f-text); color: var(--text-2); }
+
+.stack { display: flex; gap: 2px; height: 10px; }
+.stack i { display: block; height: 10px; border-radius: 3px; }
+.m1 { background: var(--accent); }
+.m2 { background: color-mix(in srgb, var(--accent) 55%, transparent); }
+.m3 { background: var(--text-3); }
+.m4 { background: var(--text-dis); }
+.legend { display: flex; flex-direction: column; gap: 10px; font: 400 13px/18px var(--f-text); color: var(--text-1); }
+.legend div { display: grid; grid-template-columns: 10px 1fr auto; column-gap: 10px; align-items: center; }
+.legend b { font: 600 13px/18px var(--f-text); font-variant-numeric: tabular-nums; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
+.wk { display: flex; flex-direction: column; gap: 18px; }
+.wk-row { display: grid; grid-template-columns: 96px 1fr 40px; align-items: center; column-gap: 10px; font: 400 13px/18px var(--f-text); color: var(--text-1); }
+.wk-row b { font: 600 13px/18px var(--f-text); text-align: right; font-variant-numeric: tabular-nums; }
+
+.cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal .dow { font: 600 10px/14px var(--f-text); color: var(--text-3); text-align: center; }
+.cal .d {
+  height: 22px; border-radius: var(--r-ctl);
+  background: color-mix(in srgb, var(--accent) calc(var(--lv, 0) * 1%), var(--cell-empty));
+}
+.cal .d.is-out, .cal .d.is-future { background: transparent; box-shadow: inset 0 0 0 1px var(--stroke); }
+.cal .d.is-today { box-shadow: inset 0 0 0 2px var(--accent); }
+
+.page-foot { margin-top: 10px; font: 400 11px/16px var(--f-text); color: var(--text-3); }
+
+/* ============================================================================
+   6. VARIANT PICKER (Settings > Colors style) AND GRIDS
+   ============================================================================ */
+.picker {
+  padding: 16px; border-radius: var(--r-card);
+  background: var(--card); border: 1px solid var(--stroke-card); color: var(--text-1);
+}
+.picker-h b { display: block; font: 600 14px/20px var(--f-text); }
+.picker-h span { font: 400 12px/16px var(--f-text); color: var(--text-2); }
+.swatches { display: flex; gap: 14px; margin-top: 14px; }
+.sw-cell { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 92px; }
+.sw-chip {
+  position: relative; display: grid; place-items: center;
+  width: 52px; height: 40px; border-radius: var(--r-ctl); background: var(--accent);
+}
+.sw-chip.is-on::after { content: "\E73E"; font-family: var(--f-icon); font-size: 14px; color: var(--accent-on); }
+.sw-cell small { font: 400 12px/16px var(--f-text); color: var(--text-2); text-align: center; }
+.modes { display: inline-flex; margin-top: 16px; border: 1px solid var(--stroke-input); border-radius: var(--r-ctl); overflow: hidden; }
+.modes span { height: 30px; padding: 0 16px; font: 400 13px/30px var(--f-text); color: var(--text-1); background: var(--control); }
+.modes span + span { border-left: 1px solid var(--stroke); }
+.modes span.is-on { background: var(--accent); color: var(--accent-on); }
+.vset { margin-top: 18px; }
+.vlabel { font: 600 13px/18px var(--f-text); color: var(--board-dim); margin-bottom: 10px; }
+.vgrid {
+  display: grid; grid-template-columns: repeat(4, 288px); gap: 22px 16px;
+  padding: 12px; border-radius: var(--r-card);
+}
+.vcell { margin: 0; }
+.vcell figcaption { display: flex; justify-content: space-between; align-items: baseline; margin: 0 0 8px; font: 600 12px/16px var(--f-text); color: var(--board-text); }
+.vcell figcaption span { font: 400 11px/16px var(--f-text); color: var(--board-dim); }
+</style>
+</head>
+<body>
+<main class="board">
+
+  <header class="board-head">
+    <div class="kicker">GATES · ICONIC · CLAUDE USAGE MONITOR</div>
+    <h1>Windows 11 Fluent 2, taken all the way</h1>
+    <p>Quick Settings card, built-in taskbar tray widget, a Settings-app dashboard and the Colors accent picker. Tokens sit at the top of the file, so a variant is a single data-variant swap. Widgets stay inside what Pillow can draw.</p>
+  </header>
+
+  <!-- ===================================================================== 01 -->
+  <section class="sec" id="sec-widget">
+    <div class="sec-h"><span class="num">01</span><h2>Floating widget</h2><span class="note">288 × 128 · Quick Settings card · always on top · 8 px radius</span></div>
+
+    <div class="capt">1x, real size, on a dark wallpaper</div>
+    <div class="desk desk-1x" id="desk-1x">
+      <div class="surface widget at" id="w-normal" data-theme="dark" data-variant="system">
+        <div class="w-head">
+          <i class="w-ico">&#xE916;</i>
+          <span class="w-title">Claude usage</span>
+          <span class="w-spacer"></span>
+          <span class="w-pill"><i class="dot"></i>LIVE</span>
+          <span class="w-more" aria-hidden="true"><i></i><i></i><i></i></span>
+        </div>
+        <div class="w-rows">
+          <div class="w-row"><span class="w-lbl">Session</span><div class="w-track"><i class="w-time" style="--t:42"></i><i class="w-fill" style="--p:13"></i></div><span class="w-val">13%</span></div>
+          <div class="w-row"><span class="w-lbl">Weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:2"></i></div><span class="w-val">2%</span></div>
+          <div class="w-row"><span class="w-lbl">Fable weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:0"></i><i class="w-share"></i></div><span class="w-val">0%</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="capt">3x, CSS-scaled copy so the details can be inspected (864 × 384 on screen)</div>
+    <div class="desk zoom" id="zoom-widget">
+      <div class="surface widget at" data-theme="dark" data-variant="system">
+        <div class="w-head">
+          <i class="w-ico">&#xE916;</i>
+          <span class="w-title">Claude usage</span>
+          <span class="w-spacer"></span>
+          <span class="w-pill"><i class="dot"></i>LIVE</span>
+          <span class="w-more" aria-hidden="true"><i></i><i></i><i></i></span>
+        </div>
+        <div class="w-rows">
+          <div class="w-row"><span class="w-lbl">Session</span><div class="w-track"><i class="w-time" style="--t:42"></i><i class="w-fill" style="--p:13"></i></div><span class="w-val">13%</span></div>
+          <div class="w-row"><span class="w-lbl">Weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:2"></i></div><span class="w-val">2%</span></div>
+          <div class="w-row"><span class="w-lbl">Fable weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:0"></i><i class="w-share"></i></div><span class="w-val">0%</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== 02 -->
+  <section class="sec" id="sec-states">
+    <div class="sec-h"><span class="num">02</span><h2>States</h2><span class="note">normal · warning 72% · critical 93% · stale · offline · paused</span></div>
+    <div class="states">
+
+      <div class="tile">
+        <div class="capt">Normal. Fable row shown, shows the 50% share tick.</div>
+        <div class="desk" style="display:grid;place-items:center;width:312px;height:152px">
+          <div class="surface widget" data-theme="dark" data-variant="system">
+            <div class="w-head">
+              <i class="w-ico">&#xE916;</i>
+              <span class="w-title">Claude usage</span><span class="w-spacer"></span>
+              <span class="w-pill"><i class="dot"></i>LIVE</span><span class="w-more" aria-hidden="true"><i></i><i></i><i></i></span>
+            </div>
+            <div class="w-rows">
+              <div class="w-row"><span class="w-lbl">Session</span><div class="w-track"><i class="w-time" style="--t:42"></i><i class="w-fill" style="--p:13"></i></div><span class="w-val">13%</span></div>
+              <div class="w-row"><span class="w-lbl">Weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:2"></i></div><span class="w-val">2%</span></div>
+              <div class="w-row"><span class="w-lbl">Fable weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:0"></i><i class="w-share"></i></div><span class="w-val">0%</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tile">
+        <div class="capt">Warning at 72%. Fable row hidden, footer carries the reset.</div>
+        <div class="desk" style="display:grid;place-items:center;width:312px;height:152px">
+          <div class="surface widget is-warn" data-theme="dark" data-variant="system">
+            <div class="w-head">
+              <i class="w-ico">&#xE916;</i>
+              <span class="w-title">Claude usage</span><span class="w-spacer"></span>
+              <span class="w-pill"><i class="dot"></i>LIVE</span><span class="w-more" aria-hidden="true"><i></i><i></i><i></i></span>
+            </div>
+            <div class="w-rows">
+              <div class="w-row"><span class="w-lbl">Session</span><div class="w-track"><i class="w-time" style="--t:58"></i><i class="w-fill" style="--p:72"></i></div><span class="w-val">72%</span></div>
+              <div class="w-row"><span class="w-lbl">Weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:2"></i></div><span class="w-val">2%</span></div>
+            </div>
+            <div class="w-foot"><span class="hot">Ahead of pace</span> · Resets 10:39 PM</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tile">
+        <div class="capt">Critical at 93%. Red fill with a soft glow.</div>
+        <div class="desk" style="display:grid;place-items:center;width:312px;height:152px">
+          <div class="surface widget is-crit" data-theme="dark" data-variant="system">
+            <div class="w-head">
+              <i class="w-ico">&#xE916;</i>
+              <span class="w-title">Claude usage</span><span class="w-spacer"></span>
+              <span class="w-pill"><i class="dot"></i>LIVE</span><span class="w-more" aria-hidden="true"><i></i><i></i><i></i></span>
+            </div>
+            <div class="w-rows">
+              <div class="w-row"><span class="w-lbl">Session</span><div class="w-track"><i class="w-time" style="--t:61"></i><i class="w-fill" style="--p:93"></i></div><span class="w-val">93%</span></div>
+              <div class="w-row"><span class="w-lbl">Weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:2"></i></div><span class="w-val">2%</span></div>
+            </div>
+            <div class="w-foot"><span class="crit">Nearly out</span> · Resets 10:39 PM</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tile">
+        <div class="capt">Stale. Last known values, dimmed.</div>
+        <div class="desk" style="display:grid;place-items:center;width:312px;height:152px">
+          <div class="surface widget is-dim" data-theme="dark" data-variant="system">
+            <div class="w-head">
+              <i class="w-ico">&#xE916;</i>
+              <span class="w-title">Claude usage</span><span class="w-spacer"></span>
+              <span class="w-pill is-stale"><i class="dot"></i>STALE</span><span class="w-more" aria-hidden="true"><i></i><i></i><i></i></span>
+            </div>
+            <div class="w-rows">
+              <div class="w-row"><span class="w-lbl">Session</span><div class="w-track"><i class="w-time" style="--t:42"></i><i class="w-fill" style="--p:13"></i></div><span class="w-val">13%</span></div>
+              <div class="w-row"><span class="w-lbl">Weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:2"></i></div><span class="w-val">2%</span></div>
+            </div>
+            <div class="w-foot"><b>Hmm, we lost touch.</b> Open Claude Code to sign in.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tile">
+        <div class="capt">Offline. No connection, retrying on a timer.</div>
+        <div class="desk" style="display:grid;place-items:center;width:312px;height:152px">
+          <div class="surface widget is-dim" data-theme="dark" data-variant="system">
+            <div class="w-head">
+              <i class="w-ico">&#xE916;</i>
+              <span class="w-title">Claude usage</span><span class="w-spacer"></span>
+              <span class="w-pill is-offline"><i class="dot"></i>OFFLINE</span><span class="w-more" aria-hidden="true"><i></i><i></i><i></i></span>
+            </div>
+            <div class="w-rows">
+              <div class="w-row"><span class="w-lbl">Session</span><div class="w-track"><i class="w-time" style="--t:42"></i><i class="w-fill" style="--p:13"></i></div><span class="w-val">13%</span></div>
+              <div class="w-row"><span class="w-lbl">Weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:2"></i></div><span class="w-val">2%</span></div>
+            </div>
+            <div class="w-foot">No connection. Retrying every minute.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tile">
+        <div class="capt">Paused. Usage frozen until you resume.</div>
+        <div class="desk" style="display:grid;place-items:center;width:312px;height:152px">
+          <div class="surface widget is-dim" data-theme="dark" data-variant="system">
+            <div class="w-head">
+              <i class="w-ico">&#xE916;</i>
+              <span class="w-title">Claude usage</span><span class="w-spacer"></span>
+              <span class="w-pill is-paused"><i class="dot"></i>PAUSED</span><span class="w-more" aria-hidden="true"><i></i><i></i><i></i></span>
+            </div>
+            <div class="w-rows">
+              <div class="w-row"><span class="w-lbl">Session</span><div class="w-track"><i class="w-time" style="--t:42"></i><i class="w-fill" style="--p:13"></i></div><span class="w-val">13%</span></div>
+              <div class="w-row"><span class="w-lbl">Weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:2"></i></div><span class="w-val">2%</span></div>
+            </div>
+            <div class="w-foot">Paused. Resume to keep usage live.</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ===================================================================== 03 -->
+  <section class="sec" id="sec-taskbar">
+    <div class="sec-h"><span class="num">03</span><h2>Taskbar strip</h2><span class="note">248 × 40 strip inside a 48 px bar · sits left of the tray clock</span></div>
+
+    <div class="capt">Dark taskbar, 1x</div>
+    <div class="surface taskbar" id="tb-dark" data-theme="dark" data-variant="system">
+      <div class="tb-center">
+        <span class="tb-btn tb-start" aria-hidden="true"><svg viewBox="0 0 16 16"><circle cx="3" cy="3" r="1.4"/><circle cx="8" cy="3" r="1.4"/><circle cx="13" cy="3" r="1.4"/><circle cx="3" cy="8" r="1.4"/><circle cx="8" cy="8" r="1.4"/><circle cx="13" cy="8" r="1.4"/><circle cx="3" cy="13" r="1.4"/><circle cx="8" cy="13" r="1.4"/><circle cx="13" cy="13" r="1.4"/></svg></span>
+        <span class="tb-btn"><i class="tb-g">&#xE721;</i></span>
+        <span class="tb-btn"><i class="tb-g">&#xE7C4;</i></span>
+        <span class="tb-btn"><i class="tb-g">&#xE8B7;</i></span>
+                <span class="tb-btn"><i class="tb-g">&#xE715;</i></span>
+        <span class="tb-btn is-active"><svg class="ring" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle class="rk" cx="8" cy="8" r="6" stroke-width="2"/><path class="ra" d="M8 2 A6 6 0 0 1 12.37 3.89" stroke-width="2"/></svg></span>
+      </div>
+      <div class="tb-tray">
+        <span class="tb-ico"><i class="tb-g">&#xE70E;</i></span>
+        <span class="tb-ico"><i class="tb-g">&#xE701;</i></span>
+                        <div class="tbstrip">
+          <div class="tb-rows">
+            <div class="tb-row"><span class="tb-lbl">5H</span><div class="tb-track"><i class="tb-time" style="--t:42"></i><i class="tb-fill" style="--p:13"></i></div><span class="tb-val">13%</span></div>
+            <div class="tb-row"><span class="tb-lbl">7D</span><div class="tb-track"><i class="tb-time" style="--t:31"></i><i class="tb-fill" style="--p:2"></i></div><span class="tb-val">2%</span></div>
+          </div>
+          <i class="dot"></i>
+        </div>
+        <div class="tb-clock"><span>4:12 PM</span><span>2026-10-21</span></div>
+        <span class="tb-ico"><i class="tb-g">&#xE7E7;</i></span>
+      </div>
+    </div>
+
+    <div class="capt">Light taskbar, 1x</div>
+    <div class="surface taskbar" id="tb-light" data-theme="light" data-variant="system">
+      <div class="tb-center">
+        <span class="tb-btn tb-start" aria-hidden="true"><svg viewBox="0 0 16 16"><circle cx="3" cy="3" r="1.4"/><circle cx="8" cy="3" r="1.4"/><circle cx="13" cy="3" r="1.4"/><circle cx="3" cy="8" r="1.4"/><circle cx="8" cy="8" r="1.4"/><circle cx="13" cy="8" r="1.4"/><circle cx="3" cy="13" r="1.4"/><circle cx="8" cy="13" r="1.4"/><circle cx="13" cy="13" r="1.4"/></svg></span>
+        <span class="tb-btn"><i class="tb-g">&#xE721;</i></span>
+        <span class="tb-btn"><i class="tb-g">&#xE7C4;</i></span>
+        <span class="tb-btn"><i class="tb-g">&#xE8B7;</i></span>
+                <span class="tb-btn"><i class="tb-g">&#xE715;</i></span>
+        <span class="tb-btn is-active"><svg class="ring" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle class="rk" cx="8" cy="8" r="6" stroke-width="2"/><path class="ra" d="M8 2 A6 6 0 0 1 12.37 3.89" stroke-width="2"/></svg></span>
+      </div>
+      <div class="tb-tray">
+        <span class="tb-ico"><i class="tb-g">&#xE70E;</i></span>
+        <span class="tb-ico"><i class="tb-g">&#xE701;</i></span>
+                        <div class="tbstrip">
+          <div class="tb-rows">
+            <div class="tb-row"><span class="tb-lbl">5H</span><div class="tb-track"><i class="tb-time" style="--t:42"></i><i class="tb-fill" style="--p:13"></i></div><span class="tb-val">13%</span></div>
+            <div class="tb-row"><span class="tb-lbl">7D</span><div class="tb-track"><i class="tb-time" style="--t:31"></i><i class="tb-fill" style="--p:2"></i></div><span class="tb-val">2%</span></div>
+          </div>
+          <i class="dot"></i>
+        </div>
+        <div class="tb-clock"><span>4:12 PM</span><span>2026-10-21</span></div>
+        <span class="tb-ico"><i class="tb-g">&#xE7E7;</i></span>
+      </div>
+    </div>
+
+    <div class="capt">Strip at 3x, CSS-scaled</div>
+    <div class="surface tb-zoom" id="tb-zoom" data-theme="dark" data-variant="system">
+      <div class="tbstrip">
+        <div class="tb-rows">
+          <div class="tb-row"><span class="tb-lbl">5H</span><div class="tb-track"><i class="tb-time" style="--t:42"></i><i class="tb-fill" style="--p:13"></i></div><span class="tb-val">13%</span></div>
+          <div class="tb-row"><span class="tb-lbl">7D</span><div class="tb-track"><i class="tb-time" style="--t:31"></i><i class="tb-fill" style="--p:2"></i></div><span class="tb-val">2%</span></div>
+        </div>
+        <i class="dot"></i>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== 04 -->
+  <section class="sec" id="sec-tray">
+    <div class="sec-h"><span class="num">04</span><h2>Tray icon</h2><span class="note">16 / 24 / 32 px · monochrome ring · session % · must read at 16 px</span></div>
+
+    <div class="capt">Dark tray, 1x (true size)</div>
+    <div class="surface tray-bar" id="tray-dark" data-theme="dark" data-variant="system">
+      <div class="tray-col">
+        <div class="tray-set">
+          <svg class="ring" width="16" height="16" viewBox="0 0 16 16"><circle class="rk" cx="8" cy="8" r="6" stroke-width="2"/><path class="ra" d="M8 2 A6 6 0 0 1 12.37 3.89" stroke-width="2"/></svg>
+          <svg class="ring" width="24" height="24" viewBox="0 0 24 24"><circle class="rk" cx="12" cy="12" r="9" stroke-width="3"/><path class="ra" d="M12 3 A9 9 0 0 1 18.56 5.84" stroke-width="3"/></svg>
+          <svg class="ring" width="32" height="32" viewBox="0 0 32 32"><circle class="rk" cx="16" cy="16" r="13" stroke-width="4"/><path class="ra" d="M16 3 A13 13 0 0 1 25.48 7.10" stroke-width="4"/></svg>
+        </div>
+        <span class="lab">13% normal</span>
+      </div>
+      <div class="tray-col">
+        <div class="tray-set is-warn">
+          <svg class="ring" width="16" height="16" viewBox="0 0 16 16"><circle class="rk" cx="8" cy="8" r="6" stroke-width="2"/><path class="ra" d="M8 2 A6 6 0 1 1 2.11 9.12" stroke-width="2"/></svg>
+          <svg class="ring" width="24" height="24" viewBox="0 0 24 24"><circle class="rk" cx="12" cy="12" r="9" stroke-width="3"/><path class="ra" d="M12 3 A9 9 0 1 1 3.16 13.69" stroke-width="3"/></svg>
+          <svg class="ring" width="32" height="32" viewBox="0 0 32 32"><circle class="rk" cx="16" cy="16" r="13" stroke-width="4"/><path class="ra" d="M16 3 A13 13 0 1 1 3.23 18.44" stroke-width="4"/></svg>
+        </div>
+        <span class="lab">72% warning</span>
+      </div>
+      <div class="tray-col">
+        <div class="tray-set is-crit">
+          <svg class="ring" width="16" height="16" viewBox="0 0 16 16"><circle class="rk" cx="8" cy="8" r="6" stroke-width="2"/><path class="ra" d="M8 2 A6 6 0 1 1 5.45 2.57" stroke-width="2"/></svg>
+          <svg class="ring" width="24" height="24" viewBox="0 0 24 24"><circle class="rk" cx="12" cy="12" r="9" stroke-width="3"/><path class="ra" d="M12 3 A9 9 0 1 1 8.17 3.86" stroke-width="3"/></svg>
+          <svg class="ring" width="32" height="32" viewBox="0 0 32 32"><circle class="rk" cx="16" cy="16" r="13" stroke-width="4"/><path class="ra" d="M16 3 A13 13 0 1 1 10.46 4.24" stroke-width="4"/></svg>
+        </div>
+        <span class="lab">93% critical</span>
+      </div>
+      <div class="tray-col">
+        <div class="tray-set is-stale">
+          <svg class="ring" width="16" height="16" viewBox="0 0 16 16"><circle class="rk" cx="8" cy="8" r="6" stroke-width="2"/><path class="ra" d="M8 2 A6 6 0 0 1 12.37 3.89" stroke-width="2"/></svg>
+          <svg class="ring" width="24" height="24" viewBox="0 0 24 24"><circle class="rk" cx="12" cy="12" r="9" stroke-width="3"/><path class="ra" d="M12 3 A9 9 0 0 1 18.56 5.84" stroke-width="3"/></svg>
+          <svg class="ring" width="32" height="32" viewBox="0 0 32 32"><circle class="rk" cx="16" cy="16" r="13" stroke-width="4"/><path class="ra" d="M16 3 A13 13 0 0 1 25.48 7.10" stroke-width="4"/></svg>
+        </div>
+        <span class="lab">stale, last known</span>
+      </div>
+    </div>
+
+    <div class="capt" style="margin-top:16px">Light tray, 1x (true size)</div>
+    <div class="surface tray-bar" id="tray-light" data-theme="light" data-variant="system">
+      <div class="tray-col">
+        <div class="tray-set">
+          <svg class="ring" width="16" height="16" viewBox="0 0 16 16"><circle class="rk" cx="8" cy="8" r="6" stroke-width="2"/><path class="ra" d="M8 2 A6 6 0 0 1 12.37 3.89" stroke-width="2"/></svg>
+          <svg class="ring" width="24" height="24" viewBox="0 0 24 24"><circle class="rk" cx="12" cy="12" r="9" stroke-width="3"/><path class="ra" d="M12 3 A9 9 0 0 1 18.56 5.84" stroke-width="3"/></svg>
+          <svg class="ring" width="32" height="32" viewBox="0 0 32 32"><circle class="rk" cx="16" cy="16" r="13" stroke-width="4"/><path class="ra" d="M16 3 A13 13 0 0 1 25.48 7.10" stroke-width="4"/></svg>
+        </div>
+        <span class="lab">13% normal</span>
+      </div>
+      <div class="tray-col">
+        <div class="tray-set is-warn">
+          <svg class="ring" width="16" height="16" viewBox="0 0 16 16"><circle class="rk" cx="8" cy="8" r="6" stroke-width="2"/><path class="ra" d="M8 2 A6 6 0 1 1 2.11 9.12" stroke-width="2"/></svg>
+          <svg class="ring" width="24" height="24" viewBox="0 0 24 24"><circle class="rk" cx="12" cy="12" r="9" stroke-width="3"/><path class="ra" d="M12 3 A9 9 0 1 1 3.16 13.69" stroke-width="3"/></svg>
+          <svg class="ring" width="32" height="32" viewBox="0 0 32 32"><circle class="rk" cx="16" cy="16" r="13" stroke-width="4"/><path class="ra" d="M16 3 A13 13 0 1 1 3.23 18.44" stroke-width="4"/></svg>
+        </div>
+        <span class="lab">72% warning</span>
+      </div>
+      <div class="tray-col">
+        <div class="tray-set is-crit">
+          <svg class="ring" width="16" height="16" viewBox="0 0 16 16"><circle class="rk" cx="8" cy="8" r="6" stroke-width="2"/><path class="ra" d="M8 2 A6 6 0 1 1 5.45 2.57" stroke-width="2"/></svg>
+          <svg class="ring" width="24" height="24" viewBox="0 0 24 24"><circle class="rk" cx="12" cy="12" r="9" stroke-width="3"/><path class="ra" d="M12 3 A9 9 0 1 1 8.17 3.86" stroke-width="3"/></svg>
+          <svg class="ring" width="32" height="32" viewBox="0 0 32 32"><circle class="rk" cx="16" cy="16" r="13" stroke-width="4"/><path class="ra" d="M16 3 A13 13 0 1 1 10.46 4.24" stroke-width="4"/></svg>
+        </div>
+        <span class="lab">93% critical</span>
+      </div>
+      <div class="tray-col">
+        <div class="tray-set is-stale">
+          <svg class="ring" width="16" height="16" viewBox="0 0 16 16"><circle class="rk" cx="8" cy="8" r="6" stroke-width="2"/><path class="ra" d="M8 2 A6 6 0 0 1 12.37 3.89" stroke-width="2"/></svg>
+          <svg class="ring" width="24" height="24" viewBox="0 0 24 24"><circle class="rk" cx="12" cy="12" r="9" stroke-width="3"/><path class="ra" d="M12 3 A9 9 0 0 1 18.56 5.84" stroke-width="3"/></svg>
+          <svg class="ring" width="32" height="32" viewBox="0 0 32 32"><circle class="rk" cx="16" cy="16" r="13" stroke-width="4"/><path class="ra" d="M16 3 A13 13 0 0 1 25.48 7.10" stroke-width="4"/></svg>
+        </div>
+        <span class="lab">stale, last known</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== 05 -->
+  <section class="sec" id="sec-dashboard">
+    <div class="sec-h"><span class="num">05</span><h2>Dashboard overview</h2><span class="note">1200 × 760 · Settings-app layout · dark and light</span></div>
+
+    <div class="capt">Dark</div>
+    <div class="surface window" id="dash-dark" data-theme="dark" data-variant="system">
+      <div class="wm-bar">
+        <svg class="ring wm-app" viewBox="0 0 16 16" aria-hidden="true"><circle class="rk" cx="8" cy="8" r="6" stroke-width="2"/><path class="ra" d="M8 2 A6 6 0 0 1 12.37 3.89" stroke-width="2"/></svg>
+        <span class="wm-name">Claude Usage Monitor</span>
+        <div class="wm-caps">
+          <button class="wm-cap" aria-label="Minimize">&#xE921;</button>
+          <button class="wm-cap" aria-label="Maximize">&#xE922;</button>
+          <button class="wm-cap is-close" aria-label="Close">&#xE8BB;</button>
+        </div>
+      </div>
+      <div class="wm-body">
+        <nav class="nav">
+          <div class="nav-search"><span class="ico">&#xE721;</span>Find a metric</div>
+          <div class="nav-profile">
+            <span class="avatar">&#xE77B;</span>
+            <div><b>Claude Code</b><small>Max 5x plan · Connected</small></div>
+          </div>
+          <ul class="nav-list">
+            <li class="nav-item is-current"><span class="ico">&#xE80F;</span>Overview</li>
+            <li class="nav-item"><span class="ico">&#xE916;</span>Limits</li>
+            <li class="nav-item"><span class="ico">&#xE9D2;</span>Cost &amp; Value</li>
+            <li class="nav-item"><span class="ico">&#xE945;</span>Efficiency</li>
+            <li class="nav-item"><span class="ico">&#xE81C;</span>History</li>
+            <li class="nav-item is-sep"><span class="ico">&#xE713;</span>Settings</li>
+            <li class="nav-item"><span class="ico">&#xE946;</span>About</li>
+          </ul>
+        </nav>
+
+        <main class="content">
+          <div class="page-head">
+            <div>
+              <h1>Overview</h1>
+              <p>Your Claude Code usage, at a glance.</p>
+            </div>
+            <div class="head-actions">
+              <span class="live"><i class="dot"></i>LIVE · Updated 12 s ago</span>
+              <button class="btn"><span class="ico">&#xE72C;</span>Refresh</button>
+            </div>
+          </div>
+
+          <div class="grid">
+            <article class="card">
+              <header class="card-h"><i class="ico">&#xE916;</i>Session<span class="meta">5-hour window</span></header>
+              <div class="big-row"><span class="big">13%</span><span class="unit">used</span><span class="chip ok">Under pace</span></div>
+              <div class="pace" style="--t:42;--p:13"><i class="t"></i><i class="f"></i></div>
+              <div class="pace-meta"><span><i class="lg-t"></i>Time elapsed 42%</span><span>Resets 10:39 PM</span></div>
+            </article>
+
+            <article class="card">
+              <header class="card-h"><i class="ico">&#xE787;</i>Weekly<span class="meta">7-day window</span></header>
+              <div class="big-row"><span class="big">2%</span><span class="unit">used</span><span class="chip ok">Under pace</span></div>
+              <div class="pace" style="--t:31;--p:2"><i class="t"></i><i class="f"></i></div>
+              <div class="pace-meta"><span><i class="lg-t"></i>Time elapsed 31%</span><span>Resets Wed 4:00 PM</span></div>
+            </article>
+
+            <article class="card">
+              <header class="card-h"><i class="ico">&#xE81D;</i>Fable weekly<span class="meta">Share 50%</span></header>
+              <div class="big-row"><span class="big">0%</span><span class="unit">of 50% share</span><span class="chip neu">Unused</span></div>
+              <div class="pace" style="--t:31;--p:0"><i class="t"></i><i class="f"></i><i class="share"></i></div>
+              <div class="pace-meta"><span><i class="lg-t"></i>Time elapsed 31%</span><span>Resets Wed 4:00 PM</span></div>
+            </article>
+
+            <article class="card span-2">
+              <header class="card-h"><i class="ico">&#xE9D2;</i>API-equivalent cost<span class="meta">At list prices · Oct 2026</span></header>
+              <div class="cost-body">
+                <div class="cost-l">
+                  <div class="big-row"><span class="big">$1,659</span><span class="unit">this month</span></div>
+                  <div class="chip-row"><span class="chip acc">16.6× your plan</span><span class="sub">vs Max 5x, $100/mo</span></div>
+                                    <div class="cmp"><span>Max 5x plan</span><div class="bar"><i style="--p:6"></i></div><b>$100</b></div>
+                  <div class="cmp"><span>API-equivalent</span><div class="bar"><i class="hot" style="--p:100"></i></div><b>$1,659</b></div>
+                                  </div>
+                <div class="cost-r">
+                  <div class="spark-h"><span>Daily cost</span><span>Sep 22 – Oct 21</span></div>
+                  <svg class="spark" viewBox="0 0 280 72" preserveAspectRatio="none" aria-hidden="true">
+                    <defs>
+                      <linearGradient id="spk-d" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0" style="stop-color:var(--accent);stop-opacity:0.36"/>
+                        <stop offset="1" style="stop-color:var(--accent);stop-opacity:0"/>
+                      </linearGradient>
+                    </defs>
+                    <path d="M0.0 50.3 L9.7 46.3 L19.3 56.2 L29.0 37.7 L38.6 43.1 L48.3 57.9 L57.9 48.9 L67.6 40.9 L77.2 45.1 L86.9 57.8 L96.6 17.4 L106.2 20.5 L115.9 28.8 L125.5 43.9 L135.2 28.6 L144.8 16.5 L154.5 19.1 L164.1 18.9 L173.8 37.4 L183.4 40.6 L193.1 22.1 L202.8 19.7 L212.4 15.6 L222.1 23.9 L231.7 43.2 L241.4 32.5 L251.0 22.4 L260.7 18.6 L270.3 13.5 L280.0 24.2 L280.0 68 L0 68 Z" fill="url(#spk-d)"/>
+                    <path d="M0.0 50.3 L9.7 46.3 L19.3 56.2 L29.0 37.7 L38.6 43.1 L48.3 57.9 L57.9 48.9 L67.6 40.9 L77.2 45.1 L86.9 57.8 L96.6 17.4 L106.2 20.5 L115.9 28.8 L125.5 43.9 L135.2 28.6 L144.8 16.5 L154.5 19.1 L164.1 18.9 L173.8 37.4 L183.4 40.6 L193.1 22.1 L202.8 19.7 L212.4 15.6 L222.1 23.9 L231.7 43.2 L241.4 32.5 L251.0 22.4 L260.7 18.6 L270.3 13.5 L280.0 24.2" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linejoin="round"/>
+                  </svg>
+                  <div class="cost-stats">
+                    <div class="stat"><b>$84.20</b><span>Today</span></div>
+                    <div class="stat"><b>$14.1K</b><span>Caching saved this month</span></div>
+                  </div>
+                </div>
+              </div>
+            </article>
+
+            <article class="card">
+              <header class="card-h"><i class="ico">&#xE945;</i>Efficiency<span class="meta">Live</span></header>
+              <div class="eff-body">
+                <div class="ring-row">
+                  <div class="ring-w">
+                    <svg viewBox="0 0 56 56" aria-hidden="true"><circle class="rt" cx="28" cy="28" r="23"/><circle class="rv" cx="28" cy="28" r="23" stroke-dasharray="139.31 144.51"/></svg>
+                    <b>96.4%</b>
+                  </div>
+                  <div class="k">Cache hit rate</div>
+                </div>
+                <div class="k">Thinking share of output<b>38%</b></div>
+                <div class="bar"><i style="--p:38"></i></div>
+                <div class="burn">
+                  <span class="k">Burn rate · $6.10/h</span><span class="burn-row"><span class="burn-v">1,240<small>tok/min</small></span>
+                  <span class="chip ok">NORMAL</span></span>
+                                  </div>
+              </div>
+            </article>
+
+            <article class="card">
+              <header class="card-h"><i class="ico">&#xE9F9;</i>Model mix<span class="meta">Share of tokens</span></header>
+              <div class="stack"><i class="m1" style="flex:86"></i><i class="m2" style="flex:7"></i><i class="m3" style="flex:6"></i><i class="m4" style="flex:1"></i></div>
+              <div class="legend">
+                <div><i class="sw m1"></i>Opus 5.5<b>86%</b></div>
+                <div><i class="sw m2"></i>Sonnet 5.5<b>7%</b></div>
+                <div><i class="sw m3"></i>Haiku 4.5<b>6%</b></div>
+                <div><i class="sw m4"></i>Haiku 5.5<b>1%</b></div>
+              </div>
+            </article>
+
+            <article class="card">
+              <header class="card-h"><i class="ico">&#xE7C4;</i>Where the week went<span class="meta">Oct 18 – 24</span></header>
+              <div class="wk">
+                <div class="wk-row"><span>Claude Code</span><div class="bar"><i style="--p:100"></i></div><b>100%</b></div>
+                <div class="wk-row"><span>Chats</span><div class="bar"><i style="--p:0"></i></div><b>0%</b></div>
+                <div class="wk-row"><span>Cowork</span><div class="bar"><i style="--p:0"></i></div><b>0%</b></div>
+              </div>
+            </article>
+
+            <article class="card">
+              <header class="card-h"><i class="ico">&#xE787;</i>Last 30 days<span class="meta">Daily cost</span></header>
+              <div class="cal">
+                <i class="dow">S</i><i class="dow">M</i><i class="dow">T</i><i class="dow">W</i><i class="dow">T</i><i class="dow">F</i><i class="dow">S</i>
+                <i class="d is-out"></i><i class="d is-out"></i>
+                <i class="d" style="--lv:26"></i><i class="d" style="--lv:32"></i><i class="d" style="--lv:17"></i><i class="d" style="--lv:45"></i><i class="d" style="--lv:37"></i>
+                <i class="d" style="--lv:15"></i><i class="d" style="--lv:28"></i><i class="d" style="--lv:40"></i><i class="d" style="--lv:34"></i><i class="d" style="--lv:15"></i><i class="d" style="--lv:75"></i><i class="d" style="--lv:70"></i>
+                <i class="d" style="--lv:58"></i><i class="d" style="--lv:35"></i><i class="d" style="--lv:58"></i><i class="d" style="--lv:76"></i><i class="d" style="--lv:72"></i><i class="d" style="--lv:72"></i><i class="d" style="--lv:45"></i>
+                <i class="d" style="--lv:40"></i><i class="d" style="--lv:68"></i><i class="d" style="--lv:71"></i><i class="d" style="--lv:77"></i><i class="d" style="--lv:65"></i><i class="d" style="--lv:36"></i><i class="d" style="--lv:52"></i>
+                <i class="d" style="--lv:67"></i><i class="d" style="--lv:73"></i><i class="d" style="--lv:81"></i><i class="d is-today" style="--lv:65"></i><i class="d is-future"></i><i class="d is-future"></i><i class="d is-future"></i>
+              </div>
+            </article>
+          </div>
+
+          <footer class="page-foot">All costs are API-equivalent at list prices, not what your plan bills.</footer>
+        </main>
+      </div>
+    </div>
+
+    <div class="capt" style="margin-top:18px">Light</div>
+    <div class="surface window" id="dash-light" data-theme="light" data-variant="system">
+      <div class="wm-bar">
+        <svg class="ring wm-app" viewBox="0 0 16 16" aria-hidden="true"><circle class="rk" cx="8" cy="8" r="6" stroke-width="2"/><path class="ra" d="M8 2 A6 6 0 0 1 12.37 3.89" stroke-width="2"/></svg>
+        <span class="wm-name">Claude Usage Monitor</span>
+        <div class="wm-caps">
+          <button class="wm-cap" aria-label="Minimize">&#xE921;</button>
+          <button class="wm-cap" aria-label="Maximize">&#xE922;</button>
+          <button class="wm-cap is-close" aria-label="Close">&#xE8BB;</button>
+        </div>
+      </div>
+      <div class="wm-body">
+        <nav class="nav">
+          <div class="nav-search"><span class="ico">&#xE721;</span>Find a metric</div>
+          <div class="nav-profile">
+            <span class="avatar">&#xE77B;</span>
+            <div><b>Claude Code</b><small>Max 5x plan · Connected</small></div>
+          </div>
+          <ul class="nav-list">
+            <li class="nav-item is-current"><span class="ico">&#xE80F;</span>Overview</li>
+            <li class="nav-item"><span class="ico">&#xE916;</span>Limits</li>
+            <li class="nav-item"><span class="ico">&#xE9D2;</span>Cost &amp; Value</li>
+            <li class="nav-item"><span class="ico">&#xE945;</span>Efficiency</li>
+            <li class="nav-item"><span class="ico">&#xE81C;</span>History</li>
+            <li class="nav-item is-sep"><span class="ico">&#xE713;</span>Settings</li>
+            <li class="nav-item"><span class="ico">&#xE946;</span>About</li>
+          </ul>
+        </nav>
+
+        <main class="content">
+          <div class="page-head">
+            <div>
+              <h1>Overview</h1>
+              <p>Your Claude Code usage, at a glance.</p>
+            </div>
+            <div class="head-actions">
+              <span class="live"><i class="dot"></i>LIVE · Updated 12 s ago</span>
+              <button class="btn"><span class="ico">&#xE72C;</span>Refresh</button>
+            </div>
+          </div>
+
+          <div class="grid">
+            <article class="card">
+              <header class="card-h"><i class="ico">&#xE916;</i>Session<span class="meta">5-hour window</span></header>
+              <div class="big-row"><span class="big">13%</span><span class="unit">used</span><span class="chip ok">Under pace</span></div>
+              <div class="pace" style="--t:42;--p:13"><i class="t"></i><i class="f"></i></div>
+              <div class="pace-meta"><span><i class="lg-t"></i>Time elapsed 42%</span><span>Resets 10:39 PM</span></div>
+            </article>
+
+            <article class="card">
+              <header class="card-h"><i class="ico">&#xE787;</i>Weekly<span class="meta">7-day window</span></header>
+              <div class="big-row"><span class="big">2%</span><span class="unit">used</span><span class="chip ok">Under pace</span></div>
+              <div class="pace" style="--t:31;--p:2"><i class="t"></i><i class="f"></i></div>
+              <div class="pace-meta"><span><i class="lg-t"></i>Time elapsed 31%</span><span>Resets Wed 4:00 PM</span></div>
+            </article>
+
+            <article class="card">
+              <header class="card-h"><i class="ico">&#xE81D;</i>Fable weekly<span class="meta">Share 50%</span></header>
+              <div class="big-row"><span class="big">0%</span><span class="unit">of 50% share</span><span class="chip neu">Unused</span></div>
+              <div class="pace" style="--t:31;--p:0"><i class="t"></i><i class="f"></i><i class="share"></i></div>
+              <div class="pace-meta"><span><i class="lg-t"></i>Time elapsed 31%</span><span>Resets Wed 4:00 PM</span></div>
+            </article>
+
+            <article class="card span-2">
+              <header class="card-h"><i class="ico">&#xE9D2;</i>API-equivalent cost<span class="meta">At list prices · Oct 2026</span></header>
+              <div class="cost-body">
+                <div class="cost-l">
+                  <div class="big-row"><span class="big">$1,659</span><span class="unit">this month</span></div>
+                  <div class="chip-row"><span class="chip acc">16.6× your plan</span><span class="sub">vs Max 5x, $100/mo</span></div>
+                                    <div class="cmp"><span>Max 5x plan</span><div class="bar"><i style="--p:6"></i></div><b>$100</b></div>
+                  <div class="cmp"><span>API-equivalent</span><div class="bar"><i class="hot" style="--p:100"></i></div><b>$1,659</b></div>
+                                  </div>
+                <div class="cost-r">
+                  <div class="spark-h"><span>Daily cost</span><span>Sep 22 – Oct 21</span></div>
+                  <svg class="spark" viewBox="0 0 280 72" preserveAspectRatio="none" aria-hidden="true">
+                    <defs>
+                      <linearGradient id="spk-l" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0" style="stop-color:var(--accent);stop-opacity:0.36"/>
+                        <stop offset="1" style="stop-color:var(--accent);stop-opacity:0"/>
+                      </linearGradient>
+                    </defs>
+                    <path d="M0.0 50.3 L9.7 46.3 L19.3 56.2 L29.0 37.7 L38.6 43.1 L48.3 57.9 L57.9 48.9 L67.6 40.9 L77.2 45.1 L86.9 57.8 L96.6 17.4 L106.2 20.5 L115.9 28.8 L125.5 43.9 L135.2 28.6 L144.8 16.5 L154.5 19.1 L164.1 18.9 L173.8 37.4 L183.4 40.6 L193.1 22.1 L202.8 19.7 L212.4 15.6 L222.1 23.9 L231.7 43.2 L241.4 32.5 L251.0 22.4 L260.7 18.6 L270.3 13.5 L280.0 24.2 L280.0 68 L0 68 Z" fill="url(#spk-l)"/>
+                    <path d="M0.0 50.3 L9.7 46.3 L19.3 56.2 L29.0 37.7 L38.6 43.1 L48.3 57.9 L57.9 48.9 L67.6 40.9 L77.2 45.1 L86.9 57.8 L96.6 17.4 L106.2 20.5 L115.9 28.8 L125.5 43.9 L135.2 28.6 L144.8 16.5 L154.5 19.1 L164.1 18.9 L173.8 37.4 L183.4 40.6 L193.1 22.1 L202.8 19.7 L212.4 15.6 L222.1 23.9 L231.7 43.2 L241.4 32.5 L251.0 22.4 L260.7 18.6 L270.3 13.5 L280.0 24.2" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linejoin="round"/>
+                  </svg>
+                  <div class="cost-stats">
+                    <div class="stat"><b>$84.20</b><span>Today</span></div>
+                    <div class="stat"><b>$14.1K</b><span>Caching saved this month</span></div>
+                  </div>
+                </div>
+              </div>
+            </article>
+
+            <article class="card">
+              <header class="card-h"><i class="ico">&#xE945;</i>Efficiency<span class="meta">Live</span></header>
+              <div class="eff-body">
+                <div class="ring-row">
+                  <div class="ring-w">
+                    <svg viewBox="0 0 56 56" aria-hidden="true"><circle class="rt" cx="28" cy="28" r="23"/><circle class="rv" cx="28" cy="28" r="23" stroke-dasharray="139.31 144.51"/></svg>
+                    <b>96.4%</b>
+                  </div>
+                  <div class="k">Cache hit rate</div>
+                </div>
+                <div class="k">Thinking share of output<b>38%</b></div>
+                <div class="bar"><i style="--p:38"></i></div>
+                <div class="burn">
+                  <span class="k">Burn rate · $6.10/h</span><span class="burn-row"><span class="burn-v">1,240<small>tok/min</small></span>
+                  <span class="chip ok">NORMAL</span></span>
+                                  </div>
+              </div>
+            </article>
+
+            <article class="card">
+              <header class="card-h"><i class="ico">&#xE9F9;</i>Model mix<span class="meta">Share of tokens</span></header>
+              <div class="stack"><i class="m1" style="flex:86"></i><i class="m2" style="flex:7"></i><i class="m3" style="flex:6"></i><i class="m4" style="flex:1"></i></div>
+              <div class="legend">
+                <div><i class="sw m1"></i>Opus 5.5<b>86%</b></div>
+                <div><i class="sw m2"></i>Sonnet 5.5<b>7%</b></div>
+                <div><i class="sw m3"></i>Haiku 4.5<b>6%</b></div>
+                <div><i class="sw m4"></i>Haiku 5.5<b>1%</b></div>
+              </div>
+            </article>
+
+            <article class="card">
+              <header class="card-h"><i class="ico">&#xE7C4;</i>Where the week went<span class="meta">Oct 18 – 24</span></header>
+              <div class="wk">
+                <div class="wk-row"><span>Claude Code</span><div class="bar"><i style="--p:100"></i></div><b>100%</b></div>
+                <div class="wk-row"><span>Chats</span><div class="bar"><i style="--p:0"></i></div><b>0%</b></div>
+                <div class="wk-row"><span>Cowork</span><div class="bar"><i style="--p:0"></i></div><b>0%</b></div>
+              </div>
+            </article>
+
+            <article class="card">
+              <header class="card-h"><i class="ico">&#xE787;</i>Last 30 days<span class="meta">Daily cost</span></header>
+              <div class="cal">
+                <i class="dow">S</i><i class="dow">M</i><i class="dow">T</i><i class="dow">W</i><i class="dow">T</i><i class="dow">F</i><i class="dow">S</i>
+                <i class="d is-out"></i><i class="d is-out"></i>
+                <i class="d" style="--lv:26"></i><i class="d" style="--lv:32"></i><i class="d" style="--lv:17"></i><i class="d" style="--lv:45"></i><i class="d" style="--lv:37"></i>
+                <i class="d" style="--lv:15"></i><i class="d" style="--lv:28"></i><i class="d" style="--lv:40"></i><i class="d" style="--lv:34"></i><i class="d" style="--lv:15"></i><i class="d" style="--lv:75"></i><i class="d" style="--lv:70"></i>
+                <i class="d" style="--lv:58"></i><i class="d" style="--lv:35"></i><i class="d" style="--lv:58"></i><i class="d" style="--lv:76"></i><i class="d" style="--lv:72"></i><i class="d" style="--lv:72"></i><i class="d" style="--lv:45"></i>
+                <i class="d" style="--lv:40"></i><i class="d" style="--lv:68"></i><i class="d" style="--lv:71"></i><i class="d" style="--lv:77"></i><i class="d" style="--lv:65"></i><i class="d" style="--lv:36"></i><i class="d" style="--lv:52"></i>
+                <i class="d" style="--lv:67"></i><i class="d" style="--lv:73"></i><i class="d" style="--lv:81"></i><i class="d is-today" style="--lv:65"></i><i class="d is-future"></i><i class="d is-future"></i><i class="d is-future"></i>
+              </div>
+            </article>
+          </div>
+
+          <footer class="page-foot">All costs are API-equivalent at list prices, not what your plan bills.</footer>
+        </main>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== 06 -->
+  <section class="sec" id="sec-variants">
+    <div class="sec-h"><span class="num">06</span><h2>Variants</h2><span class="note">7 accents × light and dark</span></div>
+
+    <div class="surface picker" data-theme="dark" data-variant="system">
+      <div class="picker-h"><b>Accent colour</b><span>Bars, the LIVE dot and the active nav item follow this choice.</span></div>
+      <div class="swatches">
+        <div class="sw-cell"><span class="surface sw-chip is-on" data-theme="dark" data-variant="system"></span><small>System accent</small></div>
+        <div class="sw-cell"><span class="surface sw-chip" data-theme="dark" data-variant="blue"></span><small>Blue</small></div>
+        <div class="sw-cell"><span class="surface sw-chip" data-theme="dark" data-variant="teal"></span><small>Teal</small></div>
+        <div class="sw-cell"><span class="surface sw-chip" data-theme="dark" data-variant="purple"></span><small>Purple</small></div>
+        <div class="sw-cell"><span class="surface sw-chip" data-theme="dark" data-variant="rose"></span><small>Rose</small></div>
+        <div class="sw-cell"><span class="surface sw-chip" data-theme="dark" data-variant="orange"></span><small>Orange</small></div>
+        <div class="sw-cell"><span class="surface sw-chip" data-theme="dark" data-variant="green"></span><small>Green</small></div>
+      </div>
+      <div class="modes"><span>Light</span><span>Dark</span><span class="is-on">System</span></div>
+    </div>
+
+    <div class="vset">
+      <div class="vlabel">Dark</div>
+      <div class="desk vgrid" id="variants-dark">
+        <figure class="vcell"><figcaption>System accent <span>#0067C0 · #60CDFF</span></figcaption><div class="surface widget" data-theme="dark" data-variant="system"><div class="w-head"><i class="w-ico">&#xE916;</i><span class="w-title">Claude usage</span><span class="w-spacer"></span><span class="w-pill"><i class="dot"></i>LIVE</span><span class="w-more" aria-hidden="true"><i></i><i></i><i></i></span></div><div class="w-rows"><div class="w-row"><span class="w-lbl">Session</span><div class="w-track"><i class="w-time" style="--t:42"></i><i class="w-fill" style="--p:13"></i></div><span class="w-val">13%</span></div><div class="w-row"><span class="w-lbl">Weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:2"></i></div><span class="w-val">2%</span></div><div class="w-row"><span class="w-lbl">Fable weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:0"></i><i class="w-share"></i></div><span class="w-val">0%</span></div></div></div></figure>
+        <figure class="vcell"><figcaption>Blue <span>#1B5FD0 · #5B9DFF</span></figcaption><div class="surface widget" data-theme="dark" data-variant="blue"><div class="w-head"><i class="w-ico">&#xE916;</i><span class="w-title">Claude usage</span><span class="w-spacer"></span><span class="w-pill"><i class="dot"></i>LIVE</span><span class="w-more" aria-hidden="true"><i></i><i></i><i></i></span></div><div class="w-rows"><div class="w-row"><span class="w-lbl">Session</span><div class="w-track"><i class="w-time" style="--t:42"></i><i class="w-fill" style="--p:13"></i></div><span class="w-val">13%</span></div><div class="w-row"><span class="w-lbl">Weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:2"></i></div><span class="w-val">2%</span></div><div class="w-row"><span class="w-lbl">Fable weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:0"></i><i class="w-share"></i></div><span class="w-val">0%</span></div></div></div></figure>
+        <figure class="vcell"><figcaption>Teal <span>#018574 · #4DD6C2</span></figcaption><div class="surface widget" data-theme="dark" data-variant="teal"><div class="w-head"><i class="w-ico">&#xE916;</i><span class="w-title">Claude usage</span><span class="w-spacer"></span><span class="w-pill"><i class="dot"></i>LIVE</span><span class="w-more" aria-hidden="true"><i></i><i></i><i></i></span></div><div class="w-rows"><div class="w-row"><span class="w-lbl">Session</span><div class="w-track"><i class="w-time" style="--t:42"></i><i class="w-fill" style="--p:13"></i></div><span class="w-val">13%</span></div><div class="w-row"><span class="w-lbl">Weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:2"></i></div><span class="w-val">2%</span></div><div class="w-row"><span class="w-lbl">Fable weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:0"></i><i class="w-share"></i></div><span class="w-val">0%</span></div></div></div></figure>
+        <figure class="vcell"><figcaption>Purple <span>#6F4FA8 · #B39AE6</span></figcaption><div class="surface widget" data-theme="dark" data-variant="purple"><div class="w-head"><i class="w-ico">&#xE916;</i><span class="w-title">Claude usage</span><span class="w-spacer"></span><span class="w-pill"><i class="dot"></i>LIVE</span><span class="w-more" aria-hidden="true"><i></i><i></i><i></i></span></div><div class="w-rows"><div class="w-row"><span class="w-lbl">Session</span><div class="w-track"><i class="w-time" style="--t:42"></i><i class="w-fill" style="--p:13"></i></div><span class="w-val">13%</span></div><div class="w-row"><span class="w-lbl">Weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:2"></i></div><span class="w-val">2%</span></div><div class="w-row"><span class="w-lbl">Fable weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:0"></i><i class="w-share"></i></div><span class="w-val">0%</span></div></div></div></figure>
+        <figure class="vcell"><figcaption>Rose <span>#C10E74 · #FF8AC5</span></figcaption><div class="surface widget" data-theme="dark" data-variant="rose"><div class="w-head"><i class="w-ico">&#xE916;</i><span class="w-title">Claude usage</span><span class="w-spacer"></span><span class="w-pill"><i class="dot"></i>LIVE</span><span class="w-more" aria-hidden="true"><i></i><i></i><i></i></span></div><div class="w-rows"><div class="w-row"><span class="w-lbl">Session</span><div class="w-track"><i class="w-time" style="--t:42"></i><i class="w-fill" style="--p:13"></i></div><span class="w-val">13%</span></div><div class="w-row"><span class="w-lbl">Weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:2"></i></div><span class="w-val">2%</span></div><div class="w-row"><span class="w-lbl">Fable weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:0"></i><i class="w-share"></i></div><span class="w-val">0%</span></div></div></div></figure>
+        <figure class="vcell"><figcaption>Orange <span>#C84F0C · #FF9F5A</span></figcaption><div class="surface widget" data-theme="dark" data-variant="orange"><div class="w-head"><i class="w-ico">&#xE916;</i><span class="w-title">Claude usage</span><span class="w-spacer"></span><span class="w-pill"><i class="dot"></i>LIVE</span><span class="w-more" aria-hidden="true"><i></i><i></i><i></i></span></div><div class="w-rows"><div class="w-row"><span class="w-lbl">Session</span><div class="w-track"><i class="w-time" style="--t:42"></i><i class="w-fill" style="--p:13"></i></div><span class="w-val">13%</span></div><div class="w-row"><span class="w-lbl">Weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:2"></i></div><span class="w-val">2%</span></div><div class="w-row"><span class="w-lbl">Fable weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:0"></i><i class="w-share"></i></div><span class="w-val">0%</span></div></div></div></figure>
+        <figure class="vcell"><figcaption>Green <span>#107C10 · #6CCB5F</span></figcaption><div class="surface widget" data-theme="dark" data-variant="green"><div class="w-head"><i class="w-ico">&#xE916;</i><span class="w-title">Claude usage</span><span class="w-spacer"></span><span class="w-pill"><i class="dot"></i>LIVE</span><span class="w-more" aria-hidden="true"><i></i><i></i><i></i></span></div><div class="w-rows"><div class="w-row"><span class="w-lbl">Session</span><div class="w-track"><i class="w-time" style="--t:42"></i><i class="w-fill" style="--p:13"></i></div><span class="w-val">13%</span></div><div class="w-row"><span class="w-lbl">Weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:2"></i></div><span class="w-val">2%</span></div><div class="w-row"><span class="w-lbl">Fable weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:0"></i><i class="w-share"></i></div><span class="w-val">0%</span></div></div></div></figure>
+      </div>
+    </div>
+
+    <div class="vset">
+      <div class="vlabel">Light</div>
+      <div class="desk is-light vgrid" id="variants-light">
+        <figure class="vcell"><figcaption>System accent <span>#0067C0</span></figcaption><div class="surface widget" data-theme="light" data-variant="system"><div class="w-head"><i class="w-ico">&#xE916;</i><span class="w-title">Claude usage</span><span class="w-spacer"></span><span class="w-pill"><i class="dot"></i>LIVE</span><span class="w-more" aria-hidden="true"><i></i><i></i><i></i></span></div><div class="w-rows"><div class="w-row"><span class="w-lbl">Session</span><div class="w-track"><i class="w-time" style="--t:42"></i><i class="w-fill" style="--p:13"></i></div><span class="w-val">13%</span></div><div class="w-row"><span class="w-lbl">Weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:2"></i></div><span class="w-val">2%</span></div><div class="w-row"><span class="w-lbl">Fable weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:0"></i><i class="w-share"></i></div><span class="w-val">0%</span></div></div></div></figure>
+        <figure class="vcell"><figcaption>Blue <span>#1B5FD0</span></figcaption><div class="surface widget" data-theme="light" data-variant="blue"><div class="w-head"><i class="w-ico">&#xE916;</i><span class="w-title">Claude usage</span><span class="w-spacer"></span><span class="w-pill"><i class="dot"></i>LIVE</span><span class="w-more" aria-hidden="true"><i></i><i></i><i></i></span></div><div class="w-rows"><div class="w-row"><span class="w-lbl">Session</span><div class="w-track"><i class="w-time" style="--t:42"></i><i class="w-fill" style="--p:13"></i></div><span class="w-val">13%</span></div><div class="w-row"><span class="w-lbl">Weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:2"></i></div><span class="w-val">2%</span></div><div class="w-row"><span class="w-lbl">Fable weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:0"></i><i class="w-share"></i></div><span class="w-val">0%</span></div></div></div></figure>
+        <figure class="vcell"><figcaption>Teal <span>#018574</span></figcaption><div class="surface widget" data-theme="light" data-variant="teal"><div class="w-head"><i class="w-ico">&#xE916;</i><span class="w-title">Claude usage</span><span class="w-spacer"></span><span class="w-pill"><i class="dot"></i>LIVE</span><span class="w-more" aria-hidden="true"><i></i><i></i><i></i></span></div><div class="w-rows"><div class="w-row"><span class="w-lbl">Session</span><div class="w-track"><i class="w-time" style="--t:42"></i><i class="w-fill" style="--p:13"></i></div><span class="w-val">13%</span></div><div class="w-row"><span class="w-lbl">Weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:2"></i></div><span class="w-val">2%</span></div><div class="w-row"><span class="w-lbl">Fable weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:0"></i><i class="w-share"></i></div><span class="w-val">0%</span></div></div></div></figure>
+        <figure class="vcell"><figcaption>Purple <span>#6F4FA8</span></figcaption><div class="surface widget" data-theme="light" data-variant="purple"><div class="w-head"><i class="w-ico">&#xE916;</i><span class="w-title">Claude usage</span><span class="w-spacer"></span><span class="w-pill"><i class="dot"></i>LIVE</span><span class="w-more" aria-hidden="true"><i></i><i></i><i></i></span></div><div class="w-rows"><div class="w-row"><span class="w-lbl">Session</span><div class="w-track"><i class="w-time" style="--t:42"></i><i class="w-fill" style="--p:13"></i></div><span class="w-val">13%</span></div><div class="w-row"><span class="w-lbl">Weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:2"></i></div><span class="w-val">2%</span></div><div class="w-row"><span class="w-lbl">Fable weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:0"></i><i class="w-share"></i></div><span class="w-val">0%</span></div></div></div></figure>
+        <figure class="vcell"><figcaption>Rose <span>#C10E74</span></figcaption><div class="surface widget" data-theme="light" data-variant="rose"><div class="w-head"><i class="w-ico">&#xE916;</i><span class="w-title">Claude usage</span><span class="w-spacer"></span><span class="w-pill"><i class="dot"></i>LIVE</span><span class="w-more" aria-hidden="true"><i></i><i></i><i></i></span></div><div class="w-rows"><div class="w-row"><span class="w-lbl">Session</span><div class="w-track"><i class="w-time" style="--t:42"></i><i class="w-fill" style="--p:13"></i></div><span class="w-val">13%</span></div><div class="w-row"><span class="w-lbl">Weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:2"></i></div><span class="w-val">2%</span></div><div class="w-row"><span class="w-lbl">Fable weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:0"></i><i class="w-share"></i></div><span class="w-val">0%</span></div></div></div></figure>
+        <figure class="vcell"><figcaption>Orange <span>#C84F0C</span></figcaption><div class="surface widget" data-theme="light" data-variant="orange"><div class="w-head"><i class="w-ico">&#xE916;</i><span class="w-title">Claude usage</span><span class="w-spacer"></span><span class="w-pill"><i class="dot"></i>LIVE</span><span class="w-more" aria-hidden="true"><i></i><i></i><i></i></span></div><div class="w-rows"><div class="w-row"><span class="w-lbl">Session</span><div class="w-track"><i class="w-time" style="--t:42"></i><i class="w-fill" style="--p:13"></i></div><span class="w-val">13%</span></div><div class="w-row"><span class="w-lbl">Weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:2"></i></div><span class="w-val">2%</span></div><div class="w-row"><span class="w-lbl">Fable weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:0"></i><i class="w-share"></i></div><span class="w-val">0%</span></div></div></div></figure>
+        <figure class="vcell"><figcaption>Green <span>#107C10</span></figcaption><div class="surface widget" data-theme="light" data-variant="green"><div class="w-head"><i class="w-ico">&#xE916;</i><span class="w-title">Claude usage</span><span class="w-spacer"></span><span class="w-pill"><i class="dot"></i>LIVE</span><span class="w-more" aria-hidden="true"><i></i><i></i><i></i></span></div><div class="w-rows"><div class="w-row"><span class="w-lbl">Session</span><div class="w-track"><i class="w-time" style="--t:42"></i><i class="w-fill" style="--p:13"></i></div><span class="w-val">13%</span></div><div class="w-row"><span class="w-lbl">Weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:2"></i></div><span class="w-val">2%</span></div><div class="w-row"><span class="w-lbl">Fable weekly</span><div class="w-track"><i class="w-time" style="--t:31"></i><i class="w-fill" style="--p:0"></i><i class="w-share"></i></div><span class="w-val">0%</span></div></div></div></figure>
+      </div>
+    </div>
+  </section>
+
+</main>
+</body>
+</html>

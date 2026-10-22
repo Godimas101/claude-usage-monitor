@@ -1,0 +1,942 @@
+<!doctype html>
+<html lang="en" data-variant="amber">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nostromo Iconic - Usage Monitor Mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Michroma&family=Share+Tech+Mono&family=VT323&display=swap" rel="stylesheet">
+<style>
+/* =====================================================================
+   1. TOKENS
+   Every theme colour is a custom property. Variants swap them with one
+   data-variant attribute (see the [data-variant] blocks below).
+   ===================================================================== */
+:root{
+  color-scheme:dark;
+  /* ---- AMBER / P3 phosphor (default) ---- */
+  --crt:#090909;               /* CRT black: base fill */
+  --crt-deep:#030303;          /* deepest black: boot screen, tube edge */
+  --plate:#110e09;             /* lifted plate, top of gradients */
+  --hot:#ffe2a6;               /* white-hot core: peaks, ticks, critical pips */
+  --bright:#ffb300;            /* key values, warning pips */
+  --main:#e8a020;              /* primary phosphor: text, lit pips */
+  --sec:#b97d1e;               /* secondary text, labels */
+  --dim:#7a5010;               /* rails, dividers, tertiary text */
+  --ghost:#2a1b07;             /* unlit pips, dotted scales */
+  --glow:rgba(255,170,30,.60); /* bloom core */
+  --glow-2:rgba(255,150,20,.22);/* bloom halo */
+  --edge:#4b3412;              /* bevel + chamfer outline */
+  --edge-hi:rgba(255,205,120,.22); /* top bevel highlight */
+  --scan:rgba(0,0,0,.30);      /* scanline stripe */
+  --shade:rgba(0,0,0,.6);     /* tube vignette */
+  --ink:#0b0805;               /* text on inverted (lit) blocks */
+
+  /* ---- mock chrome: host UI and hardware, never themed ---- */
+  --m-page:#0b0b0b; --m-ink:#dcd9d2; --m-mute:#77736b; --m-line:#26241f; --m-grid:rgba(255,255,255,.06);
+  --win-tb:#1f1f1f; --win-tb-line:#303030; --win-ink:#f3f3f3; --win-btn:#2c2c2c;
+  --wall-1:#1e2a3a; --wall-2:#0c1119; --wall-3:#3a2b18; --wall-4:#04060a;
+  --hw-1:#2b2822; --hw-2:#1a1813; --hw-3:#12110d; --rivet-a:#9b927f; --rivet-b:#4c463a; --rivet-c:#171510;
+  --led-off:#2a2519; --led-warn:#ff6a2a;
+
+  --f-head:"Michroma","Segoe UI",system-ui,sans-serif;
+  --f-read:"VT323","Consolas",monospace;
+  --f-mono:"Share Tech Mono","Consolas",monospace;
+  --f-win:"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+
+  /* chamfer geometry: outer shape and 1px-inset inner shape */
+  --cut-w:polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px);
+  --cut-w-in:polygon(9.4px 0,100% 0,100% calc(100% - 9.4px),calc(100% - 9.4px) 100%,0 100%,0 9.4px);
+  --cut-c:polygon(14px 0,100% 0,100% calc(100% - 14px),calc(100% - 14px) 100%,0 100%,0 14px);
+  --cut-c-in:polygon(13px 0,100% 0,100% calc(100% - 13px),calc(100% - 13px) 100%,0 100%,0 13px);
+  --cut-s:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px);
+  --cut-s-in:polygon(7.4px 0,100% 0,100% calc(100% - 7.4px),calc(100% - 7.4px) 100%,0 100%,0 7.4px);
+}
+
+/* ---- P1 green: MU/TH/UR green ---- */
+[data-variant="green"]{
+  --plate:#08110b; --hot:#e2ffe9; --bright:#63ff92; --main:#2fe26e; --sec:#1fa552; --dim:#136a33;
+  --ghost:#0a2a16; --glow:rgba(70,255,130,.60); --glow-2:rgba(60,255,120,.22);
+  --edge:#16412a; --edge-hi:rgba(170,255,200,.22); --ink:#030a05;
+}
+/* ---- P4 white ---- */
+[data-variant="white"]{
+  --plate:#0e0f0d; --hot:#ffffff; --bright:#f4f5f1; --main:#d8dbd2; --sec:#9ea498; --dim:#4f534a;
+  --ghost:#22241f; --glow:rgba(235,240,235,.46); --glow-2:rgba(230,235,230,.16);
+  --edge:#3d4138; --edge-hi:rgba(255,255,255,.20); --ink:#0a0b09;
+}
+/* ---- alert red: self-destruct ---- */
+[data-variant="red"]{
+  --plate:#110807; --hot:#ffd8cf; --bright:#ff6a4f; --main:#ff3b28; --sec:#c8362a; --dim:#6a1812;
+  --ghost:#2a0a07; --glow:rgba(255,60,40,.60); --glow-2:rgba(255,40,30,.22);
+  --edge:#4a140e; --edge-hi:rgba(255,150,130,.20); --ink:#0b0302;
+}
+/* ---- cool bridge blue ---- */
+[data-variant="blue"]{
+  --plate:#08101a; --hot:#eafaff; --bright:#a6e9ff; --main:#5fc6ff; --sec:#3f9bcb; --dim:#1d4d69;
+  --ghost:#0b2231; --glow:rgba(95,198,255,.58); --glow-2:rgba(80,190,255,.22);
+  --edge:#18394f; --edge-hi:rgba(180,235,255,.20); --ink:#03080c;
+}
+
+/* =====================================================================
+   2. MOCK PAGE CHROME (not part of the theme)
+   ===================================================================== */
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--m-page);color:var(--m-ink);font-family:var(--f-mono)}
+body{min-width:1320px;padding-bottom:90px}
+em{font-style:normal}
+a{color:inherit}
+.page{width:1280px;margin:0 auto}
+.kicker{font:12px var(--f-mono);letter-spacing:.22em;color:var(--m-mute);padding-top:44px}
+.masthead h1{font:400 40px/1 var(--f-head);letter-spacing:.14em;margin-top:18px;color:var(--m-ink)}
+.masthead h1 span{color:var(--m-mute)}
+.lede{max-width:900px;margin-top:16px;font:15px/1.6 var(--f-mono);color:var(--m-mute)}
+.index{display:flex;gap:10px;flex-wrap:wrap;margin-top:22px}
+.index a{font:12px var(--f-mono);letter-spacing:.14em;text-decoration:none;border:1px solid var(--m-line);padding:8px 12px}
+.index a:hover{border-color:var(--m-ink)}
+.tokens{display:flex;gap:20px;flex-wrap:wrap;margin-top:20px;font:11px var(--f-mono);color:var(--m-mute)}
+.tokens span{display:flex;align-items:center;gap:8px}
+.tokens i{width:18px;height:18px;display:inline-block;border:1px solid var(--m-line)}
+.sec{margin-top:64px}
+.sec-h{display:flex;align-items:baseline;gap:16px;border-bottom:1px solid var(--m-line);padding-bottom:12px;margin-bottom:22px}
+.sec-h .n{font:12px var(--f-mono);letter-spacing:.2em;color:var(--m-mute)}
+.sec-h h2{font:400 17px/1 var(--f-head);letter-spacing:.18em;color:var(--m-ink)}
+.sec-h p{margin-left:auto;font:12px var(--f-mono);letter-spacing:.04em;color:var(--m-mute);text-align:right}
+.zrow{display:flex;gap:30px;align-items:flex-start;margin-top:28px}
+.spec{width:360px;font:12px/1.55 var(--f-mono);color:var(--m-mute);letter-spacing:.02em}
+.spec dt{color:var(--m-ink);letter-spacing:.14em;margin-top:9px}
+.spec dd{margin:0}
+.zframe{position:relative;flex:none;width:840px;height:378px;overflow:hidden;background:var(--crt);outline:1px solid var(--m-line)}
+.zscale{position:absolute;left:0;top:0;transform:scale(3);transform-origin:0 0}
+.zframe::after{content:"";position:absolute;inset:0;pointer-events:none;background-image:linear-gradient(to right,var(--m-grid) 1px,transparent 1px),linear-gradient(to bottom,var(--m-grid) 1px,transparent 1px);background-size:3px 3px}
+.zframe-s{width:900px;height:118px}
+.zscale-s{transform:scale(3)}
+
+/* wallpaper stand-in (dark, photo-like) */
+.wall{position:relative;padding:34px 32px 30px;overflow:hidden;
+  background:
+    radial-gradient(60% 70% at 18% 18%,var(--wall-1) 0%,transparent 70%),
+    radial-gradient(45% 55% at 86% 88%,var(--wall-3) 0%,transparent 70%),
+    linear-gradient(165deg,var(--wall-1) 0%,var(--wall-2) 55%,var(--wall-4) 100%)}
+.wall::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:.10;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+.wall>*{position:relative;z-index:1}
+.fw-grid{display:flex;flex-wrap:wrap;gap:34px 28px;align-items:flex-end}
+.fw-grid figure{display:flex;flex-direction:column;gap:10px}
+.fw-grid figcaption{font:11px var(--f-mono);letter-spacing:.14em;color:var(--m-ink);opacity:.72}
+
+/* =====================================================================
+   3. COMPONENTS: FLOATING WIDGET (flat: Pillow-safe, no blur except glow)
+   Geometry: 280 wide. 2-row = 94 high, 3-row = 126 high.
+   ===================================================================== */
+@keyframes blink{0%,84%{opacity:1}85%,100%{opacity:.18}}
+
+.fw{position:relative;width:280px;height:126px;flex:none;background:var(--edge);clip-path:var(--cut-w)}
+.fw.two{height:94px}
+.fw-in{position:absolute;inset:1px;overflow:hidden;clip-path:var(--cut-w-in);
+  background:linear-gradient(180deg,var(--plate) 0%,var(--crt) 40%,var(--crt) 100%)}
+.fw-in::before{content:"";position:absolute;inset:0;z-index:5;pointer-events:none;
+  background:repeating-linear-gradient(180deg,transparent 0 2px,var(--scan) 2px 3px)}
+.fw-in::after{content:"";position:absolute;left:0;right:0;top:0;height:1px;z-index:6;background:var(--edge-hi)}
+
+.fw-head{position:absolute;z-index:3;left:13px;right:13px;top:5px;height:12px;display:flex;justify-content:space-between;align-items:center;
+  font:10px/12px var(--f-mono);letter-spacing:.14em;text-transform:uppercase;color:var(--sec)}
+.fw-head em{color:var(--sec);margin-left:5px;letter-spacing:.08em}
+.fw-head span{display:flex;align-items:center}
+.fw-head .state{letter-spacing:.12em}
+.dot{display:inline-block;flex:none;width:6px;height:6px;margin-right:6px;border-radius:50%;background:var(--bright);box-shadow:0 0 4px var(--glow);animation:blink 2.4s steps(1) infinite}
+.dot.hollow{background:none;border:1px solid var(--sec);box-shadow:none;animation:none}
+.dot.off{background:none;border:1px solid var(--dim);box-shadow:none;animation:none}
+.dot.pause{background:var(--dim);box-shadow:none;animation:none}
+
+.fw-rule{position:absolute;z-index:3;left:13px;right:13px;top:21px;height:1px;background:var(--dim);opacity:.7}
+
+.fw-row{position:absolute;z-index:3;left:13px;right:13px;height:25px}
+.r1{top:29px}.r2{top:61px}.r3{top:93px}
+.fw-lbl{position:absolute;left:0;top:0;white-space:nowrap;font:10px/12px var(--f-mono);letter-spacing:.14em;color:var(--sec)}
+.fw-lbl em{color:var(--sec);margin-left:6px;letter-spacing:.08em}
+.fw-val{position:absolute;right:0;top:-6px;font:22px/22px var(--f-read);color:var(--bright);text-shadow:0 0 5px var(--glow),0 0 1px var(--glow)}
+
+/* time-elapsed rail: dotted full window, solid = elapsed, tick = "now" */
+.fw-rail{position:absolute;left:0;right:0;top:14px;height:1px}
+.fw-rail::before{content:"";position:absolute;left:0;right:0;top:0;height:1px;background:repeating-linear-gradient(90deg,var(--ghost) 0 2px,transparent 2px 6px)}
+.fw-rail .track{position:absolute;left:0;top:0;height:1px;width:var(--t);background:var(--dim)}
+.fw-rail .tick{position:absolute;top:-2px;left:calc(var(--t) - 1px);width:2px;height:5px;background:var(--hot);box-shadow:0 0 3px var(--glow)}
+
+/* chunky pip bar: 14 segments, 14 on / 4 off, 252 px span */
+.fw-bar{position:absolute;left:0;right:0;top:17px;height:8px;background:repeating-linear-gradient(90deg,var(--ghost) 0 14px,transparent 14px 18px)}
+.fw-bar .fill{position:absolute;left:0;top:0;bottom:0;width:var(--p);background:repeating-linear-gradient(90deg,var(--main) 0 14px,transparent 14px 18px);box-shadow:0 0 6px var(--glow-2)}
+
+.hazard{display:none;position:absolute;z-index:7;left:0;right:0;top:0;height:4px;background:repeating-linear-gradient(-45deg,var(--main) 0 4px,var(--crt) 4px 8px)}
+.msg{display:none;position:absolute;z-index:4;left:13px;right:13px;top:92px;height:31px;padding:3px 7px;border:1px dashed var(--dim);
+  font:10px/12px var(--f-mono);letter-spacing:.08em;color:var(--sec);white-space:nowrap}
+
+/* states */
+.fw.warn .fill{background:repeating-linear-gradient(90deg,var(--bright) 0 14px,transparent 14px 18px);box-shadow:0 0 8px var(--glow)}
+.fw.warn .fw-val{color:var(--hot)}
+.fw.crit .fill{background:repeating-linear-gradient(90deg,var(--hot) 0 14px,transparent 14px 18px);box-shadow:0 0 10px var(--glow)}
+.fw.crit .fw-val{animation:blink 1.6s steps(1) infinite}
+.fw.crit .state{background:var(--main);color:var(--ink);padding:0 5px;text-shadow:none}
+.fw.crit .hazard{display:block}
+.fw.stale{--bright:var(--sec);--hot:var(--sec);--main:var(--dim);--glow:transparent;--glow-2:transparent}
+.fw.stale .r3{display:none}
+.fw.stale .msg{display:block}
+.fw.paused{--main:var(--sec)}
+
+/* =====================================================================
+   4. COMPONENTS: TASKBAR STRIP (262-ish x 34, sits left of the clock)
+   ===================================================================== */
+.tb-stage{position:relative;width:1280px;height:200px;overflow:hidden;border:1px solid var(--m-line)}
+.tb-wall{position:absolute;left:0;right:0;top:0;height:152px;
+  background:radial-gradient(60% 80% at 22% 30%,var(--wall-1) 0%,transparent 70%),
+  radial-gradient(45% 70% at 88% 100%,var(--wall-3) 0%,transparent 70%),
+  linear-gradient(165deg,var(--wall-1) 0%,var(--wall-2) 60%,var(--wall-4) 100%)}
+.taskbar{position:absolute;left:0;right:0;bottom:0;height:48px;background:var(--win-tb);border-top:1px solid var(--win-tb-line);color:var(--win-ink)}
+.tb-start{position:absolute;left:10px;top:6px;width:40px;height:36px;border-radius:6px;display:grid;place-items:center;background:var(--win-btn)}
+.tb-apps{position:absolute;left:50%;top:4px;transform:translateX(-50%);display:flex;align-items:center;gap:4px}
+.ap{position:relative;width:40px;height:40px;border-radius:8px;display:grid;place-items:center}
+.ap svg,.tb-start svg,.tb-right svg{fill:none;stroke:var(--win-ink);stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
+.ap svg{width:20px;height:20px}
+.ap.on::after{content:"";position:absolute;left:50%;bottom:2px;width:14px;height:3px;margin-left:-7px;border-radius:2px;background:var(--win-ink)}
+.ap.sel{background:var(--win-btn)}
+.tb-right{position:absolute;right:8px;top:0;bottom:0;display:flex;align-items:center}
+.slot{width:30px;height:40px;display:grid;place-items:center}
+.slot svg{width:16px;height:16px}
+.clock{margin-left:10px;padding:0 8px;font:12px/15px var(--f-win);color:var(--win-ink);text-align:right;white-space:nowrap}
+
+/* the strip */
+.tbs{position:relative;flex:none;display:flex;align-items:center;height:34px;margin:0 6px 0 10px;padding:1px;background:var(--edge);clip-path:var(--cut-s)}
+.tbs-in{flex:1;align-self:stretch;clip-path:var(--cut-s-in);display:flex;align-items:center;gap:6px;padding:0 9px 0 10px;
+  background:linear-gradient(180deg,var(--plate) 0%,var(--crt) 100%)}
+.tbs .st{flex:none;width:6px;height:6px;margin-right:2px;border-radius:50%;background:var(--bright);box-shadow:0 0 5px var(--glow);animation:blink 2.4s steps(1) infinite}
+.tbs .k{flex:none;font:11px var(--f-mono);letter-spacing:.12em;color:var(--sec)}
+.tbs .mb{position:relative;flex:none;width:60px;height:7px;background:repeating-linear-gradient(90deg,var(--ghost) 0 4px,transparent 4px 6px)}
+.tbs .mb i{position:absolute;left:0;top:0;bottom:0;width:var(--p);background:repeating-linear-gradient(90deg,var(--main) 0 4px,transparent 4px 6px);box-shadow:0 0 4px var(--glow-2)}
+.tbs .v{flex:none;min-width:30px;text-align:right;font:18px/14px var(--f-read);color:var(--bright);text-shadow:0 0 4px var(--glow)}
+.tbs .sep{flex:none;width:1px;height:18px;margin:0 2px;background:var(--dim)}
+
+/* =====================================================================
+   5. COMPONENTS: TRAY ICON (drawn by script 1 px per pixel, no AA)
+   ===================================================================== */
+canvas.tray-ic{display:block;image-rendering:pixelated}
+.flyout{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;width:1000px;height:124px;padding:0 26px 14px;background:var(--win-tb);border:1px solid var(--win-tb-line);color:var(--win-sub)}
+.tcell{display:flex;flex-direction:column;align-items:center;gap:10px}
+.tic{display:flex;align-items:flex-end;gap:26px}
+.tic figure{display:flex;flex-direction:column;align-items:center;gap:6px}
+.tic figcaption{font:10px var(--f-mono);letter-spacing:.1em;color:var(--win-sub)}
+.tlab{font:11px var(--f-mono);letter-spacing:.14em;color:var(--win-ink);white-space:nowrap}
+.tlab em{color:var(--win-sub)}
+.loupe{display:flex;flex-direction:column;align-items:center;gap:8px;font:11px var(--f-mono);letter-spacing:.12em;color:var(--m-mute)}
+.loupe canvas{width:128px;height:128px}
+
+/* =====================================================================
+   6. DASHBOARD: CRT console, 1200 x 760 screen
+   ===================================================================== */
+.console{position:relative;width:1280px;margin:0 auto;padding:44px 40px 30px;border-radius:54px;
+  background:linear-gradient(180deg,var(--hw-1) 0%,var(--hw-2) 24%,var(--hw-3) 100%);
+  box-shadow:inset 0 1px 0 rgba(255,236,200,.10),inset 0 0 0 2px #0a0907,0 40px 80px rgba(0,0,0,.7)}
+.rivet{position:absolute;width:12px;height:12px;border-radius:50%;background:radial-gradient(circle at 35% 35%,var(--rivet-a) 0,var(--rivet-b) 45%,var(--rivet-c) 100%);box-shadow:0 1px 0 rgba(0,0,0,.8)}
+.rv1{left:18px;top:18px}.rv2{right:18px;top:18px}.rv3{left:18px;bottom:16px}.rv4{right:18px;bottom:16px}
+
+.screen{position:relative;width:1200px;height:760px;margin:0 auto;overflow:hidden;border-radius:38px/30px;background:radial-gradient(120% 95% at 50% 42%,var(--plate) 0%,var(--crt) 58%,var(--crt-deep) 100%);
+  box-shadow:0 0 0 3px #050403,0 0 0 5px #3b352b,0 0 46px rgba(0,0,0,.9)}
+.content{position:absolute;inset:0;display:flex;flex-direction:column;animation:flicker 9s infinite}
+@keyframes flicker{0%,100%{opacity:1}46%{opacity:1}47%{opacity:.93}48%{opacity:1}73%{opacity:.985}74%{opacity:1}}
+.scan{position:absolute;inset:0;z-index:71;pointer-events:none;background:repeating-linear-gradient(180deg,transparent 0 2px,var(--scan) 2px 3px)}
+.vig{position:absolute;inset:0;z-index:72;pointer-events:none;border-radius:inherit;
+  background:radial-gradient(ellipse 96% 90% at 50% 48%,transparent 70%,var(--shade) 100%);box-shadow:inset 0 0 28px 0 var(--shade)}
+
+.tbar{flex:none;height:36px;display:flex;align-items:center;justify-content:space-between;padding:0 12px 0 16px;border-bottom:1px solid var(--edge);font:12px var(--f-mono);letter-spacing:.14em;color:var(--sec)}
+.tbar .brand{font:11px var(--f-head);letter-spacing:.2em;color:var(--main);text-shadow:0 0 6px var(--glow-2)}
+.tbar .brand em{color:var(--sec);font:11px var(--f-mono);letter-spacing:.14em;margin-left:8px}
+.tbar .r{display:flex;align-items:center;gap:18px}
+.tbar .lk{display:flex;align-items:center;color:var(--bright)}
+.tbar .lk .dot{margin-right:8px}
+.wbtns{display:flex;gap:6px}
+.wbtn{width:22px;height:18px;display:grid;place-items:center;font:13px/1 var(--f-mono);color:var(--sec);background:linear-gradient(180deg,var(--plate),var(--crt));box-shadow:inset 0 0 0 1px var(--edge),inset 1px 1px 0 var(--edge-hi)}
+
+.app{flex:1;min-height:0;display:grid;grid-template-columns:204px 1fr}
+.nav{display:flex;flex-direction:column;gap:4px;padding:16px 14px 14px;border-right:1px solid var(--edge)}
+.label{font:11px var(--f-mono);letter-spacing:.2em;color:var(--sec);margin:0 0 10px 6px}
+.nav>a{display:flex;align-items:center;gap:10px;padding:8px 10px;border-left:2px solid transparent;text-decoration:none;font:13px var(--f-mono);letter-spacing:.12em;color:var(--sec)}
+.nav>a i{font-style:normal;width:20px;color:var(--sec)}
+.nav>a:hover{color:var(--main)}
+.nav>a.on{background:var(--main);color:var(--ink);border-left-color:var(--hot)}
+.nav>a.on i{color:var(--ink)}
+.health{margin-top:auto;padding:12px 10px 10px;border:1px solid var(--edge);background:linear-gradient(180deg,var(--plate),var(--crt))}
+.log{margin-top:14px;font:11px/1.7 var(--f-mono);letter-spacing:.06em;color:var(--sec);white-space:nowrap}
+.log .label{margin-bottom:4px}
+.log .l0{color:var(--bright)}
+.health .label{margin-bottom:6px}
+.kv{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:3px 0;border-bottom:1px dotted var(--ghost);font:12px var(--f-mono);letter-spacing:.1em;color:var(--sec)}
+.kv b{font:400 20px/18px var(--f-read);letter-spacing:.02em;color:var(--bright);text-shadow:0 0 5px var(--glow-2)}
+.kv b.ok{display:flex;align-items:center}
+.sig{display:block;margin-top:8px;width:100%;height:20px}
+.vlabel{margin-top:14px}
+.vsw{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
+.vsw button{font:11px var(--f-mono);letter-spacing:.08em;padding:6px 0;cursor:pointer;color:var(--sec);background:var(--crt);border:1px solid var(--edge)}
+.vsw button.on{background:var(--main);color:var(--ink);border-color:var(--main)}
+
+.main{min-width:0;display:flex;flex-direction:column;gap:12px;padding:16px 20px 14px;
+  background-image:linear-gradient(var(--ghost) 1px,transparent 1px),linear-gradient(90deg,var(--ghost) 1px,transparent 1px);background-size:48px 48px;background-position:-1px -1px}
+.head{display:flex;align-items:flex-end;justify-content:space-between;gap:24px}
+.head h1{font:400 26px/1 var(--f-head);letter-spacing:.18em;color:var(--main);text-shadow:0 0 12px var(--glow-2),0 0 2px var(--glow)}
+.head h1 .cur{color:var(--hot);text-shadow:0 0 8px var(--glow);animation:blink 1s steps(1) infinite}
+.head .sub{max-width:520px;text-align:right;font:12px/1.5 var(--f-mono);letter-spacing:.08em;color:var(--sec)}
+
+.grid{flex:1;min-height:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:184px 252px 184px;gap:12px}
+.card{position:relative;min-width:0;background:var(--edge);padding:1px;clip-path:var(--cut-c)}
+.card.wide{grid-column:span 2}
+.card .in{position:relative;height:100%;overflow:hidden;display:flex;flex-direction:column;gap:7px;padding:12px 14px 10px;clip-path:var(--cut-c-in);background:linear-gradient(180deg,var(--plate) 0%,var(--crt) 100%)}
+.card .in::before{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(90% 60% at 100% 0%,var(--glow-2),transparent 70%);opacity:.55}
+.card .in>*{position:relative}
+.tag{align-self:flex-start;background:var(--main);color:var(--ink);font:12px/16px var(--f-mono);letter-spacing:.14em;padding:0 8px;text-transform:uppercase}
+.tag.ghost{background:none;color:var(--main);box-shadow:inset 0 0 0 1px var(--dim)}
+.tagrow{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.fine{font:10px/1.2 var(--f-mono);letter-spacing:.1em;color:var(--sec);text-transform:uppercase;white-space:nowrap}
+.kvs .kv{padding:2px 0}
+.lbl{font:11px var(--f-mono);letter-spacing:.14em;color:var(--sec);text-transform:uppercase}
+.foot{margin-top:auto;font:10.5px/1.4 var(--f-mono);letter-spacing:.1em;color:var(--sec);text-transform:uppercase}
+.big{font:66px/0.82 var(--f-read);color:var(--bright);letter-spacing:.01em;text-shadow:0 0 2px var(--glow),0 0 14px var(--glow-2)}
+.big small{font:24px/1 var(--f-read);letter-spacing:.06em;margin-left:4px;color:var(--sec);text-shadow:none}
+.big.xl{font-size:68px;line-height:.8}
+.big.m{font-size:40px;line-height:.8}
+.row-top{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin-top:2px}
+.meta{display:flex;flex-direction:column;align-items:flex-end;gap:4px;font:11px var(--f-mono);letter-spacing:.12em;color:var(--sec);text-align:right}
+.meta b{font-weight:400;color:var(--main)}
+.chip{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--main);padding:0 7px;font:11px/17px var(--f-mono);letter-spacing:.14em;color:var(--main);text-transform:uppercase;text-shadow:0 0 4px var(--glow-2)}
+.chip.solid{background:var(--main);color:var(--ink);text-shadow:none}
+.chip.hot{border-color:var(--hot);color:var(--hot)}
+
+/* pace: usage as pips, elapsed time as a rail */
+.pace{display:flex;flex-direction:column;gap:4px;margin-top:2px}
+.pl{display:flex;justify-content:space-between;font:11px var(--f-mono);letter-spacing:.12em;color:var(--sec)}
+.pl b{font-weight:400;color:var(--main)}
+.pips{position:relative;height:12px;background:repeating-linear-gradient(90deg,var(--ghost) 0 10px,transparent 10px 14px)}
+.pips i{position:absolute;left:0;top:0;bottom:0;width:var(--p);background:repeating-linear-gradient(90deg,var(--main) 0 10px,transparent 10px 14px);box-shadow:0 0 8px var(--glow-2)}
+.rail{position:relative;height:8px}
+.rail::before{content:"";position:absolute;left:0;right:0;top:3px;height:2px;background:repeating-linear-gradient(90deg,var(--ghost) 0 2px,transparent 2px 5px)}
+.rail i{position:absolute;left:0;top:3px;height:2px;width:var(--p);background:var(--dim)}
+.rail i::after{content:"";position:absolute;right:-1px;top:-3px;width:2px;height:8px;background:var(--hot);box-shadow:0 0 6px var(--glow)}
+
+.cost-top{display:flex;justify-content:space-between;gap:20px;align-items:flex-start}
+.cost-top .row2{display:flex;align-items:center;gap:12px;margin-top:8px}
+.plan{font:11px var(--f-mono);letter-spacing:.12em;color:var(--sec)}
+.kvs{width:250px;display:flex;flex-direction:column;gap:2px}
+.chart{flex:none;height:74px;display:flex;align-items:flex-end;gap:5px;padding-top:0;border-bottom:1px solid var(--edge)}
+.col{flex:1;height:100%;display:flex;flex-direction:column-reverse;justify-content:flex-start;gap:2px}
+.col i{display:block;height:4px;background:var(--ghost)}
+.col i.on{background:var(--main);box-shadow:0 0 4px var(--glow-2)}
+.col.today i.on{background:var(--hot);box-shadow:0 0 6px var(--glow)}
+.axis{display:flex;justify-content:space-between;font:10px var(--f-mono);letter-spacing:.12em;color:var(--sec)}
+
+.kpi{display:flex;flex-direction:column;gap:4px;padding-bottom:4px;border-bottom:1px dotted var(--ghost)}
+.kpi:last-child{border-bottom:0}
+.kpi .sub{font:11px var(--f-mono);letter-spacing:.06em;color:var(--dim)}
+
+.stack{display:flex;height:22px;gap:2px}
+.stack i{display:block;width:var(--w);height:100%;background:var(--main)}
+.stack i.s1{background:var(--bright);box-shadow:0 0 8px var(--glow)}
+.stack i.s2{background:var(--main)}
+.stack i.s3{background:var(--sec)}
+.stack i.s4{background:var(--hot);min-width:3px}
+.legend{display:flex;flex-direction:column;gap:3px;font:12px var(--f-mono);letter-spacing:.1em;color:var(--sec)}
+.legend div{display:flex;align-items:center;gap:8px;padding:3px 0;border-bottom:1px dotted var(--ghost)}
+.legend b{margin-left:auto;font:400 19px/16px var(--f-read);color:var(--bright)}
+.legend i{display:inline-block;width:10px;height:10px}
+.legend i.s1{background:var(--bright)}.legend i.s2{background:var(--main)}.legend i.s3{background:var(--sec)}.legend i.s4{background:var(--hot)}
+.wk{display:flex;flex-direction:column;gap:4px}
+.spark{display:block;width:100%;height:76px;overflow:visible}
+.burn-top{display:flex;align-items:flex-end;justify-content:space-between}
+.burn-sub{font:11px var(--f-mono);letter-spacing:.12em;color:var(--sec)}
+
+/* boot: typed log, then the tube collapses to reveal the screen */
+.boot{position:absolute;inset:0;z-index:70;padding:44px 52px;background:var(--crt-deep);cursor:pointer;
+  font:23px/1.32 var(--f-read);color:var(--bright);text-shadow:0 0 6px var(--glow),0 0 16px var(--glow-2);
+  transform-origin:50% 50%;transition:transform .6s cubic-bezier(.6,0,.9,.4),opacity .5s .25s}
+.boot pre{font:inherit;white-space:pre}
+.boot.done{transform:scaleY(.004);opacity:0;pointer-events:none}
+
+.cfoot{position:relative;margin-top:16px;height:20px;display:flex;align-items:center;justify-content:space-between;font:11px var(--f-mono);letter-spacing:.22em;color:var(--rivet-a)}
+.cfoot .plate{padding:2px 12px;background:var(--rivet-a);color:var(--hw-3)}
+.leds{display:flex;gap:10px;align-items:center}
+.led{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--led-off);box-shadow:inset 0 0 0 1px #000}
+.led.on{background:var(--bright);box-shadow:0 0 6px var(--glow),inset 0 0 0 1px #000;animation:blink 3s steps(1) infinite}
+.led.warn{background:var(--led-warn);box-shadow:0 0 6px var(--led-warn)}
+.hz{width:120px;height:8px;background:repeating-linear-gradient(-45deg,var(--main) 0 6px,var(--hw-3) 6px 12px)}
+
+/* =====================================================================
+   7. VARIANTS STRIP
+   ===================================================================== */
+.vgrid{display:grid;grid-template-columns:repeat(3,auto);gap:34px 40px;justify-content:start}
+.vcell{display:flex;flex-direction:column;gap:12px;padding:18px 18px 16px;background:#0e0e0e;border:1px solid var(--m-line)}
+.vlab{font:11px var(--f-mono);letter-spacing:.14em;color:var(--m-mute)}
+.vlab b{font:400 12px var(--f-head);letter-spacing:.16em;color:var(--m-ink);margin-right:8px}
+.chips{display:flex;gap:6px}
+.chips i{display:block;width:34px;height:16px;border:1px solid var(--m-line)}
+.vkey{font:11px/1.5 var(--f-mono);letter-spacing:.06em;color:var(--m-mute)}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="masthead">
+    <div class="kicker">CLAUDE USAGE MONITOR // THEME MOCKUP // NOSTROMO ICONIC</div>
+    <h1>NOSTROMO <span>ICONIC</span></h1>
+    <p class="lede">Default theme. Amber P3 phosphor, chunky pip bars, chamfered hardware panels and a dashboard that boots like a ship's computer. Widgets stay flat so Pillow can draw them; only the dashboard uses bloom, scanlines and tube curvature.</p>
+    <nav class="index">
+      <a href="#s1">01 FLOATING WIDGET</a>
+      <a href="#s2">02 TASKBAR STRIP</a>
+      <a href="#s3">03 TRAY ICON</a>
+      <a href="#s4">04 DASHBOARD</a>
+      <a href="#s5">05 VARIANTS</a>
+    </nav>
+    <div class="tokens">
+      <span><i style="background:var(--crt)"></i>--crt #090909</span>
+      <span><i style="background:var(--bright)"></i>--bright #ffb300</span>
+      <span><i style="background:var(--main)"></i>--main #e8a020</span>
+      <span><i style="background:var(--sec)"></i>--sec #b97d1e</span>
+      <span><i style="background:var(--dim)"></i>--dim #7a5010</span>
+      <span><i style="background:var(--ghost)"></i>--ghost #2a1b07</span>
+      <span><i style="background:var(--hot)"></i>--hot #ffe2a6</span>
+    </div>
+  </header>
+
+  <!-- ============ 01 FLOATING WIDGET ============ -->
+  <section class="sec" id="s1">
+    <div class="sec-h"><span class="n">01</span><h2>FLOATING WIDGET</h2><p>280 px wide &middot; 94 px (2-row) and 126 px (3-row) at 100% &middot; chamfer 10 px &middot; desktop wallpaper behind</p></div>
+    <div class="wall">
+      <div class="fw-grid">
+        <figure><div data-fw="normal2"></div><figcaption>NORMAL &middot; 2-ROW</figcaption></figure>
+        <figure><div data-fw="normal3"></div><figcaption>NORMAL &middot; FABLE ROW SHOWN</figcaption></figure>
+        <figure><div data-fw="warn3"></div><figcaption>WARNING &middot; SESSION 72%</figcaption></figure>
+        <figure><div data-fw="crit3"></div><figcaption>CRITICAL &middot; SESSION 93%</figcaption></figure>
+        <figure><div data-fw="stale3"></div><figcaption>STALE &middot; DIMMED, LAST KNOWN</figcaption></figure>
+        <figure><div data-fw="offline2"></div><figcaption>OFFLINE &middot; NO CARRIER</figcaption></figure>
+        <figure><div data-fw="paused2"></div><figcaption>PAUSED &middot; HOLD</figcaption></figure>
+      </div>
+    </div>
+
+    <div class="zrow">
+      <div class="zframe"><div class="zscale"><div data-fw="normal3"></div></div></div>
+      <dl class="spec">
+        <dt>FRAME</dt><dd>280 x 126, origin top-left. Every Y below is frame-relative. Chamfer 10 px on top-left and bottom-right. 1 px edge outline, 1 px top highlight.</dd>
+        <dt>HEADER (Y 6-18)</dt><dd>Share Tech Mono 10 px, tracking 0.14 em. Status word left, state word right.</dd>
+        <dt>ROW (Y 30 / 62 / 94)</dt><dd>Label 10 px at +0. Value VT323 22 px right-aligned. Rail at +14. Pip bar at +17, 8 px high.</dd>
+        <dt>PIP BAR</dt><dd>252 px span. 14 segments of 14 px with 4 px gaps. Unlit segments use --ghost. Partial segment is clipped at the fill edge.</dd>
+        <dt>TIME RAIL</dt><dd>1 px dotted full window. Solid --dim to the elapsed fraction. 2 x 5 px --hot tick marks "now".</dd>
+        <dt>PACE</dt><dd>Fill past the tick = ahead of time. Fill short of the tick = under pace.</dd>
+        <dt>GLOW</dt><dd>Gaussian blur r 3 px on lit pips and values, added under the crisp layer. Scanlines: 1 px every 3 px at 30% black.</dd>
+        <dt>STATES</dt><dd>WARN: pips to --bright, value to --hot. CRIT: --hot pips, inverted state chip, 4 px hazard band, value blinks. STALE: tokens dimmed, rows 1-2 kept, message box in row 3.</dd>
+      </dl>
+    </div>
+  </section>
+
+  <!-- ============ 02 TASKBAR STRIP ============ -->
+  <section class="sec" id="s2">
+    <div class="sec-h"><span class="n">02</span><h2>TASKBAR STRIP</h2><p>Windows 11 taskbar 48 px &middot; strip 34 px tall &middot; 5H and 7D bars, status dot, left of the clock</p></div>
+    <div class="tb-stage">
+      <div class="tb-wall"></div>
+      <div class="taskbar">
+        <div class="tb-start">
+          <svg viewBox="0 0 24 24" width="16" height="16"><circle cx="6" cy="6" r="1.4"/><circle cx="12" cy="6" r="1.4"/><circle cx="18" cy="6" r="1.4"/><circle cx="6" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="18" cy="12" r="1.4"/><circle cx="6" cy="18" r="1.4"/><circle cx="12" cy="18" r="1.4"/><circle cx="18" cy="18" r="1.4"/></svg>
+        </div>
+        <div class="tb-apps">
+          <span class="ap sel"><svg viewBox="0 0 24 24"><path d="M3 7h6l2 2h10v9H3z"/></svg></span>
+          <span class="ap"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 10l3 2-3 2M12 15h5"/></svg></span>
+          <span class="ap"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c3 3 3 13 0 16M12 4c-3 3-3 13 0 16"/></svg></span>
+          <span class="ap"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="1.5"/><path d="M3.5 7l8.5 6 8.5-6"/></svg></span>
+          <span class="ap on"><svg viewBox="0 0 24 24"><path d="M4 6h16v10H9l-5 4z"/></svg></span>
+        </div>
+        <div class="tb-right" id="tb-right">
+          <span class="slot"><svg viewBox="0 0 16 16"><path d="M4 10l4-4 4 4"/></svg></span>
+          <span class="slot"><canvas class="tray-ic" data-size="16" data-pct="13" data-state="live" width="16" height="16"></canvas></span>
+          <span class="slot"><svg viewBox="0 0 16 16"><path d="M2.5 6.5a8 8 0 0 1 11 0M4.5 8.8a5 5 0 0 1 7 0M6.6 11a2 2 0 0 1 2.8 0"/></svg></span>
+          <span class="slot"><svg viewBox="0 0 16 16"><path d="M2.5 6h2.5l3.5-3v10l-3.5-3H2.5zM11 5.5a3.5 3.5 0 0 1 0 5"/></svg></span>
+          <span class="slot"><svg viewBox="0 0 16 16"><rect x="2" y="5" width="11" height="6" rx="1"/><path d="M14 7v2"/><path d="M4 7.5h5"/></svg></span>
+          <div class="tbs" id="tbs-tb">
+            <div class="tbs-in">
+              <i class="st"></i>
+              <span class="k">5H</span>
+              <span class="mb" style="--p:13%"><i></i></span>
+              <span class="v">13%</span>
+              <i class="sep"></i>
+              <span class="k">7D</span>
+              <span class="mb" style="--p:2%"><i></i></span>
+              <span class="v">2%</span>
+            </div>
+          </div>
+          <div class="clock"><div>4:12 PM</div><div>2026-10-21</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="zrow">
+      <div class="zframe zframe-s"><div class="zscale zscale-s"><div class="tbs">
+        <div class="tbs-in">
+          <i class="st"></i>
+          <span class="k">5H</span>
+          <span class="mb" style="--p:13%"><i></i></span>
+          <span class="v">13%</span>
+          <i class="sep"></i>
+          <span class="k">7D</span>
+          <span class="mb" style="--p:2%"><i></i></span>
+          <span class="v">2%</span>
+        </div>
+      </div></div></div>
+      <dl class="spec">
+        <dt>STRIP</dt><dd>Height 34 px inside the 48 px taskbar. Chamfer 8 px. Width shrink-wraps the content, about 280 px.</dd>
+        <dt>BARS</dt><dd>5H and 7D, 60 px wide, 10 pips of 4 px with 2 px gaps. Fill = usage. No time rail at this size.</dd>
+        <dt>DOT</dt><dd>6 px, --bright, blinks at 2.4 s while LIVE. STALE = hollow ring. Keeps the alive indicator on the strip.</dd>
+        <dt>FIGURES</dt><dd>VT323 18 px for percentages, Share Tech Mono 10 px for 5H and 7D. Right-aligned, tabular.</dd>
+        <dt>TASKBAR</dt><dd>Win11 dark, 48 px. Tray icon sits left of the strip. Clock is two lines, Segoe UI Variable Text 12 px.</dd>
+      </dl>
+    </div>
+  </section>
+
+  <!-- ============ 03 TRAY ICON ============ -->
+  <section class="sec" id="s3">
+    <div class="sec-h"><span class="n">03</span><h2>TRAY ICON</h2><p>16 / 24 / 32 px &middot; ring = session % clockwise from 12 o'clock &middot; centre dot = status</p></div>
+    <div class="zrow" style="margin-top:0;align-items:flex-end;gap:26px">
+      <div class="flyout" id="tray-matrix">
+        <div class="tcell">
+          <div class="tic">
+            <figure><canvas class="tray-ic" data-size="16" data-pct="13" data-state="live" width="16" height="16"></canvas><figcaption>16</figcaption></figure>
+            <figure><canvas class="tray-ic" data-size="24" data-pct="13" data-state="live" width="24" height="24"></canvas><figcaption>24</figcaption></figure>
+            <figure><canvas class="tray-ic" data-size="32" data-pct="13" data-state="live" width="32" height="32"></canvas><figcaption>32</figcaption></figure>
+          </div>
+          <div class="tlab">13% <em>NORMAL</em></div>
+        </div>
+        <div class="tcell">
+          <div class="tic">
+            <figure><canvas class="tray-ic" data-size="16" data-pct="72" data-state="warn" width="16" height="16"></canvas><figcaption>16</figcaption></figure>
+            <figure><canvas class="tray-ic" data-size="24" data-pct="72" data-state="warn" width="24" height="24"></canvas><figcaption>24</figcaption></figure>
+            <figure><canvas class="tray-ic" data-size="32" data-pct="72" data-state="warn" width="32" height="32"></canvas><figcaption>32</figcaption></figure>
+          </div>
+          <div class="tlab">72% <em>ADVISORY</em></div>
+        </div>
+        <div class="tcell">
+          <div class="tic">
+            <figure><canvas class="tray-ic" data-size="16" data-pct="93" data-state="crit" width="16" height="16"></canvas><figcaption>16</figcaption></figure>
+            <figure><canvas class="tray-ic" data-size="24" data-pct="93" data-state="crit" width="24" height="24"></canvas><figcaption>24</figcaption></figure>
+            <figure><canvas class="tray-ic" data-size="32" data-pct="93" data-state="crit" width="32" height="32"></canvas><figcaption>32</figcaption></figure>
+          </div>
+          <div class="tlab">93% <em>CRITICAL</em></div>
+        </div>
+        <div class="tcell">
+          <div class="tic">
+            <figure><canvas class="tray-ic" data-size="16" data-pct="13" data-state="stale" width="16" height="16"></canvas><figcaption>16</figcaption></figure>
+            <figure><canvas class="tray-ic" data-size="24" data-pct="13" data-state="stale" width="24" height="24"></canvas><figcaption>24</figcaption></figure>
+            <figure><canvas class="tray-ic" data-size="32" data-pct="13" data-state="stale" width="32" height="32"></canvas><figcaption>32</figcaption></figure>
+          </div>
+          <div class="tlab">STALE <em>LAST KNOWN</em></div>
+        </div>
+      </div>
+      <div class="loupe">
+        <canvas class="tray-ic" data-size="16" data-pct="72" data-state="warn" width="16" height="16"></canvas>
+        <span>16 PX AT 8x</span>
+      </div>
+    </div>
+    <dl class="spec" style="margin-top:24px;width:auto;display:grid;grid-template-columns:200px 1fr;column-gap:24px">
+      <dt>GEOMETRY</dt><dd>Outer radius 7.6 / 11.6 / 15.6 px. Ring thickness 3.2 / 4.2 / 5.2 px. Centre dot radius 1.7 / 2.6 / 3.6 px. Pixel centres decide ink, no anti-aliasing.</dd>
+      <dt>ARC</dt><dd>Starts at 12 o'clock and runs clockwise to pct x 360 degrees. Track is --dim. Warn uses --bright for the arc, crit uses --hot, stale uses --dim with no centre dot.</dd>
+      <dt>READABILITY</dt><dd>At 16 px the arc keeps 3 px of thickness, so the 13% wedge stays visible. Do not add numerals at 16 px; they do not survive the size.</dd>
+    </dl>
+  </section>
+
+  <!-- ============ 04 DASHBOARD ============ -->
+  <section class="sec" id="s4">
+    <div class="sec-h"><span class="n">04</span><h2>DASHBOARD &middot; OVERVIEW</h2><p>1200 x 760 WebView2 window &middot; click the boot log to skip &middot; nav and phosphor keys are live</p></div>
+    <div class="console">
+      <i class="rivet rv1"></i><i class="rivet rv2"></i><i class="rivet rv3"></i><i class="rivet rv4"></i>
+      <div class="screen" id="screen" data-variant="amber">
+        <div class="content">
+          <header class="tbar">
+            <div class="brand"><svg width="12" height="12" viewBox="0 0 12 12" style="vertical-align:-1px;margin-right:8px"><circle cx="6" cy="6" r="4.6" fill="none" style="stroke:var(--dim)" stroke-width="2"/><path d="M6 1.4A4.6 4.6 0 0 1 10.6 6" fill="none" style="stroke:var(--bright)" stroke-width="2"/></svg>CLAUDE USAGE MONITOR<em>// ONBOARD COMPUTER</em></div>
+            <div class="r">
+              <span class="lk"><i class="dot"></i>UPLINK LIVE</span>
+              <span>DATA AGE 12 S</span>
+              <span class="wbtns"><b class="wbtn">_</b><b class="wbtn">&#9633;</b><b class="wbtn">&times;</b></span>
+            </div>
+          </header>
+
+          <div class="app">
+            <nav class="nav">
+              <div class="label">MODULES</div>
+              <a href="#" class="on"><i>01</i>OVERVIEW</a>
+              <a href="#"><i>02</i>LIMITS</a>
+              <a href="#"><i>03</i>COST &amp; VALUE</a>
+              <a href="#"><i>04</i>EFFICIENCY</a>
+              <a href="#"><i>05</i>HISTORY</a>
+              <a href="#"><i>06</i>SETTINGS</a>
+              <a href="#"><i>07</i>ABOUT</a>
+
+              <div class="log">
+                <div class="label">SHIFT LOG</div>
+                <div class="l0">16:12 PACE NOMINAL.</div>
+                <div>16:05 TELEMETRY SYNC OK</div>
+                <div>15:58 WEEKLY SAMPLE TAKEN</div>
+                <div>15:41 CACHE HIT 96.4%. HOLD.</div>
+              </div>
+
+              <div class="health">
+                <div class="label">DATA HEALTH</div>
+                <div class="kv"><span>LINK</span><b class="ok"><i class="dot"></i>LIVE</b></div>
+                <div class="kv"><span>UPDATED</span><b>12 S AGO</b></div>
+                <div class="kv"><span>SOURCES</span><b>3 / 3 OK</b></div>
+                <div class="kv"><span>PARSE ERRORS</span><b>0</b></div>
+                <svg class="sig" viewBox="0 0 150 20" preserveAspectRatio="none" aria-label="signal">
+                  <rect x="0" y="12" width="22" height="8" style="fill:var(--main)"/>
+                  <rect x="30" y="9" width="22" height="11" style="fill:var(--main)"/>
+                  <rect x="60" y="6" width="22" height="14" style="fill:var(--main)"/>
+                  <rect x="90" y="3" width="22" height="17" style="fill:var(--main)"/>
+                  <rect x="120" y="0" width="22" height="20" style="fill:var(--ghost)"/>
+                </svg>
+              </div>
+
+              <div class="label vlabel">PHOSPHOR</div>
+              <div class="vsw">
+                <button data-set="amber" class="on">AMB</button>
+                <button data-set="green">GRN</button>
+                <button data-set="white">WHT</button>
+                <button data-set="red">RED</button>
+                <button data-set="blue">BLU</button>
+              </div>
+            </nav>
+
+            <main class="main">
+              <div class="head">
+                <h1>OVERVIEW<span class="cur">&#9608;</span></h1>
+                <p class="sub">SESSION TELEMETRY, PACE AND COST. MONEY FIGURES ARE API-EQUIVALENT AT LIST PRICES, NOT AN INVOICE.</p>
+              </div>
+
+              <div class="grid">
+                <!-- limits -->
+                <section class="card">
+                  <div class="in">
+                    <span class="tag">SESSION WINDOW</span>
+                    <div class="row-top">
+                      <div class="big">13<small>%</small></div>
+                      <div class="meta"><span>5-HOUR WINDOW</span><span>RESETS <b>10:39 PM</b></span><span class="chip">UNDER PACE</span></div>
+                    </div>
+                    <div class="pace">
+                      <div class="pl"><span>USAGE</span><b>13%</b></div>
+                      <div class="pips" style="--p:13%"><i></i></div>
+                      <div class="pl"><span>TIME ELAPSED</span><b>31%</b></div>
+                      <div class="rail" style="--p:31%"><i></i></div>
+                    </div>
+                    <div class="foot">Pace 0.42x &middot; 18 pts of headroom</div>
+                  </div>
+                </section>
+
+                <section class="card">
+                  <div class="in">
+                    <span class="tag">WEEKLY ALLOWANCE</span>
+                    <div class="row-top">
+                      <div class="big">2<small>%</small></div>
+                      <div class="meta"><span>7-DAY WINDOW</span><span>RESETS <b>WED 4:00 PM</b></span><span class="chip">WELL UNDER</span></div>
+                    </div>
+                    <div class="pace">
+                      <div class="pl"><span>USAGE</span><b>2%</b></div>
+                      <div class="pips" style="--p:2%"><i></i></div>
+                      <div class="pl"><span>TIME ELAPSED</span><b>58%</b></div>
+                      <div class="rail" style="--p:58%"><i></i></div>
+                    </div>
+                    <div class="foot">Pace 0.03x &middot; 56 pts of headroom</div>
+                  </div>
+                </section>
+
+                <section class="card">
+                  <div class="in">
+                    <span class="tag">FABLE WEEKLY</span>
+                    <div class="row-top">
+                      <div class="big">0<small>%</small></div>
+                      <div class="meta"><span>OF 50% SHARE</span><span>RESETS <b>WED 4:00 PM</b></span><span class="chip">NO DRAW</span></div>
+                    </div>
+                    <div class="pace">
+                      <div class="pl"><span>USAGE OF SHARE</span><b>0%</b></div>
+                      <div class="pips" style="--p:0%"><i></i></div>
+                      <div class="pl"><span>TIME ELAPSED</span><b>58%</b></div>
+                      <div class="rail" style="--p:58%"><i></i></div>
+                    </div>
+                    <div class="foot">Share not yet drawn on this window</div>
+                  </div>
+                </section>
+
+                <!-- cost, span 2 -->
+                <section class="card wide">
+                  <div class="in">
+                    <div class="tagrow"><span class="tag">COST &amp; VALUE &middot; OCTOBER</span><span class="fine">* API-equivalent at list prices. Not an invoice.</span></div>
+                    <div class="cost-top">
+                      <div>
+                        <div class="lbl">API-equivalent cost, this month*</div>
+                        <div class="big xl">$1,659</div>
+                        <div class="row2"><span class="chip solid">16.6&times; YOUR PLAN</span><span class="plan">PLAN MAX 5X &middot; $100 / MO</span></div>
+                      </div>
+                      <div class="kvs">
+                        <div class="kv"><span>TODAY</span><b>$84.20</b></div>
+                        <div class="kv"><span>DAILY AVERAGE</span><b>$79.00</b></div>
+                        <div class="kv"><span>DAYS COUNTED</span><b>21</b></div>
+                        <div class="kv"><span>BURN RATE</span><b>$6.10 / H</b></div>
+                      </div>
+                    </div>
+                    <div class="chart" id="chart"></div>
+                    <div class="axis"><span>SEP 22</span><span>OCT 01</span><span>OCT 21 &middot; TODAY</span></div>
+                    <!-- footnote now sits in the tag row -->
+
+                  </div>
+                </section>
+
+                <section class="card">
+                  <div class="in">
+                    <span class="tag">CACHE &amp; THINKING</span>
+                    <div class="kpi"><div class="lbl">Cache hit rate</div><div class="big m">96.4<small>%</small></div><div class="pips" style="--p:96.4%"><i></i></div></div>
+                    <div class="kpi"><div class="lbl">Caching saved &middot; oct</div><div class="big m">$14.1K</div></div>
+                    <div class="kpi"><div class="lbl">Thinking share of output</div><div class="big m">38<small>%</small></div><div class="pips" style="--p:38%"><i></i></div></div>
+                  </div>
+                </section>
+
+                <!-- row 3 -->
+                <section class="card">
+                  <div class="in">
+                    <span class="tag ghost">MODEL MIX &middot; OCT</span>
+                    <div class="stack">
+                      <i class="s1" style="--w:86%"></i><i class="s2" style="--w:7%"></i><i class="s3" style="--w:6%"></i><i class="s4" style="--w:1%"></i>
+                    </div>
+                    <div class="legend">
+                      <div><i class="s1"></i>OPUS 5.5<b>86%</b></div>
+                      <div><i class="s2"></i>SONNET 5.5<b>7%</b></div>
+                      <div><i class="s3"></i>HAIKU 4.5<b>6%</b></div>
+                      <div><i class="s4"></i>HAIKU 5.5<b>1%</b></div>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="card">
+                  <div class="in">
+                    <span class="tag ghost">WHERE THE WEEK WENT</span>
+                    <div class="wk"><div class="kv"><span>CLAUDE CODE</span><b>100%</b></div><div class="pips" style="--p:100%"><i></i></div></div>
+                    <div class="wk"><div class="kv"><span>CHATS</span><b>0%</b></div><div class="pips" style="--p:0%"><i></i></div></div>
+                    <div class="wk"><div class="kv"><span>COWORK</span><b>0%</b></div><div class="pips" style="--p:0%"><i></i></div></div>
+                  </div>
+                </section>
+
+                <section class="card">
+                  <div class="in">
+                    <span class="tag ghost">BURN RATE</span>
+                    <div class="burn-top"><div class="big m">1,240<small>TOK/MIN</small></div><span class="chip">NORMAL</span></div>
+                    <div class="burn-sub">$6.10 / HOUR &middot; LAST 24 SAMPLES</div>
+                    <svg id="spark" class="spark" viewBox="0 0 284 76" aria-label="burn rate"></svg>
+                  </div>
+                </section>
+              </div>
+            </main>
+          </div>
+        </div>
+
+        <div class="boot" id="boot"><pre id="boot-text"></pre></div>
+        <div class="scan"></div>
+        <div class="vig"></div>
+      </div>
+      <div class="cfoot">
+        <span class="plate">CU-MON 5.5 // P3 PHOSPHOR // 1200 X 760</span>
+        <span class="hz"></span>
+        <span class="leds"><i class="led on"></i><i class="led on"></i><i class="led"></i><i class="led warn"></i></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 05 VARIANTS ============ -->
+  <section class="sec" id="s5">
+    <div class="sec-h"><span class="n">05</span><h2>VARIANTS</h2><p>one data-variant attribute swaps every token &middot; the components contain no per-variant rules</p></div>
+    <div class="vgrid">
+      <div class="vcell" data-variant="amber">
+        <div class="vlab"><b>AMBER</b>P3 PHOSPHOR &middot; DEFAULT</div>
+        <div data-fw="normal3"></div>
+        <div class="chips"><i style="background:var(--hot)"></i><i style="background:var(--bright)"></i><i style="background:var(--main)"></i><i style="background:var(--sec)"></i><i style="background:var(--dim)"></i><i style="background:var(--ghost)"></i><i style="background:var(--crt)"></i></div>
+      </div>
+      <div class="vcell" data-variant="green">
+        <div class="vlab"><b>GREEN</b>P1 PHOSPHOR &middot; MU/TH/UR GREEN</div>
+        <div data-fw="normal3"></div>
+        <div class="chips"><i style="background:var(--hot)"></i><i style="background:var(--bright)"></i><i style="background:var(--main)"></i><i style="background:var(--sec)"></i><i style="background:var(--dim)"></i><i style="background:var(--ghost)"></i><i style="background:var(--crt)"></i></div>
+      </div>
+      <div class="vcell" data-variant="white">
+        <div class="vlab"><b>WHITE</b>P4 PHOSPHOR &middot; PAPER WHITE</div>
+        <div data-fw="normal3"></div>
+        <div class="chips"><i style="background:var(--hot)"></i><i style="background:var(--bright)"></i><i style="background:var(--main)"></i><i style="background:var(--sec)"></i><i style="background:var(--dim)"></i><i style="background:var(--ghost)"></i><i style="background:var(--crt)"></i></div>
+      </div>
+      <div class="vcell" data-variant="red">
+        <div class="vlab"><b>RED</b>ALERT &middot; SELF-DESTRUCT RED</div>
+        <div data-fw="normal3"></div>
+        <div class="chips"><i style="background:var(--hot)"></i><i style="background:var(--bright)"></i><i style="background:var(--main)"></i><i style="background:var(--sec)"></i><i style="background:var(--dim)"></i><i style="background:var(--ghost)"></i><i style="background:var(--crt)"></i></div>
+      </div>
+      <div class="vcell" data-variant="blue">
+        <div class="vlab"><b>BLUE</b>BRIDGE &middot; COOL DISPLAY</div>
+        <div data-fw="normal3"></div>
+        <div class="chips"><i style="background:var(--hot)"></i><i style="background:var(--bright)"></i><i style="background:var(--main)"></i><i style="background:var(--sec)"></i><i style="background:var(--dim)"></i><i style="background:var(--ghost)"></i><i style="background:var(--crt)"></i></div>
+      </div>
+    </div>
+    <p class="vkey" style="margin-top:22px">Token set per variant: --plate --hot --bright --main --sec --dim --ghost --glow --glow-2 --edge --edge-hi --ink. Chips above show the first six plus --crt.</p>
+  </section>
+
+</div>
+
+<script>
+(function(){
+  'use strict';
+  var $  = function(s, r){ return (r || document).querySelector(s); };
+  var $$ = function(s, r){ return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var R  = function(l, s, p, t){ return { l: l, s: s, p: p, t: t }; };
+
+  /* ---------- floating widget specs and builder ---------- */
+  var SPEC = {
+    normal2: { two: true, live: 'LIVE', age: '12S', state: 'NOMINAL',
+      rows: [R('SESSION', 'RST 10:39P', 13, 31), R('WEEKLY', 'RST WED 4:00P', 2, 58)] },
+    normal3: { live: 'LIVE', age: '12S', state: 'NOMINAL',
+      rows: [R('SESSION', 'RST 10:39P', 13, 31), R('WEEKLY', 'RST WED 4:00P', 2, 58), R('FABLE WEEKLY', '50% SHARE', 0, 58)] },
+    warn3: { cls: 'warn', live: 'LIVE', age: '12S', state: 'ADVISORY',
+      rows: [R('SESSION', 'RST 10:39P', 72, 55), R('WEEKLY', 'RST WED 4:00P', 21, 58), R('FABLE WEEKLY', '50% SHARE', 4, 58)] },
+    crit3: { cls: 'crit', live: 'LIVE', age: '3S', state: 'CRITICAL',
+      rows: [R('SESSION', 'RST 10:39P', 93, 81), R('WEEKLY', 'RST WED 4:00P', 58, 58), R('FABLE WEEKLY', '50% SHARE', 12, 58)] },
+    stale3: { cls: 'stale', dot: 'hollow', live: 'STALE', age: '41M', state: 'LAST KNOWN',
+      msg: 'AUTH TOKEN EXPIRED.<br>OPEN CLAUDE CODE TO RESTORE LINK.',
+      rows: [R('SESSION', 'RST 10:39P', 13, 31), R('WEEKLY', 'RST WED 4:00P', 2, 58), R('FABLE WEEKLY', '50% SHARE', 0, 58)] },
+    offline2: { two: true, cls: 'stale', dot: 'off', live: 'OFFLINE', age: '', state: 'NO CARRIER',
+      rows: [R('SESSION', 'RST 10:39P', 13, 31), R('WEEKLY', 'RST WED 4:00P', 2, 58)] },
+    paused2: { two: true, cls: 'paused', dot: 'pause', live: 'PAUSED', age: '', state: 'HOLD',
+      rows: [R('SESSION', 'RST 10:39P', 13, 31), R('WEEKLY', 'RST WED 4:00P', 2, 58)] }
+  };
+
+  function fwHTML(c){
+    var rows = c.rows.map(function(r, i){
+      return '<div class="fw-row r' + (i + 1) + '" style="--t:' + r.t + '%;--p:' + r.p + '%">' +
+        '<div class="fw-lbl">' + r.l + '<em>' + r.s + '</em></div>' +
+        '<div class="fw-val">' + r.p + '%</div>' +
+        '<div class="fw-rail"><i class="track"></i><i class="tick"></i></div>' +
+        '<div class="fw-bar"><i class="fill"></i></div>' +
+        '</div>';
+    }).join('');
+    var cls = ['fw', c.two ? 'two' : '', c.cls || ''].join(' ').replace(/\s+/g, ' ').trim();
+    return '<div class="' + cls + '"><div class="fw-in">' +
+      '<div class="fw-head"><span><i class="dot ' + (c.dot || '') + '"></i>' + c.live + (c.age ? '<em>' + c.age + '</em>' : '') + '</span>' +
+      '<span class="state">' + c.state + '</span></div>' +
+      '<div class="fw-rule"></div>' + rows +
+      (c.msg ? '<div class="msg">' + c.msg + '</div>' : '') +
+      '<div class="hazard"></div>' +
+      '</div></div>';
+  }
+  $$('[data-fw]').forEach(function(el){ el.innerHTML = fwHTML(SPEC[el.getAttribute('data-fw')]); });
+
+  /* ---------- tray icon: per-pixel ring + arc, no anti-aliasing ---------- */
+  function trayIcon(cv){
+    var size  = +cv.getAttribute('data-size');
+    var pct   = (+cv.getAttribute('data-pct')) / 100;
+    var state = cv.getAttribute('data-state') || 'live';
+    var cs    = getComputedStyle(cv);
+    var tok   = function(n){ return cs.getPropertyValue(n).trim(); };
+    var track = tok('--dim');
+    var lit   = { live: tok('--main'), warn: tok('--bright'), crit: tok('--hot'), stale: tok('--sec') }[state];
+    var dot   = state === 'stale' ? tok('--dim') : tok('--bright');
+    var Ro = size === 16 ? 7.6  : size === 24 ? 11.6 : 15.6;   // outer radius
+    var T  = size === 16 ? 3.2  : size === 24 ? 4.2  : 5.2;    // ring thickness
+    var D  = size === 16 ? 1.7  : size === 24 ? 2.6  : 3.6;    // centre dot radius
+    cv.width = size; cv.height = size;
+    var ctx = cv.getContext('2d');
+    ctx.clearRect(0, 0, size, size);
+    var c = size / 2;
+    for (var y = 0; y < size; y++){
+      for (var x = 0; x < size; x++){
+        var dx = x + 0.5 - c, dy = y + 0.5 - c, r = Math.sqrt(dx * dx + dy * dy);
+        var col = null;
+        if (r <= D) col = dot;
+        else if (r <= Ro && r >= Ro - T){
+          var a = Math.atan2(dx, -dy);
+          if (a < 0) a += Math.PI * 2;
+          col = (pct > 0 && a <= pct * Math.PI * 2) ? lit : track;
+        }
+        if (col){ ctx.fillStyle = col; ctx.fillRect(x, y, 1, 1); }
+      }
+    }
+  }
+
+  /* ---------- 30-day cost columns (one segment = $10) ---------- */
+  var DAYS = [55.0,61.3,47.8,90.2,72.6,38.9,66.4,58.7,81.1,
+              61.6,71.8,88.1,95.6,94.3,58.9,41.2,77.5,83.0,96.7,92.4,74.8,66.1,81.9,92.3,96.6,88.0,79.5,70.2,64.3,84.2];
+  function buildChart(){
+    var el = $('#chart'); if (!el) return;
+    el.innerHTML = DAYS.map(function(v, i){
+      var lit = Math.round(v / 120 * 12), segs = '';
+      for (var k = 0; k < 12; k++) segs += '<i class="' + (k < lit ? 'on' : '') + '"></i>';
+      return '<div class="col' + (i === DAYS.length - 1 ? ' today' : '') + '" title="$' + v.toFixed(2) + '">' + segs + '</div>';
+    }).join('');
+  }
+
+  /* ---------- burn-rate wireframe ---------- */
+  function buildSpark(){
+    var svg = $('#spark'); if (!svg) return;
+    var V = [0.42,0.47,0.44,0.51,0.58,0.55,0.49,0.62,0.66,0.61,0.57,0.64,0.70,0.68,0.60,0.52,0.55,0.59,0.63,0.58,0.50,0.53,0.56,0.52];
+    var W = 284, H = 76, x0 = 4, x1 = W - 4, base = H - 4;
+    var pts = V.map(function(v, i){ return [x0 + i * (x1 - x0) / (V.length - 1), base - v * (H - 16)]; });
+    var g = '';
+    [14, 33, 52, base].forEach(function(yy){
+      g += '<line x1="0" x2="' + W + '" y1="' + yy + '" y2="' + yy + '" style="stroke:var(--ghost)" stroke-width="1" stroke-dasharray="1 3"/>';
+    });
+    pts.forEach(function(p){
+      g += '<line x1="' + p[0] + '" x2="' + p[0] + '" y1="' + p[1] + '" y2="' + base + '" style="stroke:var(--ghost)" stroke-width="1"/>';
+    });
+    g += '<polyline points="' + pts.map(function(p){ return p[0].toFixed(1) + ',' + p[1].toFixed(1); }).join(' ') +
+         '" fill="none" style="stroke:var(--bright)" stroke-width="1.4"/>';
+    g += pts.map(function(p){ return '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="1.9" style="fill:var(--hot)"/>'; }).join('');
+    svg.innerHTML = g;
+  }
+
+  /* ---------- boot log: typed, then the tube collapses ---------- */
+  var boot = $('#boot'), bootTxt = $('#boot-text');
+  var BOOT = [
+    'CLAUDE USAGE MONITOR  //  ONBOARD COMPUTER  REV 5.5',
+    '',
+    '> ESTABLISHING UPLINK ................ OK',
+    '> READING SESSION LOGS ............... 14,209 RECORDS',
+    '> CALIBRATING PACE CURVES ............ OK',
+    '> MONEY FIGURES: API-EQUIVALENT AT LIST PRICES',
+    '',
+    '> ALL SYSTEMS NOMINAL. HAVE A PRODUCTIVE SHIFT.'
+  ].join('\n');
+  var reduce = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  var n = 0;
+  function endBoot(){ if (boot) boot.classList.add('done'); }
+  function typeStep(){
+    n = Math.min(BOOT.length, n + 2);
+    bootTxt.textContent = BOOT.slice(0, n) + '█';
+    if (n < BOOT.length) setTimeout(typeStep, 14);
+    else setTimeout(endBoot, 900);
+  }
+  if (boot){
+    boot.addEventListener('click', endBoot);
+    if (reduce){ bootTxt.textContent = BOOT; endBoot(); }
+    else typeStep();
+  }
+
+  /* ---------- nav and phosphor switch (dashboard only) ---------- */
+  $$('.nav > a').forEach(function(a){
+    a.addEventListener('click', function(e){
+      e.preventDefault();
+      $$('.nav > a').forEach(function(x){ x.classList.toggle('on', x === a); });
+    });
+  });
+  var screen = $('#screen');
+  $$('[data-set]').forEach(function(b){
+    b.addEventListener('click', function(){
+      screen.setAttribute('data-variant', b.getAttribute('data-set'));
+      $$('[data-set]').forEach(function(x){ x.classList.toggle('on', x === b); });
+    });
+  });
+
+  buildChart();
+  buildSpark();
+  $$('canvas.tray-ic').forEach(trayIcon);
+})();
+</script>
+</body>
+</html>

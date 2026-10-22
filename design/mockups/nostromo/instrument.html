@@ -1,0 +1,767 @@
+<!doctype html>
+<html lang="en" data-variant="amber">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nostromo Usage Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Michroma&family=VT323&display=swap" rel="stylesheet">
+<style>
+/* ==========================================================================
+   NOSTROMO / INSTRUMENT, mock sheet v1
+   Layout concept: one instrument per surface. Hierarchy comes from size,
+   from the phosphor tiers (hot, bright, base, label, dim) and from ghost
+   pips that show the full scale while unlit.
+
+   0 TOKENS     every product colour lives here. A variant is one data-variant swap.
+   1 BOARD      this sheet only. Neutral grey, not part of the product.
+   2 WIDGET     floating desktop widget, 280 x 124 (94 without the FABLE row).
+   3 STRIP      taskbar strip, 248 x 36.
+   4 TRAY       notification-area icon, 16 / 24 / 32 px (SVG here).
+   5 DASHBOARD  main window, 1200 x 760.
+   ========================================================================== */
+
+/* ---------- 0 TOKENS ---------- */
+:root{
+  --f-display:"Michroma","Eurostile","Arial Narrow",sans-serif;
+  --f-mono:"IBM Plex Mono",Consolas,"Cascadia Mono",monospace;
+  --f-vt:"VT323",Consolas,"Courier New",monospace;
+  --f-ui:"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+
+  /* AMBER, P3 phosphor (default) */
+  --crt:#090909;
+  --crt-2:#100e09;
+  --ph-hot:#ffe6a8;
+  --ph-bright:#ffb300;
+  --ph-base:#e8a020;
+  --ph-label:#c98c2a;
+  --ph-dim:#7a5010;
+  --ph-ghost:rgba(232,160,32,.17);
+  --ph-rule:rgba(232,160,32,.25);
+  --ph-rule-strong:rgba(232,160,32,.52);
+  --ph-fill:rgba(232,160,32,.035);
+  --ph-glow:rgba(255,179,0,.60);
+  --ph-glow-soft:rgba(255,179,0,.22);
+  --scan:rgba(0,0,0,.22);
+  --vignette:rgba(0,0,0,.46);
+  --shade:rgba(0,0,0,.70);
+  --sheen:rgba(255,255,255,.035);
+}
+[data-variant="green"]{
+  --crt:#060a07; --crt-2:#09110b;
+  --ph-hot:#dcffe9; --ph-bright:#6dffa4; --ph-base:#36e07a; --ph-label:#3fc476; --ph-dim:#1b6b3d;
+  --ph-ghost:rgba(54,224,122,.17); --ph-rule:rgba(54,224,122,.25); --ph-rule-strong:rgba(54,224,122,.52);
+  --ph-fill:rgba(54,224,122,.035); --ph-glow:rgba(80,255,150,.56); --ph-glow-soft:rgba(80,255,150,.20);
+}
+[data-variant="white"]{
+  --crt:#080808; --crt-2:#0e0e0e;
+  --ph-hot:#ffffff; --ph-bright:#f4f8fa; --ph-base:#d5dde2; --ph-label:#a9b4bb; --ph-dim:#5d676e;
+  --ph-ghost:rgba(213,221,226,.17); --ph-rule:rgba(213,221,226,.23); --ph-rule-strong:rgba(213,221,226,.48);
+  --ph-fill:rgba(213,221,226,.03); --ph-glow:rgba(235,245,255,.46); --ph-glow-soft:rgba(235,245,255,.16);
+}
+[data-variant="red"]{
+  --crt:#0a0505; --crt-2:#120707;
+  --ph-hot:#ffd9cf; --ph-bright:#ff5a3c; --ph-base:#ff3d2a; --ph-label:#dc5240; --ph-dim:#7a1e14;
+  --ph-ghost:rgba(255,61,42,.18); --ph-rule:rgba(255,61,42,.27); --ph-rule-strong:rgba(255,61,42,.54);
+  --ph-fill:rgba(255,61,42,.035); --ph-glow:rgba(255,70,50,.56); --ph-glow-soft:rgba(255,70,50,.20);
+}
+[data-variant="blue"]{
+  --crt:#05080b; --crt-2:#0a1119;
+  --ph-hot:#e6f8ff; --ph-bright:#8fdcff; --ph-base:#4fc3ff; --ph-label:#4aa6d9; --ph-dim:#1d5676;
+  --ph-ghost:rgba(79,195,255,.17); --ph-rule:rgba(79,195,255,.25); --ph-rule-strong:rgba(79,195,255,.52);
+  --ph-fill:rgba(79,195,255,.035); --ph-glow:rgba(90,200,255,.56); --ph-glow-soft:rgba(90,200,255,.20);
+}
+/* board chrome and desktop tokens (neutral, not themed) */
+:root{
+  --board-bg:#070707; --board-ink:#a6a6a6; --board-dim:#606060; --board-line:#1f1f1f; --board-hi:#e8e8e8;
+  --wall-a:#13212e; --wall-b:#060c13; --wall-c:#1e1813; --wall-top:#0b141d; --wall-deep:#020304; --black:#000;
+  --tb-bg:#1d1d1d; --tb-line:#2d2d2d; --tb-ink:#eeeeee; --tb-hover:#2e2e2e;
+}
+
+/* ---------- 1 BOARD (mock sheet only) ---------- */
+*{box-sizing:border-box;margin:0;padding:0}
+html{background:var(--board-bg);color-scheme:dark}
+body{background:var(--board-bg);color:var(--board-ink);font:400 12px/1.5 var(--f-mono);-webkit-font-smoothing:antialiased}
+.board{width:1600px;margin:0 auto;padding:36px 40px 48px}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+:focus-visible{outline:1px solid var(--board-hi);outline-offset:3px}
+
+.b-head{display:flex;justify-content:space-between;align-items:flex-end;gap:32px;padding-bottom:18px;border-bottom:1px solid var(--board-line)}
+.b-kicker{font:600 10px/1 var(--f-mono);letter-spacing:.22em;color:var(--board-dim)}
+.b-title{margin-top:12px;font:400 26px/1.15 var(--f-display);letter-spacing:.05em;color:var(--board-hi)}
+.b-note{max-width:900px;margin-top:12px;font:400 12px/1.6 var(--f-mono);color:var(--board-ink)}
+.b-switch{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.b-switch button{font:600 10px/1 var(--f-mono);letter-spacing:.14em;color:var(--board-ink);background:transparent;border:1px solid var(--board-line);padding:10px 12px;cursor:pointer}
+.b-switch button:hover{color:var(--board-hi)}
+.b-switch button[aria-pressed="true"]{color:var(--board-hi);border-color:var(--board-hi)}
+
+.b-sec{padding-top:34px}
+.b-h{display:flex;align-items:baseline;gap:14px;margin-bottom:16px;padding-bottom:10px;border-bottom:1px solid var(--board-line);font:600 12px/1 var(--f-mono);letter-spacing:.2em;text-transform:uppercase;color:var(--board-hi)}
+.b-h span{color:var(--board-dim)}
+.b-h small{margin-left:auto;font:400 11px/1 var(--f-mono);letter-spacing:.02em;text-transform:none;color:var(--board-dim)}
+.b-sub{margin:24px 0 10px;font:600 10px/1 var(--f-mono);letter-spacing:.2em;color:var(--board-dim)}
+.b-foot{display:grid;gap:10px;margin-top:44px;padding-top:18px;border-top:1px solid var(--board-line);font:400 11px/1.6 var(--f-mono);color:var(--board-dim)}
+.b-foot p{display:grid;grid-template-columns:72px minmax(0,1fr);gap:8px}
+.b-foot b{font:600 10px/1.6 var(--f-mono);letter-spacing:.16em;color:var(--board-ink)}
+
+.wall{position:relative;display:flex;align-items:flex-start;gap:28px;padding:24px 20px;border:1px solid var(--board-line);background:radial-gradient(36% 58% at 16% 26%,var(--wall-a),transparent 72%),radial-gradient(40% 60% at 88% 84%,var(--wall-c),transparent 70%),linear-gradient(168deg,var(--wall-top) 0%,var(--wall-b) 56%,var(--wall-deep) 100%)}
+.wall + .wall{margin-top:14px}
+.zoom3{zoom:3}
+.zoom4{zoom:4}
+.cap{max-width:440px;font:400 11px/1.55 var(--f-mono);color:var(--board-ink)}
+.cap b{display:block;margin-bottom:5px;font:600 10px/1 var(--f-mono);letter-spacing:.16em;color:var(--board-hi)}
+.fig{display:flex;flex-direction:column;gap:12px}
+.fig figcaption{max-width:290px;font:400 11px/1.45 var(--f-mono);color:var(--board-ink)}
+.fig figcaption b{display:block;margin-bottom:4px;font:600 10px/1 var(--f-mono);letter-spacing:.16em;color:var(--board-hi)}
+.states{justify-content:space-between;align-items:flex-start;gap:20px}
+.vrow{justify-content:space-between;gap:20px}
+
+/* ---------- 2 WIDGET (Pillow-safe: rects, polygons, lines, text, one blur glow, linear and radial gradients) ---------- */
+.widget{position:relative;width:280px;height:124px;background:var(--ph-rule-strong);clip-path:polygon(9px 0,100% 0,100% calc(100% - 9px),calc(100% - 9px) 100%,0 100%,0 9px)}
+.widget.no-fable{height:94px}
+.w-body{position:absolute;inset:1px;overflow:hidden;background:linear-gradient(180deg,var(--crt-2) 0%,var(--crt) 45%,var(--crt) 100%);clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px);font-family:var(--f-mono);color:var(--ph-base)}
+.w-body::before{content:"";position:absolute;left:0;right:0;top:0;height:1px;background:var(--ph-rule);z-index:2}
+.w-body::after{content:"";position:absolute;inset:0;z-index:3;pointer-events:none;background:repeating-linear-gradient(180deg,transparent 0 2px,var(--scan) 2px 3px),radial-gradient(130% 120% at 50% 40%,transparent 62%,var(--vignette) 100%)}
+.w-data{position:absolute;inset:0}
+.widget.is-stale .w-data{opacity:.4}
+
+.w-head{position:absolute;left:10px;right:10px;top:7px;height:12px;display:flex;align-items:center;gap:6px}
+.w-alive{display:block;width:5px;height:5px;background:var(--ph-bright);box-shadow:0 0 4px var(--ph-glow);animation:alive 1.6s linear infinite}
+.widget.is-stale .w-alive{animation:none;background:var(--ph-dim);box-shadow:none}
+.w-title{font:400 8px/1 var(--f-display);letter-spacing:.1em;color:var(--ph-label)}
+.w-status{margin-left:auto;display:flex;align-items:center;height:12px;padding:0 4px;border:1px solid var(--ph-rule-strong);font:600 8px/1 var(--f-mono);letter-spacing:.14em;color:var(--ph-bright)}
+.w-rule{position:absolute;left:10px;right:10px;top:23px;height:1px;background:var(--ph-rule)}
+
+.w-row{position:absolute;left:10px;width:260px;height:27px}
+.w-row[data-r="1"]{top:29px}
+.w-row[data-r="2"]{top:60px}
+.w-row[data-r="3"]{top:91px}
+.widget.no-fable .w-row[data-r="3"]{display:none}
+.w-line{height:14px;display:flex;align-items:center;justify-content:space-between}
+.w-label{font:600 9px/14px var(--f-mono);letter-spacing:.12em;color:var(--ph-base);white-space:nowrap}
+.w-label em{font-style:normal;font-weight:400;margin-left:6px;letter-spacing:.08em;color:var(--ph-label)}
+.w-val{display:block;height:14px;font:400 20px/14px var(--f-vt);letter-spacing:.02em;color:var(--ph-hot);text-shadow:0 0 2px var(--ph-glow),0 0 7px var(--ph-glow-soft)}
+.w-val small{font-size:14px}
+.w-time{position:relative;height:1px;margin-top:3px;background:var(--ph-ghost)}
+.w-time i{position:absolute;left:0;top:0;height:1px;width:var(--t);background:var(--ph-label)}
+.w-time b{position:absolute;left:calc(var(--t) - 1px);top:-2px;width:2px;height:5px;background:var(--ph-base)}
+.w-pips{display:flex;gap:3px;height:7px;margin-top:3px}
+
+.w-msg{position:absolute;left:10px;right:10px;top:90px;height:28px;display:none;align-items:center;padding:0 8px;background:var(--crt);border:1px dashed var(--ph-base);font:600 9px/1 var(--f-mono);letter-spacing:.1em;color:var(--ph-hot);text-shadow:0 0 3px var(--ph-glow-soft)}
+.widget.is-stale .w-msg{display:flex}
+
+/* warning: value and lit pips move up one tier */
+.widget.is-warn .w-row[data-r="1"] .w-val{color:var(--ph-bright)}
+.widget.is-warn .w-row[data-r="1"] .p.on{background:var(--ph-bright)}
+/* critical: inverted value chip, hot pips */
+.widget.is-crit .w-row[data-r="1"] .w-val{width:max-content;padding:0 4px;color:var(--crt);background:var(--ph-bright);text-shadow:none}
+.widget.is-crit .w-row[data-r="1"] .p.on{background:var(--ph-hot);box-shadow:0 0 4px var(--ph-glow)}
+
+/* ---------- 3 STRIP (taskbar, 248 x 36) ---------- */
+.tb-strip{position:relative;width:248px;height:36px;background:var(--crt);clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px);box-shadow:inset 0 0 0 1px var(--ph-rule);font-family:var(--f-mono)}
+.tb-strip::after{content:"";position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(180deg,transparent 0 2px,var(--scan) 2px 3px)}
+.tb-dot{position:absolute;left:8px;top:15px;width:5px;height:5px;background:var(--ph-bright);box-shadow:0 0 4px var(--ph-glow);animation:alive 1.6s linear infinite}
+.tb-row{position:absolute;left:0;width:248px;height:12px}
+.tb-row[data-r="1"]{top:7px}
+.tb-row[data-r="2"]{top:21px}
+.tb-lbl{position:absolute;left:18px;top:1px;font:600 9px/10px var(--f-mono);letter-spacing:.1em;color:var(--ph-label)}
+.tb-time{position:absolute;left:44px;top:0;width:154px;height:1px;background:var(--ph-ghost)}
+.tb-time i{position:absolute;left:0;top:0;height:1px;width:var(--t);background:var(--ph-label)}
+.tb-time b{position:absolute;left:calc(var(--t) - 1px);top:-2px;width:2px;height:5px;background:var(--ph-base)}
+.tb-pips{position:absolute;left:44px;top:4px;display:flex;gap:2px;height:6px}
+.tb-pips .p{width:4px;height:6px}
+.tb-val{position:absolute;right:8px;top:-4px;font:400 16px/16px var(--f-vt);color:var(--ph-hot);text-shadow:0 0 2px var(--ph-glow),0 0 6px var(--ph-glow-soft)}
+
+/* ---------- 4 TRAY (icons are SVG; the Pillow spec is in the notes) ---------- */
+.tray-svg{display:block;overflow:visible}
+.tray-svg .t-num{font-family:var(--f-vt);font-size:18px;fill:var(--ph-hot)}
+.tray-set{display:flex;align-items:flex-end;gap:26px}
+.ti-cell{display:flex;flex-direction:column;align-items:center;gap:8px}
+.ti-cell figcaption{font:600 9px/1 var(--f-mono);letter-spacing:.12em;color:var(--board-ink)}
+.tray-wall{align-items:stretch;justify-content:space-between}
+.tray-grp{display:flex;flex-direction:column;gap:12px}
+.tray-lbl{font:600 10px/1 var(--f-mono);letter-spacing:.16em;color:var(--board-dim)}
+.tray-note{align-self:center}
+
+/* ---------- 5 DASHBOARD (1200 x 760) ---------- */
+.dash{position:relative;width:1200px;height:760px;overflow:hidden;border-radius:24px;display:grid;grid-template-columns:208px minmax(0,1fr);background:radial-gradient(80% 60% at 40% 22%,var(--ph-glow-soft),transparent 70%),var(--crt);box-shadow:inset 0 0 0 1px var(--ph-rule),inset 0 0 130px var(--shade),0 0 0 1px var(--black),0 0 44px var(--ph-glow-soft);font-family:var(--f-mono);color:var(--ph-base);animation:flicker 9s linear infinite}
+.dash::before{content:"";position:absolute;inset:0;z-index:5;pointer-events:none;background:repeating-linear-gradient(180deg,transparent 0 2px,var(--scan) 2px 3px);opacity:.55}
+.dash::after{content:"";position:absolute;inset:0;z-index:6;pointer-events:none;border-radius:inherit;background:radial-gradient(118% 112% at 50% 46%,transparent 60%,var(--vignette) 100%),linear-gradient(118deg,var(--sheen),transparent 34%)}
+
+.nav{position:relative;z-index:1;min-width:0;display:flex;flex-direction:column;gap:20px;padding:24px 18px 16px;border-right:1px solid var(--ph-rule)}
+.brand-a{font:400 15px/1 var(--f-display);letter-spacing:.14em;color:var(--ph-hot);text-shadow:0 0 6px var(--ph-glow-soft)}
+.brand-b{margin-top:6px;font:400 15px/1 var(--f-display);letter-spacing:.14em;color:var(--ph-base)}
+.brand-c{margin-top:10px;font:600 8.5px/1 var(--f-mono);letter-spacing:.2em;color:var(--ph-label)}
+.menu{list-style:none;display:flex;flex-direction:column;gap:2px}
+.menu a{display:flex;align-items:center;gap:12px;height:34px;padding:0 10px;border-left:2px solid transparent;font:600 11px/1 var(--f-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--ph-label);text-decoration:none}
+.menu a span{font:400 10px/1 var(--f-mono);letter-spacing:.04em;color:var(--ph-dim)}
+.menu a:hover{color:var(--ph-base)}
+.menu li.on a{color:var(--ph-hot);border-left-color:var(--ph-bright);background:linear-gradient(90deg,var(--ph-fill) 0,transparent 92%)}
+.menu li.on a span{color:var(--ph-bright)}
+.feed{margin-top:auto;display:flex;flex-direction:column;gap:7px;padding-top:14px;border-top:1px solid var(--ph-rule);font:400 10px/1.3 var(--f-mono);letter-spacing:.08em;color:var(--ph-label)}
+.feed-live{display:flex;align-items:center;gap:8px;font:600 10px/1 var(--f-mono);letter-spacing:.14em;color:var(--ph-hot)}
+
+.main{position:relative;z-index:1;min-width:0;display:grid;grid-template-rows:58px 200px 262px 154px;row-gap:14px;padding:24px 28px 18px}
+.m-head{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;padding-bottom:10px;border-bottom:1px solid var(--ph-rule)}
+.m-title{font:400 22px/1 var(--f-display);letter-spacing:.06em;color:var(--ph-hot);text-shadow:0 0 6px var(--ph-glow-soft)}
+.boot{margin-top:10px;font:400 11px/14px var(--f-mono);letter-spacing:.06em;color:var(--ph-label);white-space:nowrap}
+.cursor{display:inline-block;width:7px;height:12px;margin-left:4px;vertical-align:-1px;background:var(--ph-bright);box-shadow:0 0 4px var(--ph-glow);animation:cursor 1.05s steps(1,end) infinite}
+.health{display:flex;align-items:center;gap:10px;height:30px;padding:0 12px;border:1px solid var(--ph-rule-strong);font:600 10px/1 var(--f-mono);letter-spacing:.12em;color:var(--ph-label);white-space:nowrap}
+.health b{font-weight:600;color:var(--ph-bright)}
+.dot{display:inline-block;flex:0 0 auto;width:6px;height:6px;background:var(--ph-bright);box-shadow:0 0 4px var(--ph-glow);animation:alive 1.6s linear infinite}
+
+.card{position:relative;min-width:0;display:flex;flex-direction:column;padding:14px 16px;background:var(--ph-fill);border:1px solid var(--ph-rule)}
+.card::before,.card::after{content:"";position:absolute;width:10px;height:10px;border:0 solid var(--ph-base)}
+.card::before{left:-1px;top:-1px;border-left-width:2px;border-top-width:2px}
+.card::after{right:-1px;bottom:-1px;border-right-width:2px;border-bottom-width:2px}
+.card-t{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font:600 10px/1.2 var(--f-mono);letter-spacing:.16em;text-transform:uppercase;color:var(--ph-base)}
+.card-t em{font-style:normal;font-weight:400;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--ph-label);white-space:nowrap}
+
+/* limits */
+.limits{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.lim-main{display:flex;justify-content:space-between;align-items:flex-start;margin-top:10px}
+.lim-v{font:400 70px/.8 var(--f-vt);color:var(--ph-hot);text-shadow:0 0 2px var(--ph-glow),0 0 16px var(--ph-glow-soft)}
+.lim-v small{font-size:38px;margin-left:2px}
+.lim-k{margin-top:6px;font:600 9px/1 var(--f-mono);letter-spacing:.16em;color:var(--ph-label)}
+.lim-r{text-align:right}
+.lim-rv{margin-top:4px;font:400 24px/1 var(--f-vt);color:var(--ph-base)}
+.lt{display:flex;justify-content:space-between;margin-top:12px;font:600 9px/1 var(--f-mono);letter-spacing:.16em;color:var(--ph-label)}
+.lt b{font-weight:600;color:var(--ph-base)}
+.tl{position:relative;height:1px;margin-top:7px;background:var(--ph-ghost)}
+.tl i{position:absolute;left:0;top:0;height:1px;width:var(--t);background:var(--ph-label)}
+.tl b{position:absolute;left:calc(var(--t) - 1px);top:-3px;width:2px;height:7px;background:var(--ph-base)}
+.lim-pips{display:flex;gap:2px;height:12px;margin-top:10px}
+.lim-pips .p{width:6px;height:12px}
+.lim-pace{display:flex;justify-content:space-between;gap:8px;margin-top:auto;padding-top:10px;font:400 10px/1 var(--f-mono);letter-spacing:.06em;color:var(--ph-label);white-space:nowrap}
+.pace{font-weight:600;color:var(--ph-base)}
+
+/* cost and mix */
+.mid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:14px}
+.mid-r{display:grid;grid-template-rows:auto auto;row-gap:14px;min-width:0}
+.c-top{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;margin-top:8px}
+.c-big{font:400 92px/.78 var(--f-vt);color:var(--ph-hot);text-shadow:0 0 2px var(--ph-glow),0 0 20px var(--ph-glow-soft)}
+.c-x{padding-bottom:4px;text-align:right}
+.c-xv{font:400 24px/1 var(--f-display);color:var(--ph-bright);text-shadow:0 0 6px var(--ph-glow-soft)}
+.c-xl{margin-top:8px;font:600 9px/1 var(--f-mono);letter-spacing:.16em;color:var(--ph-base)}
+.c-xs{margin-top:5px;font:400 10px/1 var(--f-mono);color:var(--ph-label)}
+.ratio{display:flex;gap:3px;height:14px;margin-top:14px}
+.ratio .c{position:relative;display:block;width:12px;height:14px;box-shadow:inset 0 0 0 1px var(--ph-ghost)}
+.ratio .c.on{background:var(--ph-base);box-shadow:0 0 3px var(--ph-glow-soft)}
+.ratio .c.part::after{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--f,0%);background:var(--ph-base)}
+.ratio-cap{margin-top:6px;font:400 10px/1 var(--f-mono);letter-spacing:.1em;color:var(--ph-label)}
+.c-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:auto;padding-top:12px;border-top:1px solid var(--ph-ghost)}
+.tile p{font:600 9px/1.3 var(--f-mono);letter-spacing:.14em;color:var(--ph-label)}
+.tile b{display:block;margin-top:6px;font:400 26px/1 var(--f-vt);color:var(--ph-hot)}
+
+.mm{display:flex;flex-direction:column;gap:4px;margin-top:10px}
+.mm-row{display:grid;grid-template-columns:84px minmax(0,1fr) 40px;align-items:center;gap:10px;height:17px}
+.mm-n{font:600 9.5px/1 var(--f-mono);letter-spacing:.08em;color:var(--ph-label);white-space:nowrap}
+.mm-bar{display:flex;gap:2px;height:8px;min-width:0;overflow:hidden}
+.mm-bar .p{width:4px;height:8px}
+.mm-p{font:400 20px/1 var(--f-vt);color:var(--ph-hot);text-align:right}
+
+/* daily chart and efficiency */
+.low{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:14px}
+.chart-wrap{margin-top:12px}
+.chart-box{position:relative;height:82px;margin-right:64px}
+.chart{position:absolute;inset:0;display:grid;grid-template-columns:repeat(30,minmax(0,1fr));align-items:end}
+.col{position:relative;justify-self:center;width:9px;height:82px;display:flex;flex-direction:column-reverse;gap:2px;outline:none}
+.col .p{width:9px;height:4px}
+.col.today .p.on{background:var(--ph-hot);box-shadow:0 0 4px var(--ph-glow)}
+.col:focus-visible{box-shadow:0 0 0 1px var(--ph-bright)}
+.col::after{content:attr(data-tip);position:absolute;bottom:100%;left:50%;transform:translate(-50%,-8px);z-index:4;padding:4px 6px;white-space:nowrap;font:600 9px/1 var(--f-mono);letter-spacing:.08em;color:var(--ph-hot);background:var(--crt);border:1px solid var(--ph-rule-strong);opacity:0;pointer-events:none}
+.col:hover::after,.col:focus-visible::after{opacity:1}
+.chart-avg{position:absolute;left:0;right:0;height:0;border-top:1px dashed var(--ph-dim);pointer-events:none}
+.chart-avg b{position:absolute;left:100%;top:-11px;margin-left:8px;font:600 9px/1.25 var(--f-mono);letter-spacing:.1em;color:var(--ph-label);white-space:nowrap}
+.chart-x{display:flex;justify-content:space-between;margin-top:6px;margin-right:64px;font:400 9px/1 var(--f-mono);letter-spacing:.1em;color:var(--ph-label)}
+
+.eff-row{display:grid;grid-template-columns:92px minmax(0,1fr) 58px;align-items:center;gap:10px;height:32px;margin-top:0;border-top:1px solid var(--ph-ghost)}
+.eff-row .k,.burn .k{font:600 9px/1.25 var(--f-mono);letter-spacing:.12em;color:var(--ph-label)}
+.eff-bar{display:flex;gap:2px;height:10px;min-width:0;overflow:hidden}
+.eff-bar .p{width:6px;height:10px}
+.eff-row .v{font:400 26px/1 var(--f-vt);color:var(--ph-hot);text-align:right}
+.burn{display:flex;align-items:center;gap:8px;margin-top:auto;padding-top:10px;border-top:1px solid var(--ph-ghost);white-space:nowrap}
+.burn-v{font:400 26px/1 var(--f-vt);color:var(--ph-hot)}
+.burn-u{font:400 9px/1 var(--f-mono);letter-spacing:.08em;color:var(--ph-label)}
+.chip{padding:3px 5px;border:1px solid var(--ph-rule-strong);font:600 9px/1 var(--f-mono);letter-spacing:.14em;color:var(--ph-bright)}
+.burn-c{margin-left:auto;font:400 10px/1 var(--f-mono);color:var(--ph-label)}
+
+.feed-note{margin-top:4px;font:400 10px/1.4 var(--f-mono);letter-spacing:.04em;color:var(--ph-label)}
+
+/* ---------- 6 CONTENT CALIBRATION AND MOTION ---------- */
+.p{position:relative;display:block;flex:0 0 auto;width:7px;height:7px;box-shadow:inset 0 0 0 1px var(--ph-ghost)}
+.p.on{background:var(--ph-base);box-shadow:0 0 3px var(--ph-glow-soft)}
+.p.part::after{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--f,0%);background:var(--ph-base)}
+.dash .p.on{animation:cal .42s ease-out both;animation-delay:calc(var(--i,0) * 12ms)}
+
+@keyframes alive{0%,70%{opacity:1}71%,100%{opacity:.14}}
+@keyframes cursor{0%,49%{opacity:1}50%,100%{opacity:0}}
+@keyframes cal{from{opacity:.12}to{opacity:1}}
+@keyframes flicker{0%,93%,100%{opacity:1}94%{opacity:.965}96%{opacity:1}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important}}
+
+/* ---------- 1b BOARD: desktop, taskbar (neutral, not product) ---------- */
+.desk{display:flex;flex-direction:column;justify-content:flex-end;height:200px;border:1px solid var(--board-line);border-bottom:0;background:radial-gradient(38% 60% at 18% 30%,var(--wall-a),transparent 72%),radial-gradient(40% 60% at 86% 60%,var(--wall-c),transparent 70%),linear-gradient(168deg,var(--wall-top) 0%,var(--wall-b) 56%,var(--wall-deep) 100%)}
+.taskbar{position:relative;height:48px;background:var(--tb-bg);border-top:1px solid var(--tb-line);font-family:var(--f-ui);color:var(--tb-ink)}
+.tb-apps{position:absolute;left:50%;top:0;height:48px;display:flex;align-items:center;gap:4px;transform:translateX(-50%)}
+.tb-app{position:relative;width:36px;height:36px;display:grid;place-items:center;border-radius:6px;color:var(--tb-ink)}
+.tb-app.on{background:var(--tb-hover)}
+.tb-app.on::after{content:"";position:absolute;left:50%;bottom:2px;width:12px;height:3px;margin-left:-6px;border-radius:2px;background:var(--tb-ink)}
+.tb-app svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.3;stroke-linecap:round;stroke-linejoin:round}
+.tb-app svg.solid{fill:currentColor;stroke:none}
+.tb-sys{position:absolute;right:8px;top:0;height:48px;display:flex;align-items:center;gap:6px}
+.tb-tray{display:flex;align-items:center;gap:2px}
+.tb-tray .ti{width:28px;height:36px;display:grid;place-items:center;border-radius:4px;color:var(--tb-ink)}
+.tb-tray .ti svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.3;stroke-linecap:round;stroke-linejoin:round}
+.tb-clock{display:flex;flex-direction:column;align-items:flex-end;justify-content:center;min-width:80px;padding:0 6px 0 10px;text-align:right;font:400 12px/1.25 var(--f-ui);color:var(--tb-ink)}
+.tb-date{font-size:11px}
+</style>
+</head>
+<body>
+<div class="board">
+
+  <header class="b-head">
+    <div>
+      <p class="b-kicker">NOSTROMO / INSTRUMENT / SHEET 01</p>
+      <h1 class="b-title">Nostromo Usage Monitor</h1>
+      <p class="b-note">Floating widget, taskbar strip, tray icon and dashboard overview on one sheet. The widgets use only rectangles, polygons, lines, text, one blur glow and simple gradients, so Pillow can draw them at the same pixel positions. The switch re-tints sections 01 to 04. Section 05 always shows all five phosphors.</p>
+    </div>
+    <div class="b-switch" role="group" aria-label="Phosphor">
+      <button type="button" data-set-variant="amber" aria-pressed="true">AMBER P3</button>
+      <button type="button" data-set-variant="green" aria-pressed="false">GREEN P1</button>
+      <button type="button" data-set-variant="white" aria-pressed="false">WHITE P4</button>
+      <button type="button" data-set-variant="red" aria-pressed="false">RED ALERT</button>
+      <button type="button" data-set-variant="blue" aria-pressed="false">BLUE BRIDGE</button>
+    </div>
+  </header>
+
+  <!-- 01 FLOATING WIDGET -->
+  <section class="b-sec" aria-labelledby="h01">
+    <h2 class="b-h" id="h01"><span>01</span>Floating widget<small>280 x 124 px at 100 percent. Session, weekly and fable share rows.</small></h2>
+
+    <div class="wall" id="w1x">
+      <figure class="fig"><div data-widget="normal"></div></figure>
+      <p class="cap"><b>1x, actual size</b>Normal state with three rows. The hairline above each pip bar is the window's elapsed time. Lit pips are usage. Where the lit pips run past the hairline, usage is ahead of pace.</p>
+    </div>
+
+    <div class="wall" id="w3x">
+      <div class="zoom3"><div data-widget="normal"></div></div>
+      <p class="cap"><b>3x zoom copy</b>The same widget at three times size, using CSS zoom. Scanlines and glow scale with it, so judge the fine detail at 1x.</p>
+    </div>
+
+    <h3 class="b-sub">STATES</h3>
+    <div class="wall states" id="wstates">
+      <figure class="fig"><div data-widget="normal"></div><figcaption><b>NORMAL</b>Three rows. FABLE shows its share.</figcaption></figure>
+      <figure class="fig"><div data-widget="twoRow"></div><figcaption><b>NORMAL, TWO ROWS</b>The FABLE row is hidden when it is not relevant.</figcaption></figure>
+      <figure class="fig"><div data-widget="warn"></div><figcaption><b>WARNING 72%</b>Session value and pips move to the bright tier.</figcaption></figure>
+      <figure class="fig"><div data-widget="crit"></div><figcaption><b>CRITICAL 93%</b>Session value is an inverted chip. Session pips go hot.</figcaption></figure>
+      <figure class="fig"><div data-widget="stale"></div><figcaption><b>STALE</b>Last known values are dimmed. The auth line replaces the FABLE row.</figcaption></figure>
+    </div>
+  </section>
+
+  <!-- 02 TASKBAR STRIP -->
+  <section class="b-sec" aria-labelledby="h02">
+    <h2 class="b-h" id="h02"><span>02</span>Taskbar strip<small>248 x 36 px inside a 48 px taskbar, left of the tray and clock.</small></h2>
+
+    <div class="desk" id="desk">
+      <div class="taskbar" id="taskbar">
+        <div class="tb-apps" aria-hidden="true">
+          <span class="tb-app"><svg class="solid" viewBox="0 0 16 16"><circle cx="3" cy="3" r="1.3"/><circle cx="8" cy="3" r="1.3"/><circle cx="13" cy="3" r="1.3"/><circle cx="3" cy="8" r="1.3"/><circle cx="8" cy="8" r="1.3"/><circle cx="13" cy="8" r="1.3"/><circle cx="3" cy="13" r="1.3"/><circle cx="8" cy="13" r="1.3"/><circle cx="13" cy="13" r="1.3"/></svg></span>
+          <span class="tb-app"><svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg></span>
+          <span class="tb-app on"><svg viewBox="0 0 16 16"><path d="M2 4.5h4l1.5 1.5H14v6.5H2z"/></svg></span>
+          <span class="tb-app"><svg viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M4.5 6.5 6.5 8 4.5 9.5M8 10h3.5"/></svg></span>
+          <span class="tb-app"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><ellipse cx="8" cy="8" rx="2.4" ry="5.5"/><path d="M2.5 8h11"/></svg></span>
+          <span class="tb-app"><svg viewBox="0 0 16 16"><path d="M6 12V4l7-1.5V10.5"/><circle cx="4.5" cy="12" r="1.5"/><circle cx="11.5" cy="10.5" r="1.5"/></svg></span>
+        </div>
+        <div class="tb-sys">
+          <div data-strip></div>
+          <div class="tb-tray" aria-hidden="true">
+            <span class="ti"><svg viewBox="0 0 16 16"><path d="M4 9.5 8 5.5l4 4"/></svg></span>
+            <span class="ti" data-tray-inline="13"></span>
+            <span class="ti"><svg viewBox="0 0 16 16"><path d="M2 6.2a8.5 8.5 0 0 1 12 0M4.2 8.6a5.2 5.2 0 0 1 7.6 0M6.4 10.9a2 2 0 0 1 3.2 0"/></svg></span>
+            <span class="ti"><svg viewBox="0 0 16 16"><path d="M2.5 6.5h2.2L8 3.8v8.4L4.7 9.5H2.5zM10.5 6a3 3 0 0 1 0 4"/></svg></span>
+            <span class="ti"><svg viewBox="0 0 16 16"><rect x="2.5" y="5" width="10" height="6" rx="1"/><path d="M14 7v2"/></svg></span>
+          </div>
+          <div class="tb-clock"><span class="tb-time">4:12 PM</span><span class="tb-date">2026-10-21</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="wall" id="strip-zoom">
+      <div class="zoom3"><div data-strip></div></div>
+      <p class="cap"><b>3x zoom copy</b>The strip only. The 5H row is on top and the 7D row below. Each row is a time hairline, a pip bar and the percent. The dot blinks while the feed is live.</p>
+    </div>
+  </section>
+
+  <!-- 03 TRAY ICON -->
+  <section class="b-sec" aria-labelledby="h03">
+    <h2 class="b-h" id="h03"><span>03</span>Tray icon<small>The ring is session usage. 16, 24 and 32 px match 100, 150 and 200 percent scaling.</small></h2>
+
+    <div class="wall tray-wall" id="tray">
+      <div class="tray-grp"><p class="tray-lbl">16 PX, 100%</p><div class="tray-set" data-tray-set="16"></div></div>
+      <div class="tray-grp"><p class="tray-lbl">24 PX, 150%</p><div class="tray-set" data-tray-set="24"></div></div>
+      <div class="tray-grp"><p class="tray-lbl">32 PX, 200%</p><div class="tray-set" data-tray-set="32"></div></div>
+      <div class="tray-note"><p class="cap"><b>Reading the ring</b>The track is rule-strong. The arc starts at 12 o'clock and runs clockwise to the session percent. The centre pip is the alive mark. At 32 px the percent is printed in the centre.</p></div>
+    </div>
+
+    <div class="wall" id="tray-zoom">
+      <div class="zoom4"><div class="tray-set" data-tray-set="16"></div></div>
+      <p class="cap"><b>4x zoom copy</b>The 16 px set magnified four times, from left to right: 13 percent, 72 percent, 93 percent and stale.</p>
+    </div>
+  </section>
+
+  <!-- 04 DASHBOARD -->
+  <section class="b-sec" aria-labelledby="h04">
+    <h2 class="b-h" id="h04"><span>04</span>Dashboard, overview<small>1200 x 760 px main window. Same tokens as the widget. Chart bars are one pip = $10.</small></h2>
+
+    <section id="dashboard" class="dash" aria-label="Overview dashboard">
+      <aside class="nav">
+        <div>
+          <p class="brand-a">CLAUDE</p>
+          <p class="brand-b">USAGE</p>
+          <p class="brand-c">INSTRUMENT PANEL</p>
+        </div>
+        <ol class="menu">
+          <li class="on"><a href="#overview"><span>01</span>Overview</a></li>
+          <li><a href="#limits"><span>02</span>Limits</a></li>
+          <li><a href="#cost"><span>03</span>Cost &amp; Value</a></li>
+          <li><a href="#efficiency"><span>04</span>Efficiency</a></li>
+          <li><a href="#history"><span>05</span>History</a></li>
+          <li><a href="#settings"><span>06</span>Settings</a></li>
+          <li><a href="#about"><span>07</span>About</a></li>
+        </ol>
+        <div class="feed">
+          <p class="feed-live"><i class="dot"></i>FEED LIVE</p>
+          <p>UPDATED 12 S AGO</p>
+          <p>PLAN MAX 5X, $100 / MO</p>
+          <p>PHOSPHOR P3 AMBER</p>
+          <p>SNAPSHOT 2026-10-21</p>
+          <p class="feed-note">All money figures are API-equivalent at list prices, not amounts billed to your plan.</p>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="m-head">
+          <div>
+            <h2 class="m-title">Overview</h2>
+            <p class="boot"><span data-type="LINKED 3 SOURCES // PACE CALIBRATED // FEED OK">LINKED 3 SOURCES // PACE CALIBRATED // FEED OK</span><i class="cursor" aria-hidden="true"></i></p>
+          </div>
+          <div class="health" role="status"><i class="dot"></i><b>LIVE</b><span>UPDATED 12 S AGO</span></div>
+        </header>
+
+        <div class="limits">
+          <article class="card" id="limits">
+            <header class="card-t"><span>Session</span><em>5-hour window</em></header>
+            <div class="lim-main">
+              <div><p class="lim-v">13<small>%</small></p><p class="lim-k">USED</p></div>
+              <div class="lim-r"><p class="lim-k">RESETS</p><p class="lim-rv">10:39 PM</p></div>
+            </div>
+            <div class="lt"><span>TIME ELAPSED</span><b>38%</b></div>
+            <div class="tl" style="--t:38%"><i></i><b></b></div>
+            <div class="lim-pips" data-pips data-n="32" data-v="13"></div>
+            <p class="lim-pace"><span>USAGE 13% / TIME 38%</span><span class="pace">-25 PTS, UNDER PACE</span></p>
+          </article>
+
+          <article class="card">
+            <header class="card-t"><span>Weekly</span><em>7-day window</em></header>
+            <div class="lim-main">
+              <div><p class="lim-v">2<small>%</small></p><p class="lim-k">USED</p></div>
+              <div class="lim-r"><p class="lim-k">RESETS</p><p class="lim-rv">WED 4:00 PM</p></div>
+            </div>
+            <div class="lt"><span>TIME ELAPSED</span><b>31%</b></div>
+            <div class="tl" style="--t:31%"><i></i><b></b></div>
+            <div class="lim-pips" data-pips data-n="32" data-v="2"></div>
+            <p class="lim-pace"><span>USAGE 2% / TIME 31%</span><span class="pace">-29 PTS, UNDER PACE</span></p>
+          </article>
+
+          <article class="card">
+            <header class="card-t"><span>Fable weekly</span><em>50% share</em></header>
+            <div class="lim-main">
+              <div><p class="lim-v">0<small>%</small></p><p class="lim-k">OF 50% SHARE</p></div>
+              <div class="lim-r"><p class="lim-k">RESETS</p><p class="lim-rv">WED 4:00 PM</p></div>
+            </div>
+            <div class="lt"><span>TIME ELAPSED</span><b>31%</b></div>
+            <div class="tl" style="--t:31%"><i></i><b></b></div>
+            <div class="lim-pips" data-pips data-n="32" data-v="0"></div>
+            <p class="lim-pace"><span>USAGE 0% / TIME 31%</span><span class="pace">-31 PTS, IDLE</span></p>
+          </article>
+        </div>
+
+        <div class="mid" id="cost">
+          <article class="card">
+            <header class="card-t"><span>API-equivalent cost, month to date</span><em>at list prices</em></header>
+            <div class="c-top">
+              <p class="c-big">$1,659</p>
+              <div class="c-x">
+                <p class="c-xv">16.6&times;</p>
+                <p class="c-xl">YOUR PLAN</p>
+                <p class="c-xs">Max 5x at $100 a month</p>
+              </div>
+            </div>
+            <div class="ratio" data-ratio="16.6" role="img" aria-label="16.6 months of the Max 5x plan"></div>
+            <p class="ratio-cap">1 CELL = 1 MONTH OF MAX 5X</p>
+            <div class="c-tiles">
+              <div class="tile"><p>TODAY</p><b>$84.20</b></div>
+              <div class="tile"><p>CACHING SAVED, MTD</p><b>$14.1K</b></div>
+              <div class="tile"><p>AVG PER DAY, MTD</p><b>$79.00</b></div>
+              <div class="tile"><p>PLAN PRICE</p><b>$100</b></div>
+            </div>
+          </article>
+
+          <div class="mid-r">
+            <article class="card" id="models">
+              <header class="card-t"><span>Model mix</span><em>share, MTD</em></header>
+              <div class="mm">
+                <div class="mm-row"><span class="mm-n">OPUS 5.5</span><div class="mm-bar" data-pips data-n="30" data-v="86"></div><span class="mm-p">86%</span></div>
+                <div class="mm-row"><span class="mm-n">SONNET 5.5</span><div class="mm-bar" data-pips data-n="30" data-v="7"></div><span class="mm-p">7%</span></div>
+                <div class="mm-row"><span class="mm-n">HAIKU 4.5</span><div class="mm-bar" data-pips data-n="30" data-v="6"></div><span class="mm-p">6%</span></div>
+                <div class="mm-row"><span class="mm-n">HAIKU 5.5</span><div class="mm-bar" data-pips data-n="30" data-v="1"></div><span class="mm-p">1%</span></div>
+              </div>
+            </article>
+
+            <article class="card">
+              <header class="card-t"><span>Where the week went</span><em>share, 7 days</em></header>
+              <div class="mm">
+                <div class="mm-row"><span class="mm-n">CLAUDE CODE</span><div class="mm-bar" data-pips data-n="30" data-v="100"></div><span class="mm-p">100%</span></div>
+                <div class="mm-row"><span class="mm-n">CHATS</span><div class="mm-bar" data-pips data-n="30" data-v="0"></div><span class="mm-p">0%</span></div>
+                <div class="mm-row"><span class="mm-n">COWORK</span><div class="mm-bar" data-pips data-n="30" data-v="0"></div><span class="mm-p">0%</span></div>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <div class="low">
+          <article class="card" id="history">
+            <header class="card-t"><span>Daily cost, last 30 days</span><em>1 pip = $10</em></header>
+            <div class="chart-wrap">
+              <div class="chart-box">
+                <div class="chart" id="daily" role="img" aria-label="Daily API-equivalent cost, last 30 days"></div>
+                <i class="chart-avg" id="avg" aria-hidden="true"><b>MTD AVG<br>$79</b></i>
+              </div>
+              <div class="chart-x" aria-hidden="true"><span>SEP 22</span><span>OCT 1</span><span>OCT 11</span><span>TODAY</span></div>
+            </div>
+            <table class="sr-only" id="daily-table"></table>
+          </article>
+
+          <article class="card" id="efficiency">
+            <header class="card-t"><span>Efficiency</span><em>this month</em></header>
+            <div class="eff-row"><span class="k">CACHE HIT RATE</span><div class="eff-bar" data-pips data-n="20" data-v="96.4"></div><span class="v">96.4%</span></div>
+            <div class="eff-row"><span class="k">THINKING SHARE OF OUTPUT</span><div class="eff-bar" data-pips data-n="20" data-v="38"></div><span class="v">38%</span></div>
+            <div class="burn">
+              <span class="k">BURN RATE</span>
+              <span class="burn-v">1,240</span><span class="burn-u">TOK/MIN</span>
+              <span class="chip">NORMAL</span>
+              <span class="burn-c">$6.10/H</span>
+            </div>
+          </article>
+        </div>
+
+        <!-- footnote moved to the nav feed block -->
+      </main>
+    </section>
+  </section>
+
+  <!-- 05 VARIANTS -->
+  <section class="b-sec" aria-labelledby="h05">
+    <h2 class="b-h" id="h05"><span>05</span>Variants<small>Normal state, one per phosphor. Each cell sets data-variant, so only the tokens change.</small></h2>
+    <div class="wall vrow" id="variants">
+      <figure class="fig" data-variant="amber"><div data-widget="normal"></div><figcaption><b>AMBER P3</b>Default. The current app colour, refined.</figcaption></figure>
+      <figure class="fig" data-variant="green"><div data-widget="normal"></div><figcaption><b>GREEN P1</b>Green phosphor, terminal grade.</figcaption></figure>
+      <figure class="fig" data-variant="white"><div data-widget="normal"></div><figcaption><b>WHITE P4</b>Neutral white, low glare.</figcaption></figure>
+      <figure class="fig" data-variant="red"><div data-widget="normal"></div><figcaption><b>RED ALERT</b>Alert palette for hot runs.</figcaption></figure>
+      <figure class="fig" data-variant="blue"><div data-widget="normal"></div><figcaption><b>BLUE BRIDGE</b>Cool blue, for bridge-style displays.</figcaption></figure>
+    </div>
+  </section>
+
+  <footer class="b-foot">
+    <p><b>FONTS</b>Michroma, IBM Plex Mono and VT323 are SIL Open Font License 1.1, free to bundle. The taskbar clock uses Segoe UI Variable, a Windows system font that is not bundled.</p>
+    <p><b>SCOPE</b>Mock only. No logos, marks or film assets. All copy is original.</p>
+  </footer>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var reduce = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+
+  /* Illustrative values. The app computes these from the usage feed. */
+  var WIDGET = {
+    normal: { cls: '',         status: 'LIVE',  s: [13, 38], w: [2, 31],  f: [0, 31] },
+    twoRow: { cls: 'no-fable', status: 'LIVE',  s: [13, 38], w: [2, 31],  f: null },
+    warn:   { cls: 'is-warn',  status: 'LIVE',  s: [72, 56], w: [41, 31], f: [0, 31] },
+    crit:   { cls: 'is-crit',  status: 'LIVE',  s: [93, 80], w: [58, 44], f: [0, 44] },
+    stale:  { cls: 'is-stale', status: 'STALE', s: [13, 38], w: [2, 31],  f: [0, 31] }
+  };
+
+  function wRow(r, label, em, v, t) {
+    return '<div class="w-row" data-r="' + r + '">' +
+      '<div class="w-line"><span class="w-label">' + label + '<em>' + em + '</em></span>' +
+      '<span class="w-val">' + v + '<small>%</small></span></div>' +
+      '<div class="w-time" style="--t:' + t + '%"><i></i><b></b></div>' +
+      '<div class="w-pips" data-pips data-n="26" data-v="' + v + '"></div></div>';
+  }
+
+  function widgetHTML(key) {
+    var d = WIDGET[key];
+    return '<div class="widget ' + d.cls + '">' +
+      '<div class="w-body">' +
+        '<div class="w-data">' +
+          '<div class="w-head"><i class="w-alive"></i><span class="w-title">CLAUDE USAGE</span><span class="w-status">' + d.status + '</span></div>' +
+          '<div class="w-rule"></div>' +
+          wRow(1, 'SESSION', '5H', d.s[0], d.s[1]) +
+          wRow(2, 'WEEKLY', '7D', d.w[0], d.w[1]) +
+          (d.f ? wRow(3, 'FABLE 7D', 'OF 50% SHARE', d.f[0], d.f[1]) : '') +
+        '</div>' +
+        '<div class="w-msg">AUTH LINK LOST // OPEN CLAUDE CODE</div>' +
+      '</div></div>';
+  }
+
+  function stripRow(r, label, v, t) {
+    return '<div class="tb-row" data-r="' + r + '">' +
+      '<span class="tb-lbl">' + label + '</span>' +
+      '<div class="tb-time" style="--t:' + t + '%"><i></i><b></b></div>' +
+      '<div class="tb-pips" data-pips data-n="26" data-v="' + v + '"></div>' +
+      '<span class="tb-val">' + v + '%</span></div>';
+  }
+
+  function stripHTML() {
+    return '<div class="tb-strip"><i class="tb-dot"></i>' + stripRow(1, '5H', 13, 38) + stripRow(2, '7D', 2, 31) + '</div>';
+  }
+
+  /* Ring icon, drawn as SVG here. Pillow: supersample 4x, draw arc and centre, downsample. */
+  function ring(size, pct, mode) {
+    var cfg = {
+      16: { r: 5.5,  sw: 3,   c: 8,  dot: 2 },
+      24: { r: 8.25, sw: 3,   c: 12, dot: 4 },
+      32: { r: 12.5, sw: 4,   c: 16, dot: 0 }
+    }[size];
+    var C = 2 * Math.PI * cfg.r;
+    var stale = mode === 'stale';
+    var col = mode === 'crit' ? 'var(--ph-hot)' : mode === 'warn' ? 'var(--ph-bright)' : 'var(--ph-base)';
+    var track = '<circle cx="' + cfg.c + '" cy="' + cfg.c + '" r="' + cfg.r + '" fill="none" stroke="' +
+      (stale ? 'var(--ph-dim)' : 'var(--ph-rule-strong)') + '" stroke-width="' + cfg.sw + (stale ? '" stroke-dasharray="2 2"' : '"') + '/>';
+    var arc = stale ? '' :
+      '<circle cx="' + cfg.c + '" cy="' + cfg.c + '" r="' + cfg.r + '" fill="none" stroke="' + col +
+      '" stroke-width="' + cfg.sw + '" stroke-dasharray="' + (C * pct / 100).toFixed(2) + ' ' + C.toFixed(2) +
+      '" transform="rotate(-90 ' + cfg.c + ' ' + cfg.c + ')"/>';
+    var mid = '';
+    if (stale) {
+      mid = size === 32 ? '<text class="t-num" x="16" y="21" text-anchor="middle" style="fill:var(--ph-dim)">--</text>' : '';
+    } else if (size === 32) {
+      mid = '<text class="t-num" x="16" y="21" text-anchor="middle">' + pct + '</text>';
+    } else if (cfg.dot) {
+      var o = cfg.c - cfg.dot / 2;
+      mid = '<rect x="' + o + '" y="' + o + '" width="' + cfg.dot + '" height="' + cfg.dot + '" fill="' + col + '"/>';
+    }
+    return '<svg class="tray-svg" width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + ' ' + size +
+      '" aria-hidden="true">' + track + arc + mid + '</svg>';
+  }
+
+  /* 1. templated components */
+  document.querySelectorAll('[data-widget]').forEach(function (el) {
+    el.innerHTML = widgetHTML(el.getAttribute('data-widget'));
+  });
+  document.querySelectorAll('[data-strip]').forEach(function (el) {
+    el.innerHTML = stripHTML();
+  });
+  document.querySelectorAll('[data-tray-inline]').forEach(function (el) {
+    el.innerHTML = ring(16, +el.getAttribute('data-tray-inline'), 'normal');
+  });
+  var TRAY_STATES = [[13, 'normal', '13'], [72, 'warn', '72'], [93, 'crit', '93'], [13, 'stale', 'STALE']];
+  document.querySelectorAll('[data-tray-set]').forEach(function (el) {
+    var size = +el.getAttribute('data-tray-set');
+    el.innerHTML = TRAY_STATES.map(function (s) {
+      return '<figure class="ti-cell">' + ring(size, s[0], s[1]) + '<figcaption>' + s[2] + '</figcaption></figure>';
+    }).join('');
+  });
+
+  /* 2. pip bars: n pips, v percent. The boundary pip fills by its fraction. */
+  document.querySelectorAll('[data-pips]').forEach(function (el) {
+    var n = parseInt(el.getAttribute('data-n'), 10);
+    var v = Math.max(0, Math.min(100, parseFloat(el.getAttribute('data-v'))));
+    var x = v / 100 * n;
+    var full = Math.floor(x);
+    var frac = x - full;
+    var html = '';
+    for (var i = 0; i < n; i++) {
+      var cls = 'p';
+      var style = '--i:' + i;
+      if (i < full) {
+        cls += ' on';
+      } else if (i === full && frac > 0.04) {
+        cls += ' part';
+        style += ';--f:' + (frac * 100).toFixed(0) + '%';
+      }
+      html += '<i class="' + cls + '" style="' + style + '"></i>';
+    }
+    el.innerHTML = html;
+  });
+
+  /* 3. cost ratio: 16.6 plan-months as 16 full cells and one 60 percent cell */
+  var ratio = document.querySelector('[data-ratio]');
+  if (ratio) {
+    var rv = parseFloat(ratio.getAttribute('data-ratio'));
+    var whole = Math.floor(rv);
+    var rfrac = rv - whole;
+    var cells = '';
+    for (var k = 0; k < whole; k++) cells += '<i class="c on"></i>';
+    if (rfrac > 0.04) cells += '<i class="c part" style="--f:' + Math.round(rfrac * 100) + '%"></i>';
+    ratio.innerHTML = cells;
+  }
+
+  /* 4. daily cost chart. Values are USD, API-equivalent, Sep 22 to Oct 21. */
+  var DAILY = [55.20, 63.40, 71.90, 28.60, 49.75, 88.10, 76.30, 69.85, 60.45,
+               74.60, 106.10, 41.35, 38.90, 110.20, 138.20, 77.75, 85.30, 91.60, 33.15, 44.80,
+               97.25, 129.90, 71.40, 80.05, 64.70, 52.10, 58.85, 92.40, 86.20, 84.20];
+  function dayLabel(i) { return i < 9 ? 'SEP ' + (22 + i) : 'OCT ' + (i - 8); }
+  var chart = document.getElementById('daily');
+  if (chart) {
+    var cols = '';
+    DAILY.forEach(function (v, i) {
+      var lit = Math.ceil(v / 10);
+      var pips = '';
+      for (var p = 0; p < 14; p++) pips += '<i class="p' + (p < lit ? ' on' : '') + '"></i>';
+      cols += '<div class="col' + (i === DAILY.length - 1 ? ' today' : '') + '" tabindex="0" data-tip="' +
+        dayLabel(i) + '  $' + v.toFixed(2) + '">' + pips + '</div>';
+    });
+    chart.innerHTML = cols;
+    var avg = document.getElementById('avg');
+    if (avg) avg.style.bottom = (79 / 10 * 6) + 'px'; /* 6 px per pip step: 4 px pip + 2 px gap */
+  }
+  var tbl = document.getElementById('daily-table');
+  if (tbl) {
+    var rows = DAILY.map(function (v, i) {
+      return '<tr><td>' + dayLabel(i) + '</td><td>$' + v.toFixed(2) + '</td></tr>';
+    }).join('');
+    tbl.innerHTML = '<caption>Daily API-equivalent cost at list prices, last 30 days</caption>' +
+      '<thead><tr><th>Day</th><th>USD</th></tr></thead><tbody>' + rows + '</tbody>';
+  }
+
+  /* 5. boot line types once, then rests */
+  if (!reduce) {
+    document.querySelectorAll('[data-type]').forEach(function (el) {
+      var full = el.getAttribute('data-type');
+      var i = 0;
+      el.textContent = '';
+      var t = setInterval(function () {
+        i += 1;
+        el.textContent = full.slice(0, i);
+        if (i >= full.length) clearInterval(t);
+      }, 22);
+    });
+  }
+
+  /* 6. board switch: re-tints the root; section 05 pins its own variants */
+  document.querySelectorAll('[data-set-variant]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      document.documentElement.setAttribute('data-variant', btn.getAttribute('data-set-variant'));
+      document.querySelectorAll('[data-set-variant]').forEach(function (b) {
+        b.setAttribute('aria-pressed', b === btn ? 'true' : 'false');
+      });
+    });
+  });
+})();
+</script>
+</body>
+</html>

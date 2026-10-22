@@ -1,0 +1,964 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gates final mockup</title>
+<style>
+/* ==========================================================================
+   1. TOKENS. Lift sections 1, 2a, 2b, 2c and 2d into the app (webui and the
+   Pillow skin read the same values from usage_monitor/themes/gates.json).
+   One data-mode and one data-variant sit on the same element.
+   Variant = accent pair. Mode = neutrals, status roles and shadows.
+   Status roles (ok, warn, alert, usage-warn, usage-alert, stale) are locked
+   per mode and do not change with the accent.
+   ========================================================================== */
+:root {
+  --f-text: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --f-display: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "Cascadia Mono", Consolas, "Courier New", monospace;
+  --f-icon: "Segoe Fluent Icons", "Segoe MDL2 Assets";
+  --r-card: 8px;
+  --r-ctl: 4px;
+  --r-pill: 9px;
+  --r-bar: 2px;
+  --w-w: 288px;
+  --w-h: 128px;
+}
+
+/* accent pairs: the only colours a variant changes (accent-l = light mode, accent-d = dark mode) */
+[data-variant="system"] { --accent-d: #60CDFF; --accent-l: #0067C0; }
+[data-variant="blue"]   { --accent-d: #5B9DFF; --accent-l: #2D5BD9; }
+[data-variant="teal"]   { --accent-d: #4DD6C2; --accent-l: #018574; }
+[data-variant="purple"] { --accent-d: #B39AE6; --accent-l: #6F4FA8; }
+[data-variant="rose"]   { --accent-d: #FF8AC5; --accent-l: #C10E74; }
+[data-variant="orange"] { --accent-d: #FF9F5A; --accent-l: #C75300; }
+[data-variant="green"]  { --accent-d: #C3E86B; --accent-l: #5A7F00; }
+
+[data-mode="dark"] {
+  color-scheme: dark;
+  --bg: #202020;
+  --layer: #292929;
+  --surface: #2f2f2f;
+  --surface-alt: #3a3a3a;
+  --hover: #ffffff0f;
+  --widget-bg: #262626f2;
+  --widget-border: #ffffff17;
+  --border: #ffffff15;
+  --border-dim: #ffffff0e;
+  --text: #ffffff;
+  --text-bright: #ffffff;
+  --text-dim: #c8c8c8;
+  --text-3: #a6a6a6;
+  --ok: #6ccb5f;
+  --warn: #fce100;
+  --alert: #ff8a80;
+  --usage-warn: #fce100;
+  --usage-alert: #ff5f5f;
+  --stale: #8c8c8c;
+  --track: #ffffff1f;
+  --time: #ffffff8f;
+  --time-track: #ffffff14;
+  --hl: #ffffff29;
+  --tb-bg: #202020;
+  --tb-rule: #ffffff12;
+  --tb-hover: #ffffff12;
+  --tray-fg: #ffffff;
+  --tray-track: #ffffff6b;
+  --accent: var(--accent-d);
+  --accent-on: #000000;
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+  --accent-tint: color-mix(in srgb, var(--accent) 8%, transparent);
+  --accent-alt: color-mix(in srgb, var(--accent) 70%, var(--surface));
+  --glow: color-mix(in srgb, var(--accent) 36%, transparent);
+  --lamp-halo: color-mix(in srgb, var(--ok) 24%, transparent);
+  --pill-a: 16%;
+  --close-hover: #c42b1c;
+  --on-close: #ffffff;
+  --shadow-main: #00000057;
+  --shadow-tight: #00000066;
+}
+
+[data-mode="light"] {
+  color-scheme: light;
+  --bg: #f3f3f3;
+  --layer: #fbfbfb;
+  --surface: #ffffff;
+  --surface-alt: #ffffff;
+  --hover: #0000000a;
+  --widget-bg: #fcfcfcf2;
+  --widget-border: #00000014;
+  --border: #00000014;
+  --border-dim: #0000000d;
+  --text: #1b1b1b;
+  --text-bright: #000000;
+  --text-dim: #5d5d5d;
+  --text-3: #6b6b6b;
+  --ok: #0b6b0b;
+  --warn: #8a5200;
+  --alert: #b3261e;
+  --usage-warn: #8a5200;
+  --usage-alert: #b3261e;
+  --stale: #6f6f6f;
+  --track: #0000001a;
+  --time: #00000080;
+  --time-track: #00000012;
+  --hl: #ffffff00;
+  --tb-bg: #f3f3f3;
+  --tb-rule: #00000012;
+  --tb-hover: #0000000d;
+  --tray-fg: #1b1b1b;
+  --tray-track: #1b1b1b5c;
+  --accent: var(--accent-l);
+  --accent-on: #ffffff;
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+  --accent-tint: color-mix(in srgb, var(--accent) 8%, transparent);
+  --accent-alt: color-mix(in srgb, var(--accent) 70%, var(--surface));
+  --glow: color-mix(in srgb, var(--accent) 28%, transparent);
+  --lamp-halo: color-mix(in srgb, var(--ok) 24%, transparent);
+  --pill-a: 12%;
+  --close-hover: #c42b1c;
+  --on-close: #ffffff;
+  --shadow-main: #00000024;
+  --shadow-tight: #0000001f;
+}
+
+/* ==========================================================================
+   2a. FLOATING WIDGET. 288 x 128 card, fixed in every state. Rows sit on a
+   27 px pitch: label line 16 px, time rail 2 px at +19, usage bar 4 px at
+   +23. The third slot holds the Fable row or the footer, never both.
+   ========================================================================== */
+.surface { color: var(--text); font-family: var(--f-text); }
+.lamp { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%;
+        background: var(--ok); box-shadow: 0 0 0 2px var(--lamp-halo); }
+.lamp.is-stale { background: var(--stale); box-shadow: none; }
+.lamp.is-offline { background: transparent; box-shadow: inset 0 0 0 1.5px var(--stale); }
+.lamp.is-paused { background: transparent; box-shadow: inset 0 0 0 1.5px var(--accent); }
+
+.gw { --usage: var(--accent); position: relative; overflow: hidden; box-sizing: border-box;
+      width: var(--w-w); height: var(--w-h); padding: 11px 14px 8px; border-radius: var(--r-card);
+      border: 1px solid var(--widget-border); background: var(--widget-bg);
+      box-shadow: 0 8px 16px var(--shadow-main), 0 0 2px var(--shadow-tight);
+      color: var(--text); font-family: var(--f-text); }
+.gw::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 1px;
+              background: linear-gradient(90deg, transparent 6%, var(--hl) 50%, transparent 94%); }
+.gw-head { position: relative; display: flex; align-items: center; height: 18px; }
+.gw-ico { flex: none; width: 14px; margin-right: 7px; font: 400 14px/18px var(--f-icon); color: var(--accent); text-align: center; }
+.gw-title { font: 600 12px/18px var(--f-text); color: var(--text-bright); white-space: nowrap; }
+.gw-pill { display: inline-flex; align-items: center; gap: 6px; height: 18px; margin-left: auto; padding: 0 9px 0 6px;
+           border-radius: var(--r-pill); font: 600 10px/18px var(--f-text); white-space: nowrap;
+           color: var(--ok); background: color-mix(in srgb, var(--ok) var(--pill-a), transparent); }
+.gw-pill.is-stale, .gw-pill.is-offline, .gw-pill.is-paused { color: var(--text-3); background: var(--track); }
+.gw-pill.is-paused { color: var(--text-dim); }
+.gw-more { display: flex; align-items: center; gap: 2px; height: 18px; margin-left: 8px; }
+.gw-more i { width: 3px; height: 3px; border-radius: 50%; background: var(--text-dim); }
+
+.gw-rows { position: relative; margin-top: 8px; }
+.gw-row { position: relative; height: 27px; }
+.gw-row.is-warn { --usage: var(--usage-warn); }
+.gw-row.is-crit { --usage: var(--usage-alert); }
+.gw-line { display: flex; align-items: center; height: 16px; }
+.gw-label { font: 400 12px/16px var(--f-text); color: var(--text-dim); white-space: nowrap; }
+.gw-tag { margin-left: 6px; font: 400 11px/16px var(--f-mono); color: var(--text-3); white-space: nowrap; }
+.gw-value { margin-left: auto; font: 700 15px/16px var(--f-mono); color: var(--text); font-variant-numeric: tabular-nums; }
+.gw-row.is-warn .gw-value { color: var(--warn); }
+.gw-row.is-crit .gw-value { color: var(--alert); }
+/* time rail: the share of the window already gone, index tick at its end */
+.gw-rail { position: absolute; left: 0; right: 0; top: 19px; height: 2px; border-radius: 1px; background: var(--time-track); }
+.gw-rail i { position: absolute; left: 0; top: 0; bottom: 0; width: var(--t); border-radius: 1px; background: var(--time); }
+.gw-rail i::after { content: ""; position: absolute; right: 0; top: -2px; width: 1px; height: 6px; background: var(--time); }
+/* usage bar: accent by default, amber and red by severity */
+.gw-bar { position: absolute; left: 0; right: 0; top: 23px; height: 4px; border-radius: var(--r-bar); background: var(--track); }
+.gw-bar i { position: absolute; left: 0; top: 0; bottom: 0; width: var(--v); border-radius: var(--r-bar); background: var(--usage); }
+/* Fable share tick: 1 x 10 px at the midpoint of the track, from track top minus 3 */
+.gw-share { position: absolute; left: 50%; top: -3px; width: 1px; height: 10px; background: var(--text-dim); }
+
+.gw-foot { height: 27px; box-sizing: border-box; padding-top: 6px; overflow: hidden; white-space: nowrap;
+           font: 400 11px/16px var(--f-text); color: var(--text-3); }
+.gw-foot b { font-weight: 600; }
+.t-ok { color: var(--ok); }
+.t-warn { color: var(--warn); }
+.t-alert { color: var(--alert); }
+
+/* stale, offline and paused: last-known values stay readable (values at .7 opacity, >= 4.5:1),
+   labels and bars dim, the footer carries the state */
+.gw.is-dim .gw-row { --usage: var(--stale); }
+.gw.is-dim .gw-label { color: var(--text-3); }
+.gw.is-dim .gw-value { opacity: .7; }
+.gw.is-dim .gw-rail i { opacity: .6; }
+
+/* ==========================================================================
+   2b. TASKBAR STRIP. 248 x 40 inside a 48 px taskbar, left of the clock.
+   Rows at y 6 and 25. Each row: rail at row +1 (2 px), bar at row +5 (4 px),
+   label and value on a 14 px line. Track is the --track token (not tray-track).
+   ========================================================================== */
+.tbstrip { position: relative; flex: none; box-sizing: border-box; width: 248px; height: 40px;
+           border-radius: var(--r-ctl); background: var(--tb-hover); color: var(--text); font-family: var(--f-text); }
+.tbs-row { position: absolute; left: 0; right: 0; height: 14px; }
+.tbs-row.is-warn { --usage: var(--usage-warn); }
+.tbs-row { --usage: var(--accent); }
+.tbs-k { position: absolute; left: 10px; top: 0; width: 18px; font: 600 11px/14px var(--f-text); color: var(--text-3); }
+.tbs-time { position: absolute; left: 34px; top: 1px; width: 150px; height: 2px; border-radius: 1px; background: var(--time-track); }
+.tbs-time i { position: absolute; left: 0; top: 0; bottom: 0; width: var(--t); border-radius: 1px; background: var(--time); }
+.tbs-time i::after { content: ""; position: absolute; right: 0; top: -2px; width: 1px; height: 6px; background: var(--time); }
+.tbs-trk { position: absolute; left: 34px; top: 5px; width: 150px; height: 4px; border-radius: var(--r-bar); background: var(--track); }
+.tbs-trk i { position: absolute; left: 0; top: 0; bottom: 0; width: var(--v); border-radius: var(--r-bar); background: var(--usage); }
+.tbs-v { position: absolute; left: 190px; top: 0; width: 32px; text-align: right; font: 700 11px/14px var(--f-mono); color: var(--text); }
+.tbs-row.is-warn .tbs-v { color: var(--warn); }
+.tbs-dot { position: absolute; left: 230px; top: 16px; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 2px var(--lamp-halo); }
+.tbstrip.is-dim .tbs-dot { background: var(--stale); box-shadow: none; }
+.tbstrip.is-dim .tbs-row { --usage: var(--stale); }
+
+/* ==========================================================================
+   2c. TRAY RING. The ring is the session %. Centre radius per size, stroke
+   2.5 / 3.4 / 4.2 px at 16 / 24 / 32. Arc starts at 12 o'clock, clockwise.
+   Stale = dashed track (16: 6 on, 4.5 off, path units) with a grey arc.
+   Only the 32 px size prints the number.
+   ========================================================================== */
+.ring { display: block; overflow: visible; }
+.ring .rk { fill: none; stroke: var(--tray-track); }
+.ring .ra { fill: none; stroke: var(--tray-fg); }
+.ring.is-warn .ra { stroke: var(--usage-warn); }
+.ring.is-crit .ra { stroke: var(--usage-alert); }
+.ring.is-stale .ra { stroke: var(--text-3); }
+.ring .rg-num { font: 600 10px/1 var(--f-text); fill: var(--tray-fg); }
+.ring-slot { display: inline-flex; align-items: center; justify-content: center; line-height: 0; }
+
+/* ==========================================================================
+   2d. DASHBOARD. Settings-app layout, 1200 x 760. Mica base with a faint
+   accent wash, rounded content layer, 14 px card headings, 12 px minimum text.
+   ========================================================================== */
+.taskbar { position: relative; overflow: hidden; width: 1200px; height: 48px; box-sizing: border-box;
+           background: var(--tb-bg); border-top: 1px solid var(--tb-rule); color: var(--text); font-family: var(--f-text); }
+.tb-center { position: absolute; left: 50%; top: 4px; transform: translateX(-50%); display: flex; gap: 4px; }
+.tb-btn { position: relative; display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--r-ctl); }
+.tb-btn.is-active::after { content: ""; position: absolute; left: 50%; bottom: 3px; width: 16px; height: 3px; margin-left: -8px;
+                           border-radius: 2px; background: var(--accent); }
+.tb-g { font: 400 16px/1 var(--f-icon); color: var(--text); }
+.tb-g.is-accent { color: var(--accent); }
+.tb-ico { display: grid; place-items: center; width: 32px; height: 40px; border-radius: var(--r-ctl); }
+.tb-ico .tb-g { font-size: 14px; }
+.tb-dots { width: 16px; height: 16px; background: radial-gradient(circle, var(--text) 1.2px, transparent 1.7px) 0 0 / 5.3px 5.3px; }
+.tb-tray { position: absolute; right: 6px; top: 4px; height: 40px; display: flex; align-items: center; gap: 2px; }
+.tb-clock { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; height: 40px; padding: 0 10px;
+            font: 400 12px/15px var(--f-text); color: var(--text); white-space: nowrap; }
+
+.wm-bar { position: relative; display: flex; align-items: center; height: 32px; }
+.wm-app { flex: none; width: 14px; margin-left: 12px; font: 400 14px/1 var(--f-icon); color: var(--accent); }
+.wm-name { margin-left: 10px; font: 400 12px/32px var(--f-text); color: var(--text); }
+.wm-caps { margin-left: auto; display: flex; height: 32px; }
+.wm-caps span { display: grid; place-items: center; width: 46px; height: 32px; font: 400 10px/1 var(--f-icon); color: var(--text); }
+.wm-caps .is-close:hover { background: var(--close-hover); color: var(--on-close); }
+
+.window { position: relative; overflow: hidden; box-sizing: border-box; width: 1200px; height: 760px;
+          border-radius: var(--r-card); border: 1px solid var(--border); background: var(--bg); color: var(--text);
+          font-family: var(--f-text); box-shadow: 0 8px 16px var(--shadow-main), 0 0 2px var(--shadow-tight); }
+.window::before { content: ""; position: absolute; inset: 0; pointer-events: none;
+                  background: radial-gradient(80% 50% at 0% 0%, var(--accent-tint), transparent 70%); }
+.window > * { position: relative; }
+.wm-body { display: grid; grid-template-columns: 248px 1fr; height: 728px; }
+
+.nav { display: flex; flex-direction: column; gap: 8px; padding: 6px 8px 12px 12px; }
+.nav-search { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; border-radius: var(--r-ctl);
+              background: var(--surface-alt); border: 1px solid var(--border); border-bottom-color: var(--text-3);
+              font: 400 13px/30px var(--f-text); color: var(--text-3); }
+.nav-search i { font: 400 12px/1 var(--f-icon); color: var(--text-dim); }
+.nav-profile { display: flex; align-items: center; gap: 12px; height: 60px; margin-top: 4px; padding: 0 12px; border-radius: var(--r-card); }
+.avatar { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 50%;
+          background: var(--accent); color: var(--accent-on); font: 400 16px/1 var(--f-icon); }
+.nav-profile b { display: block; font: 600 14px/20px var(--f-text); color: var(--text-bright); }
+.nav-profile small { display: block; font: 400 12px/16px var(--f-text); color: var(--text-3); }
+.nav-list { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.nav-list li { position: relative; display: flex; align-items: center; gap: 14px; height: 36px; padding: 0 12px;
+               border-radius: var(--r-ctl); font: 400 14px/20px var(--f-text); color: var(--text); }
+.nav-list li i { width: 16px; text-align: center; font: 400 16px/1 var(--f-icon); color: var(--text); }
+.nav-list li.is-current { background: var(--surface); }
+.nav-list li.is-current i { color: var(--accent); }
+.nav-list li.is-current::before { content: ""; position: absolute; left: 0; top: 10px; width: 3px; height: 16px;
+                                  border-radius: 2px; background: var(--accent); box-shadow: 0 0 6px var(--glow); }
+.nav-list li.is-sep { margin-top: 10px; }
+.nav-foot { margin-top: auto; padding: 0 12px; font: 400 12px/16px var(--f-text); color: var(--text-3); }
+
+.content { position: relative; display: flex; flex-direction: column; margin: 0 8px 8px 0; padding: 20px 22px 14px;
+           border-radius: var(--r-card); border: 1px solid var(--border-dim); background: var(--layer); overflow: hidden; }
+.page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; height: 52px; }
+.page-head h1 { margin: 0; font: 600 28px/34px var(--f-display); color: var(--text-bright); }
+.page-head p { margin: 2px 0 0; font: 400 14px/20px var(--f-text); color: var(--text-dim); }
+.head-actions { display: flex; align-items: center; gap: 8px; padding-top: 2px; }
+.live { display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 12px; border-radius: 14px;
+        font: 600 12px/28px var(--f-text); color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.live .lamp { width: 8px; height: 8px; }
+.btn { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border: 1px solid var(--border);
+       border-radius: var(--r-ctl); background: var(--surface-alt); color: var(--text); font: 400 14px/20px var(--f-text); }
+.btn i { font: 400 12px/1 var(--f-icon); }
+.btn.primary { background: var(--accent); border-color: transparent; color: var(--accent-on); font-weight: 600; }
+
+.row { display: grid; gap: 12px; margin-top: 12px; min-height: 0; }
+.row-a { grid-template-columns: repeat(3, minmax(0, 1fr)); height: 150px; }
+.row-b { grid-template-columns: repeat(4, minmax(0, 1fr)); height: 92px; }
+.row-c { grid-template-columns: repeat(3, minmax(0, 1fr)); height: 170px; }
+.row-d { grid-template-columns: repeat(3, minmax(0, 1fr)); height: 138px; }
+.row-c .span-2 { grid-column: span 2; }
+
+.card { position: relative; box-sizing: border-box; min-width: 0; min-height: 0; overflow: hidden; padding: 12px 14px;
+        border-radius: var(--r-card); border: 1px solid var(--border); background: var(--surface); box-shadow: 0 1px 2px var(--shadow-tight); }
+.card-h { display: flex; align-items: center; gap: 8px; height: 20px; margin-bottom: 8px; font: 600 14px/20px var(--f-text); color: var(--text-bright); white-space: nowrap; }
+.card-h .ico { font: 400 14px/1 var(--f-icon); color: var(--accent); }
+.card-h .meta { margin-left: auto; font: 400 12px/16px var(--f-text); color: var(--text-3); }
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 20px; padding: 0 8px; border-radius: 10px;
+        font: 600 12px/20px var(--f-text); white-space: nowrap; }
+.chip.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 16%, transparent); }
+.chip.acc { color: var(--text); background: var(--accent-soft); }
+.chip.acc::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.chip.neu { color: var(--text-dim); background: var(--hover); }
+.chip.nrm { color: var(--ok); background: color-mix(in srgb, var(--ok) 16%, transparent); }
+
+.lim-top { display: flex; align-items: flex-end; justify-content: space-between; height: 40px; }
+.lim-big { font: 600 36px/40px var(--f-display); color: var(--text-bright); font-variant-numeric: tabular-nums; }
+.lim-big small { margin-left: 2px; font: 600 18px/40px var(--f-display); color: var(--text-dim); }
+.lim-side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.lim-reset { font: 400 12px/16px var(--f-text); color: var(--text-dim); white-space: nowrap; }
+.lanes { display: grid; gap: 6px; margin-top: 10px; }
+.lane { display: grid; grid-template-columns: 40px 1fr 36px; align-items: center; gap: 8px; height: 16px; }
+.lane-k { font: 400 12px/16px var(--f-text); color: var(--text-dim); }
+.lane-v { font: 700 12px/16px var(--f-mono); color: var(--text); text-align: right; font-variant-numeric: tabular-nums; }
+.lane-tr { position: relative; height: 6px; border-radius: 3px; background: var(--track); }
+.lane-tr i { position: absolute; left: 0; top: 0; bottom: 0; width: var(--v); border-radius: 3px; background: var(--accent); }
+.lane-tr.is-time { height: 2px; border-radius: 1px; background: var(--time-track); }
+.lane-tr.is-time i { border-radius: 1px; background: var(--time); }
+.lane-tr.is-time i::after { content: ""; position: absolute; right: 0; top: -2px; width: 1px; height: 6px; background: var(--time); }
+.lane-tr .share { position: absolute; left: 50%; top: -3px; width: 1px; height: 12px; background: var(--text-dim); }
+
+.tile { display: flex; flex-direction: column; justify-content: center; padding: 10px 14px; }
+.tile-k { font: 400 12px/16px var(--f-text); color: var(--text-dim); white-space: nowrap; }
+.tile-v { margin-top: 2px; font: 600 26px/30px var(--f-display); color: var(--text-bright); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tile-v small { margin-left: 6px; font: 400 12px/16px var(--f-text); color: var(--text-dim); }
+.tile-s { display: flex; align-items: center; gap: 6px; margin-top: 2px; font: 400 12px/16px var(--f-text); color: var(--text-3); white-space: nowrap; }
+
+.chart-svg { display: block; width: 100%; height: 96px; }
+.axis { display: flex; justify-content: space-between; margin-top: 4px; font: 400 12px/16px var(--f-mono); color: var(--text-3); }
+.mix { display: flex; gap: 2px; height: 10px; margin-top: 2px; border-radius: 4px; overflow: hidden; }
+.mix i { display: block; height: 100%; }
+.mix i:nth-child(1) { flex: 86 0 0; background: var(--accent); }
+.mix i:nth-child(2) { flex: 7 0 0; background: var(--accent-alt); }
+.mix i:nth-child(3) { flex: 6 0 0; background: color-mix(in srgb, var(--accent) 35%, var(--surface)); }
+.mix i:nth-child(4) { flex: 1 0 0; background: color-mix(in srgb, var(--accent) 18%, var(--surface)); }
+.leg { display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: 10px; height: 20px; font: 400 13px/20px var(--f-text); color: var(--text); }
+.leg i { width: 10px; height: 10px; border-radius: 3px; }
+.leg b { font: 600 13px/20px var(--f-mono); color: var(--text); }
+
+.wk { display: flex; flex-direction: column; gap: 9px; margin-top: 2px; }
+.wk-row { display: grid; grid-template-columns: 104px 1fr 44px; align-items: center; gap: 10px; font: 400 13px/18px var(--f-text); color: var(--text); }
+.wk-row b { font: 600 12px/18px var(--f-mono); text-align: right; color: var(--text); }
+.hbar { position: relative; height: 6px; border-radius: 3px; background: var(--track); }
+.hbar i { position: absolute; left: 0; top: 0; bottom: 0; width: var(--v); border-radius: 3px; background: var(--accent); }
+
+.eff { display: grid; grid-template-columns: 40px 1fr; align-items: center; gap: 12px; }
+.eff-ring { position: relative; width: 40px; height: 40px; }
+.eff-ring svg { display: block; width: 40px; height: 40px; transform: rotate(-90deg); }
+.eff-ring .rt { fill: none; stroke: var(--track); stroke-width: 5; }
+.eff-ring .rv { fill: none; stroke: var(--accent); stroke-width: 5; stroke-linecap: round; }
+.eff-ring b { position: absolute; inset: 0; display: grid; place-items: center; font: 600 9px/1 var(--f-text); color: var(--text-bright); }
+.eff-k { font: 400 12px/16px var(--f-text); color: var(--text-dim); }
+.eff-k b { margin-left: 6px; font: 600 12px/16px var(--f-mono); color: var(--text); }
+.eff-note { margin: 8px 0 0; font: 400 12px/16px var(--f-text); color: var(--text-3); }
+
+.kv { display: grid; grid-template-columns: 1fr auto; align-items: center; height: 20px; font: 400 13px/20px var(--f-text); color: var(--text-dim); }
+.kv b { font: 600 13px/20px var(--f-mono); color: var(--text); }
+.kv b.is-ok { color: var(--ok); }
+
+.page-foot { margin-top: 12px; font: 400 12px/16px var(--f-text); color: var(--text-3); }
+
+.picker { box-sizing: border-box; padding: 16px 18px; border-radius: var(--r-card); border: 1px solid var(--border);
+          background: var(--surface); color: var(--text); }
+.picker-h b { display: block; font: 600 14px/20px var(--f-text); color: var(--text-bright); }
+.picker-h span { font: 400 12px/16px var(--f-text); color: var(--text-3); }
+.swatches { display: flex; gap: 14px; margin-top: 14px; }
+.sw-cell { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 86px; }
+.sw-chip { position: relative; display: grid; place-items: center; width: 52px; height: 40px; border-radius: var(--r-ctl); background: var(--accent); }
+.sw-chip.is-on::after { content: "\E73E"; font-family: var(--f-icon); font-size: 14px; color: var(--accent-on); }
+.sw-cell small { font: 400 12px/16px var(--f-text); color: var(--text-dim); text-align: center; }
+.modes { display: inline-flex; margin-top: 14px; border: 1px solid var(--border); border-radius: var(--r-ctl); overflow: hidden; }
+.modes span { height: 30px; padding: 0 16px; font: 400 13px/30px var(--f-text); color: var(--text); background: var(--surface-alt); }
+.modes span + span { border-left: 1px solid var(--border); }
+.modes span.is-on { background: var(--accent); color: var(--accent-on); }
+
+/* ==========================================================================
+   3. MOCK SHEET. Presentation only: board chrome, wallpaper, captions.
+   Nothing below this line is app CSS.
+   ========================================================================== */
+body { margin: 0; background: #121212; }
+.sheet { box-sizing: border-box; width: 1440px; margin: 0 auto; padding: 30px 24px 70px; color: #d6d6d6; font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; }
+.kicker { margin: 0; font: 600 12px/16px "Cascadia Mono", Consolas, monospace; letter-spacing: .08em; color: #8f8f8f; }
+.sheet > header h1 { margin: 6px 0 8px; font: 600 28px/34px "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif; color: #f2f2f2; }
+.lede { margin: 0; max-width: 1180px; font: 400 14px/20px "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; color: #b5b5b5; }
+.lede code { font: 400 12px/16px "Cascadia Mono", Consolas, monospace; color: #e0e0e0; }
+.sec { margin-top: 44px; }
+.sec-h { display: flex; align-items: baseline; gap: 12px; padding-bottom: 8px; margin-bottom: 14px; border-bottom: 1px solid #2c2c2c; }
+.sec-h b { font: 400 12px/16px "Cascadia Mono", Consolas, monospace; color: #8f8f8f; }
+.sec-h h2 { margin: 0; font: 600 20px/28px "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif; color: #f0f0f0; }
+.sec-h span { margin-left: auto; font: 400 12px/16px "Cascadia Mono", Consolas, monospace; color: #8f8f8f; }
+.cap { margin: 14px 0 8px; font: 400 12px/16px "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; color: #9a9a9a; }
+.wall { box-sizing: border-box; border-radius: 6px; }
+.wall-dark { background:
+  radial-gradient(60% 80% at 16% 30%, rgba(38, 92, 150, .85), rgba(38, 92, 150, 0) 70%),
+  radial-gradient(50% 70% at 84% 75%, rgba(20, 96, 110, .75), rgba(20, 96, 110, 0) 70%),
+  radial-gradient(40% 60% at 62% 8%, rgba(88, 60, 130, .55), rgba(88, 60, 130, 0) 70%),
+  linear-gradient(165deg, #0c1624 0%, #0b1a24 50%, #071215 100%); }
+.wall-light { background:
+  radial-gradient(60% 80% at 16% 30%, rgba(170, 206, 242, .9), rgba(170, 206, 242, 0) 70%),
+  radial-gradient(50% 70% at 84% 75%, rgba(186, 232, 224, .75), rgba(186, 232, 224, 0) 70%),
+  linear-gradient(165deg, #eef2f7 0%, #e6edf3 50%, #dde7ee 100%); }
+.wall-cell { display: flex; align-items: center; justify-content: center; width: 336px; height: 176px; padding: 24px; }
+.row-wall { display: flex; gap: 20px; align-items: flex-start; }
+.wall-1x { display: flex; align-items: center; gap: 16px; height: 176px; padding: 0 12px; }
+.zoom-row { display: flex; gap: 24px; align-items: flex-start; }
+.zoom-box { position: relative; flex: none; width: 960px; height: 480px; overflow: hidden; }
+.zoom-inner { position: absolute; left: 0; top: 0; transform-origin: 0 0; transform: translate(72px, 48px) scale(3); }
+.spec { flex: 1; min-width: 0; font: 400 13px/19px "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; color: #bdbdbd; }
+.spec h3 { margin: 0 0 6px; font: 600 14px/20px "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; color: #efefef; }
+.spec ul { margin: 0 0 12px; padding-left: 16px; }
+.spec li { margin-bottom: 4px; }
+.spec code { font: 400 12px/16px "Cascadia Mono", Consolas, monospace; color: #e6e6e6; }
+.states { display: grid; grid-template-columns: repeat(3, 336px); gap: 16px 16px; }
+.states figure { margin: 0; }
+.states figcaption { margin: 0 0 6px; font: 400 12px/16px "Cascadia Mono", Consolas, monospace; color: #cfcfcf; }
+.key { display: flex; flex-wrap: wrap; gap: 8px 22px; align-items: center; margin-top: 14px; font: 400 12px/16px "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; color: #9a9a9a; }
+.key span { display: inline-flex; align-items: center; gap: 8px; }
+.key .lamp { width: 8px; height: 8px; }
+.tb-board { position: relative; }
+.mock-taskbar-wrap { position: relative; width: 1200px; }
+.tb-zoom-wall { position: relative; width: 760px; height: 160px; overflow: hidden; border-radius: 6px; background: #161616; }
+.tb-zoom-inner { position: absolute; left: 0; top: 0; transform-origin: 0 0; transform: translate(12px, 20px) scale(3); }
+.tray-board { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.tray-tile { box-sizing: border-box; padding: 16px 18px; border-radius: 6px; background: var(--tb-bg); color: var(--text); font-family: var(--f-text); }
+.tray-tile h4 { margin: 0 0 12px; font: 400 12px/16px "Cascadia Mono", Consolas, monospace; color: var(--text-3); }
+.tray-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px 12px; }
+.tray-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; font: 400 11px/14px "Cascadia Mono", Consolas, monospace; color: var(--text-3); }
+.tray-zoom { display: flex; gap: 40px; align-items: flex-end; margin-top: 14px; padding: 16px 18px; border-radius: 6px; background: #161616; color: #cfcfcf; font: 400 12px/16px "Cascadia Mono", Consolas, monospace; }
+.tray-zoom .tz { display: flex; flex-direction: column; gap: 6px; }
+.dash-frame { margin-bottom: 8px; }
+.variants { display: grid; grid-template-columns: repeat(4, 336px); gap: 12px 8px; }
+.vcell { margin: 0; }
+.vcell figcaption { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px 2px; font: 400 12px/16px "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; color: #d0d0d0; }
+.vcell figcaption b { font-weight: 600; font-size: 13px; color: #f0f0f0; }
+.vcell figcaption span { margin-left: auto; font: 400 12px/16px "Cascadia Mono", Consolas, monospace; color: #9a9a9a; }
+.legend-cell { box-sizing: border-box; width: 336px; height: 176px; padding: 14px 16px; border-radius: 6px; background: var(--layer); border: 1px solid var(--border); color: var(--text); font-family: var(--f-text); }
+.legend-cell h4 { margin: 0 0 8px; font: 600 13px/18px var(--f-text); color: var(--text-bright); }
+.legend-cell .sw-row { display: flex; align-items: center; gap: 10px; height: 18px; font: 400 12px/18px var(--f-text); color: var(--text-dim); }
+.legend-cell .sw-row i { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+.legend-cell .sw-row b { font: 400 11px/18px var(--f-mono); color: var(--text); }
+.coll { width: 100%; border-collapse: collapse; font: 400 12px/18px "Cascadia Mono", Consolas, monospace; color: #cfcfcf; }
+.coll th, .coll td { padding: 4px 10px; border-bottom: 1px solid #262626; text-align: right; }
+.coll th:first-child, .coll td:first-child { text-align: left; }
+.coll th { color: #8f8f8f; font-weight: 400; }
+.tokens { width: 100%; border-collapse: collapse; font: 400 12px/18px "Cascadia Mono", Consolas, monospace; color: #cfcfcf; }
+.tokens th, .tokens td { padding: 3px 10px; border-bottom: 1px solid #262626; text-align: left; }
+.tokens th { color: #8f8f8f; font-weight: 400; }
+.tokens .sw { display: inline-block; width: 14px; height: 14px; border-radius: 3px; margin-right: 8px; vertical-align: -2px; border: 1px solid rgba(128,128,128,.35); }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+.note { margin: 10px 0 0; font: 400 12px/18px "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; color: #9a9a9a; }
+</style>
+</head>
+<body>
+<main class="sheet">
+
+  <header>
+    <p class="kicker">GATES · FINAL · MOCKUP v2 · widgets are Pillow-ready, dashboard is webui-ready</p>
+    <h1>Readouts on native Fluent surfaces</h1>
+    <p class="lede">A Quick Settings card that reads time against usage: a thin rail is the share of the window already gone, a bar is what you have spent, and the bar sits under the rail so pace is visible at a glance. Segoe UI Variable for text, Segoe Fluent Icons for glyphs, Cascadia Mono for numbers. Every colour is a token. A variant is one data-variant and one data-mode on the same element. All figures are fixtures derived from one clock: Wed 2026-10-21, 4:12 PM.</p>
+  </header>
+
+  <!-- ===================================================================== 01 -->
+  <section class="sec" id="sec-widget">
+    <div class="sec-h"><b>01</b><h2>Floating widget</h2><span>288 × 128 px · fixed in every state · 24 px canvas margin for the shadow</span></div>
+
+    <p class="cap">1x, real pixels on a dark wallpaper · normal state with the Fable row (left) and without it, where the footer takes the slot (right)</p>
+    <div class="row-wall">
+      <div class="wall wall-dark wall-cell" id="float-1x"></div>
+      <div class="wall wall-dark wall-cell" id="float-1x-nofable"></div>
+    </div>
+
+    <p class="cap">3x zoom · the same markup scaled by transform · normal state</p>
+    <div class="zoom-row">
+      <div class="wall wall-dark zoom-box" id="float-zoom"><div class="zoom-inner" id="float-zoom-inner"></div></div>
+      <aside class="spec">
+        <h3>Pillow map at 1x (canvas 336 × 176, card at 24, 24)</h3>
+        <ul>
+          <li>Shadow: rounded-rect mask offset (0, 8), GaussianBlur sigma 8 at 34 % dark / 14 % light, plus a tight sigma 1 at 40 % / 12 %.</li>
+          <li>Card: rounded_rectangle r 8, widget-bg at 95 %, 1 px widget-border inside the card. Top highlight 1 px from x 18 to x 270 (6 % and 94 % of the 286 px padding box), dark only.</li>
+          <li>Header line y 12 to 30: icon E916 14 px at x 15 in accent; title 12 px SemiBold at x 35; status pill right-aligned, height 18, radius 9, tint at 16 % (12 % light); 8 px dot, 10 px SemiBold word and age; three 3 px dots at x 260 to 273.</li>
+          <li>Row n at y 38 + 27n. Label 12 px Regular at y + 0 (line 16). Value Cascadia Mono Bold 15 px, right edge x 273. Tag 11 px Cascadia Mono at label + 6.</li>
+          <li>Time rail 2 px at y + 19, x 15 to 273: track time-track, fill time to the elapsed %, index tick 1 × 6 px at the fill end, from y + 17.</li>
+          <li>Usage bar 4 px at y + 23, radius 2: track, fill accent, usage-warn at 60 %, usage-alert at 85 %.</li>
+          <li>Fable share tick 1 × 10 px at x 144 from the bar top minus 3. Footer 11 px Regular at y 98 (line 16).</li>
+        </ul>
+        <h3>Rules</h3>
+        <ul>
+          <li>Severity from usage: warn at 60 %, alert at 85 % (app defaults, API severity wins when sent). Rails come from the reset timestamp: elapsed = (now − (reset − window)) / window.</li>
+          <li>Pace: ahead of pace when usage % is above elapsed %. Under pace otherwise.</li>
+          <li>Fable row shows only when the LIVE feed reports a Fable window with share above 0 % and session and weekly are both normal. Otherwise the footer takes the slot and the Fable row is dropped with it.</li>
+        </ul>
+      </aside>
+    </div>
+
+    <p class="cap">States · normal, warning 72 %, critical 93 %, stale, offline and paused, each a full widget with its footer</p>
+    <div class="states" id="states-grid"></div>
+    <div class="key">
+      <span><i class="lamp"></i>LIVE · 8 px lamp with a 24 % halo, age in the pill</span>
+      <span><i class="lamp is-stale"></i>STALE · filled grey, rows dimmed, last values kept readable</span>
+      <span><i class="lamp is-offline"></i>OFFLINE · hollow grey, retrying on a timer</span>
+      <span><i class="lamp is-paused"></i>PAUSED · hollow accent, usage frozen</span>
+    </div>
+  </section>
+
+  <!-- ===================================================================== 02 -->
+  <section class="sec" id="sec-taskbar">
+    <div class="sec-h"><b>02</b><h2>Taskbar strip</h2><span>248 × 40 inside the 48 px bar, left of the clock · 5H and 7D</span></div>
+
+    <p class="cap">Dark taskbar · normal state, 1x</p>
+    <div class="taskbar surface" id="tb-dark" data-mode="dark" data-variant="system"></div>
+
+    <p class="cap" style="margin-top:16px">Light taskbar · warning state (5H at 72 %), 1x</p>
+    <div class="taskbar surface" id="tb-light" data-mode="light" data-variant="system"></div>
+
+    <p class="cap" style="margin-top:16px">Strip at 3x, dark</p>
+    <div class="tb-zoom-wall"><div class="tb-zoom-inner" id="strip-zoom"></div></div>
+  </section>
+
+  <!-- ===================================================================== 03 -->
+  <section class="sec" id="sec-tray">
+    <div class="sec-h"><b>03</b><h2>Tray icon</h2><span>ring of the session % · 16 / 24 / 32 px · 32 px only prints the number · dashed stale track</span></div>
+    <div class="tray-board">
+      <div class="tray-tile surface" data-mode="dark" data-variant="system" id="tray-dark"><h4>DARK TASKBAR · tray-fg #ffffff</h4></div>
+      <div class="tray-tile surface" data-mode="light" data-variant="system" id="tray-light"><h4>LIGHT TASKBAR · tray-fg #1b1b1b</h4></div>
+    </div>
+    <div class="tray-zoom" id="tray-4x"></div>
+  </section>
+
+  <!-- ===================================================================== 04 -->
+  <section class="sec" id="sec-dash">
+    <div class="sec-h"><b>04</b><h2>Dashboard · Overview</h2><span>1200 × 760 · Settings-app layout · light and dark</span></div>
+    <p class="cap">Dark · data-mode dark, data-variant system</p>
+    <div class="window dash-frame surface" id="dash-dark" data-mode="dark" data-variant="system"></div>
+    <p class="cap" style="margin-top:20px">Light · data-mode light, data-variant system</p>
+    <div class="window dash-frame surface" id="dash-light" data-mode="light" data-variant="system"></div>
+  </section>
+
+  <!-- ===================================================================== 05 -->
+  <section class="sec" id="sec-variants">
+    <div class="sec-h"><b>05</b><h2>Variants and modes</h2><span>7 accents × light and dark · System resolves to one of the two rows at runtime</span></div>
+
+    <div class="two-col">
+      <div class="picker surface" data-mode="dark" data-variant="system">
+        <div class="picker-h"><b>Accent colour</b><span>Bars, the active nav item and the avatar follow this choice. Status colours do not change.</span></div>
+        <div class="swatches" id="swatches"></div>
+        <div class="modes"><span>Light</span><span>Dark</span><span class="is-on">System</span></div>
+        <div style="margin-top:14px"><button class="btn primary"><i></i>Save</button></div>
+      </div>
+      <div class="legend-cell" data-mode="dark" data-variant="system" style="width:auto;height:auto">
+        <h4>Fixed roles · identical in every variant</h4>
+        <div class="sw-row"><i style="background:var(--ok)"></i>ok · LIVE lamp, Under pace chips <b>status</b></div>
+        <div class="sw-row"><i style="background:var(--warn)"></i>warn · value and footer text, Ahead of pace</div>
+        <div class="sw-row"><i style="background:var(--alert)"></i>alert · critical text, Nearly out</div>
+        <div class="sw-row"><i style="background:var(--usage-warn)"></i>usage-warn · bar fill from 60 %</div>
+        <div class="sw-row"><i style="background:var(--usage-alert)"></i>usage-alert · bar fill from 85 %</div>
+        <div class="sw-row"><i style="background:var(--stale)"></i>stale · grey lamp, dimmed bars, dashed ring</div>
+        <div class="sw-row"><i style="background:var(--accent)"></i>accent · the only colour a variant changes</div>
+      </div>
+    </div>
+
+    <p class="cap" style="margin-top:18px">Dark · accent = accent-d</p>
+    <div class="variants" id="variants-dark"></div>
+    <p class="cap" style="margin-top:18px">Light · accent = accent-l</p>
+    <div class="variants" id="variants-light"></div>
+  </section>
+
+  <!-- ===================================================================== 06 -->
+  <section class="sec" id="sec-tokens">
+    <div class="sec-h"><b>06</b><h2>Token roles and separation</h2><span>read from computed styles · CIE76 ΔE from the accent to each status role</span></div>
+    <div class="two-col">
+      <div>
+        <table class="tokens" id="tokens"></table>
+        <p class="note">Values in light and dark for the locked roles, read from the probes that carry the same data-mode and data-variant. The JSON file carries the same values under colors and extras.</p>
+      </div>
+      <div>
+        <table class="coll" id="coll"></table>
+        <p class="note">Lowest separations: Green light 21.0, Orange light 24.7, Green dark 25.3, Orange dark 28.6 (threshold 20). Every other pairing clears 35.0. Values are read live from the probes, the same numbers as gates.json.</p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script>
+(() => {
+  /* ==========================================================================
+     Fixtures. One clock, one set of reset timestamps. Rails are derived from
+     the reset time, not typed in.
+     ========================================================================== */
+  const NOW = new Date('2026-10-21T16:12:00');
+  const HOUR = 3600e3;
+  const WIN = { session: 5 * HOUR, weekly: 168 * HOUR };
+  const RESET = {
+    sessionNormal: '2026-10-21T19:39:00',   // window started 14:39, 31 % gone
+    sessionWarn: '2026-10-21T18:12:00',     // window started 13:12, 60 % gone
+    weekly: '2026-10-25T16:00:00',          // window started Sun 10-18 16:00, 43 % gone
+  };
+  const elapsed = (resetIso, span) => {
+    const start = new Date(resetIso).getTime() - span;
+    return Math.round(Math.min(100, Math.max(0, (NOW.getTime() - start) / span * 100)));
+  };
+  const fmtTime = (iso) => {
+    const d = new Date(iso);
+    const h = d.getHours();
+    const hh = ((h + 11) % 12) + 1;
+    return hh + ':' + String(d.getMinutes()).padStart(2, '0') + ' ' + (h < 12 ? 'AM' : 'PM');
+  };
+  const sev = (u) => (u >= 85 ? 'crit' : u >= 60 ? 'warn' : 'normal');
+
+  const FIX = {
+    normal:  { status: 'LIVE',    age: '12 s',   sess: { used: 13, reset: RESET.sessionNormal }, week: { used: 2,  reset: RESET.weekly }, fable: { used: 0, share: 50 } },
+    noFable: { status: 'LIVE',    age: '12 s',   sess: { used: 13, reset: RESET.sessionNormal }, week: { used: 2,  reset: RESET.weekly }, fable: null },
+    warn:    { status: 'LIVE',    age: '12 s',   sess: { used: 72, reset: RESET.sessionWarn },   week: { used: 41, reset: RESET.weekly }, fable: null },
+    crit:    { status: 'LIVE',    age: '12 s',   sess: { used: 93, reset: RESET.sessionWarn },   week: { used: 52, reset: RESET.weekly }, fable: null },
+    stale:   { status: 'STALE',   age: '14 min', sess: { used: 13, reset: RESET.sessionNormal }, week: { used: 2,  reset: RESET.weekly }, fable: null },
+    offline: { status: 'OFFLINE', age: '6 min',  sess: { used: 13, reset: RESET.sessionNormal }, week: { used: 2,  reset: RESET.weekly }, fable: null },
+    paused:  { status: 'PAUSED',  age: '2 h',    sess: { used: 13, reset: RESET.sessionNormal }, week: { used: 2,  reset: RESET.weekly }, fable: null },
+  };
+
+  const rowHTML = (label, tag, used, el, sv, extra) =>
+    '<div class="gw-row' + (sv === 'warn' ? ' is-warn' : sv === 'crit' ? ' is-crit' : '') + '">' +
+      '<div class="gw-line"><span class="gw-label">' + label + '</span><span class="gw-tag">' + tag + '</span>' +
+      '<span class="gw-value">' + used + '%</span></div>' +
+      '<div class="gw-rail"><i style="--t:' + el + '%"></i></div>' +
+      '<div class="gw-bar"><i style="--v:' + used + '%"></i>' + (extra || '') + '</div>' +
+    '</div>';
+
+  function footerHTML(st, sEl) {
+    if (st.status === 'STALE') return '<b class="t-warn">Hmm, we lost touch.</b> Sign in to Claude Code.';
+    if (st.status === 'OFFLINE') return 'No connection. Retrying every minute.';
+    if (st.status === 'PAUSED') return 'Paused. Resume to keep usage live.';
+    const when = fmtTime(st.sess.reset);
+    if (sev(st.sess.used) === 'crit') return '<b class="t-alert">Nearly out</b> · Resets ' + when;
+    return st.sess.used > sEl
+      ? '<b class="t-warn">Ahead of pace</b> · Resets ' + when
+      : '<b class="t-ok">Under pace</b> · Resets ' + when;
+  }
+
+  function widgetHTML(name, mode, variant) {
+    const st = FIX[name];
+    const sEl = elapsed(st.sess.reset, WIN.session);
+    const wEl = elapsed(st.week.reset, WIN.weekly);
+    const sSev = sev(st.sess.used), wSev = sev(st.week.used);
+    const footerShown = st.status !== 'LIVE' || sSev !== 'normal' || wSev !== 'normal' || !st.fable || st.fable.share <= 0;
+    const lampCls = st.status === 'LIVE' ? '' : ' is-' + st.status.toLowerCase();
+    const pill = '<span class="gw-pill is-' + st.status.toLowerCase() + '"><i class="lamp' + lampCls + '"></i>' + st.status + ' · ' + st.age + '</span>';
+    const third = footerShown
+      ? '<div class="gw-foot">' + footerHTML(st, sEl) + '</div>'
+      : rowHTML('Fable weekly', '50% share', st.fable.used, wEl, 'normal', '<i class="gw-share"></i>');
+    return '<div class="gw surface' + (st.status === 'LIVE' ? '' : ' is-dim') + '" data-mode="' + mode + '" data-variant="' + variant + '">' +
+      '<div class="gw-head"><i class="gw-ico">&#xE916;</i><span class="gw-title">Claude usage</span>' + pill +
+      '<span class="gw-more"><i></i><i></i><i></i></span></div>' +
+      '<div class="gw-rows">' +
+        rowHTML('Session', '5H', st.sess.used, sEl, sSev) +
+        rowHTML('Weekly', '7D', st.week.used, wEl, wSev) +
+        third +
+      '</div></div>';
+  }
+
+  function stripHTML(mode, variant, name) {
+    const st = FIX[name];
+    const sEl = elapsed(st.sess.reset, WIN.session), wEl = elapsed(st.week.reset, WIN.weekly);
+    const row = (k, top, used, el, sv) =>
+      '<div class="tbs-row' + (sv === 'warn' ? ' is-warn' : '') + '" style="top:' + top + 'px">' +
+        '<span class="tbs-k">' + k + '</span>' +
+        '<div class="tbs-time"><i style="--t:' + el + '%"></i></div>' +
+        '<div class="tbs-trk"><i style="--v:' + used + '%"></i></div>' +
+        '<span class="tbs-v">' + used + '%</span></div>';
+    return '<div class="tbstrip surface" data-mode="' + mode + '" data-variant="' + variant + '">' +
+      row('5H', 6, st.sess.used, sEl, sev(st.sess.used)) + row('7D', 25, st.week.used, wEl, sev(st.week.used)) +
+      '<span class="tbs-dot"></span></div>';
+  }
+
+  const RING = {
+    16: { vb: 16, r: 5.25, sw: 2.5, dash: '6 4.5' },
+    24: { vb: 24, r: 8, sw: 3.4, dash: '4 3' },
+    32: { vb: 32, r: 11.5, sw: 4.2, dash: '3.2 2.4' },
+  };
+  function ringHTML(size, pct, opt) {
+    const c = RING[size], m = c.vb / 2;
+    const o = opt || {};
+    const cls = 'ring ring-' + size + (o.stale ? ' is-stale' : '') + (o.sev ? ' is-' + o.sev : '');
+    const trackDash = o.stale ? ' stroke-dasharray="' + c.dash + '"' : '';
+    const num = size === 32 ? '<text class="rg-num" x="' + m + '" y="' + (m + 3.6) + '" text-anchor="middle">' + pct + '</text>' : '';
+    return '<svg class="' + cls + '" width="' + size + '" height="' + size + '" viewBox="0 0 ' + c.vb + ' ' + c.vb + '" aria-hidden="true">' +
+      '<circle class="rk" cx="' + m + '" cy="' + m + '" r="' + c.r + '" stroke-width="' + c.sw + '" pathLength="100"' + trackDash + '/>' +
+      '<circle class="ra" cx="' + m + '" cy="' + m + '" r="' + c.r + '" stroke-width="' + c.sw + '" pathLength="100" stroke-dasharray="' + pct + ' ' + (100 - pct) + '" transform="rotate(-90 ' + m + ' ' + m + ')"/>' +
+      num + '</svg>';
+  }
+
+  /* ---------- fill the widget, taskbar, tray and dashboard surfaces ---------- */
+  const q = (id) => document.getElementById(id);
+
+  q('float-1x').innerHTML = widgetHTML('normal', 'dark', 'system');
+  q('float-1x-nofable').innerHTML = widgetHTML('noFable', 'dark', 'system');
+  q('float-zoom-inner').innerHTML = widgetHTML('normal', 'dark', 'system');
+
+  q('states-grid').innerHTML = ['normal', 'warn', 'crit', 'stale', 'offline', 'paused'].map((n) => {
+    const cap = { normal: 'NORMAL · 13% / 2% · Fable row', warn: 'WARNING · 72% · footer, Fable dropped', crit: 'CRITICAL · 93% · Nearly out', stale: 'STALE · login expired', offline: 'OFFLINE · no connection', paused: 'PAUSED · usage frozen' }[n];
+    const map = { normal: 'normal', warn: 'warn', crit: 'crit', stale: 'stale', offline: 'offline', paused: 'paused' }[n];
+    return '<figure><figcaption>' + cap + '</figcaption><div class="wall wall-dark wall-cell">' + widgetHTML(map, 'dark', 'system') + '</div></figure>';
+  }).join('');
+
+  const tbFrame = (mode, variant, stripName) =>
+    '<div class="tb-center">' +
+      '<span class="tb-btn"><i class="tb-dots"></i></span>' +
+      '<span class="tb-btn"><i class="tb-g">&#xE721;</i></span>' +
+      '<span class="tb-btn"><i class="tb-g">&#xE7C4;</i></span>' +
+      '<span class="tb-btn"><i class="tb-g">&#xE8B7;</i></span>' +
+      '<span class="tb-btn"><i class="tb-g">&#xE774;</i></span>' +
+      '<span class="tb-btn"><i class="tb-g">&#xE787;</i></span>' +
+      '<span class="tb-btn"><i class="tb-g">&#xE715;</i></span>' +
+      '<span class="tb-btn is-active"><i class="tb-g is-accent">&#xE916;</i></span>' +
+    '</div>' +
+    '<div class="tb-tray">' +
+      '<span class="tb-ico"><i class="tb-g">&#xE70E;</i></span>' +
+      '<span class="tb-ico">' + ringHTML(16, 13) + '</span>' +
+      '<span class="tb-ico"><i class="tb-g">&#xE701;</i></span>' +
+      '<span class="tb-ico"><i class="tb-g">&#xE767;</i></span>' +
+      '<span class="tb-ico"><i class="tb-g">&#xE83F;</i></span>' +
+      '<span style="width:8px"></span>' +
+      stripHTML(mode, variant, stripName) +
+      '<div class="tb-clock"><span>4:12 PM</span><span>2026-10-21</span></div>' +
+      '<span class="tb-ico"><i class="tb-g">&#xE7E7;</i></span>' +
+    '</div>';
+  q('tb-dark').innerHTML = tbFrame('dark', 'system', 'normal');
+  q('tb-light').innerHTML = tbFrame('light', 'system', 'warn');
+  q('strip-zoom').innerHTML = stripHTML('dark', 'system', 'normal');
+
+  // tray tiles
+  const trayStates = [
+    { pct: 13, opt: {} },
+    { pct: 72, opt: { sev: 'warn' } },
+    { pct: 93, opt: { sev: 'crit' } },
+    { pct: 13, opt: { stale: true } },
+  ];
+  const trayRows = (size) => trayStates.map((s, i) => {
+    const label = (s.opt.stale ? 'stale' : s.pct + '%') + ' · ' + size + ' px';
+    return '<div class="tray-cell">' + ringHTML(size, s.pct, s.opt) + '<span>' + label + '</span></div>';
+  }).join('');
+  ['tray-dark', 'tray-light'].forEach((id) => {
+    const el = q(id);
+    el.insertAdjacentHTML('beforeend',
+      '<div class="tray-grid">' + trayRows(16) + '</div>' +
+      '<div class="tray-grid" style="margin-top:14px">' + trayRows(24) + '</div>' +
+      '<div class="tray-grid" style="margin-top:14px">' + trayRows(32) + '</div>');
+  });
+  // 4x geometry check (vector scale): each 16 px state drawn at 4x inside a 64 px box
+  q('tray-4x').innerHTML = trayStates.map((s) =>
+    '<div class="tz"><div style="width:64px;height:64px;overflow:visible">' +
+      '<div style="width:16px;height:16px;transform:scale(4);transform-origin:0 0">' + ringHTML(16, s.pct, s.opt) + '</div></div>' +
+      '<span>' + (s.opt.stale ? 'stale' : s.pct + '%') + ' · 16 px at 4x</span></div>').join('');
+
+  /* ---------- dashboard ---------- */
+  const DAILY = [55, 63, 41, 28, 70, 66, 58, 49, 61, 79, 84, 76, 92, 66, 40, 48, 88, 96, 78, 78, 81, 102, 90, 70, 77, 85, 72, 94, 79, 84.2];
+  function barsSVG(vals) {
+    const W = 600, H = 96, base = 80, top = 6, max = 110, padL = 40;
+    const k = (base - top) / max;
+    const slot = (W - padL) / vals.length, bw = slot * 0.62;
+    let s = '<svg class="chart-svg" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet" aria-hidden="true">';
+    [100, 50].forEach((v) => {
+      const y = base - v * k;
+      s += '<line x1="' + padL + '" x2="' + W + '" y1="' + y + '" y2="' + y + '" style="stroke:var(--border);stroke-dasharray:2 3" stroke-width="1"/>';
+      s += '<text x="0" y="' + (y + 4) + '" style="font:400 12px/16px var(--f-mono);fill:var(--text-3)">$' + v + '</text>';
+    });
+    s += '<line x1="' + padL + '" x2="' + W + '" y1="' + (base + .5) + '" y2="' + (base + .5) + '" style="stroke:var(--border)" stroke-width="1"/>';
+    vals.forEach((v, i) => {
+      const h = v * k, x = padL + i * slot + (slot - bw) / 2, last = i === vals.length - 1;
+      s += '<rect x="' + x.toFixed(2) + '" y="' + (base - h).toFixed(2) + '" width="' + bw.toFixed(2) + '" height="' + h.toFixed(2) + '" rx="2" style="fill:var(--accent);fill-opacity:' + (last ? 1 : 0.42) + '"/>';
+    });
+    return s + '</svg>';
+  }
+
+  const limCard = (icon, title, meta, pctUsed, unitCls, chip, resetTxt, tEl, share) =>
+    '<article class="card">' +
+      '<header class="card-h"><i class="ico">' + icon + '</i>' + title + '<span class="meta">' + meta + '</span></header>' +
+      '<div class="lim-top"><div class="lim-big">' + pctUsed + '<small>%</small></div>' +
+        '<div class="lim-side">' + chip + '<span class="lim-reset">' + resetTxt + '</span></div></div>' +
+      '<div class="lanes">' +
+        '<div class="lane"><span class="lane-k">Time</span><div class="lane-tr is-time"><i style="--v:' + tEl + '%"></i></div><span class="lane-v">' + tEl + '%</span></div>' +
+        '<div class="lane"><span class="lane-k">Usage</span><div class="lane-tr"><i style="--v:' + pctUsed + '%"></i>' + (share ? '<span class="share"></span>' : '') + '</div><span class="lane-v">' + pctUsed + '%</span></div>' +
+      '</div></article>';
+
+  const sEl = elapsed(RESET.sessionNormal, WIN.session);
+  const wEl = elapsed(RESET.weekly, WIN.weekly);
+  const dashHTML = () =>
+    '<div class="wm-bar"><i class="wm-app">&#xE916;</i><span class="wm-name">Claude Usage Monitor</span>' +
+      '<div class="wm-caps"><span>&#xE921;</span><span>&#xE922;</span><span class="is-close">&#xE8BB;</span></div></div>' +
+    '<div class="wm-body">' +
+      '<nav class="nav">' +
+        '<div class="nav-search"><i>&#xE721;</i>Find a metric</div>' +
+        '<div class="nav-profile"><span class="avatar">&#xE77B;</span><div><b>Claude Code</b><small>Max 5x plan · Connected</small></div></div>' +
+        '<ul class="nav-list">' +
+          '<li class="is-current"><i>&#xE80F;</i>Overview</li>' +
+          '<li><i>&#xE916;</i>Limits</li>' +
+          '<li><i>&#xE8C7;</i>Cost &amp; Value</li>' +
+          '<li><i>&#xE945;</i>Efficiency</li>' +
+          '<li><i>&#xE81C;</i>History</li>' +
+          '<li class="is-sep"><i>&#xE713;</i>Settings</li>' +
+          '<li><i>&#xE946;</i>About</li>' +
+        '</ul>' +
+        '<div class="nav-foot">Plan Max 5x · $100 / month</div>' +
+      '</nav>' +
+      '<main class="content">' +
+        '<header class="page-head"><div><h1>Overview</h1><p>Max 5x plan · October 2026 · cost figures are API-equivalent at list prices</p></div>' +
+          '<div class="head-actions"><span class="live"><i class="lamp"></i>LIVE · updated 12 s ago</span><button class="btn"><i>&#xE72C;</i>Refresh</button></div></header>' +
+
+        '<div class="row row-a">' +
+          limCard('&#xE916;', 'Session', '5-hour window', 13, '', '<span class="chip ok">Under pace</span>', 'Resets 7:39 PM', sEl, false) +
+          limCard('&#xE787;', 'Weekly', '7-day window', 2, '', '<span class="chip ok">Under pace</span>', 'Resets Sun 4:00 PM', wEl, false) +
+          limCard('&#xE81D;', 'Fable weekly', '50% share', 0, '', '<span class="chip neu">Unused</span>', 'Resets Sun 4:00 PM', wEl, true) +
+        '</div>' +
+
+        '<div class="row row-b">' +
+          '<section class="card tile"><div class="tile-k">API-equivalent · this month</div><div class="tile-v">$1,659</div><div class="tile-s"><span class="chip acc">16.6× your Max 5x plan ($100)</span></div></section>' +
+          '<section class="card tile"><div class="tile-k">Today</div><div class="tile-v">$84.20</div><div class="tile-s">Since midnight, at list prices</div></section>' +
+          '<section class="card tile"><div class="tile-k">Caching saved · this month</div><div class="tile-v">$14.1K</div><div class="tile-s">Cache hit rate 96.4%</div></section>' +
+          '<section class="card tile"><div class="tile-k">Burn rate</div><div class="tile-v">1,240<small>tok/min</small></div><div class="tile-s">$6.10/h <span class="chip nrm">NORMAL</span></div></section>' +
+        '</div>' +
+
+        '<div class="row row-c">' +
+          '<section class="card span-2"><header class="card-h"><i class="ico">&#xE8C7;</i>Daily cost · 30 days<span class="meta">API-equivalent at list prices</span></header>' +
+            barsSVG(DAILY) +
+            '<div class="axis"><span>Sep 22</span><span>Oct 21 · today $84.20</span></div></section>' +
+          '<section class="card"><header class="card-h"><i class="ico">&#xE9F9;</i>Model mix<span class="meta">Share of tokens</span></header>' +
+            '<div class="mix"><i></i><i></i><i></i><i></i></div>' +
+            '<div style="margin-top:12px">' +
+              '<div class="leg"><i style="background:var(--accent)"></i><span>Opus 5.5</span><b>86%</b></div>' +
+              '<div class="leg"><i style="background:var(--accent-alt)"></i><span>Sonnet 5.5</span><b>7%</b></div>' +
+              '<div class="leg"><i style="background:color-mix(in srgb, var(--accent) 35%, var(--surface))"></i><span>Haiku 4.5</span><b>6%</b></div>' +
+              '<div class="leg"><i style="background:color-mix(in srgb, var(--accent) 18%, var(--surface))"></i><span>Haiku 5.5</span><b>1%</b></div>' +
+            '</div></section>' +
+        '</div>' +
+
+        '<div class="row row-d">' +
+          '<section class="card"><header class="card-h"><i class="ico">&#xE7C4;</i>Where the week went<span class="meta">Since Oct 18</span></header>' +
+            '<div class="wk">' +
+              '<div class="wk-row"><span>Claude Code</span><div class="hbar"><i style="--v:100%"></i></div><b>100%</b></div>' +
+              '<div class="wk-row"><span>Chats</span><div class="hbar"><i style="--v:0%"></i></div><b>0%</b></div>' +
+              '<div class="wk-row"><span>Cowork</span><div class="hbar"><i style="--v:0%"></i></div><b>0%</b></div>' +
+            '</div></section>' +
+          '<section class="card"><header class="card-h"><i class="ico">&#xE945;</i>Efficiency<span class="meta">This month</span></header>' +
+            '<div class="eff"><div class="eff-ring"><svg viewBox="0 0 40 40" aria-hidden="true"><circle class="rt" cx="20" cy="20" r="16"/><circle class="rv" cx="20" cy="20" r="16" stroke-dasharray="96.4 100.5" pathLength="100"/></svg><b>96.4%</b></div>' +
+              '<div><div class="eff-k">Cache hit rate<b>96.4%</b></div><div class="eff-k" style="margin-top:6px">Thinking share<b>38%</b></div>' +
+              '<div class="hbar" style="margin-top:6px"><i style="--v:38%"></i></div></div></div>' +
+            '<p class="eff-note">Thinking tokens as a share of all output this month.</p></section>' +
+          '<section class="card"><header class="card-h"><i class="ico">&#xE9D2;</i>Data health<span class="meta">Settings</span></header>' +
+            '<div class="kv"><span>Feed</span><b class="is-ok">LIVE</b></div>' +
+            '<div class="kv"><span>Last sample</span><b>12 s ago</b></div>' +
+            '<div class="kv"><span>Refresh cadence</span><b>60 s</b></div>' +
+            '<div class="kv"><span>Sign-in</span><b>Valid</b></div></section>' +
+        '</div>' +
+
+        '<footer class="page-foot">All costs are API-equivalent at list prices, not what your plan bills.</footer>' +
+      '</main>' +
+    '</div>';
+  q('dash-dark').innerHTML = dashHTML();
+  q('dash-light').innerHTML = dashHTML();
+
+  /* ---------- variants and the Colors picker ---------- */
+  const VARIANTS = [
+    ['system', 'System accent'], ['blue', 'Blue'], ['teal', 'Teal'], ['purple', 'Purple'],
+    ['rose', 'Rose'], ['orange', 'Orange'], ['green', 'Green'],
+  ];
+  q('swatches').innerHTML = VARIANTS.map(([v, name], i) =>
+    '<div class="sw-cell"><span class="sw-chip surface' + (i === 0 ? ' is-on' : '') + '" data-mode="dark" data-variant="' + v + '"></span><small>' + name + '</small></div>').join('');
+
+  ['dark', 'light'].forEach((mode) => {
+    const grid = q('variants-' + mode);
+    grid.innerHTML = VARIANTS.map(([v, name]) =>
+      '<figure class="vcell"><figcaption><b>' + name + '</b><span class="vh"></span></figcaption>' +
+      '<div class="wall wall-' + mode + ' wall-cell">' + widgetHTML('normal', mode, v) + '</div></figure>').join('');
+    if (mode === 'dark') {
+      grid.insertAdjacentHTML('beforeend',
+        '<div class="legend-cell surface" data-mode="dark" data-variant="system"><h4>Same in every accent</h4>' +
+        '<div class="sw-row"><i style="background:var(--ok)"></i>ok · LIVE lamp <b>#6CCB5F</b></div>' +
+        '<div class="sw-row"><i style="background:var(--warn)"></i>warn · value and footer <b>#FCE100</b></div>' +
+        '<div class="sw-row"><i style="background:var(--alert)"></i>alert · critical text <b>#FF8A80</b></div>' +
+        '<div class="sw-row"><i style="background:var(--usage-alert)"></i>usage-alert fill <b>#FF5F5F</b></div>' +
+        '<div class="sw-row"><i style="background:var(--stale)"></i>stale grey <b>#8C8C8C</b></div>' +
+        '<div class="sw-row"><i style="background:var(--accent)"></i>accent, the only variant colour</div></div>');
+    } else {
+      grid.insertAdjacentHTML('beforeend',
+        '<div class="legend-cell surface" data-mode="light" data-variant="system"><h4>Same in every accent · light</h4>' +
+        '<div class="sw-row"><i style="background:var(--ok)"></i>ok · LIVE lamp <b>#0B6B0B</b></div>' +
+        '<div class="sw-row"><i style="background:var(--warn)"></i>warn · value and footer <b>#8A5200</b></div>' +
+        '<div class="sw-row"><i style="background:var(--alert)"></i>alert · critical text <b>#B3261E</b></div>' +
+        '<div class="sw-row"><i style="background:var(--stale)"></i>stale grey <b>#6F6F6F</b></div>' +
+        '<div class="sw-row"><i style="background:var(--accent)"></i>accent, the only variant colour</div>' +
+        '<p class="note" style="margin-top:8px">System mode picks the dark or light row of the chosen accent.</p></div>');
+    }
+  });
+
+  /* ---------- label each variant with its computed accent ---------- */
+  document.querySelectorAll('.variants .vcell').forEach((cell) => {
+    const w = cell.querySelector('.gw');
+    const hex = getComputedStyle(w).getPropertyValue('--accent').trim().toUpperCase();
+    cell.querySelector('.vh').textContent = hex;
+  });
+
+  /* ---------- token table and collision check (both read computed styles) ---------- */
+  const probe = (mode, variant) => {
+    const d = document.createElement('div');
+    d.className = 'surface'; d.dataset.mode = mode; d.dataset.variant = variant;
+    d.style.position = 'absolute'; d.style.left = '-9999px';
+    document.body.appendChild(d);
+    return d;
+  };
+  const cssVal = (el, name) => getComputedStyle(el).getPropertyValue('--' + name).trim();
+  const ROLES = ['bg', 'surface', 'surface-alt', 'text', 'text-dim', 'text-3', 'accent', 'ok', 'warn', 'alert',
+                 'usage-warn', 'usage-alert', 'stale', 'track', 'time', 'time-track', 'widget-bg', 'tb-bg', 'tray-fg', 'tray-track'];
+  const pd = probe('dark', 'system'), pl = probe('light', 'system');
+  const tok = q('tokens');
+  tok.innerHTML = '<tr><th>role</th><th>light</th><th>dark</th></tr>' + ROLES.map((r) => {
+    const l = cssVal(pl, r), d = cssVal(pd, r);
+    return '<tr><td><span class="sw" style="background:' + l + '"></span>--' + r + '</td><td>' + l + '</td><td>' + d + '</td></tr>';
+  }).join('');
+
+  const hexRGB = (h) => {
+    const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(h);
+    return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : null;
+  };
+  const lab = (rgb) => {
+    const f = (c) => { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+    const r = f(rgb[0]), g = f(rgb[1]), b = f(rgb[2]);
+    const X = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047;
+    const Y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    const Z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883;
+    const t = (v) => (v > 0.008856 ? Math.cbrt(v) : 7.787 * v + 16 / 116);
+    return [116 * t(Y) - 16, 500 * (t(X) - t(Y)), 200 * (t(Y) - t(Z))];
+  };
+  const de = (a, b) => {
+    const A = lab(hexRGB(a)), B = lab(hexRGB(b));
+    return Math.hypot(A[0] - B[0], A[1] - B[1], A[2] - B[2]);
+  };
+  const rows = [];
+  ['dark', 'light'].forEach((mode) => {
+    VARIANTS.forEach(([v, name]) => {
+      const p = probe(mode, v);
+      const acc = cssVal(p, 'accent');
+      const ok = cssVal(p, 'ok'), warn = cssVal(p, 'warn'), alert = cssVal(p, 'alert'), ua = cssVal(p, 'usage-alert'), st = cssVal(p, 'stale');
+      const dOk = de(acc, ok), dW = de(acc, warn), dA = de(acc, alert), dU = de(acc, ua), dS = de(acc, st);
+      rows.push({ mode, name, acc, min: Math.min(dOk, dW, dA, dU, dS), dOk, dW, dA });
+      p.remove();
+    });
+  });
+  q('coll').innerHTML = '<tr><th>mode</th><th>accent</th><th>hex</th><th>dE ok</th><th>dE warn</th><th>dE alert</th><th>min</th></tr>' +
+    rows.map((r) => '<tr><td>' + r.mode + '</td><td>' + r.name + '</td><td>' + r.acc.toUpperCase() + '</td><td>' + r.dOk.toFixed(1) +
+      '</td><td>' + r.dW.toFixed(1) + '</td><td>' + r.dA.toFixed(1) + '</td><td>' + r.min.toFixed(1) + '</td></tr>').join('');
+  pd.remove(); pl.remove();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,1181 @@
+<!doctype html>
+<html lang="en" data-variant="blackwall">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Night City Final v2 - Claude Usage Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Rajdhani:wght@500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+/* =====================================================================
+   NIGHT CITY / FINAL v2  -  Claude Usage Monitor, design reference
+   Fonts (all SIL OFL 1.1): Chakra Petch (display numerals, headings),
+   Rajdhani (labels, chips, nav), Share Tech Mono (numbers, reset times,
+   data noise). Segoe UI Variable (Microsoft, Windows 11 system font) is
+   used only by the taskbar mock and is not bundled.
+   Layout: 1 tokens | 2 shared parts | 3 floating widget | 4 taskbar strip
+           | 5 tray options (A to D) | 6 dashboard (.nc-win) | 7 mock sheet
+           (mk-*, tr-*) and the Windows 11 taskbar mock (win-*, host colours).
+   Variants: blackwall (default; red line art, cyan RAM cells, cyan selection),
+   relic and mox (unchanged), edgerun (yellow plates,
+   Breach Protocol motifs). Every variant block defines the full token set.
+   Lift rule: every theme class starts with nc-; dashboard rules sit under
+   .nc-win so they can be lifted into the app without collisions.
+   ===================================================================== */
+
+/* ---------- 1. TOKENS: every theme colour is defined here, once per variant ---------- */
+/* --nc-bar = usage fill colour (defaults to fg on the older variants), --nc-sel = selection box,
+   --nc-yg = Breach Protocol lime (edgerun motifs only). */
+:root,
+[data-variant="blackwall"] {
+  --nc-bg-0: #070203;          /* void */
+  --nc-bg-1: #120608;
+  --nc-bg-2: #1c0a0d;          /* lifted panel top */
+  --nc-panel: #140609;         /* flat card / widget fill */
+  --nc-track: #4a1a1f;         /* empty RAM cell, dark red */
+  --nc-fg: #ff8f7e;            /* labels, primary text */
+  --nc-fg-hi: #ffd9cf;         /* numerals, emphasis */
+  --nc-ink-2: #ea8677;         /* secondary labels */
+  --nc-ink-3: #b06c62;         /* noise, reset text, stale values */
+  --nc-fg-faint: #5c2623;      /* decoration only, never text */
+  --nc-line: #ff3b30;          /* red line art: frames, dividers, boxes */
+  --nc-line-a: #ff3b30a0;      /* frame at 63 % */
+  --nc-hair: #ff3b3052;        /* 32 % hairlines */
+  --nc-accent: #ff4a3c;        /* time line, pace tick, corner brackets */
+  --nc-ok: #ff5a4c;            /* REC-style live dot and LIVE word */
+  --nc-warn: #ffb020;          /* WARN fill and outline chip */
+  --nc-signal: #ff3b30;        /* tabs, stamps, active nav block */
+  --nc-danger: #ff2e3d;        /* CRIT value and fill */
+  --nc-ink: #0a0304;           /* text on red blocks */
+  --nc-hz-a: #ff2e3d; --nc-hz-b: #0a0304;
+  --nc-hazard: repeating-linear-gradient(-45deg, var(--nc-hz-a) 0 2.83px, var(--nc-hz-b) 2.83px 5.66px);
+  --nc-glow: #ff3b3073;        /* glow, alpha 0.45 */
+  --nc-glow-accent: #ff3b3080; /* live dot glow, alpha 0.50 */
+  --nc-glow-danger: #ff2e3d59; /* critical glow, alpha 0.35 */
+  --nc-scan: #00000026;        /* scanline shade, alpha 0.15 */
+  --nc-ring: #6a2a2c;          /* tray track, empty cells */
+  --nc-stale: #b06c62;         /* stale fills and values */
+  --nc-bar: #3ef0ff;           /* RAM cell fill, cyan */
+  --nc-sel: #3ef0ff;           /* selection box, cyan */
+  --nc-yg: #d6f55a;            /* Breach lime (unused on this variant) */
+  --nc-cat-1: #ff8f7e; --nc-cat-2: #3ef0ff; --nc-cat-3: #ffb020; --nc-cat-4: #b06c62;
+  --nc-wall-a: #3a0d12; --nc-wall-b: #070203; --nc-wall-c: #15060a; --nc-haze: #ff3b3042;
+  --nc-page: #050101;
+}
+[data-variant="relic"] {
+  --nc-bg-0: #02080a; --nc-bg-1: #04161b; --nc-bg-2: #082630;
+  --nc-panel: #05171c; --nc-track: #0f3a45;
+  --nc-fg: #2fe6ff; --nc-fg-hi: #e2feff; --nc-ink-2: #8fe3ee; --nc-ink-3: #5a9aa4; --nc-fg-faint: #1a4550;
+  --nc-line: #2fd8ea; --nc-line-a: #2fd8ea99; --nc-hair: #2fd8ea52;
+  --nc-accent: #bff6ff; --nc-ok: #7dfff0; --nc-warn: #ffe600; --nc-signal: #ffe600; --nc-danger: #ff2e3d; --nc-ink: #02080a;
+  --nc-hz-a: #ffe600; --nc-hz-b: #02080a;
+  --nc-hazard: repeating-linear-gradient(-45deg, var(--nc-hz-a) 0 2.83px, var(--nc-hz-b) 2.83px 5.66px);
+  --nc-glow: #2fd8ea73; --nc-glow-accent: #bff6ff80; --nc-glow-danger: #ff2e3d59; --nc-scan: #00000026;
+  --nc-ring: #1d5560; --nc-stale: #5a9aa4;
+  --nc-bar: #2fe6ff; --nc-sel: #bff6ff; --nc-yg: #d6f55a;
+  --nc-cat-1: #2fe6ff; --nc-cat-2: #ffe600; --nc-cat-3: #7dfff0; --nc-cat-4: #bff6ff;
+  --nc-wall-a: #063440; --nc-wall-b: #03060a; --nc-wall-c: #0a1f2a; --nc-haze: #2fd8ea33; --nc-page: #010507;
+}
+[data-variant="edgerun"] {
+  --nc-bg-0: #0a0802; --nc-bg-1: #17130a; --nc-bg-2: #241d0c;
+  --nc-panel: #15110a; --nc-track: #4a3c14;
+  --nc-fg: #f6e9a6; --nc-fg-hi: #fff8cf; --nc-ink-2: #e8d68a; --nc-ink-3: #a8963c; --nc-fg-faint: #4e4515;
+  --nc-line: #fcee0a; --nc-line-a: #fcee0a99; --nc-hair: #fcee0a52;
+  --nc-accent: #fcee0a; --nc-ok: #3ef0ff; --nc-warn: #ff7a1a; --nc-signal: #fcee0a; --nc-danger: #ff2e3d; --nc-ink: #0a0802;
+  --nc-hz-a: #fcee0a; --nc-hz-b: #0a0802;
+  --nc-hazard: repeating-linear-gradient(-45deg, var(--nc-hz-a) 0 2.83px, var(--nc-hz-b) 2.83px 5.66px);
+  --nc-glow: #fcee0a73; --nc-glow-accent: #3ef0ff80; --nc-glow-danger: #ff2e3d59; --nc-scan: #00000026;
+  --nc-ring: #6e5a22; --nc-stale: #a8963c;
+  --nc-bar: #fcee0a; --nc-sel: #3ef0ff; --nc-yg: #d6f55a;
+  --nc-cat-1: #fcee0a; --nc-cat-2: #3ef0ff; --nc-cat-3: #d6f55a; --nc-cat-4: #ff7a1a;
+  --nc-wall-a: #2c2408; --nc-wall-b: #070703; --nc-wall-c: #15110a; --nc-haze: #fcee0a30; --nc-page: #050401;
+}
+[data-variant="mox"] {
+  --nc-bg-0: #09030a; --nc-bg-1: #140719; --nc-bg-2: #1f0b2a;
+  --nc-panel: #1a0a22; --nc-track: #4a1f52;
+  --nc-fg: #ff7ac3; --nc-fg-hi: #ffd9ef; --nc-ink-2: #e7a2d2; --nc-ink-3: #b274ad; --nc-fg-faint: #4e2141;
+  --nc-line: #ff3ea5; --nc-line-a: #ff3ea599; --nc-hair: #ff3ea552;
+  --nc-accent: #3ef0ff; --nc-ok: #3ef0ff; --nc-warn: #ffe600; --nc-signal: #ffe600; --nc-danger: #ff2e3d; --nc-ink: #09030a;
+  --nc-hz-a: #ffe600; --nc-hz-b: #09030a;
+  --nc-hazard: repeating-linear-gradient(-45deg, var(--nc-hz-a) 0 2.83px, var(--nc-hz-b) 2.83px 5.66px);
+  --nc-glow: #ff3ea573; --nc-glow-accent: #3ef0ff80; --nc-glow-danger: #ff2e3d59; --nc-scan: #00000026;
+  --nc-ring: #6a3a6a; --nc-stale: #b274ad;
+  --nc-bar: #ff7ac3; --nc-sel: #3ef0ff; --nc-yg: #d6f55a;
+  --nc-cat-1: #ff7ac3; --nc-cat-2: #3ef0ff; --nc-cat-3: #ffe600; --nc-cat-4: #ffd9ef;
+  --nc-wall-a: #3a0c35; --nc-wall-b: #07030a; --nc-wall-c: #1a0820; --nc-haze: #ff3ea53d; --nc-page: #050107;
+}
+
+/* ---------- 2. SHARED PARTS (chamfer frame, chips, pulse, refresh hit) ---------- */
+*, *::before, *::after { box-sizing: border-box; }
+/* live pip: eased 2.4 s pulse between alpha 1.0 and 0.3 (Pillow: 0.65 + 0.35*cos(2*pi*t/2.4)) */
+.nc-pip { display: inline-block; width: 6px; height: 6px; background: var(--nc-ok); box-shadow: 0 0 6px var(--nc-glow-accent); animation: nc-pulse 2.4s ease-in-out infinite; }
+@keyframes nc-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+/* refresh hit: three frames of 50 ms, played once per data refresh, never looped */
+@keyframes nc-hit {
+  0%     { text-shadow: var(--nc-hit-1); animation-timing-function: step-end; }
+  33.33% { text-shadow: var(--nc-hit-2); animation-timing-function: step-end; }
+  66.66% { text-shadow: var(--nc-hit-3); animation-timing-function: step-end; }
+  100%   { text-shadow: var(--nc-hit-3); }
+}
+.nc-hit {
+  --nc-hit-1: -2px 0 0 var(--nc-accent), 2px 0 0 var(--nc-danger);
+  --nc-hit-2: -1px 0 0 var(--nc-accent), 1px 0 0 var(--nc-danger);
+  --nc-hit-3: none;
+  animation: nc-hit 150ms linear 1 both;
+}
+/* chips: out = outline (chamfered, two layers), crit = hazard-capped black box, solid = yellow block */
+.nc-chip {
+  position: relative; isolation: isolate; display: inline-flex; align-items: center; height: 14px; padding: 0 6px;
+  white-space: nowrap; font: 700 11px/1 "Rajdhani", sans-serif; letter-spacing: .06em; text-transform: uppercase;
+  --oc: var(--nc-accent); color: var(--oc);
+}
+.nc-chip.out::before, .nc-chip.out::after { content: ""; position: absolute; inset: 0; z-index: -2; background: var(--oc); clip-path: polygon(5px 0, 100% 0, 100% 100%, 0 100%, 0 5px); }
+.nc-chip.out::after { inset: 1px; z-index: -1; background: var(--nc-panel); clip-path: polygon(4px 0, 100% 0, 100% 100%, 0 100%, 0 4px); }
+.nc-chip.warn { --oc: var(--nc-warn); color: var(--nc-warn); }
+.nc-chip.ghost { --oc: var(--nc-ink-3); color: var(--nc-ink-2); }
+.nc-chip.solid { padding: 0 6px; background: var(--nc-warn); color: var(--nc-ink); clip-path: polygon(5px 0, 100% 0, 100% 100%, 0 100%, 0 5px); }
+.nc-chip.crit { padding: 0 6px 0 11px; background: var(--nc-ink); color: var(--nc-hz-a); clip-path: polygon(0 0, calc(100% - 5px) 0, 100% 5px, 100% 100%, 0 100%); }
+.nc-chip.crit::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 7px; background: var(--nc-hazard); }
+/* corner brackets: L-shaped, 9 px, 2 px stroke, top-right and bottom-left */
+.nc-br { position: absolute; width: 9px; height: 9px; border: 0 solid var(--nc-accent); }
+.nc-br.tr { top: 4px; right: 4px; border-top-width: 2px; border-right-width: 2px; }
+.nc-br.bl { bottom: 4px; left: 4px; border-bottom-width: 2px; border-left-width: 2px; }
+/* pace hairline: 2 px line, accent up to --t (percent), with a 2 x 6 px tick at the end */
+.nc-tl { position: relative; height: 2px; background: linear-gradient(90deg, var(--nc-accent) calc(var(--t) * 1%), var(--nc-track) calc(var(--t) * 1%)); }
+.nc-tl::after { content: ""; position: absolute; top: -2px; left: calc(var(--t) * 1% - 1px); width: 2px; height: 6px; background: var(--nc-accent); }
+/* solid slanted bar: fill with a 45-degree leading edge (4 px at 8 px height) */
+.nc-bar { position: relative; height: 8px; background: var(--nc-track); }
+.nc-bar > b { position: absolute; left: 0; top: 0; bottom: 0; width: calc(var(--p) * 1%); background: var(--nc-bar, var(--nc-fg)); clip-path: polygon(0 0, 100% 0, calc(100% - 4px) 100%, 0 100%); }
+/* hazard stripes (45 degrees, horizontal period 8 px, see extras.hazard) */
+.nc-hz { background: var(--nc-hazard); }
+
+/* ---------- 3. FLOATING WIDGET  (264 x 96 two-row, 264 x 126 with FABLE; origin = outer top-left) ---------- */
+.nc-widget {
+  position: relative; isolation: isolate; width: 264px; height: 126px; color: var(--nc-fg);
+  font-family: "Rajdhani", sans-serif; overflow: visible;
+}
+.nc-widget.is-2row { height: 96px; }
+/* frame: chamfer 8 at top-left and bottom-right, 1 px line at 60 % */
+.nc-widget::before {
+  content: ""; position: absolute; inset: 0; z-index: -2; background: var(--nc-line-a);
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+}
+/* panel: inset 1 px, flat fill, scanlines 15 % every 3rd row under the content */
+.nc-widget::after {
+  content: ""; position: absolute; inset: 1px; z-index: -1;
+  background: repeating-linear-gradient(0deg, var(--nc-scan) 0 1px, transparent 1px 3px), var(--nc-panel);
+  clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
+}
+.nc-widget .nc-br { border-color: var(--nc-accent); }
+.nc-widget .nc-hd { position: absolute; left: 14px; right: 14px; top: 8px; height: 12px; display: flex; align-items: center; justify-content: space-between; }
+.nc-widget .nc-brand { display: flex; align-items: center; gap: 7px; font: 700 12px/12px "Rajdhani", sans-serif; letter-spacing: .16em; text-transform: uppercase; color: var(--nc-fg-hi); }
+.nc-widget .nc-live { font: 700 11px/12px "Rajdhani", sans-serif; letter-spacing: .12em; text-transform: uppercase; color: var(--nc-ok); }
+.nc-widget .nc-rows { position: absolute; left: 14px; top: 28px; width: 236px; }
+.nc-widget .nc-row { position: relative; height: 30px; }
+.nc-widget .nc-rt { position: absolute; left: 0; right: 0; top: 0; height: 14px; display: flex; align-items: center; justify-content: space-between; }
+.nc-widget .nc-lbl { display: flex; align-items: center; gap: 6px; font: 700 13px/14px "Rajdhani", sans-serif; letter-spacing: .12em; text-transform: uppercase; color: var(--nc-fg); white-space: nowrap; }
+.nc-widget .nc-lbl em { font: 600 11px/14px "Rajdhani", sans-serif; font-style: normal; letter-spacing: .08em; color: var(--nc-ink-3); }
+.nc-widget .nc-end { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.nc-widget .nc-rs { font: 400 11px/14px "Share Tech Mono", monospace; letter-spacing: .02em; color: var(--nc-ink-2); }
+.nc-widget .nc-val { font: 400 15px/14px "Share Tech Mono", monospace; color: var(--nc-fg-hi); text-shadow: 0 0 6px var(--nc-glow); }
+.nc-widget .nc-val small { font-size: 11px; color: var(--nc-ink-2); margin-left: 1px; text-shadow: none; }
+.nc-widget .nc-tl { position: absolute; left: 0; right: 0; top: 15px; }
+.nc-widget .nc-bar { position: absolute; left: 0; right: 0; top: 19px; }
+.nc-widget .nc-bar::after { content: ""; position: absolute; right: 0; top: -2px; width: 1px; height: 12px; background: var(--nc-ink-3); }
+/* segmented RAM bar: 26 cells of 7 px with 2 px gaps = 232 px (blackwall and edgerun) */
+.nc-widget .nc-wseg { display: none; position: absolute; left: 0; top: 19px; width: 232px; height: 8px; gap: 2px; }
+.nc-widget .nc-wseg i { flex: 0 0 7px; position: relative; height: 100%; background: var(--nc-track); }
+.nc-widget .nc-wseg i b { position: absolute; left: 0; top: 0; bottom: 0; width: calc(var(--f) * 100%); background: var(--nc-bar, var(--nc-fg)); }
+:is([data-variant="blackwall"], [data-variant="edgerun"]) .nc-widget .nc-wseg { display: flex; }
+:is([data-variant="blackwall"], [data-variant="edgerun"]) .nc-widget .nc-bar { display: none; }
+/* warning: amber fill, value amber, outline WARN chip */
+.nc-widget .nc-row.warn .nc-bar > b, .nc-widget .nc-row.warn .nc-wseg b { background: var(--nc-warn); }
+.nc-widget .nc-row.warn .nc-val { color: var(--nc-warn); }
+/* critical: hazard fill, danger value, hazard-capped CRIT chip */
+.nc-widget .nc-row.crit .nc-bar > b, .nc-widget .nc-row.crit .nc-wseg b { background: var(--nc-hazard); }
+.nc-widget .nc-row.crit .nc-val { color: var(--nc-danger); text-shadow: 0 0 6px var(--nc-glow-danger); }
+/* stale: whole widget drops to the dim tokens, values stay readable, the band carries the state */
+.nc-widget.is-stale { --nc-fg: var(--nc-ink-3); --nc-fg-hi: var(--nc-ink-3); --nc-ink-2: var(--nc-ink-3); --nc-accent: var(--nc-ink-3); }
+.nc-widget.is-stale .nc-val { text-shadow: none; }
+.nc-widget .nc-band {
+  position: absolute; left: 12px; right: 16px; top: 6px; height: 16px; padding: 0 8px;
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--nc-ink); box-shadow: inset 0 0 0 1px var(--nc-warn);
+  font: 700 11px/1 "Rajdhani", sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--nc-warn);
+}
+.nc-widget .nc-band::before, .nc-widget .nc-band::after { content: ""; position: absolute; left: 0; right: 0; height: 2px; background: var(--nc-hazard); }
+.nc-widget .nc-band::before { top: 0; }
+.nc-widget .nc-band::after { bottom: 0; }
+.nc-widget .nc-band .nc-age { font: 400 11px/1 "Share Tech Mono", monospace; letter-spacing: .02em; color: var(--nc-ink-2); }
+/* blackwall: boxed LIVE tag, boxed RST counter, cyan RAM cells inside red line art */
+[data-variant="blackwall"] .nc-widget .nc-live { padding: 1px 4px 0; box-shadow: inset 0 0 0 1px var(--nc-line); }
+[data-variant="blackwall"] .nc-widget .nc-rs { padding: 0 4px; color: var(--nc-ink-2); box-shadow: inset 0 0 0 1px var(--nc-line); }
+/* edgerun: the widget is a yellow plate (ink text, ink cells, black LIVE chip with cyan) */
+[data-variant="edgerun"] .nc-widget,
+[data-variant="edgerun"] .nc-strip {
+  --nc-panel: #fcee0a; --nc-line: #0a0802; --nc-line-a: #0a0802; --nc-hair: #0a080252;
+  --nc-fg: #0a0802; --nc-fg-hi: #0a0802; --nc-ink-2: #2e2900; --nc-ink-3: #4f4700;
+  --nc-accent: #0a0802; --nc-track: #c2b408; --nc-bar: #0a0802; --nc-scan: #0000001a;
+  --nc-glow: transparent; --nc-glow-accent: transparent;
+  --nc-warn: #ff6a1a; --nc-hazard: var(--nc-danger);
+}
+[data-variant="edgerun"] .nc-widget .nc-brand .nc-pip { display: none; }
+[data-variant="edgerun"] .nc-widget .nc-live { position: relative; padding: 1px 5px 0 15px; background: var(--nc-ink); }
+[data-variant="edgerun"] .nc-widget .nc-live::before { content: ""; position: absolute; left: 5px; top: 3px; width: 6px; height: 6px; background: var(--nc-ok); animation: nc-pulse 2.4s ease-in-out infinite; }
+[data-variant="edgerun"] .nc-widget .nc-row.warn .nc-val,
+[data-variant="edgerun"] .nc-widget .nc-row.crit .nc-val { color: var(--nc-ink); text-shadow: none; }
+[data-variant="edgerun"] .nc-widget .nc-chip.warn { --oc: var(--nc-ink); color: var(--nc-ink); }
+[data-variant="edgerun"] .nc-widget .nc-band .nc-age { color: #fcee0a; }
+
+/* ---------- 4. TASKBAR STRIP  (240 x 38, sits left of the tray clock inside the 48 px bar) ---------- */
+.nc-strip { position: relative; isolation: isolate; width: 240px; height: 38px; color: var(--nc-fg); font-family: "Rajdhani", sans-serif; }
+.nc-strip::before {
+  content: ""; position: absolute; inset: 0; z-index: -2; background: var(--nc-line-a);
+  clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
+}
+.nc-strip::after {
+  content: ""; position: absolute; inset: 1px; z-index: -1;
+  background: repeating-linear-gradient(0deg, var(--nc-scan) 0 1px, transparent 1px 3px), var(--nc-panel);
+  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+}
+.nc-s-row { position: absolute; left: 0; right: 0; height: 14px; }
+.nc-s-row.r1 { top: 6px; }
+.nc-s-row.r2 { top: 22px; }
+.nc-s-k { position: absolute; left: 10px; top: 0; font: 700 11px/12px "Rajdhani", sans-serif; letter-spacing: .12em; color: var(--nc-fg-hi); }
+.nc-s-line { position: absolute; left: 28px; width: 124px; top: 2px; height: 2px; background: linear-gradient(90deg, var(--nc-accent) calc(var(--t) * 1%), var(--nc-track) calc(var(--t) * 1%)); }
+.nc-s-line::after { content: ""; position: absolute; top: -2px; left: calc(var(--t) * 1% - 1px); width: 2px; height: 6px; background: var(--nc-accent); }
+.nc-s-bar { position: absolute; left: 28px; width: 124px; top: 5px; height: 6px; background: var(--nc-track); }
+.nc-s-bar b { position: absolute; left: 0; top: 0; bottom: 0; width: calc(var(--p) * 1%); background: var(--nc-bar, var(--nc-fg)); clip-path: polygon(0 0, 100% 0, calc(100% - 3px) 100%, 0 100%); }
+/* segmented strip bar: 18 cells of 6 px with 1 px gaps = 125 px (blackwall and edgerun) */
+.nc-strip .nc-s-seg { display: none; position: absolute; left: 28px; top: 5px; width: 125px; height: 6px; gap: 1px; }
+.nc-strip .nc-s-seg i { flex: 0 0 6px; position: relative; height: 100%; background: var(--nc-track); }
+.nc-strip .nc-s-seg i b { position: absolute; left: 0; top: 0; bottom: 0; width: calc(var(--f) * 100%); background: var(--nc-bar, var(--nc-fg)); }
+:is([data-variant="blackwall"], [data-variant="edgerun"]) .nc-strip .nc-s-seg { display: flex; }
+:is([data-variant="blackwall"], [data-variant="edgerun"]) .nc-strip .nc-s-bar { display: none; }
+/* live tag behind the dot and word: boxed red on blackwall, black chip on edgerun */
+.nc-strip .nc-s-tag { display: none; position: absolute; left: 183px; top: 12px; width: 53px; height: 14px; }
+:is([data-variant="blackwall"], [data-variant="edgerun"]) .nc-strip .nc-s-tag { display: block; }
+[data-variant="blackwall"] .nc-strip .nc-s-tag { box-shadow: inset 0 0 0 1px var(--nc-line); }
+[data-variant="edgerun"] .nc-strip .nc-s-tag { background: var(--nc-ink); }
+.nc-s-pct { position: absolute; right: 64px; top: 0; font: 400 11px/12px "Share Tech Mono", monospace; color: var(--nc-fg-hi); text-align: right; }
+.nc-s-dot { position: absolute; left: 186px; top: 16px; width: 6px; height: 6px; background: var(--nc-ok); animation: nc-pulse 2.4s ease-in-out infinite; }
+.nc-s-word { position: absolute; left: 196px; top: 14px; font: 700 11px/12px "Rajdhani", sans-serif; letter-spacing: .12em; text-transform: uppercase; color: var(--nc-ok); }
+.nc-strip.is-stale { --nc-fg: var(--nc-ink-3); --nc-fg-hi: var(--nc-ink-3); --nc-accent: var(--nc-ink-3); --nc-ok: var(--nc-ink-3); }
+
+/* ---------- 5. TRAY OPTIONS  (four alternatives, built by JS from integer geometry; see TRAY_OPT) ---------- */
+.nc-tray { display: inline-flex; line-height: 0; }
+.nc-tray svg { display: block; }
+
+/* ---------- 6. DASHBOARD OVERVIEW  (.nc-win, 1200 x 760, WebView2 window) ---------- */
+.nc-win {
+  position: relative; isolation: isolate; width: 1200px; height: 760px; overflow: hidden;
+  color: var(--nc-fg); font: 500 14px/1.35 "Rajdhani", sans-serif; background: var(--nc-bg-0);
+  box-shadow: 0 0 0 1px var(--nc-hair), 0 0 46px -14px var(--nc-glow);
+}
+.nc-win::before {
+  content: ""; position: absolute; inset: 0; z-index: -1;
+  background:
+    radial-gradient(900px 520px at 80% -8%, var(--nc-wall-a) 0%, transparent 70%),
+    radial-gradient(640px 460px at -4% 112%, var(--nc-wall-c) 0%, transparent 72%),
+    linear-gradient(180deg, var(--nc-bg-2) 0%, var(--nc-bg-0) 62%);
+}
+.nc-win > .nc-scanov { position: absolute; inset: 0; z-index: 60; pointer-events: none; background: repeating-linear-gradient(0deg, var(--nc-scan) 0 1px, transparent 1px 3px); }
+.nc-win .nc-tb {
+  position: relative; z-index: 2; height: 34px; display: flex; align-items: center; justify-content: space-between;
+  padding-left: 12px; background: linear-gradient(90deg, var(--nc-bg-0), var(--nc-bg-2)); box-shadow: inset 0 -1px 0 var(--nc-line);
+}
+.nc-win .nc-tb-t { display: flex; align-items: center; gap: 12px; font: 600 12px/1 "Chakra Petch", sans-serif; letter-spacing: .2em; text-transform: uppercase; color: var(--nc-fg-hi); }
+.nc-win .nc-tag { display: inline-block; transform: skewX(-12deg); background: var(--nc-signal); color: var(--nc-ink); padding: 4px 9px 3px; font: 700 12px/1 "Rajdhani", sans-serif; letter-spacing: .14em; }
+.nc-win .nc-tag > span { display: inline-block; transform: skewX(12deg); }
+.nc-win .nc-wb { display: flex; height: 34px; color: var(--nc-fg); }
+.nc-win .nc-wb i { position: relative; width: 46px; height: 34px; display: block; }
+.nc-win .nc-wb i::before, .nc-win .nc-wb i::after { content: ""; position: absolute; }
+.nc-win .wb-min::before { left: 18px; top: 17px; width: 11px; height: 2px; background: var(--nc-fg); }
+.nc-win .wb-max::before { left: 18px; top: 12px; width: 10px; height: 10px; border: 2px solid var(--nc-fg); }
+.nc-win .wb-x::before, .nc-win .wb-x::after { left: 14px; top: 16px; width: 18px; height: 2px; background: var(--nc-danger); }
+.nc-win .wb-x::before { transform: rotate(45deg); }
+.nc-win .wb-x::after { transform: rotate(-45deg); }
+.nc-win .nc-body { position: relative; z-index: 1; display: grid; grid-template-columns: 200px 1000px; height: 726px; }
+/* nav */
+.nc-win .nc-nav { position: relative; padding: 18px 0 16px; display: flex; flex-direction: column; background: linear-gradient(180deg, var(--nc-bg-2), var(--nc-bg-0)); box-shadow: inset -1px 0 0 var(--nc-hair); }
+.nc-win .nc-brand-blk { padding: 0 18px; }
+.nc-win .nc-brand-blk h1 { margin: 0; font: 700 23px/1.02 "Chakra Petch", sans-serif; letter-spacing: .05em; text-transform: uppercase; color: var(--nc-fg-hi); }
+.nc-win .nc-brand-blk h1 span { color: var(--nc-signal); }
+.nc-win .nc-brand-blk .nc-noise { display: block; margin-top: 8px; }
+.nc-win .nc-navlist { list-style: none; margin: 24px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.nc-win .nc-navlist li { margin-left: 10px; }
+.nc-win .nc-navlist a {
+  position: relative; isolation: isolate; display: flex; align-items: center; gap: 10px; height: 34px; width: 186px; padding: 0 16px 0 22px;
+  font: 600 15px/1 "Rajdhani", sans-serif; letter-spacing: .14em; text-transform: uppercase; text-decoration: none;
+  color: var(--nc-ink-2); background: var(--nc-bg-1); clip-path: polygon(12px 0, 100% 0, calc(100% - 12px) 100%, 0 100%);
+}
+.nc-win .nc-navlist .ix { font: 400 11px/1 "Share Tech Mono", monospace; color: var(--nc-ink-3); width: 18px; }
+.nc-win .nc-navlist li.on a { background: var(--nc-signal); color: var(--nc-ink); }
+.nc-win .nc-navlist li.on .ix { color: var(--nc-ink); }
+/* blackwall selection: cyan outline box, cyan text, dark fill (layered so the chamfer keeps its line) */
+.nc-win[data-variant="blackwall"] .nc-navlist li.on a { background: transparent; color: var(--nc-sel); }
+.nc-win[data-variant="blackwall"] .nc-navlist li.on a::before { content: ""; position: absolute; inset: 0; z-index: -2; background: var(--nc-sel); clip-path: polygon(12px 0, 100% 0, calc(100% - 12px) 100%, 0 100%); }
+.nc-win[data-variant="blackwall"] .nc-navlist li.on a::after { content: ""; position: absolute; inset: 1px; z-index: -1; background: #06181c; clip-path: polygon(11px 0, 100% 0, calc(100% - 11px) 100%, 0 100%); }
+.nc-win[data-variant="blackwall"] .nc-navlist li.on .ix { color: var(--nc-sel); }
+.nc-win .nc-wf { display: none; margin: 22px 0 0 26px; color: var(--nc-line); }
+.nc-win[data-variant="blackwall"] .nc-wf { display: block; }
+.nc-win .nc-matrix { display: none; margin: 22px 18px 0; }
+.nc-win[data-variant="edgerun"] .nc-matrix { display: block; }
+.nc-win .nc-matrix .mh { display: inline-block; background: var(--nc-signal); color: var(--nc-ink); padding: 2px 7px 1px; font: 700 11px/12px "Rajdhani", sans-serif; letter-spacing: .14em; text-transform: uppercase; }
+.nc-win .nc-mx { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; margin-top: 8px; }
+.nc-win .nc-mx i, .nc-win .nc-buf i { display: block; height: 17px; font: 400 11px/17px "Share Tech Mono", monospace; font-style: normal; text-align: center; color: var(--nc-yg); box-shadow: inset 0 0 0 1px var(--nc-hair); }
+.nc-win .nc-mx i.hi, .nc-win .nc-buf i.on { background: var(--nc-yg); color: var(--nc-ink); box-shadow: none; }
+.nc-win .nc-buf { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 10px; }
+.nc-win .nc-buf i { height: 20px; line-height: 20px; box-shadow: inset 0 0 0 1px var(--nc-yg); }
+.nc-win .nc-sync { margin: auto 18px 0; padding-top: 12px; box-shadow: inset 0 1px 0 var(--nc-hair); display: flex; flex-direction: column; gap: 8px; }
+.nc-win .nc-live { display: flex; align-items: center; gap: 8px; font: 700 13px/1 "Rajdhani", sans-serif; letter-spacing: .14em; text-transform: uppercase; color: var(--nc-ok); }
+/* main */
+.nc-win .nc-main { position: relative; min-width: 0; padding: 16px 22px 12px; display: flex; flex-direction: column; gap: 14px; }
+.nc-win .nc-ph { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; padding-bottom: 10px; box-shadow: inset 0 -1px 0 var(--nc-hair); }
+.nc-win .nc-ph h2 { margin: 0; font: 700 30px/1 "Chakra Petch", sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--nc-fg-hi); }
+.nc-win .nc-ph-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; text-align: right; }
+.nc-win .nc-ph-meta p { margin: 0; font: 500 13px/1.25 "Rajdhani", sans-serif; color: var(--nc-ink-2); max-width: 420px; }
+.nc-win .nc-noise { font: 400 11px/1.25 "Share Tech Mono", monospace; letter-spacing: .06em; text-transform: uppercase; color: var(--nc-ink-3); white-space: nowrap; }
+/* cut card: chamfer 14 at top-left and bottom-right */
+.nc-win .nc-card { position: relative; isolation: isolate; --cut: 14px; padding: 14px 16px; }
+.nc-win .nc-card::before {
+  content: ""; position: absolute; inset: 0; z-index: -2; background: var(--nc-line-a);
+  clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+}
+.nc-win .nc-card::after {
+  content: ""; position: absolute; inset: 1px; z-index: -1; background: var(--nc-panel);
+  clip-path: polygon(calc(var(--cut) - 1px) 0, 100% 0, 100% calc(100% - var(--cut) + 1px), calc(100% - var(--cut) + 1px) 100%, 0 100%, 0 calc(var(--cut) - 1px));
+}
+.nc-win .nc-card .nc-br { border-color: var(--nc-accent); }
+.nc-win .nc-kh { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.nc-win .nc-k { font: 700 13px/1 "Rajdhani", sans-serif; letter-spacing: .16em; text-transform: uppercase; color: var(--nc-fg-hi); }
+.nc-win .nc-k em { font-style: normal; font-weight: 600; letter-spacing: .08em; color: var(--nc-ink-2); margin-left: 6px; }
+.nc-win .nc-big { display: block; margin-top: 8px; font: 700 48px/1 "Chakra Petch", sans-serif; color: var(--nc-fg-hi); }
+.nc-win .nc-big small { font-size: 22px; color: var(--nc-ink-2); margin-left: 4px; }
+.nc-win .nc-big .nc-sm { margin-left: 10px; font: 700 12px/1 "Rajdhani", sans-serif; letter-spacing: .12em; text-transform: uppercase; color: var(--nc-ink-2); }
+.nc-win .nc-resets { margin-top: 8px; font: 400 11px/1 "Share Tech Mono", monospace; letter-spacing: .06em; text-transform: uppercase; color: var(--nc-ink-2); }
+/* blackwall reset: boxed red RST and countdown; edgerun reset: filled TIME REMAINING bar */
+.nc-win .nc-rbox-row { display: none; margin-top: 6px; gap: 6px; }
+.nc-win .nc-rbox { display: inline-block; padding: 1px 5px 0; box-shadow: inset 0 0 0 1px var(--nc-line); font: 400 11px/14px "Share Tech Mono", monospace; letter-spacing: .04em; text-transform: uppercase; color: var(--nc-ink-2); }
+.nc-win .nc-rbox.c { color: var(--nc-accent); box-shadow: inset 0 0 0 1px var(--nc-accent); }
+.nc-win .nc-cd { display: none; position: relative; height: 16px; margin-top: 6px; background: var(--nc-track); box-shadow: inset 0 0 0 1px var(--nc-hair); }
+.nc-win .nc-cd b { position: absolute; left: 0; top: 0; bottom: 0; width: calc(var(--p) * 1%); background: var(--nc-signal); }
+.nc-win .nc-cd .l { position: absolute; left: 6px; top: 0; z-index: 1; font: 700 11px/16px "Rajdhani", sans-serif; letter-spacing: .12em; text-transform: uppercase; color: var(--nc-ink); }
+.nc-win .nc-cd .v { position: absolute; right: 6px; top: 0; z-index: 1; font: 400 11px/16px "Share Tech Mono", monospace; letter-spacing: .04em; color: var(--nc-signal); }
+.nc-win[data-variant="blackwall"] .nc-rbox-row { display: flex; }
+.nc-win[data-variant="blackwall"] .nc-resets, .nc-win[data-variant="edgerun"] .nc-resets { display: none; }
+.nc-win[data-variant="edgerun"] .nc-cd { display: block; }
+.nc-win .nc-pacebar { margin-top: 12px; }
+.nc-win .nc-pacebar .nc-tl { height: 3px; }
+.nc-win .nc-pacebar .nc-tl::after { top: -3px; height: 9px; }
+/* segmented bar: 31 cells of 7 px with 2 px gaps (card width 277 px), cell fill = clamp(p/100*31 - i, 0, 1) */
+.nc-win .nc-seg { display: flex; gap: 2px; height: 10px; margin-top: 8px; }
+.nc-win .nc-seg i { flex: 0 0 7px; position: relative; height: 100%; background: var(--nc-track); }
+.nc-win .nc-seg i b { position: absolute; left: 0; top: 0; bottom: 0; width: calc(var(--f) * 100%); background: var(--nc-bar, var(--nc-fg)); }
+.nc-win .nc-sbar { position: relative; height: 10px; background: var(--nc-track); }
+.nc-win .nc-sbar > b { position: absolute; left: 0; top: 0; bottom: 0; width: calc(var(--p) * 1%); background: var(--nc-bar, var(--nc-fg)); clip-path: polygon(0 0, 100% 0, calc(100% - 5px) 100%, 0 100%); }
+.nc-win .nc-pace { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 10px; font: 400 11px/16px "Share Tech Mono", monospace; letter-spacing: .04em; text-transform: uppercase; color: var(--nc-ink-2); }
+.nc-win .nc-limits { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.nc-win .nc-limits .nc-card { height: 176px; }
+/* cost row */
+.nc-win .nc-costrow { display: grid; grid-template-columns: 1.25fr 1.15fr 1fr; gap: 14px; }
+.nc-win .nc-costrow .nc-card { height: 216px; }
+.nc-win .nc-hero .nc-hzt { position: absolute; left: 14px; right: 0; top: 0; height: 3px; background: var(--nc-hazard); }
+.nc-win .nc-money { display: block; margin-top: 8px; font: 700 52px/1 "Chakra Petch", sans-serif; color: var(--nc-fg-hi); text-shadow: 0 0 16px var(--nc-glow); }
+.nc-win .nc-money.nc-hit { --nc-hit-3: 0 0 16px var(--nc-glow); }
+.nc-win .nc-stamp { display: inline-block; margin-top: 10px; transform: skewX(-12deg); background: var(--nc-signal); color: var(--nc-ink); padding: 5px 12px 4px; font: 700 15px/1 "Rajdhani", sans-serif; letter-spacing: .12em; text-transform: uppercase; }
+.nc-win .nc-stamp span { display: inline-block; transform: skewX(12deg); }
+.nc-win .nc-hero p { margin: 8px 0 0; font: 500 13px/1.3 "Rajdhani", sans-serif; color: var(--nc-fg); max-width: 330px; }
+.nc-win .nc-plan { margin-top: 14px; }
+.nc-win .nc-plan .nc-sbar { height: 8px; }
+.nc-win .nc-plan .nc-tick { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--nc-accent); }
+.nc-win .nc-plan .nc-capline { position: relative; height: 14px; margin-top: 6px; font: 400 11px/14px "Share Tech Mono", monospace; letter-spacing: .04em; text-transform: uppercase; color: var(--nc-ink-2); }
+.nc-win .nc-minis { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.nc-win .nc-minis .nc-card { height: 85px; padding: 12px 14px; }
+.nc-win .nc-mini .nc-k { font-size: 12px; }
+.nc-win .nc-mini .nc-big-s { margin-top: 6px; font: 700 24px/1 "Chakra Petch", sans-serif; color: var(--nc-fg-hi); }
+.nc-win .nc-mini .nc-sub { margin-top: 4px; font: 400 11px/1 "Share Tech Mono", monospace; letter-spacing: .04em; text-transform: uppercase; color: var(--nc-ink-2); white-space: nowrap; }
+.nc-win[data-variant="blackwall"] .nc-mini .nc-big-s, .nc-win[data-variant="blackwall"] .nc-mini .nc-sub { text-align: right; }
+.nc-win .nc-burn .nc-big-b { margin-top: 10px; font: 700 40px/1 "Chakra Petch", sans-serif; color: var(--nc-fg-hi); }
+.nc-win .nc-burn .nc-big-b small { font-size: 14px; color: var(--nc-ink-2); margin-left: 6px; }
+.nc-win .nc-scale { position: relative; margin-top: 18px; }
+.nc-win .nc-scale .nc-sbar { height: 8px; }
+.nc-win .nc-scale .nc-ticks { display: flex; justify-content: space-between; margin-top: 6px; font: 400 11px/1 "Share Tech Mono", monospace; letter-spacing: .04em; text-transform: uppercase; color: var(--nc-ink-3); }
+.nc-win .nc-scale .nc-ticks b { font-weight: 400; color: var(--nc-accent); }
+/* row 3 */
+.nc-win .nc-row3 { display: grid; grid-template-columns: 1.05fr 0.9fr 1.35fr; gap: 14px; }
+.nc-win .nc-row3 .nc-card { height: 178px; }
+.nc-win .nc-stackbar { display: flex; height: 14px; margin-top: 14px; gap: 1px; }
+.nc-win .nc-stackbar i { display: block; height: 100%; }
+.nc-win .nc-mix { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
+.nc-win .nc-mix li { display: grid; grid-template-columns: 12px 1fr auto; align-items: center; gap: 8px; font: 700 13px/1 "Rajdhani", sans-serif; letter-spacing: .1em; text-transform: uppercase; color: var(--nc-fg); }
+.nc-win .nc-mix li i { width: 10px; height: 10px; display: block; }
+.nc-win .nc-mix li em { font: 400 12px/1 "Share Tech Mono", monospace; font-style: normal; color: var(--nc-fg-hi); letter-spacing: .02em; text-align: right; }
+.nc-win .nc-week { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.nc-win .nc-week .wr { display: flex; justify-content: space-between; font: 700 13px/1 "Rajdhani", sans-serif; letter-spacing: .1em; text-transform: uppercase; color: var(--nc-fg); }
+.nc-win .nc-week .wr em { font: 400 12px/1 "Share Tech Mono", monospace; font-style: normal; color: var(--nc-fg-hi); }
+.nc-win .nc-week .nc-seg { margin-top: 7px; height: 10px; }
+.nc-win .nc-spark { margin-top: 12px; }
+.nc-win .nc-spark svg { display: block; width: 100%; height: 104px; }
+.nc-win .nc-spark .d { fill: var(--nc-fg); opacity: .55; }
+.nc-win .nc-spark .t { fill: var(--nc-accent); }
+.nc-win .nc-spark .p { fill: var(--nc-warn); }
+.nc-win .nc-spark .avg { stroke: var(--nc-ink-2); stroke-width: 1; stroke-dasharray: 4 3; }
+.nc-win .nc-spark .base { stroke: var(--nc-hair); stroke-width: 1; }
+.nc-win .nc-legend { display: flex; gap: 14px; margin-top: 8px; font: 400 11px/1 "Share Tech Mono", monospace; letter-spacing: .04em; text-transform: uppercase; color: var(--nc-ink-2); }
+.nc-win .nc-legend i { display: inline-block; width: 10px; height: 6px; vertical-align: middle; margin-right: 6px; }
+/* footer: status line, then key hints on blackwall or the sync chip on edgerun */
+.nc-win .nc-foot { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding-top: 10px; box-shadow: inset 0 1px 0 var(--nc-hair); }
+.nc-win .nc-foot .nc-live { font-size: 12px; }
+.nc-win .nc-keys { display: none; align-items: center; gap: 16px; font: 700 12px/1 "Rajdhani", sans-serif; letter-spacing: .12em; text-transform: uppercase; color: var(--nc-fg); white-space: nowrap; }
+.nc-win .nc-keys span { display: inline-flex; align-items: center; gap: 6px; }
+.nc-win .nc-keys kbd { display: inline-block; min-width: 18px; height: 16px; padding: 0 4px; box-shadow: inset 0 0 0 1px var(--nc-line); font: 400 11px/16px "Share Tech Mono", monospace; letter-spacing: 0; text-align: center; color: var(--nc-fg-hi); }
+.nc-win[data-variant="blackwall"] .nc-keys { display: flex; }
+.nc-win[data-variant="blackwall"] .sy-status { display: none; }
+/* edgerun dashboard: yellow title bar, yellow card titles, lime Breach code noise */
+.nc-win[data-variant="edgerun"] .nc-tb { background: var(--nc-signal); box-shadow: none; }
+.nc-win[data-variant="edgerun"] .nc-tb .nc-tb-t { color: var(--nc-ink); }
+.nc-win[data-variant="edgerun"] .nc-tb .nc-noise { color: var(--nc-ink) !important; }
+.nc-win[data-variant="edgerun"] .nc-tag { background: var(--nc-ink); color: var(--nc-signal); }
+.nc-win[data-variant="edgerun"] .nc-wb { color: var(--nc-ink); }
+.nc-win[data-variant="edgerun"] .wb-min::before { background: var(--nc-ink); }
+.nc-win[data-variant="edgerun"] .wb-max::before { border-color: var(--nc-ink); }
+.nc-win[data-variant="edgerun"] .nc-card .nc-k { display: inline-block; white-space: nowrap; background: var(--nc-signal); color: var(--nc-ink); padding: 3px 8px 2px; }
+.nc-win[data-variant="edgerun"] .nc-mini .nc-k { letter-spacing: .06em; }
+.nc-win[data-variant="edgerun"] .nc-card .nc-k em { color: var(--nc-ink); }
+.nc-win[data-variant="edgerun"] .nc-noise { color: var(--nc-yg); }
+.nc-win[data-variant="edgerun"] .nc-limits .nc-big { margin-top: 3px; }
+.nc-win[data-variant="edgerun"] .nc-pacebar { margin-top: 8px; }
+.nc-win[data-variant="edgerun"] .nc-hero .nc-noise, .nc-win[data-variant="edgerun"] .nc-foot .nc-noise { color: var(--nc-yg); }
+
+@media (prefers-reduced-motion: reduce) {
+  .nc-pip, .nc-s-dot, .nc-live::before { animation: none !important; }
+  .nc-hit { animation: none !important; }
+}
+
+/* ---------- 7. MOCK SHEET (not part of the theme) + WINDOWS 11 TASKBAR (host colours) ---------- */
+:root {
+  --win-tb: #1c1c21; --win-tb-line: #34343b; --win-glyph: #ececf1; --win-muted: #a4a4ad;
+  --win-pill: #2c2c33; --win-run: #7aa7ff; --win-hover: #33333c;
+}
+html, body { margin: 0; }
+body { background: var(--nc-page); color: var(--nc-fg); font: 500 14px/1.35 "Rajdhani", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+.mk-wrap { width: 1344px; margin: 0 auto; padding: 28px 0 40px; }
+.mk-mast { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; border-bottom: 1px solid var(--nc-hair); padding-bottom: 14px; margin-bottom: 20px; }
+.mk-mast h1 { margin: 0; font: 700 34px/1 "Chakra Petch", sans-serif; letter-spacing: .06em; text-transform: uppercase; color: var(--nc-fg-hi); text-shadow: 0 0 18px var(--nc-glow); }
+.mk-tag { font: 400 11px/1.5 "Share Tech Mono", monospace; color: var(--nc-ink-2); letter-spacing: .06em; text-align: right; text-transform: uppercase; }
+.mk-noise { font: 400 11px/1.3 "Share Tech Mono", monospace; color: var(--nc-ink-3); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 10px; }
+.mk-index { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 20px; }
+.mk-index a { font: 700 12px/1 "Rajdhani", sans-serif; letter-spacing: .14em; text-transform: uppercase; color: var(--nc-fg); text-decoration: none; padding: 6px 10px; box-shadow: inset 0 0 0 1px var(--nc-hair); }
+.mk-index a b { color: var(--nc-signal); font-weight: 700; margin-right: 6px; }
+.mk-pal { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 22px; }
+.mk-pal .sw { width: 104px; height: 46px; display: flex; flex-direction: column; justify-content: flex-end; box-shadow: inset 0 0 0 1px var(--nc-hair); }
+.mk-pal .sw span { font: 400 11px/1 "Share Tech Mono", monospace; color: var(--nc-fg-hi); background: var(--nc-bg-0); padding: 4px 5px; }
+.mk-sheet { position: relative; margin: 0 0 28px; padding: 22px 26px 26px; background: linear-gradient(180deg, var(--nc-bg-1), var(--nc-bg-0)); box-shadow: inset 0 0 0 1px var(--nc-hair); }
+.mk-sh { display: flex; align-items: center; gap: 16px; margin: 0 0 18px; }
+.mk-sh .nc-noise { margin-left: auto; }
+.mk-tab { display: inline-block; transform: skewX(-12deg); background: var(--nc-signal); color: var(--nc-ink); padding: 6px 14px 5px; font: 700 13px/1 "Rajdhani", sans-serif; letter-spacing: .18em; text-transform: uppercase; }
+.mk-tab > span { display: inline-block; transform: skewX(12deg); }
+.mk-cap { font: 400 11px/1.4 "Share Tech Mono", monospace; color: var(--nc-ink-3); letter-spacing: .06em; text-transform: uppercase; margin: 0 0 8px; }
+.mk-row { display: flex; align-items: flex-start; gap: 26px; flex-wrap: wrap; }
+.mk-stack { display: flex; flex-direction: column; gap: 6px; }
+.mk-label { font: 700 12px/1 "Rajdhani", sans-serif; letter-spacing: .16em; text-transform: uppercase; color: var(--nc-ink-2); margin-top: 10px; }
+.mk-label b { color: var(--nc-signal); font-weight: 700; margin-right: 6px; }
+.mk-chips { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.mk-wall {
+  position: relative; overflow: hidden;
+  background:
+    radial-gradient(40% 55% at 84% 14%, var(--nc-wall-c) 0%, transparent 70%),
+    radial-gradient(80% 62% at 50% 92%, var(--nc-haze) 0%, transparent 72%),
+    linear-gradient(180deg, var(--nc-wall-b) 0%, var(--nc-wall-c) 100%);
+  box-shadow: inset 0 0 0 1px var(--nc-hair);
+}
+.mk-wall > svg.mk-sky { position: absolute; left: 0; bottom: 0; width: 100%; height: 100%; }
+.mk-sky .b { fill: var(--nc-bg-0); stroke: var(--nc-hair); stroke-width: 1; }
+.mk-sky .w { fill: var(--nc-warn); opacity: .32; }
+.mk-sky .n { fill: var(--nc-accent); opacity: .85; }
+.mk-sky .m { fill: var(--nc-line); opacity: .9; }
+.mk-wall .nc-widget { position: absolute; }
+.mk-hitrow { position: relative; width: 264px; height: 46px; background: var(--nc-panel); box-shadow: inset 0 0 0 1px var(--nc-hair); }
+.mk-hitrow .nc-lbl, .mk-hitrow .nc-end { position: absolute; top: 15px; }
+.mk-hitrow .nc-lbl { left: 14px; }
+.mk-hitrow .nc-end { right: 14px; }
+.mk-hitrow .nc-val.f1 { text-shadow: -2px 0 0 var(--nc-accent), 2px 0 0 var(--nc-danger); }
+.mk-hitrow .nc-val.f2 { text-shadow: -1px 0 0 var(--nc-accent), 1px 0 0 var(--nc-danger); }
+.mk-hitrow .nc-val.f3 { text-shadow: 0 0 6px var(--nc-glow); }
+.mk-spec { font: 400 11px/1.7 "Share Tech Mono", monospace; color: var(--nc-ink-2); letter-spacing: .03em; text-transform: uppercase; }
+.mk-spec b { font-weight: 400; color: var(--nc-signal); display: inline-block; min-width: 96px; }
+.mk-states { display: flex; gap: 22px; align-items: flex-start; flex-wrap: wrap; }
+.mk-tile { width: 288px; height: 150px; }
+.win-tb { position: relative; height: 48px; width: 1292px; background: var(--win-tb); box-shadow: inset 0 1px 0 var(--win-tb-line); font-family: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif; color: var(--win-glyph); }
+.win-tb .grp { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; }
+.win-tb .l { left: 12px; gap: 4px; }
+.win-tb .c { left: 50%; transform: translateX(-50%); gap: 4px; }
+.win-tb .grp-r { right: 8px; gap: 2px; }
+.win-tb .btn { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: 4px; }
+.win-tb .btn svg, .win-tb .glyph svg { width: 16px; height: 16px; stroke: var(--win-glyph); fill: none; stroke-width: 1.3; }
+.win-tb .search { width: 132px; height: 30px; border-radius: 15px; background: var(--win-pill); display: flex; align-items: center; gap: 8px; padding: 0 12px; color: var(--win-muted); font-size: 12px; margin-left: 6px; }
+.win-tb .search svg { width: 13px; height: 13px; stroke: var(--win-muted); fill: none; stroke-width: 1.4; }
+.win-tb .app { position: relative; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: 4px; }
+.win-tb .app svg { width: 18px; height: 18px; stroke: var(--win-glyph); fill: none; stroke-width: 1.3; }
+.win-tb .app.run::after { content: ""; position: absolute; bottom: 2px; left: 50%; width: 10px; height: 3px; margin-left: -5px; border-radius: 2px; background: var(--win-run); }
+.win-tb .app.on { background: var(--win-hover); }
+.win-tb .glyph { width: 28px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: 4px; }
+.win-tb .clock { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; padding: 0 10px 0 8px; height: 40px; font-size: 12px; line-height: 1.2; color: var(--win-glyph); }
+.win-tb .clock small { font-size: 12px; color: var(--win-glyph); }
+.win-tb .strip-slot { margin: 0 10px 0 0; }
+.win-tb .fillg { fill: var(--win-glyph) !important; stroke: none !important; }
+.win-zoom { position: relative; width: 560px; height: 48px; overflow: hidden; background: var(--win-tb); font-family: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif; color: var(--win-glyph); }
+.mk-tray-notes { font: 400 11px/1.9 "Share Tech Mono", monospace; color: var(--nc-ink-2); letter-spacing: .03em; text-transform: uppercase; }
+.mk-tray-notes b { font-weight: 400; color: var(--nc-signal); display: inline-block; width: 74px; }
+.mk-varrow { display: grid; grid-template-columns: repeat(4, 288px); gap: 24px; }
+.mk-swatch { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; width: 288px; }
+.mk-swatch span { display: inline-flex; align-items: center; gap: 5px; font: 400 11px/1 "Share Tech Mono", monospace; letter-spacing: .04em; color: var(--nc-ink-2); text-transform: uppercase; }
+.mk-swatch i { width: 10px; height: 10px; display: inline-block; box-shadow: inset 0 0 0 1px var(--nc-hair); }
+.mk-vcards { display: flex; flex-direction: column; gap: 16px; }
+.mk-vcards .nc-win { width: 956px; height: auto; overflow: visible; padding: 0; background: var(--nc-bg-0); box-shadow: none; }
+.mk-vcards .nc-win::before { display: none; }
+.mk-vcards .nc-win .nc-limits { width: 956px; }
+.mk-vcards .nc-win .nc-limits .nc-card { height: 176px; }
+.mk-credit { margin-top: 12px; padding: 16px 18px; box-shadow: inset 0 0 0 1px var(--nc-hair); background: var(--nc-bg-1); }
+.mk-credit p { margin: 0 0 6px; font: 400 11px/1.5 "Share Tech Mono", monospace; color: var(--nc-ink-2); letter-spacing: .03em; text-transform: uppercase; }
+.mk-credit p b { font-weight: 400; color: var(--nc-signal); display: inline-block; min-width: 170px; }
+/* tray options grid */
+.tr-key { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 0 0 22px; }
+.tr-card { position: relative; padding: 12px 14px 12px 46px; background: var(--nc-bg-1); box-shadow: inset 0 0 0 1px var(--nc-hair); font: 400 11px/1.55 "Share Tech Mono", monospace; color: var(--nc-ink-2); letter-spacing: .03em; text-transform: uppercase; }
+.tr-card > b { position: absolute; left: 14px; top: 12px; font: 700 22px/1 "Chakra Petch", sans-serif; color: var(--nc-signal); }
+.tr-card strong { display: block; margin-bottom: 4px; font: 700 13px/1.2 "Rajdhani", sans-serif; letter-spacing: .12em; color: var(--nc-fg-hi); }
+.tr-card.rec { box-shadow: inset 0 0 0 1px var(--nc-signal); }
+.tr-block { margin: 0 0 22px; }
+.tr-vt { margin: 0 0 8px; }
+.tr-grid { display: grid; grid-template-columns: 196px repeat(15, 50px); padding: 8px 10px 10px; margin: 0 0 8px; width: max-content; background: var(--win-tb); box-shadow: inset 0 0 0 1px var(--win-tb-line); }
+.tr-grid[data-bg="light"] { background: #f3f3f3; box-shadow: inset 0 0 0 1px #d0d0d0; }
+.tr-grid .tr-h { height: 18px; font: 400 10px/18px "Share Tech Mono", monospace; letter-spacing: .04em; text-transform: uppercase; color: var(--nc-ink-2); text-align: center; }
+.tr-grid .tr-sz { text-align: left; padding-left: 8px; font: 700 12px/18px "Rajdhani", sans-serif; letter-spacing: .14em; color: var(--nc-fg-hi); box-shadow: inset 2px 0 0 var(--nc-signal); }
+.tr-grid .tr-lab { text-align: left; font: 700 11px/18px "Rajdhani", sans-serif; letter-spacing: .12em; text-transform: uppercase; color: var(--nc-ink-2); }
+.tr-grid .tr-n { display: flex; align-items: center; gap: 6px; padding-right: 8px; font: 700 12px/1.1 "Rajdhani", sans-serif; letter-spacing: .1em; text-transform: uppercase; color: var(--nc-fg); }
+.tr-grid .tr-n em { font: 700 10px/1 "Rajdhani", sans-serif; font-style: normal; letter-spacing: .1em; background: var(--nc-signal); color: var(--nc-ink); padding: 3px 5px 2px; }
+.tr-grid .tr-c { height: 50px; display: flex; align-items: center; justify-content: center; }
+.tr-grid .g { box-shadow: inset 1px 0 0 var(--nc-hair); }
+.tr-grid[data-bg="light"] .tr-h, .tr-grid[data-bg="light"] .tr-lab, .tr-grid[data-bg="light"] .tr-n, .tr-grid[data-bg="light"] .tr-sz { color: #1d1d1d; }
+.tr-grid[data-bg="light"] .tr-n em { color: #0a0802; }
+.tr-zoom { display: inline-flex; gap: 6px; padding: 10px; background: var(--win-tb); box-shadow: inset 0 0 0 1px var(--win-tb-line); width: max-content; }
+</style>
+</head>
+<body>
+<div class="mk-wrap">
+
+<header class="mk-mast">
+  <div>
+    <div class="mk-noise">NIGHT CITY // FINAL v2 // MOCKUP 0x02 // REV 6 // DATA NOISE ON</div>
+    <h1>Claude Usage Monitor</h1>
+  </div>
+  <div class="mk-tag">Tokens at :root, variants via data-variant on the root or any wall<br>Widgets are Pillow-safe: polygons, rectangles, 1 px lines, TTF text, blur glow, alpha<br>Fonts: Chakra Petch, Rajdhani, Share Tech Mono (SIL OFL 1.1), Segoe UI Variable (taskbar mock)</div>
+</header>
+
+<nav class="mk-index">
+  <a href="#s-widget"><b>01</b>Floating widget</a>
+  <a href="#s-taskbar"><b>02</b>Taskbar strip</a>
+  <a href="#s-tray"><b>03</b>Tray options</a>
+  <a href="#s-dash"><b>04</b>Dashboard overview</a>
+  <a href="#s-variants"><b>05</b>Colour variants</a>
+</nav>
+
+<div class="mk-pal">
+  <div class="sw" style="background: var(--nc-bg-0);"><span>BG-0 #070203</span></div>
+  <div class="sw" style="background: var(--nc-panel);"><span>PANEL #140609</span></div>
+  <div class="sw" style="background: var(--nc-fg);"><span>FG #FF8F7E</span></div>
+  <div class="sw" style="background: var(--nc-fg-hi);"><span>FG-HI #FFD9CF</span></div>
+  <div class="sw" style="background: var(--nc-line);"><span>LINE #FF3B30</span></div>
+  <div class="sw" style="background: var(--nc-bar);"><span>RAM CYAN #3EF0FF</span></div>
+  <div class="sw" style="background: var(--nc-warn);"><span>WARN #FFB020</span></div>
+  <div class="sw" style="background: var(--nc-danger);"><span>DANGER #FF2E3D</span></div>
+  <div class="sw" style="background: #fcee0a;"><span>SIGNAL #FCEE0A</span></div>
+  <div class="sw" style="background: #d6f55a;"><span>BREACH LIME #D6F55A</span></div>
+</div>
+
+<!-- ============ 01 FLOATING WIDGET ============ -->
+<section class="mk-sheet" id="s-widget">
+  <div class="mk-sh">
+    <span class="mk-tab"><span>01 &middot; Floating widget</span></span>
+    <span class="nc-noise">264 x 96 two-row &middot; 264 x 126 with FABLE &middot; chamfer 8 &middot; scan 15 pct under content &middot; glow 6 at 0.45 &middot; LIVE pulse 2.4 s</span>
+  </div>
+
+  <div class="mk-row">
+    <div class="mk-stack">
+      <div class="mk-cap">1x &middot; real size on the desktop &middot; Blackwall (default), normal, FABLE row shown</div>
+      <div class="mk-wall" data-sky style="width: 700px; height: 250px;">
+        <div class="nc-widget" data-w="normal" id="float-1x" style="position:absolute; right: 30px; bottom: 26px;"></div>
+      </div>
+    </div>
+    <div class="mk-stack" style="width: 520px;">
+      <div class="mk-cap">status chips &middot; the state word lives in the header, the band carries STALE</div>
+      <div class="mk-chips">
+        <span class="nc-chip out" style="--oc: var(--nc-ok); color: var(--nc-ok);">LIVE</span>
+        <span class="nc-chip solid">STALE</span>
+        <span class="nc-chip out ghost">OFFLINE</span>
+        <span class="nc-chip out ghost">PAUSED</span>
+      </div>
+      <div class="mk-cap" style="margin-top: 16px;">two-row layout &middot; FABLE row hidden unless the plan has a share</div>
+      <div class="mk-wall" data-sky style="width: 300px; height: 150px; margin-top: 4px;">
+        <div class="nc-widget is-2row" data-w="two" style="position:absolute; left: 18px; top: 26px;"></div>
+      </div>
+      <div class="mk-spec" style="margin-top: 8px;">
+        <b>size</b>264 x 96 (2 row) / 264 x 126 (3 row)<br>
+        <b>cells</b>26 x 7 px, 2 px gaps (blackwall, edgerun)<br>
+        <b>pulse</b>LIVE pip and strip dot, 2.4 s eased<br>
+        <b>scanlines</b>15 pct, every 3rd row, under text
+      </div>
+    </div>
+  </div>
+
+  <div class="mk-cap" style="margin-top: 24px;">3x zoom &middot; CSS zoom on the vector layers &middot; check frame chamfer, RAM cells, bar end, time tick</div>
+  <div class="mk-wall" data-sky id="float-zoom" style="width: 300px; height: 140px; zoom: 3; transform-origin: 0 0;">
+    <div class="nc-widget" data-w="normal" style="position:absolute; left: 6px; top: 6px;"></div>
+  </div>
+
+  <div class="mk-cap" style="margin-top: 14px;">state set &middot; 1x &middot; blackwall &middot; normal, warning 72 pct, critical 93 pct, stale (band)</div>
+  <div class="mk-states" id="states">
+    <div class="mk-stack"><div class="mk-wall mk-tile" data-sky><div class="nc-widget" data-w="normal" style="position:absolute; left:0; top:12px;"></div></div><div class="mk-label"><b>A</b>Normal</div></div>
+    <div class="mk-stack"><div class="mk-wall mk-tile" data-sky><div class="nc-widget" data-w="warn" style="position:absolute; left:0; top:12px;"></div></div><div class="mk-label"><b>B</b>Warning 72 pct</div></div>
+    <div class="mk-stack"><div class="mk-wall mk-tile" data-sky><div class="nc-widget" data-w="crit" style="position:absolute; left:0; top:12px;"></div></div><div class="mk-label"><b>C</b>Critical 93 pct</div></div>
+    <div class="mk-stack"><div class="mk-wall mk-tile" data-sky><div class="nc-widget" data-w="stale" style="position:absolute; left:0; top:12px;"></div></div><div class="mk-label"><b>D</b>Stale, auth lost</div></div>
+  </div>
+
+  <div class="mk-cap" style="margin-top: 22px;">edgerun plate &middot; the widget is a yellow plate with ink text, ink RAM cells and a black LIVE chip &middot; same four states</div>
+  <div class="mk-states" data-variant="edgerun">
+    <div class="mk-stack"><div class="mk-wall mk-st" data-sky><div class="nc-widget" data-w="normal" style="position:absolute; left:0; top:12px;"></div></div><div class="mk-label"><b>A</b>Normal</div></div>
+    <div class="mk-stack"><div class="mk-wall mk-st" data-sky><div class="nc-widget" data-w="warn" style="position:absolute; left:0; top:12px;"></div></div><div class="mk-label"><b>B</b>Warning 72 pct</div></div>
+    <div class="mk-stack"><div class="mk-wall mk-st" data-sky><div class="nc-widget" data-w="crit" style="position:absolute; left:0; top:12px;"></div></div><div class="mk-label"><b>C</b>Critical 93 pct</div></div>
+    <div class="mk-stack"><div class="mk-wall mk-st" data-sky><div class="nc-widget" data-w="stale" style="position:absolute; left:0; top:12px;"></div></div><div class="mk-label"><b>D</b>Stale, auth lost</div></div>
+  </div>
+  <style>.mk-st { position: relative; overflow: hidden; width: 288px; height: 150px; }</style>
+
+  <div class="mk-cap" style="margin-top: 26px;">refresh hit &middot; three frames of 50 ms, played once per data refresh &middot; target: the value numerals &middot; F1 cyan -2 px and red +2 px &middot; F2 cyan -1 px and red +1 px &middot; F3 settled</div>
+  <div class="mk-row" id="hit-frames">
+    <div class="mk-stack"><div class="mk-hitrow"><span class="nc-lbl" style="position:absolute; left:14px; top:15px;">Session</span><span class="nc-end" style="position:absolute; right:14px; top:15px;"><span class="nc-val f1">13<small>%</small></span></span></div><div class="mk-cap" style="margin:0;">F1 &middot; 0 to 50 ms</div></div>
+    <div class="mk-stack"><div class="mk-hitrow"><span class="nc-lbl" style="position:absolute; left:14px; top:15px;">Session</span><span class="nc-end" style="position:absolute; right:14px; top:15px;"><span class="nc-val f2">13<small>%</small></span></span></div><div class="mk-cap" style="margin:0;">F2 &middot; 50 to 100 ms</div></div>
+    <div class="mk-stack"><div class="mk-hitrow"><span class="nc-lbl" style="position:absolute; left:14px; top:15px;">Session</span><span class="nc-end" style="position:absolute; right:14px; top:15px;"><span class="nc-val f3">13<small>%</small></span></span></div><div class="mk-cap" style="margin:0;">F3 &middot; 100 to 150 ms, settled</div></div>
+  </div>
+</section>
+
+<!-- ============ 02 TASKBAR STRIP ============ -->
+<section class="mk-sheet" id="s-taskbar">
+  <div class="mk-sh">
+    <span class="mk-tab"><span>02 &middot; Taskbar strip</span></span>
+    <span class="nc-noise">48 px bar &middot; strip 240 x 38 &middot; sits left of the tray clock &middot; 5H and 7D &middot; RAM cells &middot; tray option B (recommended)</span>
+  </div>
+  <div class="win-tb" id="taskbar" style="width: 1292px;">
+    <div class="grp l">
+      <div class="btn" title="Start"><svg viewBox="0 0 16 16" class="fillg"><rect x="2" y="2" width="5" height="5" rx="0.6"/><rect x="9" y="2" width="5" height="5" rx="0.6"/><rect x="2" y="9" width="5" height="5" rx="0.6"/><rect x="9" y="9" width="5" height="5" rx="0.6"/></svg></div>
+      <div class="search"><svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg>Search</div>
+      <div class="btn" title="Task view"><svg viewBox="0 0 16 16"><rect x="2" y="3.5" width="12" height="9" rx="1.5"/></svg></div>
+    </div>
+    <div class="grp c">
+      <div class="app run on"><svg viewBox="0 0 18 18"><path d="M2.5 5.5h4l1.5 1.5h7.5v6.5h-13z"/></svg></div>
+      <div class="app run"><svg viewBox="0 0 18 18"><rect x="2.5" y="3.5" width="13" height="11" rx="1.5"/><path d="M5.5 7l2 1.8-2 1.8M9.5 11.5h3"/></svg></div>
+      <div class="app run"><svg viewBox="0 0 18 18"><path d="M3 4.5h12v7H8.5L5 14v-2.5H3z"/></svg></div>
+      <div class="app"><svg viewBox="0 0 18 18"><path d="M6.5 5L3 9l3.5 4M11.5 5L15 9l-3.5 4"/></svg></div>
+      <div class="app"><svg viewBox="0 0 18 18"><rect x="2.5" y="3.5" width="13" height="11" rx="1.5"/><circle cx="6.5" cy="7" r="1.2"/><path d="M3 13l4-3.5 3 2.5 2-1.5 3 2.5"/></svg></div>
+      <div class="app"><svg viewBox="0 0 18 18"><rect x="2.5" y="4" width="13" height="10" rx="1.5"/><path d="M3 5l6 4.5L15 5"/></svg></div>
+    </div>
+    <div class="grp grp-r" id="tb-right">
+      <div class="nc-strip strip-slot" id="tb-strip">
+        <i class="nc-s-tag"></i>
+        <div class="nc-s-row r1" style="--t:31; --p:13;"><span class="nc-s-k">5H</span><i class="nc-s-line"></i><i class="nc-s-bar"><b></b></i><div class="nc-s-seg" data-p="13"></div><span class="nc-s-pct">13%</span></div>
+        <div class="nc-s-row r2" style="--t:33; --p:2;"><span class="nc-s-k">7D</span><i class="nc-s-line"></i><i class="nc-s-bar"><b></b></i><div class="nc-s-seg" data-p="2"></div><span class="nc-s-pct">2%</span></div>
+        <i class="nc-s-dot"></i><span class="nc-s-word">LIVE</span>
+      </div>
+      <div class="glyph" title="Hidden icons"><svg viewBox="0 0 16 16"><path d="M4 10l4-4 4 4"/></svg></div>
+      <span class="nc-tray" data-opt="B" data-px="16" data-pct="13" data-state="normal" title="Claude usage 13 pct"></span>
+      <div class="glyph"><svg viewBox="0 0 16 16"><path d="M2 6.5a9 9 0 0 1 12 0"/><path d="M4.5 9a5.5 5.5 0 0 1 7 0"/><circle cx="8" cy="12" r="1" class="fillg"/></svg></div>
+      <div class="glyph"><svg viewBox="0 0 16 16"><path d="M2 6h2.5L8 3v10L4.5 10H2z"/><path d="M10.5 5.5a3.5 3.5 0 0 1 0 5"/></svg></div>
+      <div class="glyph"><svg viewBox="0 0 16 16"><rect x="1.5" y="5" width="12" height="6" rx="1.2"/><rect x="3" y="6.5" width="7" height="3" class="fillg"/><path d="M14.5 7.2v1.6"/></svg></div>
+      <div class="clock"><span>4:12 PM</span><small>2026-10-21</small></div>
+    </div>
+  </div>
+
+  <div class="mk-cap" style="margin-top: 22px;">2x zoom &middot; strip, tray icon and clock &middot; the same markup as the bar above</div>
+  <div class="win-tb win-zoom" id="tb-zoom" style="zoom: 2;"></div>
+</section>
+
+<!-- ============ 03 TRAY OPTIONS ============ -->
+<section class="mk-sheet" id="s-tray">
+  <div class="mk-sh">
+    <span class="mk-tab"><span>03 &middot; Tray options</span></span>
+    <span class="nc-noise">four alternatives to the octagon &middot; 16, 24 and 32 px &middot; 0, 13, 72, 93 pct and STALE &middot; dark and light taskbar &middot; all four variants</span>
+  </div>
+  <div class="tr-key">
+    <div class="tr-card"><b>A</b><strong>Segment ring</strong>Chamfered plate with an eight-segment ring. Lit count = round(pct / 12.5). Reads as a dial. The ring is the only mark.</div>
+    <div class="tr-card rec"><b>B</b><strong>RAM meter &middot; recommended</strong>Chamfered plate with five stacked cells, filling from the bottom in 20 pct steps. Same language as the Blackwall RAM bars. Clearest state read at 16 px.</div>
+    <div class="tr-card"><b>C</b><strong>Hex liquid</strong>Hexagon badge with a continuous liquid level. Reads as a tank. The surface line carries the level, the colour carries the state.</div>
+    <div class="tr-card"><b>D</b><strong>Slant plate</strong>Parallelogram with a slanted fill bar. At 16 px it is the bar only. At 24 and 32 px it adds the percent digits in Share Tech Mono.</div>
+  </div>
+  <div id="tray-opts"></div>
+  <div class="mk-cap" style="margin-top: 16px;">4x zoom &middot; option B at 16 px, the recommended master, shown for the five states (CSS zoom on vector masters)</div>
+  <div class="tr-zoom" id="tray-z4" style="zoom: 4;"></div>
+</section>
+
+<!-- ============ 04 DASHBOARD OVERVIEW ============ -->
+<section class="mk-sheet" id="s-dash">
+  <div class="mk-sh">
+    <span class="mk-tab"><span>04 &middot; Dashboard overview</span></span>
+    <span class="nc-noise">1200 x 760 &middot; WebView2 window &middot; scanlines 15 pct &middot; numerals hit once per data refresh, never on a loop</span>
+  </div>
+
+  <div class="mk-cap">01 &middot; Blackwall (default) &middot; red line art, cyan RAM cells, boxed reset counters, key-hint footer</div>
+  <div class="nc-win" id="dash" data-variant="blackwall">
+    <i class="nc-scanov" aria-hidden="true"></i>
+
+    <div class="nc-tb">
+      <div class="nc-tb-t"><span class="nc-tag"><span>NC//USAGE</span></span>Claude Usage Monitor <span class="nc-noise" style="color: var(--nc-ink-3);">0x3F2A &middot; build 0.9.4</span></div>
+      <div class="nc-wb"><i class="wb-min"></i><i class="wb-max"></i><i class="wb-x"></i></div>
+    </div>
+
+    <div class="nc-body">
+      <aside class="nc-nav">
+        <div class="nc-brand-blk">
+          <h1>Usage<br><span>//</span> Monitor</h1>
+          <span class="nc-noise">Sector 07 &middot; 33.4N 112.0W<br>Plan Max 5x</span>
+        </div>
+        <ul class="nc-navlist">
+          <li class="on"><a href="#"><span class="ix">01</span>Overview</a></li>
+          <li><a href="#"><span class="ix">02</span>Limits</a></li>
+          <li><a href="#"><span class="ix">03</span>Cost &amp; Value</a></li>
+          <li><a href="#"><span class="ix">04</span>Efficiency</a></li>
+          <li><a href="#"><span class="ix">05</span>History</a></li>
+          <li><a href="#"><span class="ix">06</span>Settings</a></li>
+          <li><a href="#"><span class="ix">07</span>About</a></li>
+        </ul>
+        <svg class="nc-wf" width="64" height="64" viewBox="0 0 64 64" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1">
+          <circle cx="32" cy="32" r="27"/><circle cx="32" cy="32" r="13" stroke-dasharray="3 3"/>
+          <path d="M32 3v11M32 50v11M3 32h11M50 32h11"/>
+          <path d="M7 15V7h8M57 15V7h-8M7 49v8h8M57 49v8h-8"/>
+        </svg>
+        <div class="nc-matrix">
+          <span class="mh">Code matrix</span>
+          <div class="nc-mx"><i>BD</i><i>E9</i><i class="hi">1C</i><i>BD</i><i>BD</i><i>1C</i><i>1C</i><i>BD</i><i class="hi">BD</i><i>55</i><i>BD</i><i>BD</i><i class="hi">55</i><i>BD</i><i>BD</i><i>1C</i><i>55</i><i>55</i><i>E9</i><i>BD</i></div>
+          <div class="nc-buf"><i class="on">BD</i><i class="on">E9</i><i class="on">1C</i><i>55</i></div>
+        </div>
+        <div class="nc-sync">
+          <div class="nc-live"><span class="nc-pip"></span><span>Live &middot; 12 s ago</span></div>
+          <span class="nc-noise">Source local logs<br>Sync 0x3F2A &middot; parse ok</span>
+        </div>
+      </aside>
+
+      <main class="nc-main">
+        <header class="nc-ph">
+          <h2>Overview</h2>
+          <div class="nc-ph-meta">
+            <span class="nc-noise">Session 13% &middot; Weekly 2% &middot; Fable 0% of 50% share</span>
+            <p>Money is API-equivalent at list prices. Your plan absorbed the difference.</p>
+          </div>
+        </header>
+
+        <section class="nc-limits" id="dash-limits">
+          <article class="nc-card"><i class="nc-br tr"></i><i class="nc-br bl"></i>
+            <div class="nc-kh"><span class="nc-k">Session<em>5h window</em></span><span class="nc-noise">0x01</span></div>
+            <div class="nc-big nc-hit-target" data-hit>13<small>%</small></div>
+            <div class="nc-resets">Resets 7:39 PM today</div>
+            <div class="nc-rbox-row"><span class="nc-rbox">RST 7:39 PM</span><span class="nc-rbox c">T-03:27:00</span></div>
+            <div class="nc-cd" style="--p: 69;"><b></b><span class="l">Time remaining</span><span class="v">03:27:00</span></div>
+            <div class="nc-pacebar"><div class="nc-tl" style="--t: 31;"></div><div class="nc-seg" data-p="13"></div></div>
+            <div class="nc-pace"><span>Used 13% &middot; time 31%</span><span class="nc-chip out">Under pace -18</span></div>
+          </article>
+          <article class="nc-card"><i class="nc-br tr"></i><i class="nc-br bl"></i>
+            <div class="nc-kh"><span class="nc-k">Weekly<em>7d window</em></span><span class="nc-noise">0x02</span></div>
+            <div class="nc-big nc-hit-target" data-hit>2<small>%</small></div>
+            <div class="nc-resets">Resets Mon 9:00 AM</div>
+            <div class="nc-rbox-row"><span class="nc-rbox">RST MON 9:00</span><span class="nc-rbox c">T-4D 16:48</span></div>
+            <div class="nc-cd" style="--p: 67;"><b></b><span class="l">Time remaining</span><span class="v">4D 16:48</span></div>
+            <div class="nc-pacebar"><div class="nc-tl" style="--t: 33;"></div><div class="nc-seg" data-p="2"></div></div>
+            <div class="nc-pace"><span>Used 2% &middot; time 33%</span><span class="nc-chip out">Under pace -31</span></div>
+          </article>
+          <article class="nc-card"><i class="nc-br tr"></i><i class="nc-br bl"></i>
+            <div class="nc-kh"><span class="nc-k">Fable weekly<em>own share</em></span><span class="nc-noise">0x03</span></div>
+            <div class="nc-big nc-hit-target" data-hit>0<small>%</small><span class="nc-sm">of 50% share</span></div>
+            <div class="nc-resets">Resets Mon 9:00 AM</div>
+            <div class="nc-rbox-row"><span class="nc-rbox">RST MON 9:00</span><span class="nc-rbox c">T-4D 16:48</span></div>
+            <div class="nc-cd" style="--p: 67;"><b></b><span class="l">Time remaining</span><span class="v">4D 16:48</span></div>
+            <div class="nc-pacebar"><div class="nc-tl" style="--t: 33;"></div><div class="nc-seg" data-p="0"></div></div>
+            <div class="nc-pace"><span>No Fable draw this week</span><span class="nc-chip out ghost">Idle</span></div>
+          </article>
+        </section>
+
+        <section class="nc-costrow">
+          <article class="nc-card nc-hero"><i class="nc-br tr"></i><i class="nc-br bl"></i><i class="nc-hzt"></i>
+            <div class="nc-kh" style="margin-top: 6px;"><span class="nc-k">Cost<em>this month</em></span><span class="nc-noise">API-equiv</span></div>
+            <div class="nc-money nc-hit-target" data-hit>$1,659</div>
+            <div><span class="nc-stamp"><span>16.6x your plan</span></span></div>
+            <p>Plan Max 5x costs $100 a month. The same work at list API prices would have billed $1,659.</p>
+            <div class="nc-plan">
+              <div class="nc-sbar" style="--p: 100;"><b></b><i class="nc-tick" style="left: 6.03%;"></i></div>
+              <div class="nc-capline"><span style="position:absolute; left: 6.03%; transform: translateX(-50%);">Plan $100</span><span style="position:absolute; right: 0;">API-eq $1,659</span></div>
+            </div>
+          </article>
+
+          <div class="nc-minis">
+            <article class="nc-card nc-mini"><i class="nc-br tr"></i>
+              <div class="nc-k">Caching saved</div>
+              <div class="nc-big-s">$14.1K</div>
+              <div class="nc-sub">this month</div>
+            </article>
+            <article class="nc-card nc-mini"><i class="nc-br tr"></i>
+              <div class="nc-k">Cache hit rate</div>
+              <div class="nc-big-s">96.4%</div>
+              <div class="nc-sub">input served warm</div>
+            </article>
+            <article class="nc-card nc-mini"><i class="nc-br tr"></i>
+              <div class="nc-k">Thinking share</div>
+              <div class="nc-big-s">38%</div>
+              <div class="nc-sub">of output tokens</div>
+            </article>
+            <article class="nc-card nc-mini"><i class="nc-br tr"></i>
+              <div class="nc-k">Today</div>
+              <div class="nc-big-s">$84.20</div>
+              <div class="nc-sub">00:00 to now</div>
+            </article>
+          </div>
+
+          <article class="nc-card nc-burn"><i class="nc-br tr"></i><i class="nc-br bl"></i>
+            <div class="nc-kh"><span class="nc-k">Burn rate</span><span class="nc-chip out">Normal</span></div>
+            <div class="nc-big-b nc-hit-target" data-hit>1,240<small>tok / min</small></div>
+            <div class="nc-resets">$6.10 / h &middot; API-equivalent</div>
+            <div class="nc-scale">
+              <div class="nc-sbar" style="--p: 41;"><b></b></div>
+              <div class="nc-ticks"><span>Idle</span><b>Normal</b><span>Hot</span><span>Runaway</span></div>
+            </div>
+          </article>
+        </section>
+
+        <section class="nc-row3">
+          <article class="nc-card"><i class="nc-br tr"></i><i class="nc-br bl"></i>
+            <div class="nc-kh"><span class="nc-k">Model mix<em>tokens, 30 days</em></span><span class="nc-noise">0x5A</span></div>
+            <div class="nc-stackbar">
+              <i style="width: 86%; background: var(--nc-cat-1);"></i><i style="width: 7%; background: var(--nc-cat-2);"></i><i style="width: 6%; background: var(--nc-cat-3);"></i><i style="width: 1%; background: var(--nc-cat-4);"></i>
+            </div>
+            <ul class="nc-mix">
+              <li><i style="background: var(--nc-cat-1);"></i>Opus 5.5<em>86%</em></li>
+              <li><i style="background: var(--nc-cat-2);"></i>Sonnet 5.5<em>7%</em></li>
+              <li><i style="background: var(--nc-cat-3);"></i>Haiku 4.5<em>6%</em></li>
+              <li><i style="background: var(--nc-cat-4);"></i>Haiku 5.5<em>1%</em></li>
+            </ul>
+          </article>
+
+          <article class="nc-card"><i class="nc-br tr"></i><i class="nc-br bl"></i>
+            <div class="nc-kh"><span class="nc-k">Where the week went</span><span class="nc-noise">0x6B</span></div>
+            <ul class="nc-week">
+              <li><div class="wr"><span>Claude Code</span><em>100%</em></div><div class="nc-seg" data-p="100"></div></li>
+              <li><div class="wr"><span>Chats</span><em>0%</em></div><div class="nc-seg" data-p="0"></div></li>
+              <li><div class="wr"><span>Cowork</span><em>0%</em></div><div class="nc-seg" data-p="0"></div></li>
+            </ul>
+          </article>
+
+          <article class="nc-card"><i class="nc-br tr"></i><i class="nc-br bl"></i>
+            <div class="nc-kh"><span class="nc-k">Daily cost<em>last 30 days</em></span><span class="nc-noise">API-equiv</span></div>
+            <div class="nc-spark"><svg id="spark" viewBox="0 0 300 118" preserveAspectRatio="none" aria-label="30-day daily cost"></svg></div>
+            <div class="nc-legend"><span><i style="background: var(--nc-warn);"></i>Peak $141</span><span><i style="background: var(--nc-accent);"></i>Today $84.20</span><span><i style="background: var(--nc-ink-2); height: 2px;"></i><span id="avg-lbl">Avg</span></span></div>
+          </article>
+        </section>
+
+        <footer class="nc-foot">
+          <span class="nc-live"><span class="nc-pip"></span>Live &middot; updated 12 s ago &middot; source local logs</span>
+          <span class="nc-noise">All money figures are API-equivalent at list prices &middot; not a bill</span>
+          <span class="nc-chip out sy-status">Sync ok</span>
+          <span class="nc-keys"><span><kbd>R</kbd>Refresh</span><span><kbd>D</kbd>Dashboard</span><span><kbd>Esc</kbd>Hide</span></span>
+        </footer>
+      </main>
+    </div>
+  </div>
+
+  <div class="mk-cap" style="margin-top: 26px;">02 &middot; Edgerun &middot; same markup, variant swap &middot; yellow title bar and card plates, TIME REMAINING bars, Breach code matrix and buffer</div>
+  <div id="dash-sy-slot"></div>
+</section>
+
+<!-- ============ 05 VARIANTS ============ -->
+<section class="mk-sheet" id="s-variants">
+  <div class="mk-sh">
+    <span class="mk-tab"><span>05 &middot; Colour variants</span></span>
+    <span class="nc-noise">same widget, same geometry &middot; data-variant swap only &middot; every variant defines the full token set</span>
+  </div>
+  <div class="mk-varrow" id="variants-row">
+    <div class="mk-stack">
+      <div class="mk-wall mk-tile" data-sky data-variant="blackwall"><div class="nc-widget" data-w="normal" style="position:absolute; left:0; top:12px;"></div></div>
+      <div class="mk-swatch"><span><i style="background: var(--nc-bar);"></i>Bar</span><span><i style="background: var(--nc-line);"></i>Line</span><span><i style="background: var(--nc-warn);"></i>Warn</span><span><i style="background: var(--nc-danger);"></i>Crit</span><span><i style="background: var(--nc-ok);"></i>Live</span><span><i style="background: var(--nc-sel);"></i>Select</span></div>
+      <div class="mk-label"><b>01</b>Blackwall &middot; default</div>
+    </div>
+    <div class="mk-stack">
+      <div class="mk-wall mk-tile" data-sky data-variant="relic"><div class="nc-widget" data-w="normal" style="position:absolute; left:0; top:12px;"></div></div>
+      <div class="mk-swatch"><span><i style="background: var(--nc-fg);"></i>Bar</span><span><i style="background: var(--nc-accent);"></i>Time</span><span><i style="background: var(--nc-warn);"></i>Warn</span><span><i style="background: var(--nc-danger);"></i>Crit</span><span><i style="background: var(--nc-ok);"></i>Live</span><span><i style="background: var(--nc-ink-2);"></i>Ink</span></div>
+      <div class="mk-label"><b>02</b>Relic</div>
+    </div>
+    <div class="mk-stack">
+      <div class="mk-wall mk-tile" data-sky data-variant="edgerun"><div class="nc-widget" data-w="normal" style="position:absolute; left:0; top:12px;"></div></div>
+      <div class="mk-swatch"><span><i style="background: var(--nc-bar);"></i>Bar</span><span><i style="background: var(--nc-yg);"></i>Lime</span><span><i style="background: var(--nc-warn);"></i>Warn</span><span><i style="background: var(--nc-danger);"></i>Crit</span><span><i style="background: var(--nc-ok);"></i>Live</span><span><i style="background: var(--nc-ink);"></i>Ink</span></div>
+      <div class="mk-label"><b>03</b>Edgerun</div>
+    </div>
+    <div class="mk-stack">
+      <div class="mk-wall mk-tile" data-sky data-variant="mox"><div class="nc-widget" data-w="normal" style="position:absolute; left:0; top:12px;"></div></div>
+      <div class="mk-swatch"><span><i style="background: var(--nc-fg);"></i>Bar</span><span><i style="background: var(--nc-accent);"></i>Time</span><span><i style="background: var(--nc-warn);"></i>Warn</span><span><i style="background: var(--nc-danger);"></i>Crit</span><span><i style="background: var(--nc-ok);"></i>Live</span><span><i style="background: var(--nc-ink-2);"></i>Ink</span></div>
+      <div class="mk-label"><b>04</b>Mox</div>
+    </div>
+  </div>
+
+  <div class="mk-cap" style="margin-top: 26px;">limit cards in every variant &middot; the dashboard cards are cloned from the overview section, the variant attribute sits on each .nc-win</div>
+  <div class="mk-vcards" id="variant-cards">
+    <div class="mk-stack"><div class="mk-label" style="margin:0;"><b>01</b>Blackwall</div><div class="nc-win is-strip" data-variant="blackwall" data-clone-cards></div></div>
+    <div class="mk-stack"><div class="mk-label" style="margin:0;"><b>02</b>Relic</div><div class="nc-win is-strip" data-variant="relic" data-clone-cards></div></div>
+    <div class="mk-stack"><div class="mk-label" style="margin:0;"><b>03</b>Edgerun</div><div class="nc-win is-strip" data-variant="edgerun" data-clone-cards></div></div>
+    <div class="mk-stack"><div class="mk-label" style="margin:0;"><b>04</b>Mox</div><div class="nc-win is-strip" data-variant="mox" data-clone-cards></div></div>
+  </div>
+
+  <div class="mk-credit" id="credit">
+    <p><b>Chakra Petch</b>SIL OFL 1.1 &middot; numerals and headings &middot; Google Fonts, bundle the 600 and 700 TTF</p>
+    <p><b>Rajdhani</b>SIL OFL 1.1 &middot; labels, chips, nav, tags &middot; bundle the 600 and 700 TTF</p>
+    <p><b>Share Tech Mono</b>SIL OFL 1.1 &middot; numbers, reset times, data noise &middot; bundle the regular TTF</p>
+    <p><b>Segoe UI Variable</b>Microsoft, ships with Windows 11 &middot; taskbar mock only, not bundled, not used by the widget renderer</p>
+    <p><b>NOT USED</b>franchise or studio marks, game or film art, any font outside this list &middot; tray glyphs are generic shapes; the Breach lime and yellow are colour values, not art</p>
+  </div>
+</section>
+
+</div>
+
+<script>
+(function () {
+  const q = (s, r = document) => r.querySelector(s);
+  const qa = (s, r = document) => Array.from(r.querySelectorAll(s));
+
+  /* ---------- 1. FLOATING WIDGET: data to markup (frozen sample set, see extras.sample) ---------- */
+  const rowS = (v, t, st) => ({ label: 'Session', rs: 'RST 7:39 PM', v, t, st: st || '' });
+  const rowW = (v, t, st) => ({ label: 'Weekly', rs: 'RST MON 9:00 AM', v, t, st: st || '' });
+  const rowF = (v) => ({ label: 'Fable', em: '50% SHARE', rs: '', v, t: 33, st: '' });
+  const WIDGETS = {
+    normal: { cls: '', rows: [rowS(13, 31), rowW(2, 33), rowF(0)] },
+    two:    { cls: 'is-2row', rows: [rowS(13, 31), rowW(2, 33)] },
+    warn:   { cls: '', rows: [rowS(72, 31, 'warn'), rowW(41, 33), rowF(0)] },
+    crit:   { cls: '', rows: [rowS(93, 31, 'crit'), rowW(58, 33), rowF(0)] },
+    stale:  { cls: 'is-stale', band: true, rows: [rowS(13, 31), rowW(2, 33), rowF(0)] }
+  };
+  function rowHTML(r) {
+    const chip = r.st === 'warn' ? '<span class="nc-chip out warn">Warn</span>'
+               : r.st === 'crit' ? '<span class="nc-chip crit">Crit</span>' : '';
+    return '<div class="nc-row ' + r.st + '" style="--t:' + r.t + ';--p:' + r.v + '">' +
+      '<div class="nc-rt"><span class="nc-lbl">' + r.label + (r.em ? '<em>' + r.em + '</em>' : '') + chip + '</span>' +
+      '<span class="nc-end">' + (r.rs ? '<span class="nc-rs">' + r.rs + '</span>' : '') +
+      '<span class="nc-val">' + r.v + '<small>%</small></span></span></div>' +
+      '<i class="nc-tl"></i><i class="nc-bar"><b></b></i><div class="nc-wseg" data-p="' + r.v + '"></div></div>';
+  }
+  function widgetHTML(w) {
+    const head = w.band
+      ? '<div class="nc-band"><span>Relink // open Claude Code</span><span class="nc-age">14 M OLD</span></div>'
+      : '<div class="nc-hd"><span class="nc-brand"><span class="nc-pip"></span>Claude//Usage</span><span class="nc-live">LIVE</span></div>';
+    return '<i class="nc-br tr"></i><i class="nc-br bl"></i>' + head +
+      '<div class="nc-rows">' + w.rows.map(rowHTML).join('') + '</div>';
+  }
+  qa('[data-w]').forEach(function (el) {
+    const w = WIDGETS[el.dataset.w];
+    el.className = 'nc-widget' + (w.cls ? ' ' + w.cls : '');
+    el.innerHTML = widgetHTML(w);
+  });
+
+  /* ---------- 2. WALLPAPER SKYLINE (generic polygons, no franchise art) ---------- */
+  const SKY = '<svg class="mk-sky" viewBox="0 0 600 200" preserveAspectRatio="xMidYMax meet" aria-hidden="true">' +
+    '<rect class="b" x="0" y="120" width="46" height="80"/><rect class="b" x="40" y="86" width="54" height="114"/>' +
+    '<polygon class="b" points="94,130 94,200 130,200 130,70 112,52 94,70"/><rect class="b" x="128" y="104" width="66" height="96"/>' +
+    '<rect class="b" x="190" y="60" width="40" height="140"/><polygon class="b" points="228,122 228,200 282,200 282,96 268,80 250,96 250,122"/>' +
+    '<rect class="b" x="280" y="140" width="50" height="60"/><rect class="b" x="326" y="34" width="58" height="166"/>' +
+    '<rect class="b" x="382" y="96" width="44" height="104"/><rect class="b" x="424" y="70" width="70" height="130"/>' +
+    '<polygon class="b" points="492,140 492,200 540,200 540,50 530,40 520,50 510,50 500,120"/><rect class="b" x="536" y="110" width="64" height="90"/>' +
+    '<rect class="w" x="338" y="50" width="4" height="6"/><rect class="w" x="348" y="50" width="4" height="6"/><rect class="w" x="338" y="66" width="4" height="6"/>' +
+    '<rect class="w" x="358" y="82" width="4" height="6"/><rect class="w" x="394" y="110" width="4" height="6"/><rect class="w" x="434" y="90" width="4" height="6"/>' +
+    '<rect class="w" x="448" y="90" width="4" height="6"/><rect class="w" x="434" y="112" width="4" height="6"/><rect class="w" x="104" y="120" width="4" height="6"/>' +
+    '<rect class="w" x="14" y="130" width="4" height="6"/><rect class="w" x="552" y="128" width="4" height="6"/>' +
+    '<rect class="n" x="332" y="70" width="34" height="3"/><rect class="n" x="440" y="100" width="26" height="3"/>' +
+    '<polygon class="m" points="230,104 266,104 260,110 236,110"/><rect class="m" x="136" y="144" width="22" height="2"/>' +
+    '<rect class="n" x="40" y="104" width="3" height="3"/></svg>';
+  qa('[data-sky]').forEach(function (w) { w.insertAdjacentHTML('afterbegin', SKY); });
+
+  /* ---------- 3. TRAY OPTIONS: four geometries, integer vertices, shapes only (Pillow-safe) ---------- */
+  const STATE_FILL = { normal: 'var(--nc-bar, var(--nc-fg))', warn: 'var(--nc-warn)', crit: 'var(--nc-danger)', stale: 'var(--nc-stale)' };
+  const poly = (P) => 'M' + P.map(p => p[0] + ' ' + p[1]).join('L') + 'Z';
+  function perim(P) { const L = [0]; for (let i = 1; i < P.length; i++) L.push(L[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1])); return L; }
+  function at(P, L, f) {
+    const s = f * L[L.length - 1]; let i = 1;
+    while (i < L.length - 1 && L[i] < s) i++;
+    const seg = L[i] - L[i - 1], u = seg ? (s - L[i - 1]) / seg : 0;
+    return [P[i - 1][0] + (P[i][0] - P[i - 1][0]) * u, P[i - 1][1] + (P[i][1] - P[i - 1][1]) * u];
+  }
+  function side(P, L, f0, f1) {
+    const T = L[L.length - 1], out = [at(P, L, f0)];
+    for (let i = 1; i < P.length - 1; i++) { const f = L[i] / T; if (f > f0 && f < f1) out.push(P[i]); }
+    out.push(at(P, L, f1)); return out;
+  }
+  function bandD(M, f0, f1) {
+    const Lo = perim(M.outer), Li = perim(M.inner);
+    const o = side(M.outer, Lo, f0, f1), i = side(M.inner, Li, f0, f1).reverse();
+    return poly(o.concat(i));
+  }
+  /* chamfered square, inset i from the edge; the chamfer grows by 0.414 i so the diagonal keeps its offset */
+  function octo(px, c, i) {
+    const a = i, b = px - i, k = Math.round(c + i * 0.414);
+    return [[k, a], [px - k, a], [b, k], [b, px - k], [px - k, b], [k, b], [a, px - k], [a, k], [k, a]];
+  }
+  /* Sutherland-Hodgman clip of a closed polygon to the half-plane y >= yl */
+  function clipBelow(P, yl) {
+    const out = [];
+    for (let i = 0; i < P.length; i++) {
+      const A = P[i], B = P[(i + 1) % P.length];
+      const ain = A[1] >= yl, bin = B[1] >= yl;
+      if (ain) out.push(A);
+      if (ain !== bin) { const t = (yl - A[1]) / (B[1] - A[1]); out.push([A[0] + (B[0] - A[0]) * t, yl]); }
+    }
+    return out;
+  }
+  const TRAY_OPT = {
+    /* A: segmented chamfer ring, eight segments, lit = round(pct / 12.5) */
+    A: function (px, pct, state) {
+      const band = px === 16 ? 3 : px === 24 ? 4 : 5, N = 8, lit = Math.round(pct / 100 * N);
+      const O = octo(px, px / 4, 2), I = octo(px, px / 4, 2 + band);
+      const T = perim(O), gap = 1.2 / T[T.length - 1];
+      let segs = '';
+      for (let i = 0; i < N; i++) {
+        segs += '<path style="fill:' + (i < lit ? STATE_FILL[state] : 'var(--nc-ring)') + '" d="' +
+          bandD({ outer: O, inner: I }, i / N + gap / 2, (i + 1) / N - gap / 2) + '"/>';
+      }
+      return '<path style="fill:var(--nc-line)" d="' + poly(octo(px, px / 4, 0)) + '"/>' +
+             '<path style="fill:var(--nc-bg-0)" d="' + poly(octo(px, px / 4, 1)) + '"/>' + segs;
+    },
+    /* B: vertical RAM meter, five stacked cells filling from the bottom (recommended) */
+    B: function (px, pct, state) {
+      const g = { 16: [8, 2, 1], 24: [10, 3, 1], 32: [14, 4, 2] }[px], N = 5, lit = Math.round(pct / 100 * N);
+      const w = g[0], h = g[1], gp = g[2], total = N * h + (N - 1) * gp;
+      const x0 = (px - w) / 2, y0 = Math.floor((px - total) / 2), c = px >= 24 ? 4 : 3;
+      let cells = '';
+      for (let k = 0; k < N; k++) {
+        const y = y0 + (N - 1 - k) * (h + gp);
+        cells += '<rect x="' + x0 + '" y="' + y + '" width="' + w + '" height="' + h + '" style="fill:' +
+          (k < lit ? STATE_FILL[state] : 'var(--nc-ring)') + '"/>';
+      }
+      return '<path style="fill:var(--nc-line)" d="' + poly(octo(px, c, 0)) + '"/>' +
+             '<path style="fill:var(--nc-bg-0)" d="' + poly(octo(px, c, 1)) + '"/>' + cells;
+    },
+    /* C: hexagon badge with a continuous liquid level, surface line carries the level */
+    C: function (px, pct, state) {
+      const O = [[px / 2, 0], [px, px / 4], [px, 3 * px / 4], [px / 2, px], [0, 3 * px / 4], [0, px / 4]];
+      const I = { 16: [[8, 2], [14, 5], [14, 11], [8, 14], [2, 11], [2, 5]],
+                  24: [[12, 4], [20, 8], [20, 16], [12, 20], [4, 16], [4, 8]],
+                  32: [[16, 5], [28, 11], [28, 21], [16, 27], [4, 21], [4, 11]] }[px];
+      const top = I[0][1], bot = I[3][1];
+      const level = Math.round(bot - pct / 100 * (bot - top));
+      const liquid = pct > 0 ? clipBelow(I, level).map(p => [Math.round(p[0]), Math.round(p[1])]) : [];
+      return '<path style="fill:var(--nc-line)" d="' + poly(O) + '"/>' +
+             '<path style="fill:var(--nc-ring)" d="' + poly(I) + '"/>' +
+             (liquid.length > 2 ? '<path style="fill:' + STATE_FILL[state] + '" d="' + poly(liquid) + '"/>' : '');
+    },
+    /* D: slant plate with a slanted fill bar; percent digits from 24 px */
+    D: function (px, pct, state) {
+      const s = Math.round(px / 4);
+      const P = [[s, 0], [px, 0], [px - s, px], [0, px]];
+      const Pi = [[s + 1, 1], [px - 1, 1], [px - s - 1, px - 1], [1, px - 1]];
+      const bx = px === 16 ? [4, 12, 6, 4] : px === 24 ? [5, 19, 16, 3] : [6, 26, 22, 4];
+      const fw = Math.round((bx[1] - bx[0]) * pct / 100);
+      let out = '<path style="fill:var(--nc-line)" d="' + poly(P) + '"/><path style="fill:var(--nc-bg-0)" d="' + poly(Pi) + '"/>';
+      out += '<rect x="' + bx[0] + '" y="' + bx[2] + '" width="' + (bx[1] - bx[0]) + '" height="' + bx[3] + '" style="fill:var(--nc-ring)"/>';
+      if (fw > 0) out += '<rect x="' + bx[0] + '" y="' + bx[2] + '" width="' + fw + '" height="' + bx[3] + '" style="fill:' + STATE_FILL[state] + '"/>';
+      if (px > 16) {
+        const fs = px === 24 ? 10 : 14, base = px === 24 ? 13 : 16;
+        out += '<text x="' + (px / 2) + '" y="' + base + '" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="' + fs +
+               '" style="fill:' + (state === 'normal' ? 'var(--nc-fg-hi)' : STATE_FILL[state]) + '">' + pct + '</text>';
+      }
+      return out;
+    }
+  };
+  function trayIcon(opt, px, pct, state) {
+    return '<svg width="' + px + '" height="' + px + '" viewBox="0 0 ' + px + ' ' + px + '" shape-rendering="crispEdges" aria-hidden="true">' +
+      TRAY_OPT[opt](px, pct, state) + '</svg>';
+  }
+  qa('.nc-tray[data-opt]').forEach(function (el) { el.innerHTML = trayIcon(el.dataset.opt, +el.dataset.px, +el.dataset.pct, el.dataset.state); });
+
+  const T_VARIANTS = [['blackwall', '01', 'Blackwall'], ['relic', '02', 'Relic'], ['edgerun', '03', 'Edgerun'], ['mox', '04', 'Mox']];
+  const T_OPTS = [['A', 'Segment ring'], ['B', 'RAM meter'], ['C', 'Hex liquid'], ['D', 'Slant plate']];
+  const T_STATES = [['0%', 0, 'normal'], ['13%', 13, 'normal'], ['72%', 72, 'warn'], ['93%', 93, 'crit'], ['STALE', 13, 'stale']];
+  const T_SIZES = [16, 24, 32];
+  function trayGrid(vid, bg) {
+    let h = '<div class="tr-grid" data-variant="' + vid + '" data-bg="' + bg + '">';
+    h += '<div class="tr-lab">' + (bg === 'dark' ? 'Dark taskbar' : 'Light taskbar') + '</div>';
+    T_SIZES.forEach(function (sz) { h += '<div class="tr-sz" style="grid-column: span 5">' + sz + ' px</div>'; });
+    h += '<div class="tr-lab"></div>';
+    T_SIZES.forEach(function () { T_STATES.forEach(function (s, j) { h += '<div class="tr-h' + (j === 0 ? ' g' : '') + '">' + s[0] + '</div>'; }); });
+    T_OPTS.forEach(function (o) {
+      h += '<div class="tr-n">' + o[0] + ' &middot; ' + o[1] + (o[0] === 'B' ? '<em>recommended</em>' : '') + '</div>';
+      T_SIZES.forEach(function (sz) {
+        T_STATES.forEach(function (s, j) {
+          h += '<div class="tr-c' + (j === 0 ? ' g' : '') + '">' + trayIcon(o[0], sz, s[1], s[2]) + '</div>';
+        });
+      });
+    });
+    return h + '</div>';
+  }
+  q('#tray-opts').innerHTML = T_VARIANTS.map(function (v) {
+    return '<div class="tr-block"><div class="mk-label tr-vt"><b>' + v[1] + '</b>' + v[2] + '</div>' +
+      trayGrid(v[0], 'dark') + trayGrid(v[0], 'light') + '</div>';
+  }).join('');
+  q('#tray-z4').innerHTML = T_STATES.map(function (s) {
+    return '<span class="nc-tray" style="display:inline-flex;">' + trayIcon('B', 16, s[1], s[2]) + '</span>';
+  }).join('');
+
+  /* ---------- 4. SEGMENT CELLS: .nc-seg (31 cells), .nc-wseg (26), .nc-s-seg (18) for every [data-p] ---------- */
+  function fillCells(el, N) {
+    const p = +el.dataset.p; let html = '';
+    for (let i = 0; i < N; i++) {
+      const f = Math.max(0, Math.min(1, p / 100 * N - i));
+      html += '<i style="--f:' + f.toFixed(3) + '"><b></b></i>';
+    }
+    el.innerHTML = html;
+  }
+  qa('.nc-seg[data-p]').forEach(function (el) { fillCells(el, 31); });
+  qa('.nc-wseg[data-p]').forEach(function (el) { fillCells(el, 26); });
+  qa('.nc-s-seg[data-p]').forEach(function (el) { fillCells(el, 18); });
+
+  /* ---------- 5. TASKBAR 2x ZOOM COPY: clone the right-hand group (after tray and cells are built) ---------- */
+  q('#tb-zoom').innerHTML = q('#tb-right').outerHTML.replace(/ id="[^"]*"/g, '');
+
+  /* ---------- 6. 30-DAY SPARKLINE (deterministic mock data, average computed) ---------- */
+  let seed = 7;
+  const rnd = function () { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+  const vals = [];
+  for (let i = 0; i < 30; i++) vals.push(20 + rnd() * 70);
+  vals[11] = 141; vals[29] = 84.2;
+  const avg = vals.reduce(function (a, b) { return a + b; }, 0) / vals.length;
+  q('#avg-lbl').textContent = 'Avg $' + avg.toFixed(0);
+  let svg = '<line class="base" x1="0" x2="300" y1="112" y2="112"/>';
+  vals.forEach(function (v, i) {
+    const h = v / 150 * 100;
+    const cls = i === 29 ? 't' : (i === 11 ? 'p' : 'd');
+    svg += '<rect class="' + cls + '" x="' + (i * 10 + 1) + '" y="' + (112 - h).toFixed(2) + '" width="6" height="' + h.toFixed(2) + '"/>';
+  });
+  svg += '<line class="avg" x1="0" x2="300" y1="' + (112 - avg / 150 * 100).toFixed(2) + '" y2="' + (112 - avg / 150 * 100).toFixed(2) + '"/>';
+  q('#spark').innerHTML = svg;
+
+  /* ---------- 7. EDGERUN DASHBOARD: clone of the overview, variant swapped (same markup, CSS decides the skin) ---------- */
+  const dash = q('#dash');
+  const dashSY = dash.cloneNode(true);
+  dashSY.id = 'dash-sy';
+  dashSY.dataset.variant = 'edgerun';
+  dashSY.querySelectorAll('[id]').forEach(function (e) { e.removeAttribute('id'); });
+  q('#dash-sy-slot').appendChild(dashSY);
+
+  /* ---------- 8. VARIANT LIMIT CARDS: clone the overview cards into each variant root ---------- */
+  qa('[data-clone-cards]').forEach(function (el) {
+    el.innerHTML = '<section class="nc-limits">' + q('#dash-limits').innerHTML + '</section>';
+  });
+
+  /* ---------- 9. REFRESH HIT: once on load, then only when the data changes ---------- */
+  setTimeout(function () {
+    qa('[data-hit]').forEach(function (el) { el.classList.add('nc-hit'); });
+  }, 250);
+})();
+</script>
+</body>
+</html>

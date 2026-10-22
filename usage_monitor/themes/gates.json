@@ -1,0 +1,902 @@
+{
+  "id": "gates",
+  "name": "Gates",
+  "tagline": "Readouts on native Fluent surfaces: a rail for time, a bar for usage, one lamp for the link.",
+  "fonts": {
+    "display": {
+      "family": "Segoe UI Variable Display",
+      "file_hint": "SegUIVar.ttf (variable). Pillow: named instance 'Semibold Display' (wght 600, opsz 28). CSS fallback 'Segoe UI Variable'.",
+      "licence": "Microsoft Windows 11 system font. Not redistributable: read from C:\\Windows\\Fonts, never bundled."
+    },
+    "body": {
+      "family": "Segoe UI Variable Text",
+      "file_hint": "SegUIVar.ttf (variable). Pillow: wght 400 for labels and footers, wght 600 for titles and the pill word, opsz 11-12. CSS fallback 'Segoe UI Variable'.",
+      "licence": "Microsoft Windows 11 system font. Not redistributable: read from C:\\Windows\\Fonts, never bundled."
+    },
+    "mono": {
+      "family": "Cascadia Mono",
+      "file_hint": "CascadiaMono.ttf (variable 200-700). Pillow: wght 700 for values, wght 400 for tags.",
+      "licence": "SIL Open Font License 1.1 (Cascadia Code / Cascadia Mono, Microsoft)."
+    }
+  },
+  "shape": {
+    "radius": 8,
+    "control_radius": 4,
+    "chamfer": 0,
+    "stroke": 1
+  },
+  "effects": {
+    "glow_radius": 6,
+    "glow_strength": 0.36,
+    "scanlines": 0,
+    "scanline_spacing": 0,
+    "flicker": false,
+    "vignette": 0,
+    "glitch": false,
+    "curvature": 0
+  },
+  "bar": {
+    "style": "solid",
+    "segments": 0,
+    "gap": 0,
+    "height": 4
+  },
+  "widget": {
+    "floating": {
+      "width": 288,
+      "height": 128,
+      "height_with_scoped": 128
+    },
+    "taskbar": {
+      "width": 248
+    }
+  },
+  "variants": [
+    {
+      "id": "system-dark",
+      "name": "System accent · Dark",
+      "default": true,
+      "mode": "dark",
+      "colors": {
+        "bg": "#202020",
+        "surface": "#2f2f2f",
+        "surface_alt": "#3a3a3a",
+        "border": "#ffffff15",
+        "border_dim": "#ffffff0e",
+        "text": "#ffffff",
+        "text_bright": "#ffffff",
+        "text_dim": "#c8c8c8",
+        "accent": "#60CDFF",
+        "accent_alt": "#519ec1",
+        "ok": "#6ccb5f",
+        "warn": "#fce100",
+        "alert": "#ff8a80",
+        "track": "#ffffff1f",
+        "glow": "#60cdff5c",
+        "stale": "#8c8c8c"
+      }
+    },
+    {
+      "id": "blue-dark",
+      "name": "Blue · Dark",
+      "default": false,
+      "mode": "dark",
+      "colors": {
+        "bg": "#202020",
+        "surface": "#2f2f2f",
+        "surface_alt": "#3a3a3a",
+        "border": "#ffffff15",
+        "border_dim": "#ffffff0e",
+        "text": "#ffffff",
+        "text_bright": "#ffffff",
+        "text_dim": "#c8c8c8",
+        "accent": "#5B9DFF",
+        "accent_alt": "#4e7cc1",
+        "ok": "#6ccb5f",
+        "warn": "#fce100",
+        "alert": "#ff8a80",
+        "track": "#ffffff1f",
+        "glow": "#5b9dff5c",
+        "stale": "#8c8c8c"
+      }
+    },
+    {
+      "id": "teal-dark",
+      "name": "Teal · Dark",
+      "default": false,
+      "mode": "dark",
+      "colors": {
+        "bg": "#202020",
+        "surface": "#2f2f2f",
+        "surface_alt": "#3a3a3a",
+        "border": "#ffffff15",
+        "border_dim": "#ffffff0e",
+        "text": "#ffffff",
+        "text_bright": "#ffffff",
+        "text_dim": "#c8c8c8",
+        "accent": "#4DD6C2",
+        "accent_alt": "#44a496",
+        "ok": "#6ccb5f",
+        "warn": "#fce100",
+        "alert": "#ff8a80",
+        "track": "#ffffff1f",
+        "glow": "#4dd6c25c",
+        "stale": "#8c8c8c"
+      }
+    },
+    {
+      "id": "purple-dark",
+      "name": "Purple · Dark",
+      "default": false,
+      "mode": "dark",
+      "colors": {
+        "bg": "#202020",
+        "surface": "#2f2f2f",
+        "surface_alt": "#3a3a3a",
+        "border": "#ffffff15",
+        "border_dim": "#ffffff0e",
+        "text": "#ffffff",
+        "text_bright": "#ffffff",
+        "text_dim": "#c8c8c8",
+        "accent": "#B39AE6",
+        "accent_alt": "#8b7aaf",
+        "ok": "#6ccb5f",
+        "warn": "#fce100",
+        "alert": "#ff8a80",
+        "track": "#ffffff1f",
+        "glow": "#b39ae65c",
+        "stale": "#8c8c8c"
+      }
+    },
+    {
+      "id": "rose-dark",
+      "name": "Rose · Dark",
+      "default": false,
+      "mode": "dark",
+      "colors": {
+        "bg": "#202020",
+        "surface": "#2f2f2f",
+        "surface_alt": "#3a3a3a",
+        "border": "#ffffff15",
+        "border_dim": "#ffffff0e",
+        "text": "#ffffff",
+        "text_bright": "#ffffff",
+        "text_dim": "#c8c8c8",
+        "accent": "#FF8AC5",
+        "accent_alt": "#c16f98",
+        "ok": "#6ccb5f",
+        "warn": "#fce100",
+        "alert": "#ff8a80",
+        "track": "#ffffff1f",
+        "glow": "#ff8ac55c",
+        "stale": "#8c8c8c"
+      }
+    },
+    {
+      "id": "orange-dark",
+      "name": "Orange · Dark",
+      "default": false,
+      "mode": "dark",
+      "colors": {
+        "bg": "#202020",
+        "surface": "#2f2f2f",
+        "surface_alt": "#3a3a3a",
+        "border": "#ffffff15",
+        "border_dim": "#ffffff0e",
+        "text": "#ffffff",
+        "text_bright": "#ffffff",
+        "text_dim": "#c8c8c8",
+        "accent": "#FF9F5A",
+        "accent_alt": "#c17d4d",
+        "ok": "#6ccb5f",
+        "warn": "#fce100",
+        "alert": "#ff8a80",
+        "track": "#ffffff1f",
+        "glow": "#ff9f5a5c",
+        "stale": "#8c8c8c"
+      }
+    },
+    {
+      "id": "green-dark",
+      "name": "Green · Dark",
+      "default": false,
+      "mode": "dark",
+      "colors": {
+        "bg": "#202020",
+        "surface": "#2f2f2f",
+        "surface_alt": "#3a3a3a",
+        "border": "#ffffff15",
+        "border_dim": "#ffffff0e",
+        "text": "#ffffff",
+        "text_bright": "#ffffff",
+        "text_dim": "#c8c8c8",
+        "accent": "#C3E86B",
+        "accent_alt": "#97b059",
+        "ok": "#6ccb5f",
+        "warn": "#fce100",
+        "alert": "#ff8a80",
+        "track": "#ffffff1f",
+        "glow": "#c3e86b5c",
+        "stale": "#8c8c8c"
+      }
+    },
+    {
+      "id": "system-light",
+      "name": "System accent · Light",
+      "default": false,
+      "mode": "light",
+      "colors": {
+        "bg": "#f3f3f3",
+        "surface": "#ffffff",
+        "surface_alt": "#ffffff",
+        "border": "#00000014",
+        "border_dim": "#0000000d",
+        "text": "#1b1b1b",
+        "text_bright": "#000000",
+        "text_dim": "#5d5d5d",
+        "accent": "#0067C0",
+        "accent_alt": "#4d95d3",
+        "ok": "#0b6b0b",
+        "warn": "#8a5200",
+        "alert": "#b3261e",
+        "track": "#0000001a",
+        "glow": "#0067c047",
+        "stale": "#6f6f6f"
+      }
+    },
+    {
+      "id": "blue-light",
+      "name": "Blue · Light",
+      "default": false,
+      "mode": "light",
+      "colors": {
+        "bg": "#f3f3f3",
+        "surface": "#ffffff",
+        "surface_alt": "#ffffff",
+        "border": "#00000014",
+        "border_dim": "#0000000d",
+        "text": "#1b1b1b",
+        "text_bright": "#000000",
+        "text_dim": "#5d5d5d",
+        "accent": "#2D5BD9",
+        "accent_alt": "#6c8ce4",
+        "ok": "#0b6b0b",
+        "warn": "#8a5200",
+        "alert": "#b3261e",
+        "track": "#0000001a",
+        "glow": "#2d5bd947",
+        "stale": "#6f6f6f"
+      }
+    },
+    {
+      "id": "teal-light",
+      "name": "Teal · Light",
+      "default": false,
+      "mode": "light",
+      "colors": {
+        "bg": "#f3f3f3",
+        "surface": "#ffffff",
+        "surface_alt": "#ffffff",
+        "border": "#00000014",
+        "border_dim": "#0000000d",
+        "text": "#1b1b1b",
+        "text_bright": "#000000",
+        "text_dim": "#5d5d5d",
+        "accent": "#018574",
+        "accent_alt": "#4daa9e",
+        "ok": "#0b6b0b",
+        "warn": "#8a5200",
+        "alert": "#b3261e",
+        "track": "#0000001a",
+        "glow": "#01857447",
+        "stale": "#6f6f6f"
+      }
+    },
+    {
+      "id": "purple-light",
+      "name": "Purple · Light",
+      "default": false,
+      "mode": "light",
+      "colors": {
+        "bg": "#f3f3f3",
+        "surface": "#ffffff",
+        "surface_alt": "#ffffff",
+        "border": "#00000014",
+        "border_dim": "#0000000d",
+        "text": "#1b1b1b",
+        "text_bright": "#000000",
+        "text_dim": "#5d5d5d",
+        "accent": "#6F4FA8",
+        "accent_alt": "#9a84c2",
+        "ok": "#0b6b0b",
+        "warn": "#8a5200",
+        "alert": "#b3261e",
+        "track": "#0000001a",
+        "glow": "#6f4fa847",
+        "stale": "#6f6f6f"
+      }
+    },
+    {
+      "id": "rose-light",
+      "name": "Rose · Light",
+      "default": false,
+      "mode": "light",
+      "colors": {
+        "bg": "#f3f3f3",
+        "surface": "#ffffff",
+        "surface_alt": "#ffffff",
+        "border": "#00000014",
+        "border_dim": "#0000000d",
+        "text": "#1b1b1b",
+        "text_bright": "#000000",
+        "text_dim": "#5d5d5d",
+        "accent": "#C10E74",
+        "accent_alt": "#d4569e",
+        "ok": "#0b6b0b",
+        "warn": "#8a5200",
+        "alert": "#b3261e",
+        "track": "#0000001a",
+        "glow": "#c10e7447",
+        "stale": "#6f6f6f"
+      }
+    },
+    {
+      "id": "orange-light",
+      "name": "Orange · Light",
+      "default": false,
+      "mode": "light",
+      "colors": {
+        "bg": "#f3f3f3",
+        "surface": "#ffffff",
+        "surface_alt": "#ffffff",
+        "border": "#00000014",
+        "border_dim": "#0000000d",
+        "text": "#1b1b1b",
+        "text_bright": "#000000",
+        "text_dim": "#5d5d5d",
+        "accent": "#C75300",
+        "accent_alt": "#d8874d",
+        "ok": "#0b6b0b",
+        "warn": "#8a5200",
+        "alert": "#b3261e",
+        "track": "#0000001a",
+        "glow": "#c7530047",
+        "stale": "#6f6f6f"
+      }
+    },
+    {
+      "id": "green-light",
+      "name": "Green · Light",
+      "default": false,
+      "mode": "light",
+      "colors": {
+        "bg": "#f3f3f3",
+        "surface": "#ffffff",
+        "surface_alt": "#ffffff",
+        "border": "#00000014",
+        "border_dim": "#0000000d",
+        "text": "#1b1b1b",
+        "text_bright": "#000000",
+        "text_dim": "#5d5d5d",
+        "accent": "#5A7F00",
+        "accent_alt": "#8ca54d",
+        "ok": "#0b6b0b",
+        "warn": "#8a5200",
+        "alert": "#b3261e",
+        "track": "#0000001a",
+        "glow": "#5a7f0047",
+        "stale": "#6f6f6f"
+      }
+    }
+  ],
+  "extras": {
+    "schema_notes": "Extra keys are allowed inside extras. Colours in colors and extras are #rrggbb or #rrggbbaa. Widget metrics are integer px at 1x.",
+    "mode_policy": "Light and dark are separate variants (same accent, different mode). System mode is resolved by the host from the Windows app theme (AppsUseLightTheme) and picks the dark or light entry of the chosen accent. No variant uses mode null.",
+    "accent_policy": "System accent = the Windows accent colour read at runtime; the system-* values are the fallback. The other six accents are fixed pairs (accent-d for dark, accent-l for light).",
+    "locked_roles": [
+      "ok",
+      "warn",
+      "alert",
+      "usage_warn",
+      "usage_alert",
+      "stale",
+      "text_3",
+      "track",
+      "time",
+      "time_track",
+      "tray_fg",
+      "tray_track",
+      "widget_bg",
+      "widget_border",
+      "bg",
+      "surface"
+    ],
+    "locked_note": "These values are identical in every accent of a mode. Only accent, accent_alt, glow and the derived accent colours change with the variant.",
+    "modes": {
+      "dark": {
+        "layer": "#292929",
+        "hover": "#ffffff0f",
+        "widget_bg": "#262626f2",
+        "widget_border": "#ffffff17",
+        "text_3": "#a6a6a6",
+        "usage_warn": "#fce100",
+        "usage_alert": "#ff5f5f",
+        "time": "#ffffff8f",
+        "time_track": "#ffffff14",
+        "hl": "#ffffff29",
+        "tb_bg": "#202020",
+        "tb_rule": "#ffffff12",
+        "tb_hover": "#ffffff12",
+        "tray_fg": "#ffffff",
+        "tray_track": "#ffffff6b",
+        "shadow_main": "#00000057",
+        "shadow_tight": "#00000066"
+      },
+      "light": {
+        "layer": "#fbfbfb",
+        "hover": "#0000000a",
+        "widget_bg": "#fcfcfcf2",
+        "widget_border": "#00000014",
+        "text_3": "#6b6b6b",
+        "usage_warn": "#8a5200",
+        "usage_alert": "#b3261e",
+        "time": "#00000080",
+        "time_track": "#00000012",
+        "hl": "#ffffff00",
+        "tb_bg": "#f3f3f3",
+        "tb_rule": "#00000012",
+        "tb_hover": "#0000000d",
+        "tray_fg": "#1b1b1b",
+        "tray_track": "#1b1b1b5c",
+        "shadow_main": "#00000024",
+        "shadow_tight": "#0000001f"
+      }
+    },
+    "pill": {
+      "dark_alpha": 0.16,
+      "light_alpha": 0.12,
+      "note": "status pill tint = status colour at this alpha over widget_bg; the word uses the status colour, stale/offline/paused use text_3 on track"
+    },
+    "derived_per_variant": {
+      "system-dark": {
+        "accent_soft": "#60cdff24",
+        "accent_tint": "#60cdff14",
+        "lamp_halo": "#6ccb5f3d",
+        "pill_ok_bg": "#6ccb5f29",
+        "pill_track_bg": "#ffffff1f"
+      },
+      "blue-dark": {
+        "accent_soft": "#5b9dff24",
+        "accent_tint": "#5b9dff14",
+        "lamp_halo": "#6ccb5f3d",
+        "pill_ok_bg": "#6ccb5f29",
+        "pill_track_bg": "#ffffff1f"
+      },
+      "teal-dark": {
+        "accent_soft": "#4dd6c224",
+        "accent_tint": "#4dd6c214",
+        "lamp_halo": "#6ccb5f3d",
+        "pill_ok_bg": "#6ccb5f29",
+        "pill_track_bg": "#ffffff1f"
+      },
+      "purple-dark": {
+        "accent_soft": "#b39ae624",
+        "accent_tint": "#b39ae614",
+        "lamp_halo": "#6ccb5f3d",
+        "pill_ok_bg": "#6ccb5f29",
+        "pill_track_bg": "#ffffff1f"
+      },
+      "rose-dark": {
+        "accent_soft": "#ff8ac524",
+        "accent_tint": "#ff8ac514",
+        "lamp_halo": "#6ccb5f3d",
+        "pill_ok_bg": "#6ccb5f29",
+        "pill_track_bg": "#ffffff1f"
+      },
+      "orange-dark": {
+        "accent_soft": "#ff9f5a24",
+        "accent_tint": "#ff9f5a14",
+        "lamp_halo": "#6ccb5f3d",
+        "pill_ok_bg": "#6ccb5f29",
+        "pill_track_bg": "#ffffff1f"
+      },
+      "green-dark": {
+        "accent_soft": "#c3e86b24",
+        "accent_tint": "#c3e86b14",
+        "lamp_halo": "#6ccb5f3d",
+        "pill_ok_bg": "#6ccb5f29",
+        "pill_track_bg": "#ffffff1f"
+      },
+      "system-light": {
+        "accent_soft": "#0067c024",
+        "accent_tint": "#0067c014",
+        "lamp_halo": "#0b6b0b3d",
+        "pill_ok_bg": "#0b6b0b1f",
+        "pill_track_bg": "#0000001a"
+      },
+      "blue-light": {
+        "accent_soft": "#2d5bd924",
+        "accent_tint": "#2d5bd914",
+        "lamp_halo": "#0b6b0b3d",
+        "pill_ok_bg": "#0b6b0b1f",
+        "pill_track_bg": "#0000001a"
+      },
+      "teal-light": {
+        "accent_soft": "#01857424",
+        "accent_tint": "#01857414",
+        "lamp_halo": "#0b6b0b3d",
+        "pill_ok_bg": "#0b6b0b1f",
+        "pill_track_bg": "#0000001a"
+      },
+      "purple-light": {
+        "accent_soft": "#6f4fa824",
+        "accent_tint": "#6f4fa814",
+        "lamp_halo": "#0b6b0b3d",
+        "pill_ok_bg": "#0b6b0b1f",
+        "pill_track_bg": "#0000001a"
+      },
+      "rose-light": {
+        "accent_soft": "#c10e7424",
+        "accent_tint": "#c10e7414",
+        "lamp_halo": "#0b6b0b3d",
+        "pill_ok_bg": "#0b6b0b1f",
+        "pill_track_bg": "#0000001a"
+      },
+      "orange-light": {
+        "accent_soft": "#c7530024",
+        "accent_tint": "#c7530014",
+        "lamp_halo": "#0b6b0b3d",
+        "pill_ok_bg": "#0b6b0b1f",
+        "pill_track_bg": "#0000001a"
+      },
+      "green-light": {
+        "accent_soft": "#5a7f0024",
+        "accent_tint": "#5a7f0014",
+        "lamp_halo": "#0b6b0b3d",
+        "pill_ok_bg": "#0b6b0b1f",
+        "pill_track_bg": "#0000001a"
+      }
+    },
+    "fixed_roles_legend": [
+      "ok: LIVE lamp, Under pace",
+      "warn: value and footer text, Ahead of pace",
+      "alert: critical text, Nearly out",
+      "usage_warn: bar 60 % to 85 %",
+      "usage_alert: bar from 85 %",
+      "stale: grey lamp, dimmed bars, dashed ring",
+      "accent: the only colour a variant changes"
+    ],
+    "severity": {
+      "warn_at_pct": 60,
+      "alert_at_pct": 85,
+      "source": "API severity when present, else these thresholds"
+    },
+    "pace": {
+      "ahead": "usage_pct > elapsed_pct",
+      "under": "usage_pct <= elapsed_pct",
+      "footers": {
+        "normal": "Under pace · Resets {time}",
+        "warn": "Ahead of pace · Resets {time}",
+        "crit": "Nearly out · Resets {time}",
+        "stale": "Hmm, we lost touch. Sign in to Claude Code.",
+        "offline": "No connection. Retrying every minute.",
+        "paused": "Paused. Resume to keep usage live."
+      }
+    },
+    "fable_rule": "Fable row shows only when the LIVE feed reports a Fable window with share_pct > 0 and session and weekly are both below 60 %. Otherwise the footer takes the third slot and the Fable row is dropped with it. The widget is 128 px tall in every state.",
+    "rails": "time rail = elapsed_pct of the window, derived from the reset timestamp (see fixtures.rule). Index tick 1 x 6 px at the rail end.",
+    "fixtures": {
+      "clock_local": "2026-10-21T16:12:00",
+      "session": {
+        "window_h": 5,
+        "normal_reset": "2026-10-21T19:39:00",
+        "elapsed_pct": 31,
+        "used_pct": 13,
+        "warn_reset": "2026-10-21T18:12:00",
+        "warn_elapsed_pct": 60,
+        "warn_used_pct": 72,
+        "crit_used_pct": 93
+      },
+      "weekly": {
+        "window_h": 168,
+        "reset": "2026-10-25T16:00:00",
+        "elapsed_pct": 43,
+        "used_pct": 2,
+        "warn_used_pct": 41,
+        "crit_used_pct": 52
+      },
+      "fable": {
+        "share_pct": 50,
+        "used_pct": 0,
+        "reset": "2026-10-25T16:00:00"
+      },
+      "stale_age": "14 min",
+      "offline_age": "6 min",
+      "paused_age": "2 h",
+      "live_age": "12 s",
+      "rule": "elapsed_pct = (clock - (reset - window)) / window * 100, rounded"
+    },
+    "footer_widths": {
+      "note": "measured by pillow_proto.py at 11 px SegUIVar (wght 400/600)",
+      "stale_copy_px": 220.0,
+      "iconic_stale_copy_px": 248.8,
+      "crit_px": 133.2,
+      "warn_px": 152.8,
+      "offline_px": 186.2,
+      "paused_px": 172.5,
+      "box_px": 258
+    },
+    "pillow": {
+      "supersample": 4,
+      "canvas": {
+        "w": 336,
+        "h": 176,
+        "margin": 24,
+        "note": "card at (24, 24); margin covers the 8 px offset and 16 px blur"
+      },
+      "card": {
+        "w": 288,
+        "h": 128,
+        "radius": 8,
+        "border_px": 1,
+        "pad": {
+          "top": 11,
+          "x": 14,
+          "bottom": 8
+        }
+      },
+      "shadow": {
+        "main": {
+          "dy": 8,
+          "gaussian_sigma": 8,
+          "alpha_dark": 0.34,
+          "alpha_light": 0.14
+        },
+        "tight": {
+          "dy": 0,
+          "gaussian_sigma": 1,
+          "alpha_dark": 0.4,
+          "alpha_light": 0.12
+        },
+        "note": "Pillow GaussianBlur radius equals sigma. Draw the mask at 4x so sigma 8 becomes 32."
+      },
+      "highlight": {
+        "y": 1,
+        "x0": 18,
+        "x1": 270,
+        "dark_only": true,
+        "note": "6 % and 94 % of the 286 px padding box, starting at x 1"
+      },
+      "header": {
+        "y_top": 12,
+        "h": 18,
+        "icon": {
+          "glyph": "E916",
+          "px": 14,
+          "x": 15,
+          "font": "Segoe Fluent Icons"
+        },
+        "title": {
+          "x": 36,
+          "px": 12,
+          "wght": 600,
+          "opsz": 12
+        },
+        "pill": {
+          "h": 18,
+          "r": 9,
+          "right_x": 252,
+          "dot_px": 8,
+          "halo_px": 2,
+          "word_px": 10,
+          "wght": 600,
+          "text_x_offset": 20
+        },
+        "more": {
+          "x0": 260,
+          "dots": 3,
+          "dot_px": 3,
+          "pitch": 5
+        }
+      },
+      "rows": {
+        "tops": [
+          38,
+          65,
+          92
+        ],
+        "pitch": 27,
+        "x0": 15,
+        "x1": 273,
+        "track_w": 258,
+        "label": {
+          "px": 12,
+          "wght": 400,
+          "line": 16,
+          "x": 15
+        },
+        "tag": {
+          "px": 11,
+          "font": "Cascadia Mono 400",
+          "gap_after_label": 6
+        },
+        "value": {
+          "px": 15,
+          "font": "Cascadia Mono 700",
+          "right_x": 273,
+          "line": 16
+        },
+        "rail": {
+          "dy": 19,
+          "h": 2,
+          "radius": 1,
+          "track": "time_track",
+          "fill": "time",
+          "tick": {
+            "w": 1,
+            "h": 6,
+            "dy": 17
+          }
+        },
+        "bar": {
+          "dy": 23,
+          "h": 4,
+          "radius": 2,
+          "track": "track",
+          "fill": "usage (accent / usage_warn / usage_alert / stale)"
+        },
+        "share_tick": {
+          "w": 1,
+          "h": 10,
+          "x_offset": 129,
+          "dy": 20,
+          "colour": "text_dim"
+        }
+      },
+      "footer": {
+        "y": 98,
+        "line": 16,
+        "px": 11,
+        "wght": 400,
+        "lead_wght": 600,
+        "x": 15
+      },
+      "text_placement": "origin = (card x + offset, card y + baseline); baseline = line_top + (line_h - (ascent + descent)) / 2 + ascent, metrics from the 4x font",
+      "downsample": "draw everything at 4x onto RGBA, convert to RGBa, resize LANCZOS to 1x, convert back to RGBA",
+      "tray": {
+        "sizes": {
+          "16": {
+            "centre_r": 5.25,
+            "stroke": 2.5,
+            "dash_units": [
+              6,
+              4.5
+            ],
+            "bbox_r": 6.5
+          },
+          "24": {
+            "centre_r": 8.0,
+            "stroke": 3.4,
+            "dash_units": [
+              4,
+              3
+            ],
+            "bbox_r": 9.7
+          },
+          "32": {
+            "centre_r": 11.5,
+            "stroke": 4.2,
+            "dash_units": [
+              3.2,
+              2.4
+            ],
+            "bbox_r": 13.6,
+            "number": {
+              "px": 10,
+              "wght": 600,
+              "centred": true
+            }
+          }
+        },
+        "bbox_rule": "Pillow draws the stroke inward from the bounding box: bbox radius = centre_r + stroke / 2",
+        "arc": "start 270 deg (12 o'clock), sweep clockwise 3.6 deg per percent; arc end = (270 + 3.6 * pct) mod 360",
+        "stale": "track dashed (dash_units in pathLength units, 1 unit = 3.6 deg), arc in text_3",
+        "measured_16px": {
+          "bbox_centre_radius_outer_px": 5.38,
+          "bbox_rule_outer_px": 6.62,
+          "bbox_rule_inner_px": 4.25,
+          "expected_outer_px": 6.5,
+          "expected_inner_px": 4.0,
+          "quantum_px": 0.25,
+          "arc_sweep_deg": {
+            "13": 46.8,
+            "72": 259.2,
+            "93": 334.8
+          },
+          "pixels_alpha_gt_127_for_13pct_arc": 12
+        }
+      }
+    },
+    "dashboard": {
+      "window": {
+        "w": 1200,
+        "h": 760,
+        "title_bar_h": 32,
+        "nav_w": 248,
+        "content_margin_right": 8,
+        "radius": 8
+      },
+      "type": {
+        "page_title": "28/34 Display 600",
+        "card_heading": "14/20 Text 600",
+        "body": "12-14 Text",
+        "numbers": "Cascadia Mono 12-13 Bold",
+        "minimum_px": 11,
+        "no_caps_tracking": true,
+        "no_ellipsis": true
+      },
+      "title_icon": "E916 timer, 14 px, accent",
+      "caption_buttons": [
+        "E921",
+        "E922",
+        "E8BB"
+      ],
+      "charts": "data-driven: daily cost array of 30 values drives the bars; no hand-written paths",
+      "pace_chips": {
+        "under": "Under pace (ok)",
+        "ahead": "Ahead of pace (warn)",
+        "unused": "Unused (neutral)"
+      },
+      "footer_note": "All costs are API-equivalent at list prices, not what your plan bills."
+    },
+    "glyphs": [
+      "E916",
+      "E80F",
+      "E8C7",
+      "E945",
+      "E81C",
+      "E713",
+      "E946",
+      "E721",
+      "E77B",
+      "E72C",
+      "E73E",
+      "E787",
+      "E81D",
+      "E9F9",
+      "E7C4",
+      "E9D2",
+      "E70E",
+      "E701",
+      "E767",
+      "E83F",
+      "E7E7",
+      "E774",
+      "E715",
+      "E8B7",
+      "E921",
+      "E922",
+      "E8BB",
+      "E72E"
+    ],
+    "css_token_map": {
+      "bg": "--bg",
+      "surface": "--surface",
+      "surface_alt": "--surface-alt",
+      "border": "--border",
+      "border_dim": "--border-dim",
+      "text": "--text",
+      "text_bright": "--text-bright",
+      "text_dim": "--text-dim",
+      "accent": "--accent",
+      "accent_alt": "--accent-alt",
+      "ok": "--ok",
+      "warn": "--warn",
+      "alert": "--alert",
+      "track": "--track",
+      "glow": "--glow",
+      "stale": "--stale"
+    },
+    "lift": "Lift sections 1, 2a-2d of final.html (tokens, widget, taskbar strip, tray ring, dashboard). Section 3 is mock-only."
+  }
+}

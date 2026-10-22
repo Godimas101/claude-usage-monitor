@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Night City v2 review</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; background: #0b0a0d; color: #e6e1d3; font: 15px/1.5 "Segoe UI", system-ui, sans-serif; }
+  .wrap { width: 1280px; margin: 0 auto; padding: 36px 0 60px; }
+  h1 { margin: 0 0 6px; font: 700 32px/1.1 "Rajdhani", "Segoe UI", sans-serif; letter-spacing: .06em; text-transform: uppercase; color: #fff8cf; }
+  .lede { margin: 0 0 8px; max-width: 1040px; color: #c2bbab; }
+  h2 { margin: 44px 0 10px; padding-top: 16px; border-top: 1px solid #2c2a30; font: 700 21px/1.2 "Rajdhani", "Segoe UI", sans-serif; letter-spacing: .1em; text-transform: uppercase; color: #f1ecdc; }
+  h2 .n { display: inline-block; margin-right: 10px; padding: 3px 8px 2px; background: #fcee0a; color: #0a0802; font-size: 15px; letter-spacing: .08em; transform: skewX(-10deg); }
+  h2 .n.r { background: #ff3b30; color: #0a0304; }
+  h2 .n.g { background: #d9d3c3; color: #0a0a0c; }
+  .intro { margin: 0 0 16px; max-width: 1060px; color: #b5ae9d; font-size: 14px; }
+  .cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .rt { grid-column: 1 / -1; margin: 6px 0 -4px; font: 700 13px/1 "Rajdhani", "Segoe UI", sans-serif; letter-spacing: .16em; text-transform: uppercase; color: #cfc8b6; }
+  .cell { min-width: 0; padding: 14px; background: #151418; box-shadow: inset 0 0 0 1px #26242a; }
+  .cell.full { grid-column: 1 / -1; }
+  .lab { margin: 0 0 10px; font: 700 11px/1 "Rajdhani", "Segoe UI", sans-serif; letter-spacing: .16em; text-transform: uppercase; color: #8f897b; }
+  .lab.new.y { color: #fcee0a; }
+  .lab.new.r { color: #ff6a5c; }
+  .cell img { display: block; max-width: 100%; height: auto; }
+  .cell img.fit { width: 100%; }
+  .cell .note { margin: 10px 0 0; font-size: 12px; color: #9a9485; }
+  .tray { display: grid; grid-template-columns: 1fr; gap: 12px; }
+  .tray .cell img { max-width: 100%; }
+  table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 14px; }
+  th, td { padding: 9px 10px; text-align: left; vertical-align: top; border-bottom: 1px solid #26242a; }
+  th { font: 700 12px/1 "Rajdhani", "Segoe UI", sans-serif; letter-spacing: .14em; text-transform: uppercase; color: #8f897b; }
+  td.k { width: 230px; font: 700 14px/1.3 "Rajdhani", "Segoe UI", sans-serif; letter-spacing: .08em; text-transform: uppercase; color: #f1ecdc; }
+  tr.rec td.k { color: #fcee0a; }
+  .pill { display: inline-block; margin-left: 8px; padding: 2px 6px 1px; background: #fcee0a; color: #0a0802; font: 700 11px/1.3 "Rajdhani", "Segoe UI", sans-serif; letter-spacing: .12em; text-transform: uppercase; }
+  ul.chg { margin: 8px 0 0; padding-left: 18px; color: #c9c2b1; font-size: 14px; }
+  ul.chg li { margin: 4px 0; }
+  .foot { margin-top: 40px; padding-top: 14px; border-top: 1px solid #2c2a30; font-size: 13px; color: #8f897b; }
+  code { font: 400 12px/1.4 "Share Tech Mono", Consolas, monospace; color: #d9d2c0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Night City v2 &middot; review</h1>
+<p class="lede">Owner feedback applied: Edgerun now leans into yellow, Blackwall is renamed Blackwall and restyled after the quickhack UI (still the default), and the tray octagon is replaced by four options with a recommendation. BEFORE is the approved v1 render; AFTER is <code>final.html</code> v2. Images are screenshots of the mockup at 1x unless marked 2x.</p>
+
+<h2><span class="n">01</span>Edgerun</h2>
+<p class="intro">v1 was cream on dark with yellow as an accent. v2 makes yellow the dominant colour. The floating widget and the taskbar strip are yellow plates with ink text, ink RAM cells and a black LIVE chip with a cyan dot. The dashboard gets yellow title and card plates, a filled TIME REMAINING bar for each reset, and a Breach Protocol code matrix and buffer in lime (sampled from the reference at about #D6F55A). v1 had no full Edgerun dashboard, so its BEFORE thumbnail is the v1 overview recoloured for comparison.</p>
+<div class="cmp">
+  <div class="rt">Floating widget, 1x</div>
+  <div class="cell"><div class="lab">Before &middot; v1 Edgerun</div><img src="review-img/before-widget-sy-1x.png" alt="v1 Edgerun widget at 1x"></div>
+  <div class="cell"><div class="lab new y">After &middot; v2 yellow plate</div><img src="review-img/after-widget-sy-1x.png" alt="v2 Edgerun plate widget at 1x"></div>
+
+  <div class="rt">Floating widget, 2x</div>
+  <div class="cell"><div class="lab">Before &middot; v1 Edgerun, 2x</div><img src="review-img/before-widget-sy-2x.png" alt="v1 Edgerun widget at 2x"></div>
+  <div class="cell"><div class="lab new y">After &middot; v2 yellow plate, 2x</div><img src="review-img/after-widget-sy-2x.png" alt="v2 Edgerun plate widget at 2x"></div>
+
+  <div class="rt">Plate states, normal, warn, critical and stale (after only)</div>
+  <div class="cell full"><div class="lab new y">After &middot; v2 yellow plate, 1x</div><img src="review-img/after-states-sy.png" alt="Edgerun plate in four states"><p class="note">Warn fill is orange and the value turns ink; critical fill is red with a black CRIT chip; stale swaps the header for the black band.</p></div>
+
+  <div class="rt">Taskbar strip with tray and clock, 1x</div>
+  <div class="cell"><div class="lab">Before &middot; v1 strip and octagon</div><img src="review-img/before-tb-sy.png" alt="v1 strip, tray octagon and clock"></div>
+  <div class="cell"><div class="lab new y">After &middot; v2 strip, RAM tray</div><img src="review-img/after-tb-sy.png" alt="v2 strip and RAM meter tray"></div>
+
+  <div class="rt">Dashboard thumbnail, 1200 x 760 scaled</div>
+  <div class="cell"><div class="lab">Before &middot; v1 overview recoloured</div><img class="fit" src="review-img/before-dash-sy.png" alt="v1 overview in edgerun"></div>
+  <div class="cell"><div class="lab new y">After &middot; v2 Edgerun dashboard</div><img class="fit" src="review-img/after-dash-sy.png" alt="v2 Edgerun dashboard"></div>
+</div>
+
+<h2><span class="n r">02</span>Blackwall <span style="font-weight:600; color:#9a9485; font-size:15px; letter-spacing:.04em; text-transform:none;">(was Blackwall, still the default)</span></h2>
+<p class="intro">Renamed to <code>blackwall</code> and kept as the default. Restyled after the in-mission quickhack UI: red line art on red-black, a cyan selection box, cyan segmented RAM cells inside red frames, boxed red reset counters, a red REC-style live dot, small boxed tags and right-aligned numbers, with a key-hint footer on the dashboard. The live word stays LIVE so the state copy did not change.</p>
+<div class="cmp">
+  <div class="rt">Floating widget, 1x</div>
+  <div class="cell"><div class="lab">Before &middot; v1 Blackwall</div><img src="review-img/before-widget-sr-1x.png" alt="v1 Blackwall widget at 1x"></div>
+  <div class="cell"><div class="lab new r">After &middot; v2 Blackwall</div><img src="review-img/after-widget-nd-1x.png" alt="v2 Blackwall widget at 1x"></div>
+
+  <div class="rt">Floating widget, 2x</div>
+  <div class="cell"><div class="lab">Before &middot; v1 Blackwall, 2x</div><img src="review-img/before-widget-sr-2x.png" alt="v1 Blackwall widget at 2x"></div>
+  <div class="cell"><div class="lab new r">After &middot; v2 Blackwall, 2x</div><img src="review-img/after-widget-nd-2x.png" alt="v2 Blackwall widget at 2x"></div>
+
+  <div class="rt">Taskbar strip with tray and clock, 1x</div>
+  <div class="cell"><div class="lab">Before &middot; v1 strip and octagon</div><img src="review-img/before-tb-sr.png" alt="v1 strip, tray octagon and clock"></div>
+  <div class="cell"><div class="lab new r">After &middot; v2 strip, RAM tray</div><img src="review-img/after-tb-nd.png" alt="v2 Blackwall strip and RAM meter tray"></div>
+
+  <div class="rt">Dashboard thumbnail, 1200 x 760 scaled</div>
+  <div class="cell"><div class="lab">Before &middot; v1 Blackwall overview</div><img class="fit" src="review-img/before-dash-sr.png" alt="v1 Blackwall overview"></div>
+  <div class="cell"><div class="lab new r">After &middot; v2 Blackwall overview</div><img class="fit" src="review-img/after-dash-nd.png" alt="v2 Blackwall overview"></div>
+</div>
+
+<h2><span class="n g">03</span>Tray options</h2>
+<p class="intro">The octagon is retired. Four alternatives, each drawn as shapes (Pillow-safe, with TTF digits on option D only), each on its own dark plate so it reads on a dark or light taskbar. Every option is shown at 16, 24 and 32 px, at 0, 13, 72 and 93 percent and STALE, for all four variants. Dark and light taskbar rows sit under each variant label.</p>
+<div class="cmp">
+  <div class="cell full"><div class="lab">Before &middot; v1 octagon, 16 / 20 / 24 / 32 px (retired)</div><img src="review-img/before-tray.png" alt="v1 octagon tray icons"></div>
+</div>
+<div class="tray" style="margin-top: 14px;">
+  <div class="cell"><div class="lab new">After &middot; Blackwall, dark and light taskbar</div><img src="review-img/after-tray-block-1.png" alt="Tray options, Blackwall"></div>
+  <div class="cell"><div class="lab new">After &middot; Relic (unchanged colours)</div><img src="review-img/after-tray-block-2.png" alt="Tray options, Relic"></div>
+  <div class="cell"><div class="lab new y">After &middot; Edgerun</div><img src="review-img/after-tray-block-3.png" alt="Tray options, Edgerun"></div>
+  <div class="cell"><div class="lab new">After &middot; Mox (unchanged colours)</div><img src="review-img/after-tray-block-4.png" alt="Tray options, Mox"></div>
+  <div class="cell"><div class="lab new">After &middot; recommended option B at 4x zoom, 16 px master</div><img src="review-img/after-tray-zoom.png" alt="Option B at 4x zoom"></div>
+</div>
+<table>
+  <tr><th>Option</th><th>Shape and rule</th><th>Read at 16 px</th></tr>
+  <tr><td class="k">A &middot; Segment ring</td><td>Chamfered plate with eight ring segments, lit count = round(pct / 12.5). Reads as a dial.</td><td>Segments are small; the lit count is easy to miscount at 13 percent.</td></tr>
+  <tr class="rec"><td class="k">B &middot; RAM meter<span class="pill">recommended</span></td><td>Chamfered plate with five stacked cells, filling from the bottom in 20 percent steps. Same language as the Blackwall RAM cells.</td><td>Clearest read at 16 px. Each state is a colour and a cell count, both visible at once.</td></tr>
+  <tr><td class="k">C &middot; Hex liquid</td><td>Hexagon badge with a continuous liquid level. Reads as a tank.</td><td>Level is a shape, not a count, so 13 and 72 percent are harder to tell apart.</td></tr>
+  <tr><td class="k">D &middot; Slant plate</td><td>Parallelogram with a slanted fill bar. At 24 and 32 px it adds the percent digits in Share Tech Mono.</td><td>Bar only at 16 px. Best choice if the owner wants numbers in the tray at 150 to 200 percent DPI.</td></tr>
+</table>
+
+<h2><span class="n g">04</span>Changes by variant</h2>
+<ul class="chg">
+  <li><b>Blackwall (default):</b> id <code>blackwall</code>, name Blackwall. Red line art on red-black, cyan RAM cells and selection box, boxed RST and countdown, red REC-style dot, key-hint footer (R REFRESH, D DASHBOARD, ESC HIDE), small wireframe reticle on the nav.</li>
+  <li><b>Edgerun:</b> yellow plates for the widget and strip (ink text, ink cells, black LIVE chip with cyan), yellow title bar and card title plates, TIME REMAINING bars, Breach code matrix and buffer in lime, yellow RAM cells in the tray.</li>
+  <li><b>Relic and Mox:</b> colours and slanted bars unchanged. Tokens <code>--nc-bar</code> (usage fill) and <code>--nc-sel</code> (selection) are now set explicitly on both so no value leaks between variants.</li>
+  <li><b>Pillow rule:</b> plates, cells, hexagon, octagon and slant geometry are polygons and rectangles; text is TTF; glow is the blur layer; no CSS-only tricks in the widget or tray. Fonts unchanged (SIL OFL 1.1); no logos or game art.</li>
+</ul>
+
+<div class="foot">Files: <code>design/mockups/night_city/final.html</code>, <code>usage_monitor/themes/night_city.json</code>, this page and <code>review-img/</code>. Contrast figures are in the theme JSON under <code>extras.contrast</code>.</div>
+
+</div>
+</body>
+</html>

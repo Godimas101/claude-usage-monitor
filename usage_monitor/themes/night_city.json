@@ -1,0 +1,1285 @@
+{
+  "id": "night_city",
+  "name": "Night City",
+  "tagline": "Yellow plates for Edgerun with Breach lime, red line art and cyan RAM cells for Blackwall (default), chamfered frames, and a one-shot RGB split on refresh. Dark only.",
+  "fonts": {
+    "display": {
+      "family": "Chakra Petch",
+      "file_hint": "ChakraPetch-Bold.ttf (700 numerals and headings); ChakraPetch-SemiBold.ttf (600 title bar)",
+      "licence": "SIL Open Font License 1.1"
+    },
+    "body": {
+      "family": "Rajdhani",
+      "file_hint": "Rajdhani-Bold.ttf (700 labels, chips, status words); Rajdhani-SemiBold.ttf (600 tags and nav)",
+      "licence": "SIL Open Font License 1.1"
+    },
+    "mono": {
+      "family": "Share Tech Mono",
+      "file_hint": "ShareTechMono-Regular.ttf (values, reset times, data noise)",
+      "licence": "SIL Open Font License 1.1"
+    }
+  },
+  "shape": {
+    "radius": 0,
+    "control_radius": 0,
+    "chamfer": 8,
+    "stroke": 1
+  },
+  "effects": {
+    "glow_radius": 3,
+    "glow_strength": 0.45,
+    "scanlines": 0.15,
+    "scanline_spacing": 3,
+    "flicker": false,
+    "vignette": 0,
+    "glitch": true,
+    "curvature": 0
+  },
+  "bar": {
+    "style": "slanted",
+    "segments": 31,
+    "gap": 2,
+    "height": 8
+  },
+  "widget": {
+    "floating": {
+      "width": 264,
+      "height": 96,
+      "height_with_scoped": 126
+    },
+    "taskbar": {
+      "width": 240
+    }
+  },
+  "variants": [
+    {
+      "id": "blackwall",
+      "name": "Blackwall",
+      "default": true,
+      "mode": "dark",
+      "colors": {
+        "bg": "#070203",
+        "surface": "#140609",
+        "surface_alt": "#1c0a0d",
+        "border": "#ff3b30a0",
+        "border_dim": "#ff3b3052",
+        "text": "#ff8f7e",
+        "text_bright": "#ffd9cf",
+        "text_dim": "#ea8677",
+        "accent": "#ff4a3c",
+        "accent_alt": "#3ef0ff",
+        "ok": "#ff5a4c",
+        "warn": "#ffb020",
+        "alert": "#ff2e3d",
+        "track": "#4a1a1f",
+        "glow": "#ff3b3073",
+        "stale": "#b06c62"
+      }
+    },
+    {
+      "id": "relic",
+      "name": "Relic",
+      "default": false,
+      "mode": "dark",
+      "colors": {
+        "bg": "#02080a",
+        "surface": "#05171c",
+        "surface_alt": "#082630",
+        "border": "#2fd8ea99",
+        "border_dim": "#2fd8ea52",
+        "text": "#2fe6ff",
+        "text_bright": "#e2feff",
+        "text_dim": "#8fe3ee",
+        "accent": "#bff6ff",
+        "accent_alt": "#ffe600",
+        "ok": "#7dfff0",
+        "warn": "#ffe600",
+        "alert": "#ff2e3d",
+        "track": "#0f3a45",
+        "glow": "#2fd8ea73",
+        "stale": "#5a9aa4"
+      }
+    },
+    {
+      "id": "edgerun",
+      "name": "Edgerun",
+      "default": false,
+      "mode": "dark",
+      "colors": {
+        "bg": "#0a0802",
+        "surface": "#15110a",
+        "surface_alt": "#241d0c",
+        "border": "#fcee0a99",
+        "border_dim": "#fcee0a52",
+        "text": "#f6e9a6",
+        "text_bright": "#fff8cf",
+        "text_dim": "#e8d68a",
+        "accent": "#fcee0a",
+        "accent_alt": "#d6f55a",
+        "ok": "#3ef0ff",
+        "warn": "#ff7a1a",
+        "alert": "#ff2e3d",
+        "track": "#4a3c14",
+        "glow": "#fcee0a73",
+        "stale": "#a8963c"
+      }
+    },
+    {
+      "id": "mox",
+      "name": "Mox",
+      "default": false,
+      "mode": "dark",
+      "colors": {
+        "bg": "#09030a",
+        "surface": "#1a0a22",
+        "surface_alt": "#1f0b2a",
+        "border": "#ff3ea599",
+        "border_dim": "#ff3ea552",
+        "text": "#ff7ac3",
+        "text_bright": "#ffd9ef",
+        "text_dim": "#e7a2d2",
+        "accent": "#3ef0ff",
+        "accent_alt": "#ffe600",
+        "ok": "#3ef0ff",
+        "warn": "#ffe600",
+        "alert": "#ff2e3d",
+        "track": "#4a1f52",
+        "glow": "#ff3ea573",
+        "stale": "#b274ad"
+      }
+    }
+  ],
+  "extras": {
+    "fonts_mock_only": {
+      "family": "Segoe UI Variable",
+      "licence": "Microsoft, ships with Windows 11. Used only by the taskbar mock. Not bundled, not used by the widget renderer."
+    },
+    "light_mode": "None. Night City is dark only: every variant is mode dark. On a light host taskbar the widget, the strip and every tray option still draw their own dark plate.",
+    "accent_options": {
+      "blackwall": "red line art and red-salmon text, cyan RAM cells and selection box, red REC-style live dot, amber WARN, red CRIT (default)",
+      "relic": "cyan family: usage cyan, ice time line, mint LIVE",
+      "edgerun": "yellow plates for the widget and strip (ink text, ink cells, black LIVE chip with cyan); yellow title and card plates, TIME REMAINING bars and Breach lime code matrix on the dashboard",
+      "mox": "pink primary, cyan time line and LIVE, yellow WARN"
+    },
+    "bar_note": "bar.style slanted is the default and is used by relic and mox on the widget and strip. blackwall and edgerun use segmented cells instead (see extras.segments). Dashboard limit cards use extras.dashboard.segments (31 cells) on every variant.",
+    "token_extras": {
+      "note": "Tokens added in v2 that sit beside variant_tokens. Every variant defines them, so no value leaks between variants.",
+      "blackwall": {
+        "bar": "#3ef0ff",
+        "sel": "#3ef0ff",
+        "yg": "#d6f55a"
+      },
+      "relic": {
+        "bar": "#2fe6ff",
+        "sel": "#bff6ff",
+        "yg": "#d6f55a"
+      },
+      "edgerun": {
+        "bar": "#fcee0a",
+        "sel": "#3ef0ff",
+        "yg": "#d6f55a"
+      },
+      "mox": {
+        "bar": "#ff7ac3",
+        "sel": "#3ef0ff",
+        "yg": "#d6f55a"
+      },
+      "meaning": {
+        "bar": "usage fill colour (RAM cells, bars); equals fg on relic and mox",
+        "sel": "selection box colour; cyan on blackwall and edgerun",
+        "yg": "Breach Protocol lime, sampled from the reference at about #D6F55A; used only by the edgerun motifs (code matrix, buffer, noise)"
+      }
+    },
+    "variant_tokens": {
+      "blackwall": {
+        "bg-0": "#070203",
+        "bg-1": "#120608",
+        "bg-2": "#1c0a0d",
+        "panel": "#140609",
+        "track": "#4a1a1f",
+        "fg": "#ff8f7e",
+        "fg-hi": "#ffd9cf",
+        "ink-2": "#ea8677",
+        "ink-3": "#b06c62",
+        "fg-faint": "#5c2623",
+        "line": "#ff3b30",
+        "line-a": "#ff3b30a0",
+        "hair": "#ff3b3052",
+        "accent": "#ff4a3c",
+        "ok": "#ff5a4c",
+        "warn": "#ffb020",
+        "signal": "#ff3b30",
+        "danger": "#ff2e3d",
+        "ink": "#0a0304",
+        "hz-a": "#ff2e3d",
+        "hz-b": "#0a0304",
+        "glow": "#ff3b3073",
+        "glow-accent": "#ff3b3080",
+        "glow-danger": "#ff2e3d59",
+        "scan": "#00000026",
+        "ring": "#6a2a2c",
+        "stale": "#b06c62",
+        "cat-1": "#ff8f7e",
+        "cat-2": "#3ef0ff",
+        "cat-3": "#ffb020",
+        "cat-4": "#b06c62",
+        "wall-a": "#3a0d12",
+        "wall-b": "#070203",
+        "wall-c": "#15060a",
+        "haze": "#ff3b3042",
+        "page": "#050101"
+      },
+      "relic": {
+        "bg-0": "#02080a",
+        "bg-1": "#04161b",
+        "bg-2": "#082630",
+        "panel": "#05171c",
+        "track": "#0f3a45",
+        "fg": "#2fe6ff",
+        "fg-hi": "#e2feff",
+        "ink-2": "#8fe3ee",
+        "ink-3": "#5a9aa4",
+        "fg-faint": "#1a4550",
+        "line": "#2fd8ea",
+        "line-a": "#2fd8ea99",
+        "hair": "#2fd8ea52",
+        "accent": "#bff6ff",
+        "ok": "#7dfff0",
+        "warn": "#ffe600",
+        "signal": "#ffe600",
+        "danger": "#ff2e3d",
+        "ink": "#02080a",
+        "hz-a": "#ffe600",
+        "hz-b": "#02080a",
+        "glow": "#2fd8ea73",
+        "glow-accent": "#bff6ff80",
+        "glow-danger": "#ff2e3d59",
+        "scan": "#00000026",
+        "ring": "#1d5560",
+        "stale": "#5a9aa4",
+        "cat-1": "#2fe6ff",
+        "cat-2": "#ffe600",
+        "cat-3": "#7dfff0",
+        "cat-4": "#bff6ff",
+        "wall-a": "#063440",
+        "wall-b": "#03060a",
+        "wall-c": "#0a1f2a",
+        "haze": "#2fd8ea33",
+        "page": "#010507"
+      },
+      "edgerun": {
+        "bg-0": "#0a0802",
+        "bg-1": "#17130a",
+        "bg-2": "#241d0c",
+        "panel": "#15110a",
+        "track": "#4a3c14",
+        "fg": "#f6e9a6",
+        "fg-hi": "#fff8cf",
+        "ink-2": "#e8d68a",
+        "ink-3": "#a8963c",
+        "fg-faint": "#4e4515",
+        "line": "#fcee0a",
+        "line-a": "#fcee0a99",
+        "hair": "#fcee0a52",
+        "accent": "#fcee0a",
+        "ok": "#3ef0ff",
+        "warn": "#ff7a1a",
+        "signal": "#fcee0a",
+        "danger": "#ff2e3d",
+        "ink": "#0a0802",
+        "hz-a": "#fcee0a",
+        "hz-b": "#0a0802",
+        "glow": "#fcee0a73",
+        "glow-accent": "#3ef0ff80",
+        "glow-danger": "#ff2e3d59",
+        "scan": "#00000026",
+        "ring": "#6e5a22",
+        "stale": "#a8963c",
+        "cat-1": "#fcee0a",
+        "cat-2": "#3ef0ff",
+        "cat-3": "#d6f55a",
+        "cat-4": "#ff7a1a",
+        "wall-a": "#2c2408",
+        "wall-b": "#070703",
+        "wall-c": "#15110a",
+        "haze": "#fcee0a30",
+        "page": "#050401"
+      },
+      "mox": {
+        "bg-0": "#09030a",
+        "bg-1": "#140719",
+        "bg-2": "#1f0b2a",
+        "panel": "#1a0a22",
+        "track": "#4a1f52",
+        "fg": "#ff7ac3",
+        "fg-hi": "#ffd9ef",
+        "ink-2": "#e7a2d2",
+        "ink-3": "#b274ad",
+        "fg-faint": "#4e2141",
+        "line": "#ff3ea5",
+        "line-a": "#ff3ea599",
+        "hair": "#ff3ea552",
+        "accent": "#3ef0ff",
+        "ok": "#3ef0ff",
+        "warn": "#ffe600",
+        "signal": "#ffe600",
+        "danger": "#ff2e3d",
+        "ink": "#09030a",
+        "hz-a": "#ffe600",
+        "hz-b": "#09030a",
+        "glow": "#ff3ea573",
+        "glow-accent": "#3ef0ff80",
+        "glow-danger": "#ff2e3d59",
+        "scan": "#00000026",
+        "ring": "#6a3a6a",
+        "stale": "#b274ad",
+        "cat-1": "#ff7ac3",
+        "cat-2": "#3ef0ff",
+        "cat-3": "#ffe600",
+        "cat-4": "#ffd9ef",
+        "wall-a": "#3a0c35",
+        "wall-b": "#07030a",
+        "wall-c": "#1a0820",
+        "haze": "#ff3ea53d",
+        "page": "#050107"
+      }
+    },
+    "variant_roles": {
+      "blackwall": "Default. Red line art on red-black with salmon labels and pale numerals. Cyan RAM cells and selection box. Red REC-style live dot, boxed RST and countdown counters, amber WARN, red CRIT.",
+      "relic": "Cyan family kept distinct at 1x: usage cyan 2fe6ff, time hairline bff6ff (near white), LIVE mint 7dfff0 as text. Unchanged in v2.",
+      "edgerun": "Yellow dominant. Widget and strip are yellow plates with ink text, ink RAM cells and a black LIVE chip with a cyan dot. Dashboard: yellow title bar and card title plates, TIME REMAINING bars, Breach lime code matrix and buffer, orange WARN, red CRIT.",
+      "mox": "Pink usage fill with cyan time line and cyan LIVE; yellow WARN. Unchanged in v2."
+    },
+    "contrast": {
+      "blackwall": {
+        "fg_on_panel": 8.95,
+        "fg_hi_on_panel": 15.17,
+        "ink2_on_panel": 7.71,
+        "ink3_on_panel": 4.88,
+        "danger_on_panel": 5.39,
+        "warn_on_panel": 10.84,
+        "ok_on_panel": 6.43,
+        "accent_on_panel": 5.94,
+        "bar_on_panel": 14.26,
+        "ink_on_warn": 11.17,
+        "ink_on_signal": 5.76,
+        "track_vs_panel": 1.38,
+        "ring_vs_taskbar": 1.6
+      },
+      "relic": {
+        "fg_on_panel": 12.12,
+        "fg_hi_on_panel": 17.33,
+        "accent_on_panel": 15.57,
+        "ok_on_panel": 15.22,
+        "ink2_on_panel": 12.56,
+        "ink3_on_panel": 5.75,
+        "danger_on_panel": 4.98,
+        "track_vs_panel": 1.49,
+        "ring_vs_taskbar": 2.04
+      },
+      "edgerun": {
+        "fg_on_panel": 15.34,
+        "fg_hi_on_panel": 17.54,
+        "warn_on_panel": 7.21,
+        "ink2_on_panel": 12.91,
+        "ink3_on_panel": 6.35,
+        "danger_on_panel": 5.11,
+        "ink_on_signal": 16.57,
+        "ink_on_warn": 7.68,
+        "track_vs_panel": 1.74,
+        "ring_vs_taskbar": 2.54,
+        "plate_ink_on_yellow": 16.57,
+        "plate_ink2_on_yellow": 12.12,
+        "plate_ink3_on_yellow": 7.78,
+        "plate_cyan_on_chip": 14.41,
+        "plate_track_vs_yellow": 1.77,
+        "plate_warn_fill_vs_yellow": 2.37,
+        "plate_danger_fill_vs_yellow": 3.04,
+        "lime_on_ink": 16.28
+      },
+      "mox": {
+        "fg_on_panel": 7.95,
+        "fg_hi_on_panel": 14.79,
+        "ink2_on_panel": 9.45,
+        "ink3_on_panel": 5.4,
+        "danger_on_panel": 5.14,
+        "track_vs_panel": 1.45,
+        "ring_vs_taskbar": 1.96
+      },
+      "method": "WCAG 2.x relative luminance ratio, computed on the hex values above. Plate and fill rows are non-text or decorative pairs where noted: plate_track, plate_warn_fill and plate_danger_fill compare a fill with the plate and are not text."
+    },
+    "hazard": {
+      "colours": "hz-a and hz-b per variant: yellow and ink on edgerun, relic and mox; red and ink on blackwall",
+      "rule": "Pixel colour is hz-a when floor((x + y) / 4) is even, otherwise hz-b. Horizontal period 8 px; stripes run bottom-left to top-right.",
+      "css": "repeating-linear-gradient(-45deg, hz-a 0 2.83px, hz-b 2.83px 5.66px)",
+      "uses": [
+        "critical bar fill (inside the fill polygon only)",
+        "stale band strips, 2 px at top and bottom",
+        "CRIT chip cap, 7 px wide",
+        "dashboard cost hero top strip, 3 px"
+      ],
+      "never": "not on normal or warn fills, not on tracks, not on the tray icon",
+      "plate": "On the edgerun plate the critical fill is solid danger red, because yellow stripes would vanish into the yellow plate. The hazard token resolves to danger there. The stale band strips take the same red."
+    },
+    "pulse": {
+      "period_s": 2.4,
+      "alpha_min": 0.3,
+      "alpha_max": 1.0,
+      "pillow": "alpha(t) = 0.65 + 0.35 * cos(2 * pi * t / 2.4), recomputed per frame and applied to the pip layer",
+      "css": "Keyframes 0 and 100 percent at opacity 1, 50 percent at 0.3, ease-in-out. Within 0.03 of the cosine.",
+      "targets": [
+        "widget header pip, 6 x 6 (or the cyan dot inside the plate LIVE chip)",
+        "strip status dot, 6 x 6",
+        "dashboard sync pip, 6 x 6"
+      ],
+      "never": "No stepped blink anywhere. State is carried by the LIVE word, the chip and the colour, not by the pip."
+    },
+    "refresh_hit": {
+      "trigger": "Once per data refresh. Never looped, never on a timer.",
+      "frames": 3,
+      "frame_ms": 50,
+      "target": "Value numerals only: the widget NN, the dashboard big numerals and the cost figure.",
+      "f1": {
+        "ms": "0-50",
+        "cyan_dx_px": -2,
+        "red_dx_px": 2
+      },
+      "f2": {
+        "ms": "50-100",
+        "cyan_dx_px": -1,
+        "red_dx_px": 1
+      },
+      "f3": {
+        "ms": "100-150",
+        "cyan_dx_px": 0,
+        "red_dx_px": 0,
+        "note": "settled"
+      },
+      "draw": "Per frame: red copy at +red_dx, cyan copy at +cyan_dx (both alpha 1), then the base numeral in fg-hi, unshifted, drawn last. The channels never flip sides."
+    },
+    "glow": {
+      "css_blur_px": 6,
+      "pillow_gaussian_radius": 3,
+      "normal": {
+        "colour": "glow",
+        "alpha": 0.45,
+        "use": "widget value numerals"
+      },
+      "critical": {
+        "colour": "glow-danger",
+        "alpha": 0.35,
+        "use": "critical value numeral"
+      },
+      "accent": {
+        "colour": "glow-accent",
+        "alpha": 0.5,
+        "use": "live pip and strip dot"
+      },
+      "recipe": "Draw the glyphs on a transparent layer in the glow colour at the stated alpha, GaussianBlur(radius=3), then alpha-composite under the crisp glyphs.",
+      "not_on": "bars, chips, tracks, tray icons. Dashboard numerals are flat except the cost figure (CSS blur 16, Pillow radius 8, alpha 0.45).",
+      "plate": "The edgerun plate has no glow: glow tokens are transparent there and value numerals are flat ink.",
+      "blackwall_live": "The blackwall live dot glows red (glow-accent), not cyan."
+    },
+    "chips": {
+      "out": "Outline chip, 14 px tall, 1 px outline in the chip colour, 5 px top-left chamfer (inner outline chamfer 4 px). Text Rajdhani Bold 11 px, tracking 0.06 em, 6 px side padding, baseline at chip top + 10. Used for WARN (warn), UNDER PACE and NORMAL (accent), IDLE and PAUSED (ink-3, ghost). On the edgerun plate, WARN is an ink outline.",
+      "crit": "Black box (ink), 14 px tall, 7 px hazard cap on the left, 5 px top-right chamfer. Text hazard yellow, Rajdhani Bold 11 px, left padding 11 px, right padding 6 px. Used for CRIT.",
+      "solid": "Signal yellow block, ink text, 5 px top-left chamfer. Used for STALE and dashboard stamps only."
+    },
+    "stale": {
+      "rule": "The stale band replaces the header row. Rows stay visible at the dim tokens (labels, values, bars and time line use ink-3). No opacity anywhere. Last good values stay readable at 4.88:1 on blackwall.",
+      "copy": {
+        "auth": "RELINK // OPEN CLAUDE CODE",
+        "offline": "NO SIGNAL // NET DOWN",
+        "age_tag": "14 M OLD"
+      },
+      "band": "x 12 to 247, y 6 to 21. Black fill, 1 px warn outline, 2 px hazard strips at y 6-7 and y 20-21. Text Rajdhani Bold 11 px in warn at x 20, baseline y 17. Age tag Share Tech Mono 11 px in ink-2, right edge x 239, baseline y 17. On the edgerun plate the age tag is yellow."
+    },
+    "pace": {
+      "unit": "Percent of the window elapsed, from window open to now. Window open = reset timestamp minus window length.",
+      "delta": "delta = used percent minus elapsed percent, in points.",
+      "status": "delta > +5 AHEAD (warn chip). -5 to +5 ON PACE (no chip). delta < -5 UNDER PACE (accent outline chip).",
+      "draw": "A 2 px time hairline sits above the usage bar on the widget, the strip and the dashboard alike, with a 2 x 6 px tick at the elapsed point."
+    },
+    "state_rules": {
+      "normal": "Used below 70 percent: fill bar (cyan on blackwall, yellow on edgerun, fg on the other two), value fg-hi.",
+      "warn": "70 to 89 percent: fill warn, value warn, WARN outline chip. On the edgerun plate the value is ink and the fill is orange.",
+      "crit": "90 percent and above: hazard fill (solid red on the edgerun plate), value danger, CRIT chip with hazard cap. On the plate the value is ink.",
+      "stale": "Auth lost: band replaces the header, all dim tokens.",
+      "offline": "Network down: band with NO SIGNAL // NET DOWN, all dim tokens.",
+      "paused": "Polling paused: ghost PAUSED chip in the header, values as last read."
+    },
+    "sample": {
+      "clock_local": "Wed 2026-10-21 16:12",
+      "session": {
+        "window_h": 5,
+        "opened": "14:39",
+        "reset": "19:39",
+        "elapsed_pct": 31,
+        "used_pct": 13,
+        "delta_pts": -18,
+        "label": "RST 7:39 PM"
+      },
+      "weekly": {
+        "window_d": 7,
+        "opened": "Mon 2026-10-19 09:00",
+        "reset": "Mon 2026-10-26 09:00",
+        "elapsed_pct": 33,
+        "used_pct": 2,
+        "delta_pts": -31,
+        "label": "RST MON 9:00 AM"
+      },
+      "countdown": {
+        "session_remaining": "03:27:00",
+        "session_remaining_pct": 69,
+        "weekly_remaining": "4D 16:48",
+        "weekly_remaining_pct": 67,
+        "basis": "remaining = reset minus now (16:12 Wed to 19:39 Wed; Wed 16:12 to Mon 09:00); remaining pct = 100 minus elapsed pct"
+      },
+      "fable": {
+        "share_pct": 50,
+        "used_of_share_pct": 0,
+        "reset": "same as weekly",
+        "shown_when": "the plan has a Fable share"
+      },
+      "demo_states": {
+        "warn": {
+          "session_used": 72,
+          "weekly_used": 41
+        },
+        "crit": {
+          "session_used": 93,
+          "weekly_used": 58
+        },
+        "stale": {
+          "values": "frozen at 13, 2, 0",
+          "age_min": 14
+        }
+      },
+      "retired": "The earlier set (session reset 10:39 PM on a 5 h window, elapsed 58 percent; weekly reset Wed 4:00 PM, 12 minutes before the clock) cannot be true at 4:12 PM and is retired.",
+      "cost": {
+        "month_api_eq_usd": 1659,
+        "plan_usd": 100,
+        "multiple": 16.6,
+        "today_usd": 84.2,
+        "peak_usd": 141,
+        "avg_usd": 55,
+        "caching_saved": "14.1K",
+        "cache_hit_pct": 96.4,
+        "thinking_share_pct": 38,
+        "burn_tok_per_min": 1240,
+        "burn_usd_per_h": 6.1
+      },
+      "model_mix_pct": {
+        "Opus 5.5": 86,
+        "Sonnet 5.5": 7,
+        "Haiku 4.5": 6,
+        "Haiku 5.5": 1
+      },
+      "week_pct": {
+        "Claude Code": 100,
+        "Chats": 0,
+        "Cowork": 0
+      }
+    },
+    "widget_layout": {
+      "origin": "Outer top-left of the canvas. Canvas 264 x 96 (two row) or 264 x 126 (three row).",
+      "frame": "Outline polygon (8,0) (W-1,0) (W-1,H-9) (W-9,H-1) (0,H-1) (0,8), 1 px, line-a. Panel is the same polygon inset 1 px, flat panel fill (blackwall: red-black panel; edgerun: yellow plate).",
+      "scanlines": "Rows with y mod 3 equal 0 darkened by 15 percent (black alpha 0.15), drawn before any text. On the plate 10 percent.",
+      "brackets": "Accent, 2 px. TR: x 251-259 at y 4-5, plus x 258-259 at y 4-12. BL: x 4-12 at y H-6 to H-5, plus x 4-5 at y H-13 to H-5. On the plate the brackets are ink.",
+      "header": "Pip 6 x 6 at (14, 11), ok colour, pulsing. Brand CLAUDE//USAGE at x 26, baseline y 17.5, Rajdhani Bold 12 px, tracking 0.16 em, fg-hi. LIVE word right-aligned to x 250, baseline y 17, Rajdhani Bold 11 px, ok colour. On blackwall the LIVE word sits in a 1 px red box. On the plate the pip moves into a black chip with the LIVE word in cyan.",
+      "rows": "Row tops at y 28, 58 and 88. Content spans x 14 to 249 (236 px).",
+      "label": "Name baseline row+11, Rajdhani Bold 13 px, tracking 0.12 em, fg. A tag or chip starts 6 px after the name.",
+      "value": "Value baseline row+11.5, right edge x 249, Share Tech Mono 15 px, fg-hi. Unit percent sign Share Tech Mono 11 px in ink-2, 1 px gap, baseline row+10.5.",
+      "reset": "RST text Share Tech Mono 11 px in ink-2, baseline row+10.5, right edge 8 px left of the value. On blackwall the RST text sits in a 1 px red box, 4 px side padding.",
+      "time_line": "2 px tall at y row+15 to row+16, x 14 to 249. Accent from x 14 to 14 + t * 2.36, track after. Tick 2 px wide at x (14 + t * 2.36 - 1), y row+13 to row+18, accent.",
+      "bar": "Slanted (relic, mox): 8 px tall at y row+19 to row+26. Track rectangle x 14 to 249. Fill polygon (14, row+19), (14 + p * 2.36, row+19), (14 + p * 2.36 - 4, row+26), (14, row+26), clipped to the track. End tick 1 px at x 249, y row+17 to row+28, ink-3.",
+      "segmented_bar": "Segmented (blackwall, edgerun): 26 cells, 7 px wide with 2 px gaps (232 px), at y row+19 to row+26. Cell fill = clamp(p / 100 * 26 - i, 0, 1), drawn as a left-anchored rectangle of width f * 7 px over the track cell. Warn fill warn; crit fill hazard (plate: danger).",
+      "fable_row": "No reset text. Tag 50% SHARE in Rajdhani SemiBold 11 px, ink-3, 6 px after the name.",
+      "stale_band": "See extras.stale.band. The band replaces the header row; rows keep their positions."
+    },
+    "strip_layout": {
+      "canvas": "240 x 38, sits 5 px below the top of the 48 px taskbar, left of the tray. Chamfer 7 at top-left and bottom-right, 1 px frame, flat panel, scanlines as the widget.",
+      "row_a": "Label 5H in Rajdhani Bold 11 px, fg-hi, x 10, baseline y 15. Pace hairline x 28 to 151, y 8 to 9, tick y 6 to 11. Bar x 28 to 151, y 11 to 16, fill slant 3 px. Percent in Share Tech Mono 11 px, fg-hi, right edge x 176, baseline y 15.5.",
+      "row_b": "Same as row A, shifted down 16 px: label baseline y 31, hairline y 24 to 25, tick y 22 to 27, bar y 27 to 32, percent baseline y 31.5.",
+      "segmented": "blackwall and edgerun: 18 cells, 6 px wide with 1 px gaps (125 px), from x 28, y row+5, height 6, replacing the slanted bar. Live tag: 53 x 14 box at x 183, y 12. blackwall: 1 px red outline. edgerun: black chip.",
+      "status": "Dot 6 x 6 at x 186, y 16 to 21, ok colour, eased pulse. Word LIVE in Rajdhani Bold 11 px, ok colour, x 196, baseline y 23.",
+      "scale": "Bar width 124 px equals 100 percent; the pace tick uses 1.24 px per percent."
+    },
+    "text_baselines": [
+      {
+        "use": "Widget brand",
+        "font": "Rajdhani Bold",
+        "px": 12,
+        "line_height": 12,
+        "baseline_from_line_top": 9.5,
+        "cap_height": 8
+      },
+      {
+        "use": "Row label",
+        "font": "Rajdhani Bold",
+        "px": 13,
+        "line_height": 14,
+        "baseline_from_line_top": 11,
+        "cap_height": 9
+      },
+      {
+        "use": "Tags and em labels",
+        "font": "Rajdhani SemiBold",
+        "px": 11,
+        "line_height": 14,
+        "baseline_from_line_top": 10,
+        "cap_height": 8
+      },
+      {
+        "use": "LIVE word, strip labels, strip status word",
+        "font": "Rajdhani Bold",
+        "px": 11,
+        "line_height": 12,
+        "baseline_from_line_top": 9,
+        "cap_height": 8
+      },
+      {
+        "use": "Chip and band text",
+        "font": "Rajdhani Bold",
+        "px": 11,
+        "line_height": 11,
+        "baseline_from_line_top": 8.5,
+        "cap_height": 8
+      },
+      {
+        "use": "Reset text and percent unit",
+        "font": "Share Tech Mono",
+        "px": 11,
+        "line_height": 14,
+        "baseline_from_line_top": 10.5,
+        "cap_height": 8
+      },
+      {
+        "use": "Widget value numerals",
+        "font": "Share Tech Mono",
+        "px": 15,
+        "line_height": 14,
+        "baseline_from_line_top": 11.5,
+        "cap_height": 11
+      },
+      {
+        "use": "Strip percent and band age",
+        "font": "Share Tech Mono",
+        "px": 11,
+        "line_height": 12,
+        "baseline_from_line_top": 9.5,
+        "cap_height": 8
+      },
+      {
+        "use": "Tray digits (option D, 24 and 32 px)",
+        "font": "Share Tech Mono",
+        "px": "10 at 24, 14 at 32",
+        "line_height": "n/a",
+        "baseline_from_line_top": "13 at 24, 16 at 32 (y of baseline in the icon)",
+        "cap_height": "about 7 and 10"
+      }
+    ],
+    "text_baseline_note": "Measured in Chromium with canvas font box metrics; baseline = (line_height - (ascent + descent)) / 2 + ascent. Accurate to about 0.5 px. Re-measure if the TTF versions change.",
+    "tray": {
+      "status": "RETIRED in v2. The octagon is superseded by extras.tray_options. The keys below are kept so the existing code path still resolves; the sizes and the state table still apply to the new options.",
+      "sizes_px": [
+        16,
+        20,
+        24,
+        32
+      ],
+      "dpi_map": "16 for 100 percent, 20 for 125 percent, 24 for 150 percent, 32 for 200 percent. The mock draws 16, 24 and 32; 20 is derived with the same rules and is not drawn.",
+      "masters": {
+        "16": {
+          "band": 4,
+          "centre": 0,
+          "outer": [
+            [
+              8,
+              0
+            ],
+            [
+              11,
+              0
+            ],
+            [
+              16,
+              5
+            ],
+            [
+              16,
+              11
+            ],
+            [
+              11,
+              16
+            ],
+            [
+              5,
+              16
+            ],
+            [
+              0,
+              11
+            ],
+            [
+              0,
+              5
+            ],
+            [
+              5,
+              0
+            ],
+            [
+              8,
+              0
+            ]
+          ],
+          "inner": [
+            [
+              8,
+              4
+            ],
+            [
+              9,
+              4
+            ],
+            [
+              12,
+              7
+            ],
+            [
+              12,
+              9
+            ],
+            [
+              9,
+              12
+            ],
+            [
+              7,
+              12
+            ],
+            [
+              4,
+              9
+            ],
+            [
+              4,
+              7
+            ],
+            [
+              7,
+              4
+            ],
+            [
+              8,
+              4
+            ]
+          ]
+        },
+        "20": {
+          "band": 4,
+          "centre": 0,
+          "outer": [
+            [
+              10,
+              0
+            ],
+            [
+              14,
+              0
+            ],
+            [
+              20,
+              6
+            ],
+            [
+              20,
+              14
+            ],
+            [
+              14,
+              20
+            ],
+            [
+              6,
+              20
+            ],
+            [
+              0,
+              14
+            ],
+            [
+              0,
+              6
+            ],
+            [
+              6,
+              0
+            ],
+            [
+              10,
+              0
+            ]
+          ],
+          "inner": [
+            [
+              10,
+              4
+            ],
+            [
+              12,
+              4
+            ],
+            [
+              16,
+              8
+            ],
+            [
+              16,
+              12
+            ],
+            [
+              12,
+              16
+            ],
+            [
+              8,
+              16
+            ],
+            [
+              4,
+              12
+            ],
+            [
+              4,
+              8
+            ],
+            [
+              8,
+              4
+            ],
+            [
+              10,
+              4
+            ]
+          ]
+        },
+        "24": {
+          "band": 3,
+          "centre": 4,
+          "outer": [
+            [
+              12,
+              0
+            ],
+            [
+              17,
+              0
+            ],
+            [
+              24,
+              7
+            ],
+            [
+              24,
+              17
+            ],
+            [
+              17,
+              24
+            ],
+            [
+              7,
+              24
+            ],
+            [
+              0,
+              17
+            ],
+            [
+              0,
+              7
+            ],
+            [
+              7,
+              0
+            ],
+            [
+              12,
+              0
+            ]
+          ],
+          "inner": [
+            [
+              12,
+              3
+            ],
+            [
+              16,
+              3
+            ],
+            [
+              21,
+              8
+            ],
+            [
+              21,
+              16
+            ],
+            [
+              16,
+              21
+            ],
+            [
+              8,
+              21
+            ],
+            [
+              3,
+              16
+            ],
+            [
+              3,
+              8
+            ],
+            [
+              8,
+              3
+            ],
+            [
+              12,
+              3
+            ]
+          ]
+        },
+        "32": {
+          "band": 4,
+          "centre": 6,
+          "outer": [
+            [
+              16,
+              0
+            ],
+            [
+              23,
+              0
+            ],
+            [
+              32,
+              9
+            ],
+            [
+              32,
+              23
+            ],
+            [
+              23,
+              32
+            ],
+            [
+              9,
+              32
+            ],
+            [
+              0,
+              23
+            ],
+            [
+              0,
+              9
+            ],
+            [
+              9,
+              0
+            ],
+            [
+              16,
+              0
+            ]
+          ],
+          "inner": [
+            [
+              16,
+              4
+            ],
+            [
+              21,
+              4
+            ],
+            [
+              28,
+              11
+            ],
+            [
+              28,
+              21
+            ],
+            [
+              21,
+              28
+            ],
+            [
+              11,
+              28
+            ],
+            [
+              4,
+              21
+            ],
+            [
+              4,
+              11
+            ],
+            [
+              11,
+              4
+            ],
+            [
+              16,
+              4
+            ]
+          ]
+        }
+      },
+      "draw": "Retired octagon: fill the outer polygon with the ring token, then cut the inner polygon (even-odd). Arc = band between perimeter fraction 0 and pct/100.",
+      "states": {
+        "normal": {
+          "pct": 13,
+          "arc": "fg"
+        },
+        "warn": {
+          "pct": 72,
+          "arc": "warn"
+        },
+        "crit": {
+          "pct": 93,
+          "arc": "alert"
+        },
+        "stale": {
+          "pct": 13,
+          "arc": "stale, drawn as 2 px dashes with 1 px gaps along the arc"
+        }
+      },
+      "centre": "Retired with the octagon.",
+      "pixels": "Integer vertices, edges on pixel boundaries, no anti-aliasing (crispEdges)."
+    },
+    "tray_options_note": "Four alternatives, shown at 16, 24 and 32 px, at 0, 13, 72 and 93 percent and STALE, on a dark and a light taskbar, for all four variants. Every option draws its own dark plate (bg-0 with a line-colour frame), so it reads on a light taskbar. The lit colour is bar (fg on the older variants), warn, alert and stale. The track is ring. Recommendation: option B.",
+    "tray_options": [
+      {
+        "id": "A",
+        "name": "Segment ring",
+        "recommended": false,
+        "shape": "Chamfered plate (chamfer px / 4, 1 px line) with an eight-segment ring inside it. Ring inset 2 px, band 3 / 4 / 5 px at 16 / 24 / 32 px, segments separated by about 1.2 px.",
+        "lit_rule": "lit segments = round(pct / 100 * 8); lit take the state colour, unlit take ring",
+        "sizes_px": [
+          16,
+          24,
+          32
+        ],
+        "read_at_16": "Reads as a dial. Segments are small, so a lit count is hard to judge at 13 percent.",
+        "pillow": "Polygons only: each segment is a band between two octagons. 1 px outline, no text.",
+        "states": {
+          "0": "no lit segment",
+          "13": "1 lit",
+          "72": "6 lit, warn",
+          "93": "7 lit, alert",
+          "stale": "1 lit in stale"
+        },
+        "chosen": false
+      },
+      {
+        "id": "B",
+        "name": "RAM meter",
+        "recommended": true,
+        "shape": "Chamfered square plate (chamfer 3 at 16 px, 4 at 24 and 32 px) with a 1 px line, and five stacked rectangular cells filling from the bottom. Cells: 16 px 8 x 2 with 1 px gaps; 24 px 10 x 3 with 1 px gaps; 32 px 14 x 4 with 2 px gaps.",
+        "lit_rule": "lit cells = round(pct / 100 * 5), so 20 percent steps: 13 percent lights 1, 72 percent 4, 93 percent 5",
+        "sizes_px": [
+          16,
+          24,
+          32
+        ],
+        "read_at_16": "Clearest read at 16 px: the cell count and the colour are both visible. Same language as the Blackwall RAM cells.",
+        "pillow": "Rectangles and one chamfered outline. No text, no blur.",
+        "states": {
+          "0": "no lit cell",
+          "13": "1 lit",
+          "72": "4 lit, warn",
+          "93": "5 lit, alert",
+          "stale": "1 lit in stale"
+        },
+        "chosen": true
+      },
+      {
+        "id": "C",
+        "name": "Hex liquid",
+        "recommended": false,
+        "shape": "Pointy-top hexagon badge with a 2 px frame in line colour, inner hexagon filled with ring, liquid = inner hexagon clipped below a horizontal surface line at level = bottom - pct / 100 * height, rounded to whole pixels.",
+        "lit_rule": "continuous level; the state colour fills the liquid",
+        "sizes_px": [
+          16,
+          24,
+          32
+        ],
+        "read_at_16": "Reads as a tank. 13 and 72 percent are harder to separate than in B because the level is a shape, not a count.",
+        "pillow": "Polygons with one half-plane clip (Sutherland-Hodgman). No text.",
+        "states": {
+          "0": "empty",
+          "13": "low liquid",
+          "72": "warn liquid",
+          "93": "near full, alert",
+          "stale": "low liquid in stale"
+        },
+        "chosen": false
+      },
+      {
+        "id": "D",
+        "name": "Slant plate",
+        "recommended": false,
+        "shape": "Parallelogram plate with a 1 px line and a slanted fill bar. 16 px: bar only, x 4 to 12 at y 6, 4 px tall. 24 and 32 px add the percent integer in Share Tech Mono, 10 and 14 px, centred above the bar (bar x 5 to 19 at y 16 for 24 px; x 6 to 26 at y 22 for 32 px).",
+        "lit_rule": "bar fill width = round(pct / 100 * bar width); digits show the percent integer, stale shows the last value in stale",
+        "sizes_px": [
+          16,
+          24,
+          32
+        ],
+        "read_at_16": "Bar only. At 13 percent the fill is a 1 px sliver, so the state reads from the colour alone.",
+        "pillow": "Polygons, rectangles and TTF digits (Share Tech Mono). The best option if numbers are wanted in the tray at 150 to 200 percent DPI.",
+        "states": {
+          "0": "digit 0, empty bar",
+          "13": "digit 13, 1 px fill",
+          "72": "digit 72, warn",
+          "93": "digit 93, alert",
+          "stale": "digit 13 in stale"
+        },
+        "chosen": false
+      }
+    ],
+    "dashboard": {
+      "size": [
+        1200,
+        760
+      ],
+      "scope": ".nc-win. Every dashboard rule sits under this class.",
+      "title_bar_px": 34,
+      "nav_px": 200,
+      "body_height_px": 726,
+      "main_padding_px": [
+        16,
+        22,
+        12,
+        22
+      ],
+      "gap_px": 14,
+      "rows_px": {
+        "limits": 176,
+        "cost": 216,
+        "row3": 178,
+        "footer": 26
+      },
+      "columns": {
+        "limits": "3 x 1fr",
+        "cost": "1.25fr hero, 1.15fr 2x2 minis, 1fr burn",
+        "row3": "1.05fr model mix, 0.9fr week, 1.35fr daily cost"
+      },
+      "card": {
+        "chamfer_px": 14,
+        "padding_px": [
+          14,
+          16
+        ],
+        "brackets": "9 px, 2 px stroke, TR and BL, accent"
+      },
+      "segments": {
+        "cells": 31,
+        "cell_w": 7,
+        "gap": 2,
+        "row_w": 277,
+        "height": 10,
+        "fill": "cell fraction = clamp(p / 100 * 31 - i, 0, 1), fg fill over track (bar token on blackwall and edgerun)"
+      },
+      "numerals": {
+        "big_px": 48,
+        "unit_px": 22,
+        "money_px": 52,
+        "mini_px": 24,
+        "burn_px": 40
+      },
+      "headings": {
+        "h1_px": 23,
+        "h2_px": 30,
+        "font": "Chakra Petch Bold"
+      },
+      "scanlines": "Overlay at 15 percent across the whole window, 3 px period, above the content layer.",
+      "refresh": "The nc-hit class goes on data-hit numerals on each data refresh. Never looped.",
+      "blackwall": {
+        "selection": "Selected nav item: 1 px cyan outline box with a dark cyan-tinted fill, cyan text, chamfer kept on the outline (layered pseudo-elements).",
+        "reset_boxes": "Each card: RST text and a T-countdown in 1 px red boxes, Share Tech Mono 11 px, the countdown in accent red.",
+        "footer": "Live status on the left; key hints on the right: boxed keys R, D, Esc with labels REFRESH, DASHBOARD, HIDE.",
+        "wireframe": "Small red reticle (64 px) on the nav above the sync block.",
+        "mini_numbers": "Caching, cache hit, thinking and today figures right-aligned."
+      },
+      "edgerun": {
+        "title_bar": "Yellow fill with ink text; the tag is a black chip with yellow text.",
+        "card_titles": "Yellow plates with ink text, nowrap (inline-block shrink to text).",
+        "reset": "Filled TIME REMAINING bar, 16 px tall, yellow fill from the left equal to the remaining percent (session 69, weekly and Fable 67), ink label on the fill, yellow countdown on the track.",
+        "code_matrix": "Nav block: CODE MATRIX plate, 5 x 4 hex grid in lime with four cells inverse (lime fill, ink text), and a buffer of four boxes with BD, E9, 1C filled and 55 open.",
+        "noise": "Noise and code text in lime (yg)."
+      }
+    },
+    "edgerun_plate": {
+      "applies_to": "floating widget and taskbar strip when the variant is edgerun. The dashboard keeps the dark body.",
+      "tokens": {
+        "panel": "#fcee0a",
+        "line": "#0a0802",
+        "line_a": "#0a0802",
+        "fg": "#0a0802",
+        "fg_hi": "#0a0802",
+        "ink_2": "#2e2900",
+        "ink_3": "#4f4700",
+        "accent": "#0a0802",
+        "track": "#c2b408",
+        "bar": "#0a0802",
+        "scan": "#0000001a",
+        "glow": "transparent",
+        "glow_accent": "transparent",
+        "warn": "#ff6a1a",
+        "hazard": "resolves to danger (#ff2e3d)"
+      },
+      "live_chip": "Black chip (ink) behind the LIVE word, 1 px inset padding; cyan (ok, #3ef0ff) dot and cyan LIVE word. Replaces the header pip, which is hidden on the plate.",
+      "values": "Normal numerals in ink; warn numerals in ink with an orange fill; crit numerals in ink with the red fill and the CRIT chip. Red text on the yellow plate is 3.0:1 and is not used.",
+      "cells": "Segmented cells: ink fill on a #c2b408 track (1.77:1 against the plate, decorative only).",
+      "stale_band": "Black band with a warn outline and warn text, age tag in yellow (#fcee0a), hazard strips in red.",
+      "chips": "WARN chip is an ink outline; CRIT chip keeps the black box with a yellow cap."
+    },
+    "breach_motifs": {
+      "source": "Breach Protocol reference, colour sampled from the reference image at about #D6F55A (bins D0F050 to D0F060).",
+      "lime": "#d6f55a",
+      "uses": [
+        "code matrix hex cells and buffer boxes (edgerun dashboard)",
+        "dashboard noise text (edgerun)",
+        "model mix third category (edgerun)"
+      ],
+      "rule": "Colour and layout only. No Breach art, no game text. The quickhack references set the blackwall red, cyan selection and RAM-cell layout, and the REC dot idea."
+    },
+    "copy": {
+      "stale_auth": "RELINK // OPEN CLAUDE CODE",
+      "offline": "NO SIGNAL // NET DOWN",
+      "age_tag": "14 M OLD",
+      "live": "LIVE",
+      "warn_chip": "WARN",
+      "crit_chip": "CRIT",
+      "under_pace": "UNDER PACE -18",
+      "ahead_example": "AHEAD +41",
+      "idle": "IDLE",
+      "footer": "All money figures are API-equivalent at list prices. Not a bill.",
+      "footer_blackwall": "R REFRESH  D DASHBOARD  ESC HIDE",
+      "time_remaining": "TIME REMAINING",
+      "hero_line": "Plan Max 5x costs $100 a month. The same work at list API prices would have billed $1,659."
+    },
+    "not_used": "No franchise or studio marks, no game or film art or sounds, and no fonts outside the list under fonts. The tray options are generic shapes. The Breach lime and yellow are colour values only, and the quickhack references are used for colour and layout only.",
+    "tray_style": "ram-meter",
+    "tray_style_note": "Option B (RAM meter: 5 stacked cells filling from the bottom in 20% steps) chosen by Chris 2026-10-21."
+  }
+}

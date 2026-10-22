@@ -1,0 +1,921 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gates · Instrument mockup</title>
+<style>
+/* ============================================================================
+   1. TOKENS  (app CSS starts here: lift sections 1-5 into webui/themes/gates.css)
+   Role names follow the theme JSON roles in docs/UI_ARCHITECTURE.md > Themes:
+   bg surface surface-alt border border-dim text text-bright text-dim accent
+   accent-alt ok warn alert track glow stale.
+   Extras used by the widgets and the Pillow skin: time time-track usage-warn
+   usage-alert widget-bg widget-border tb-bg tray-fg, plus shape and font tokens.
+   VARIANT SWAP: put data-mode and data-variant on the same surface element.
+   Mode "system" is resolved to light or dark by the host (JS here, Win32 in app).
+   ============================================================================ */
+:root {
+  --accent-l: #0078d4;           /* variant: accent for light mode  (System accent = Windows default blue) */
+  --accent-d: #4cc2ff;           /* variant: accent for dark mode   */
+  --r-card: 8px;                 /* window + cards */
+  --r-control: 4px;              /* buttons, nav items, chips */
+  --r-bar: 2px;                  /* widget bars */
+  --widget-w: 280px;
+  --bar-h: 4px;
+  --font-text: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-small: "Segoe UI Variable Small", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", Consolas, "Courier New", monospace;
+  --font-icon: "Segoe Fluent Icons", "Segoe MDL2 Assets", sans-serif;
+}
+
+/* light (default) */
+:root, [data-mode="light"] {
+  color-scheme: light;
+  --accent: var(--accent-l);
+  --accent-alt: color-mix(in srgb, var(--accent) 82%, #000);
+  --bg: #f3f3f3;
+  --surface: #fbfbfb;
+  --surface-alt: #eeeeee;
+  --border: rgba(0, 0, 0, .075);
+  --border-dim: rgba(0, 0, 0, .055);
+  --text: #1b1b1b;
+  --text-bright: #000000;
+  --text-dim: #5e5e5e;
+  --ok: #0f7b0f;
+  --warn: #9d5d00;
+  --alert: #c42b1c;
+  --stale: #8a8a8a;
+  --track: rgba(0, 0, 0, .09);
+  --glow: rgba(0, 120, 212, .28);
+  --time: rgba(0, 0, 0, .40);
+  --time-track: rgba(0, 0, 0, .07);
+  --usage-warn: #b26a00;
+  --usage-alert: #d13438;
+  --widget-bg: rgba(252, 252, 252, .95);
+  --widget-border: rgba(0, 0, 0, .10);
+  --shadow-2: 0 1px 2px rgba(0, 0, 0, .12), 0 0 2px rgba(0, 0, 0, .08);
+  --shadow-8: 0 4px 8px rgba(0, 0, 0, .12), 0 0 2px rgba(0, 0, 0, .10);
+  --shadow-16: 0 8px 16px rgba(0, 0, 0, .16), 0 0 2px rgba(0, 0, 0, .12);
+  --tb-bg: #f3f3f3;
+  --tb-hover: rgba(0, 0, 0, .06);
+  --tray-fg: #1b1b1b;
+}
+
+/* dark */
+[data-mode="dark"] {
+  color-scheme: dark;
+  --accent: var(--accent-d);
+  --accent-alt: color-mix(in srgb, var(--accent) 80%, #fff);
+  --bg: #202020;
+  --surface: #2b2b2b;
+  --surface-alt: #363636;
+  --border: rgba(255, 255, 255, .085);
+  --border-dim: rgba(255, 255, 255, .055);
+  --text: #ffffff;
+  --text-bright: #ffffff;
+  --text-dim: #b4b4b4;
+  --ok: #6ccb5f;
+  --warn: #ffc857;
+  --alert: #ff8a80;
+  --stale: #7d7d7d;
+  --track: rgba(255, 255, 255, .12);
+  --glow: rgba(76, 194, 255, .36);
+  --time: rgba(255, 255, 255, .46);
+  --time-track: rgba(255, 255, 255, .08);
+  --usage-warn: #f5a524;
+  --usage-alert: #ff5f57;
+  --widget-bg: rgba(38, 38, 38, .95);
+  --widget-border: rgba(255, 255, 255, .10);
+  --shadow-2: 0 1px 2px rgba(0, 0, 0, .40), 0 0 2px rgba(0, 0, 0, .30);
+  --shadow-8: 0 4px 8px rgba(0, 0, 0, .40), 0 0 2px rgba(0, 0, 0, .35);
+  --shadow-16: 0 8px 16px rgba(0, 0, 0, .46), 0 0 2px rgba(0, 0, 0, .40);
+  --tb-bg: #1f1f1f;
+  --tb-hover: rgba(255, 255, 255, .08);
+  --tray-fg: #ffffff;
+}
+
+/* colour variants: the only tokens a variant changes */
+[data-variant="system"] { --accent-l: #0078d4; --accent-d: #4cc2ff; }
+[data-variant="blue"]   { --accent-l: #3b5bdb; --accent-d: #91a7ff; }
+[data-variant="teal"]   { --accent-l: #00877a; --accent-d: #5fd4c4; }
+[data-variant="purple"] { --accent-l: #7c4dd6; --accent-d: #c9a7ff; }
+[data-variant="rose"]   { --accent-l: #c2336e; --accent-d: #ff8fbf; }
+[data-variant="orange"] { --accent-l: #c95a12; --accent-d: #ffb171; }
+[data-variant="green"]  { --accent-l: #2f8a2c; --accent-d: #8ddc86; }
+
+/* ============================================================================
+   2. COMPONENTS  (Pillow map in the notes beside section 01)
+   ============================================================================ */
+.surface { color: var(--text); font-family: var(--font-text); }
+.ic { font-family: var(--font-icon); font-style: normal; font-weight: 400; line-height: 1; display: inline-block; }
+.lamp { display: inline-block; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--ok);
+        box-shadow: 0 0 0 2px color-mix(in srgb, var(--ok) 24%, transparent), 0 0 6px var(--glow); }
+.lamp.stale { background: var(--stale); box-shadow: none; }
+.lamp.offline { background: transparent; box-shadow: inset 0 0 0 1.5px var(--stale); }
+.lamp.paused { background: transparent; box-shadow: inset 0 0 0 1.5px var(--accent); }
+
+/* ---- 2a. floating widget: 280 wide, 8 radius, 1 px border, 8/12 padding ---- */
+.gw { --usage: var(--accent); box-sizing: border-box; position: relative; width: var(--widget-w);
+      padding: 8px 12px; border-radius: var(--r-card); background: var(--widget-bg);
+      border: 1px solid var(--widget-border); box-shadow: var(--shadow-16); color: var(--text);
+      font-family: var(--font-text); }
+.gw-head { display: flex; align-items: center; gap: 6px; height: 14px; margin-bottom: 6px; }
+.gw[data-link="live"] .gw-head .lamp { animation: lamp-breathe 2.8s ease-out infinite; }
+.gw-status { font-family: var(--font-small); font-size: 11px; font-weight: 600; letter-spacing: .09em; line-height: 14px; }
+.gw-age { margin-left: auto; font-family: var(--font-mono); font-size: 11px; line-height: 14px; color: var(--text-dim); }
+.gw-msg { display: flex; align-items: center; gap: 6px; height: 14px; margin: 0 0 6px; font-family: var(--font-small);
+          font-size: 11px; font-weight: 600; color: var(--warn); }
+.gw-msg .ic { font-size: 11px; }
+.gw-row + .gw-row { margin-top: 6px; }
+.gw-meta { display: flex; align-items: baseline; gap: 6px; height: 14px; }
+.gw-label { font-family: var(--font-small); font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--text-dim); }
+.gw-win { font-family: var(--font-mono); font-size: 10px; line-height: 14px; color: var(--text-dim); }
+.gw-pct { margin-left: auto; font-family: var(--font-mono); font-size: 15px; font-weight: 700; line-height: 14px; color: var(--text); font-variant-numeric: tabular-nums; }
+/* time rail: neutral hairline = share of the window already gone; index tick at its end */
+.gw-time { position: relative; height: 2px; margin-top: 3px; border-radius: 1px; background: var(--time-track); }
+.gw-time i { position: absolute; left: 0; top: 0; bottom: 0; width: var(--t); border-radius: 1px; background: var(--time); }
+.gw-time i::after { content: ""; position: absolute; right: -1px; top: -2px; width: 1px; height: 6px; background: var(--time); }
+/* usage bar: accent by default, amber / red by severity */
+.gw-bar { position: relative; height: var(--bar-h); margin-top: 2px; border-radius: var(--r-bar); background: var(--track); overflow: hidden; }
+.gw-bar i { position: absolute; left: 0; top: 0; bottom: 0; width: var(--v); border-radius: var(--r-bar); background: var(--usage); }
+.gw-row[data-sev="warn"] { --usage: var(--usage-warn); }
+.gw-row[data-sev="warn"] .gw-pct { color: var(--warn); }
+.gw-row[data-sev="crit"] { --usage: var(--usage-alert); }
+.gw-row[data-sev="crit"] .gw-pct { color: var(--alert); }
+.gw[data-link="stale"] .gw-row { opacity: .42; }
+.gw[data-link="stale"] .gw-status, .gw[data-link="offline"] .gw-status { color: var(--text-dim); }
+.gw:not([data-link="stale"]) .gw-msg { display: none; }
+.gw[data-link="offline"] .gw-row { opacity: .6; }
+@keyframes lamp-breathe {
+  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 46%, transparent), 0 0 6px var(--glow); }
+  70%, 100% { box-shadow: 0 0 0 4px transparent, 0 0 6px var(--glow); }
+}
+
+/* ---- 2b. taskbar strip: 48 px bar, two compact rows, blends into the taskbar ---- */
+.tb-strip { --usage: var(--accent); display: flex; align-items: center; gap: 8px; box-sizing: border-box;
+            width: 236px; height: 40px; margin: 0 4px 0 6px; padding: 0 8px 0 10px; border-radius: var(--r-control);
+            border-left: 1px solid var(--border-dim); }
+.tb-rows { flex: 1; display: grid; gap: 9px; }
+.tb-row { display: grid; grid-template-columns: 16px 1fr 34px; align-items: center; gap: 6px; height: 14px; }
+.tb-row[data-sev="warn"] { --usage: var(--usage-warn); }
+.tb-row[data-sev="warn"] .tb-pct { color: var(--warn); }
+.tb-k { font-family: var(--font-small); font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--text-dim); }
+.tb-cell { position: relative; height: 4px; }
+.tb-time { position: absolute; left: 0; right: 0; top: -3px; height: 2px; border-radius: 1px; background: var(--time-track); }
+.tb-time i { position: absolute; left: 0; top: 0; bottom: 0; width: var(--t); border-radius: 1px; background: var(--time); }
+.tb-trk { position: absolute; inset: 0; border-radius: var(--r-bar); background: var(--track); overflow: hidden; }
+.tb-trk i { position: absolute; left: 0; top: 0; bottom: 0; width: var(--v); background: var(--usage); }
+.tb-pct { font-family: var(--font-mono); font-size: 11px; font-weight: 700; text-align: right; color: var(--text); }
+
+/* ---- 2c. tray ring: ring of the session %, hand-tuned stroke per size ---- */
+.ring { display: block; overflow: visible; }
+.ring-slot { display: inline-flex; align-items: center; line-height: 0; }
+.ring .rg-track { fill: none; stroke: var(--tray-fg); stroke-opacity: .40; }
+.ring .rg-arc { fill: none; stroke: var(--tray-arc, var(--tray-fg)); }
+.ring .rg-num { font-family: var(--font-small); font-size: 10px; font-weight: 600; fill: var(--tray-fg); }
+.ring-16 .rg-track, .ring-16 .rg-arc { stroke-width: 2.5; }
+.ring-24 .rg-track, .ring-24 .rg-arc { stroke-width: 3.4; }
+.ring-32 .rg-track, .ring-32 .rg-arc { stroke-width: 4.2; }
+.ring.stale .rg-arc { stroke-opacity: .5; }
+.ring-16.stale .rg-track { stroke-dasharray: 6 4.5; stroke-opacity: .6; }
+.ring-24.stale .rg-track { stroke-dasharray: 4 3; stroke-opacity: .6; }
+.ring-32.stale .rg-track { stroke-dasharray: 3.2 2.4; stroke-opacity: .6; }
+
+/* ---- 2d. dashboard (Settings-style shell, 1200 x 760 window) ---- */
+.win { position: relative; box-sizing: border-box; width: 1200px; height: 760px; overflow: hidden;
+       border-radius: var(--r-card); background: var(--bg); border: 1px solid var(--border);
+       box-shadow: var(--shadow-16); color: var(--text); font-family: var(--font-text); }
+.win::before { content: ""; position: absolute; inset: 0; pointer-events: none;
+               background: radial-gradient(720px 340px at 0% 0%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 70%); }
+.win > * { position: relative; }
+.win-cap { display: flex; align-items: center; height: 32px; padding-left: 12px; font-size: 12px; color: var(--text-dim); }
+.win-cap .ring { margin-right: 8px; }
+.cap-btns { margin-left: auto; display: flex; height: 32px; }
+.cap-btns span { width: 46px; display: flex; align-items: center; justify-content: center; font-family: var(--font-icon); font-size: 10px; color: var(--text); }
+.win-body { display: grid; grid-template-columns: 248px 1fr; height: 726px; }
+
+.nav { display: flex; flex-direction: column; gap: 2px; padding: 10px 10px 14px 12px; }
+.nav-item { position: relative; display: flex; align-items: center; gap: 12px; height: 36px; padding: 0 12px;
+            border-radius: var(--r-control); font-size: 14px; color: var(--text); }
+.nav-item .ic { width: 16px; font-size: 16px; text-align: center; color: var(--text); }
+.nav-item:hover { background: var(--surface-alt); }
+.nav-item[aria-current="page"] { background: var(--surface); box-shadow: var(--shadow-2); }
+.nav-item[aria-current="page"]::before { content: ""; position: absolute; left: -5px; top: 10px; width: 3px; height: 16px;
+            border-radius: 2px; background: var(--accent); box-shadow: 0 0 6px var(--glow); }
+.nav-item[aria-current="page"] .ic { color: var(--accent); }
+.nav-sep { height: 1px; margin: 8px 12px; background: var(--border-dim); }
+.nav-foot { margin-top: auto; padding: 0 12px; font-size: 12px; line-height: 16px; color: var(--text-dim); }
+
+.main { display: flex; flex-direction: column; min-width: 0; padding: 22px 32px 0; }
+.pagehead { display: flex; align-items: flex-start; justify-content: space-between; height: 56px; margin-bottom: 14px; }
+.pagehead h1 { margin: 0; font-family: var(--font-display); font-size: 28px; line-height: 34px; font-weight: 600; letter-spacing: -.01em; }
+.pagehead p { margin: 2px 0 0; font-size: 13px; line-height: 18px; color: var(--text-dim); }
+.pagehead-r { display: flex; align-items: center; gap: 8px; padding-top: 4px; }
+.pill { display: inline-flex; align-items: center; gap: 7px; height: 24px; padding: 0 10px; border-radius: 12px;
+        background: var(--surface); border: 1px solid var(--border); font-family: var(--font-small); font-size: 11px;
+        font-weight: 600; letter-spacing: .06em; }
+.btn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border-radius: var(--r-control);
+       border: 1px solid var(--border); background: var(--surface); color: var(--text); font: 600 12px/1 var(--font-text); }
+.btn .ic { font-size: 12px; }
+
+.row { display: grid; gap: 12px; }
+.row-limits { grid-template-columns: repeat(3, minmax(0, 1fr)); height: 168px; }
+.row-kpi { grid-template-columns: repeat(4, minmax(0, 1fr)); height: 84px; margin-top: 12px; }
+.row-chart { grid-template-columns: 1.6fr 1fr; height: 176px; margin-top: 12px; }
+.row-misc { grid-template-columns: repeat(3, minmax(0, 1fr)); height: 138px; margin-top: 12px; }
+
+.card { position: relative; box-sizing: border-box; min-width: 0; overflow: hidden; padding: 12px 14px;
+        background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-card); box-shadow: var(--shadow-2); }
+.card-h { display: flex; align-items: center; gap: 8px; height: 16px; margin-bottom: 8px; font-family: var(--font-small);
+          font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim); }
+.card-h .tag { margin-left: auto; font-family: var(--font-mono); font-size: 11px; font-weight: 400; letter-spacing: 0;
+               text-transform: none; color: var(--text-dim); }
+.chip { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 3px; border: 1px solid var(--border);
+        font-family: var(--font-small); font-size: 10.5px; font-weight: 600; letter-spacing: .05em; color: var(--text-dim); white-space: nowrap; }
+.chip.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+.chip.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, transparent); }
+
+/* limit card: value, reset, then a two-lane instrument (time lane over usage lane) with a 10 % scale */
+.lim-top { display: flex; align-items: flex-end; gap: 10px; height: 40px; }
+.lim-pct { font-family: var(--font-display); font-size: 40px; line-height: 40px; font-weight: 600; letter-spacing: -.02em;
+           font-variant-numeric: tabular-nums; }
+.lim-pct small { font-size: 20px; font-weight: 600; margin-left: 2px; color: var(--text-dim); }
+.lim-side { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 5px; font-size: 12px; color: var(--text-dim); }
+.lim-side .chip { margin-bottom: 1px; }
+.gauge { display: grid; gap: 5px; margin-top: 12px; }
+.g-row { display: grid; grid-template-columns: 42px 1fr 34px; align-items: center; gap: 8px; height: 16px; }
+.g-k { font-family: var(--font-small); font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-dim); }
+.g-v { font-family: var(--font-mono); font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; }
+.g-tr { position: relative; height: 6px; border-radius: 3px; background: var(--track); overflow: hidden; }
+.g-tr i { position: absolute; left: 0; top: 0; bottom: 0; width: var(--w); border-radius: 3px; background: var(--accent); }
+.g-tr.t { height: 2px; border-radius: 1px; background: var(--time-track); overflow: visible; }
+.g-tr.t i { border-radius: 1px; background: var(--time); }
+.g-tr.t i::after { content: ""; position: absolute; right: -1px; top: -2px; width: 1px; height: 6px; background: var(--time); }
+.g-scale { height: 5px; margin: 0 42px 0 50px; border: 1px solid var(--border); border-top: 0;
+           background: repeating-linear-gradient(90deg, var(--border) 0 1px, transparent 1px 10%); }
+.lim-note { margin: 9px 0 0; font-size: 11.5px; line-height: 16px; color: var(--text-dim); }
+
+/* kpi tiles */
+.tile { padding: 10px 14px; }
+.tile-k { font-family: var(--font-small); font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--text-dim); line-height: 14px; }
+.tile-v { margin-top: 4px; font-family: var(--font-display); font-size: 26px; line-height: 28px; font-weight: 600; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+.tile-v small { margin-left: 4px; font-size: 12px; font-weight: 600; letter-spacing: 0; color: var(--text-dim); }
+.tile-s { margin-top: 2px; font-size: 12px; line-height: 16px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile-s .chip { margin-left: 6px; vertical-align: 1px; }
+
+/* chart + mix + rows */
+.chart-svg { display: block; width: 100%; height: 112px; margin-top: 2px; }
+.axis { display: flex; justify-content: space-between; margin: 2px 0 0 36px; font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim); }
+.mix { display: flex; gap: 1px; height: 10px; margin-top: 2px; border-radius: 3px; overflow: hidden; }
+.mix i:nth-child(1) { flex: 86 0 0; background: var(--accent); }
+.mix i:nth-child(2) { flex: 7 0 0; background: color-mix(in srgb, var(--accent) 70%, var(--surface)); }
+.mix i:nth-child(3) { flex: 6 0 0; background: color-mix(in srgb, var(--accent) 45%, var(--surface)); }
+.mix i:nth-child(4) { flex: 1 0 0; background: color-mix(in srgb, var(--accent) 25%, var(--surface)); }
+.leg { display: grid; grid-template-columns: 8px 1fr auto; align-items: center; gap: 8px; height: 22px; font-size: 12.5px; }
+.leg i { width: 8px; height: 8px; border-radius: 2px; }
+.leg b { font-family: var(--font-mono); font-weight: 400; font-size: 12px; color: var(--text-dim); }
+.hrow { display: grid; grid-template-columns: 96px 1fr 44px; align-items: center; gap: 10px; height: 24px; font-size: 12.5px; }
+.hrow b { font-family: var(--font-mono); font-weight: 400; font-size: 12px; text-align: right; color: var(--text); }
+.hbar { height: 6px; border-radius: 3px; background: var(--track); overflow: hidden; }
+.hbar i { display: block; height: 100%; width: var(--v); border-radius: 3px; background: var(--accent); }
+.dot-ok { color: var(--ok); }
+.kv { display: grid; grid-template-columns: 110px 1fr; align-items: center; height: 24px; font-size: 12.5px; }
+.kv span:first-child { color: var(--text-dim); }
+.kv b { font-weight: 600; font-family: var(--font-mono); font-size: 12px; }
+.btn.primary { background: var(--accent); border-color: transparent; color: #fff; }
+[data-mode="dark"] .btn.primary { color: #000; }
+
+/* ---- 2e. shared small helpers used by the mock only ---- */
+.wall-dark { background:
+  radial-gradient(60% 80% at 16% 30%, rgba(38, 92, 150, .85), rgba(38, 92, 150, 0) 70%),
+  radial-gradient(50% 70% at 84% 75%, rgba(20, 96, 110, .75), rgba(20, 96, 110, 0) 70%),
+  radial-gradient(40% 60% at 62% 8%, rgba(88, 60, 130, .55), rgba(88, 60, 130, 0) 70%),
+  linear-gradient(165deg, #0c1624 0%, #0b1a24 50%, #071215 100%); }
+.wall-light { background:
+  radial-gradient(60% 80% at 16% 30%, rgba(170, 206, 242, .9), rgba(170, 206, 242, 0) 70%),
+  radial-gradient(50% 70% at 84% 75%, rgba(186, 232, 224, .75), rgba(186, 232, 224, 0) 70%),
+  linear-gradient(165deg, #eef2f7 0%, #e6edf3 50%, #dde7ee 100%); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+/* ============================================================================
+   3. MOCK SHEET  (presentation only, not app CSS)
+   ============================================================================ */
+body { margin: 0; background: #121212; }
+.sheet { width: 1400px; box-sizing: border-box; margin: 0 auto; padding: 30px 44px 70px; color: #d7d7d7; font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; }
+.kicker { margin: 0; font-family: var(--font-mono); font-size: 11px; letter-spacing: .12em; color: #8f8f8f; }
+.sheet > header h1 { margin: 6px 0 6px; font: 600 26px/32px "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif; color: #f2f2f2; }
+.lede { margin: 0; max-width: 1000px; font-size: 13px; line-height: 19px; color: #b5b5b5; }
+.lede code { font-family: var(--font-mono); font-size: 12px; color: #e0e0e0; }
+.sec { margin-top: 44px; }
+.sec-h { display: flex; align-items: baseline; gap: 12px; padding-bottom: 8px; margin-bottom: 14px; border-bottom: 1px solid #2c2c2c; }
+.sec-h b { font-family: var(--font-mono); font-weight: 400; font-size: 12px; color: #8f8f8f; }
+.sec-h h2 { margin: 0; font: 600 18px/24px "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif; color: #f0f0f0; }
+.sec-h span { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: #8f8f8f; }
+.cap { margin: 14px 0 6px; font-family: var(--font-mono); font-size: 11px; color: #8f8f8f; }
+.wall { box-sizing: border-box; border-radius: 6px; }
+.wall-1x { display: flex; align-items: center; gap: 28px; height: 172px; padding: 18px 24px; }
+.zoom-row { display: flex; gap: 24px; align-items: flex-start; }
+.zoom-box { position: relative; width: 880px; height: 300px; overflow: hidden; flex: none; }
+.zoom-inner { position: absolute; left: 0; top: 0; transform-origin: 0 0; transform: translate(20px, 9px) scale(3); }
+.spec { flex: 1; min-width: 0; font-size: 12.5px; line-height: 18px; color: #bdbdbd; }
+.spec h3 { margin: 0 0 8px; font: 600 13px/18px "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; color: #efefef; }
+.spec ul { margin: 0; padding-left: 16px; }
+.spec li { margin-bottom: 5px; }
+.spec code { font-family: var(--font-mono); font-size: 11.5px; color: #e6e6e6; }
+.states { display: flex; gap: 22px; padding: 18px 20px; align-items: flex-start; }
+.states figure { margin: 0; }
+.states figcaption { margin: 0 0 8px; font-family: var(--font-mono); font-size: 11px; color: #cfcfcf; }
+.key { display: flex; gap: 22px; align-items: center; margin-top: 12px; font-family: var(--font-mono); font-size: 11px; color: #9a9a9a; }
+.key span { display: inline-flex; align-items: center; gap: 8px; }
+.kl { display: inline-block; width: 6px; height: 6px; border-radius: 50%; }
+
+.tb-wrap { position: relative; }
+.taskbar { position: relative; box-sizing: border-box; width: 100%; height: 48px; overflow: hidden;
+           background: var(--tb-bg); color: var(--text); font-family: var(--font-text); }
+.tb-center { position: absolute; left: 50%; top: 0; height: 48px; transform: translateX(-50%); display: flex; align-items: center; gap: 2px; }
+.tb-btn { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 40px; border-radius: var(--r-control); color: var(--text); }
+.tb-btn .ic { font-size: 17px; }
+.tb-btn.sm { width: 28px; }
+.tb-btn.sm .ic { font-size: 14px; }
+.tb-launch { width: 14px; height: 14px; background: radial-gradient(circle, var(--text) 1.3px, transparent 1.7px) 0 0 / 5px 5px; }
+.tb-tray { position: absolute; right: 0; top: 0; height: 48px; display: flex; align-items: center; gap: 2px; padding-right: 6px; }
+.tb-clock { padding: 0 10px 0 8px; text-align: right; font-size: 12px; line-height: 16px; white-space: nowrap; }
+.tb-sep { width: 1px; height: 20px; background: var(--border); margin: 0 2px; }
+
+.tray-board { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.tray-tile { box-sizing: border-box; padding: 16px 18px; border-radius: 6px; background: var(--tb-bg); color: var(--text); font-family: var(--font-text); }
+.tray-row { display: flex; align-items: flex-end; gap: 28px; margin-bottom: 16px; }
+.tray-row:last-child { margin-bottom: 0; }
+.tray-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); }
+.tray-cell .ring-slot { display: block; }
+.tray-cell.big .ring-slot { display: block; }
+.tray-tile .tray-h { margin: 0 0 12px; font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); }
+
+.win-wrap { margin-bottom: 8px; }
+.variants { display: grid; grid-template-columns: repeat(4, 300px); gap: 16px; }
+.vcell { box-sizing: border-box; padding: 14px 10px 12px; border-radius: 6px; min-height: 164px; }
+.vcap { display: flex; align-items: baseline; gap: 10px; margin: 0 0 10px 2px; font-family: var(--font-mono); font-size: 11px; color: #cfcfcf; }
+.vcap .vn { font-family: var(--font-small); font-size: 13px; font-weight: 600; color: var(--text); }
+.vcap .vh { margin-left: auto; color: var(--text-dim); }
+.vcell.legend { display: flex; flex-direction: column; gap: 9px; font-size: 12px; color: var(--text-dim); }
+.vcell.legend .sw-row { display: flex; align-items: center; gap: 10px; font-family: var(--font-mono); font-size: 11px; color: var(--text); }
+.vcell.legend .sw-row i { width: 14px; height: 14px; border-radius: 3px; flex: none; }
+.mode-row { display: grid; grid-template-columns: repeat(3, 300px); gap: 16px; margin-bottom: 18px; }
+.seg { display: inline-flex; height: 28px; border-radius: 4px; border: 1px solid #3a3a3a; overflow: hidden; margin-bottom: 12px; font-family: var(--font-text); font-size: 12px; }
+.seg span { display: flex; align-items: center; padding: 0 14px; color: #d0d0d0; background: #1e1e1e; border-right: 1px solid #3a3a3a; }
+.seg span:last-child { border-right: 0; }
+.seg span.on { background: #2f2f2f; color: #ffffff; font-weight: 600; }
+
+.dash-cap { margin: 0 0 6px; font-family: var(--font-mono); font-size: 11px; color: #8f8f8f; }
+.toks { display: grid; grid-template-columns: 170px 1fr 1fr; gap: 0 14px; font-family: var(--font-mono); font-size: 11px; color: #cfcfcf; }
+.toks > div { display: flex; align-items: center; gap: 8px; height: 26px; border-bottom: 1px solid #262626; }
+.toks > div.h { color: #8f8f8f; border-bottom-color: #3a3a3a; }
+.toks .sw { width: 16px; height: 16px; border-radius: 3px; flex: none; border: 1px solid rgba(128, 128, 128, .35); }
+.toks .sw-c { display: block; height: 16px; border-radius: 3px; flex: none; width: 16px; }
+</style>
+</head>
+<body>
+<main class="sheet">
+
+  <header>
+    <p class="kicker">GATES · INSTRUMENT · MOCKUP v1 · widgets are Pillow-ready, dashboard is webui-ready</p>
+    <h1>Precision readouts on native Fluent surfaces</h1>
+    <p class="lede">Time is a hairline, usage is the accent, status is a lamp, figures are tabular. Type is Segoe UI Variable (Small, Text, Display), glyphs are Segoe Fluent Icons, numbers in readouts are Cascadia Mono. Every colour is a token; a variant is one <code>data-variant</code> swap. All figures are sample values.</p>
+  </header>
+
+  <!-- ====================================================================== -->
+  <section class="sec" id="sec-float">
+    <div class="sec-h"><b>01</b><h2>Floating widget</h2><span>280 px wide · 94 px for two rows · 125 px with the Fable row</span></div>
+
+    <p class="cap">1x · actual pixels on a dark wallpaper · normal state, without the Fable row and with it (shown only when relevant)</p>
+    <div class="wall wall-dark wall-1x surface" data-mode="dark" data-variant="system" id="float-1x">
+      <div data-gw="normal"></div>
+      <div data-gw="fable"></div>
+    </div>
+
+    <p class="cap">3x zoom · same markup scaled 3x (transform, nearest pixel grid) · normal state</p>
+    <div class="zoom-row">
+      <div class="wall wall-dark zoom-box surface" data-mode="dark" data-variant="system" id="float-zoom">
+        <div class="zoom-inner"><div data-gw="normal"></div></div>
+      </div>
+      <aside class="spec">
+        <h3>Pillow map at 100 %</h3>
+        <ul>
+          <li>Card: <code>rounded_rectangle</code> r 8, fill widget-bg, 1 px widget-border. Draw at 2x, LANCZOS down.</li>
+          <li>Shadow: rounded-rect mask offset 8 px down, <code>GaussianBlur</code> r 6, alpha .16 (light) / .46 (dark).</li>
+          <li>Header: 14 px line. Lamp = ellipse 6 px, halo ring 2 px at 24 % alpha. Status = 11 px SemiBold caps, +0.09 em tracking.</li>
+          <li>Label = 11 px SemiBold caps, tracking .07 em, text-dim. Tag = 10 px mono. Value = 15 px Cascadia Mono Bold, right aligned.</li>
+          <li>Time rail: 2 px line 3 px under the value line, time-track full width, time filled to the elapsed share. Index tick 1 x 6 px at its end.</li>
+          <li>Usage bar: 4 px pill (r 2) starting 2 px under the rail, track 12 % alpha, fill = accent, amber or red.</li>
+          <li>Row gap 6 px. Stale: rows at 42 % alpha, message row added (14 px + 6 px gap).</li>
+        </ul>
+        <h3 style="margin-top:12px">Reading the pace</h3>
+        <ul>
+          <li>Rail longer than the bar = behind pace (calm). Bar longer than the rail = ahead of pace.</li>
+          <li>Severity follows the usage bar colour and the value colour. The lamp only reports the link.</li>
+        </ul>
+      </aside>
+    </div>
+
+    <p class="cap">States · normal, warning ~72 %, critical ~93 %, stale (login expired) · lamp key below</p>
+    <div class="wall wall-dark states surface" data-mode="dark" data-variant="system">
+      <figure><figcaption>NORMAL · 13 % / 2 %</figcaption><div data-gw="normal"></div></figure>
+      <figure><figcaption>WARNING · 72 %</figcaption><div data-gw="warn"></div></figure>
+      <figure><figcaption>CRITICAL · 93 %</figcaption><div data-gw="crit"></div></figure>
+      <figure><figcaption>STALE · LOGIN EXPIRED</figcaption><div data-gw="stale"></div></figure>
+    </div>
+    <div class="key">
+      <span><i class="kl" style="background:#6ccb5f;box-shadow:0 0 0 2px rgba(108,203,95,.24)"></i>LIVE · lamp + halo, breathes 2.8 s</span>
+      <span><i class="kl" style="background:#7d7d7d"></i>STALE · filled grey, rows at 42 %</span>
+      <span><i class="kl" style="box-shadow:inset 0 0 0 1.5px #7d7d7d"></i>OFFLINE · hollow grey</span>
+      <span><i class="kl" style="box-shadow:inset 0 0 0 1.5px #4cc2ff"></i>PAUSED · hollow accent</span>
+    </div>
+  </section>
+
+  <!-- ====================================================================== -->
+  <section class="sec" id="sec-taskbar">
+    <div class="sec-h"><b>02</b><h2>Taskbar strip</h2><span>48 px bar · strip 236 px wide, left of the clock · 5H and 7D</span></div>
+
+    <p class="cap">Dark taskbar · normal state</p>
+    <div class="tb-wrap">
+      <div class="taskbar surface" id="tb-dark" data-mode="dark" data-variant="system">
+        <div class="tb-center">
+          <span class="tb-btn"><span class="tb-launch"></span></span>
+          <span class="tb-btn"><i class="ic">&#xE721;</i></span>
+          <span class="tb-btn"><i class="ic">&#xE7C4;</i></span>
+          <span class="tb-btn"><i class="ic">&#xE8B7;</i></span>
+          <span class="tb-btn"><i class="ic">&#xE774;</i></span>
+          <span class="tb-btn"><i class="ic">&#xE756;</i></span>
+          <span class="tb-btn"><i class="ic">&#xE787;</i></span>
+          <span class="tb-btn"><i class="ic">&#xE715;</i></span>
+        </div>
+        <div class="tb-tray">
+          <span class="tb-btn sm"><i class="ic">&#xE70E;</i></span>
+          <span class="ring-slot" data-size="16" data-pct="13" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:40px"></span>
+          <span class="tb-btn sm"><i class="ic">&#xE701;</i></span>
+          <span class="tb-btn sm"><i class="ic">&#xE767;</i></span>
+          <span class="tb-btn sm"><i class="ic">&#xE83F;</i></span>
+          <span class="tb-sep"></span>
+          <div data-tbstrip="normal"></div>
+          <div class="tb-clock"><div>4:12 PM</div><div>2026-10-21</div></div>
+          <span class="tb-btn sm"><i class="ic">&#xE7E7;</i></span>
+        </div>
+      </div>
+    </div>
+
+    <p class="cap">Light taskbar · warning state (session 72 %)</p>
+    <div class="tb-wrap">
+      <div class="taskbar surface" id="tb-light" data-mode="light" data-variant="system">
+        <div class="tb-center">
+          <span class="tb-btn"><span class="tb-launch"></span></span>
+          <span class="tb-btn"><i class="ic">&#xE721;</i></span>
+          <span class="tb-btn"><i class="ic">&#xE7C4;</i></span>
+          <span class="tb-btn"><i class="ic">&#xE8B7;</i></span>
+          <span class="tb-btn"><i class="ic">&#xE774;</i></span>
+          <span class="tb-btn"><i class="ic">&#xE756;</i></span>
+          <span class="tb-btn"><i class="ic">&#xE787;</i></span>
+          <span class="tb-btn"><i class="ic">&#xE715;</i></span>
+        </div>
+        <div class="tb-tray">
+          <span class="tb-btn sm"><i class="ic">&#xE70E;</i></span>
+          <span class="ring-slot" data-size="16" data-pct="72" data-sev="warn" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:40px"></span>
+          <span class="tb-btn sm"><i class="ic">&#xE701;</i></span>
+          <span class="tb-btn sm"><i class="ic">&#xE767;</i></span>
+          <span class="tb-btn sm"><i class="ic">&#xE83F;</i></span>
+          <span class="tb-sep"></span>
+          <div data-tbstrip="warn"></div>
+          <div class="tb-clock"><div>4:12 PM</div><div>2026-10-21</div></div>
+          <span class="tb-btn sm"><i class="ic">&#xE7E7;</i></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ====================================================================== -->
+  <section class="sec" id="sec-tray">
+    <div class="sec-h"><b>03</b><h2>Tray icon</h2><span>ring of the session % · 16 / 24 / 32 px · hand-tuned stroke per size</span></div>
+    <div class="tray-board" id="tray-zoom">
+      <div class="tray-tile surface" data-mode="dark" data-variant="system">
+        <p class="tray-h">DARK TASKBAR · tray-fg #ffffff</p>
+        <div class="tray-row">
+          <div class="tray-cell big"><span class="ring-slot" data-size="16" data-pct="13"></span>16 px · 13 %</div>
+          <div class="tray-cell big"><span class="ring-slot" data-size="16" data-pct="72" data-sev="warn"></span>16 px · 72 %</div>
+          <div class="tray-cell big"><span class="ring-slot" data-size="16" data-pct="93" data-sev="crit"></span>16 px · 93 %</div>
+          <div class="tray-cell big"><span class="ring-slot" data-size="16" data-pct="13" data-stale="1"></span>16 px · stale</div>
+        </div>
+        <div class="tray-row">
+          <div class="tray-cell"><span class="ring-slot" data-size="24" data-pct="13"></span>24 px · 13 %</div>
+          <div class="tray-cell"><span class="ring-slot" data-size="24" data-pct="72" data-sev="warn"></span>24 px · 72 %</div>
+          <div class="tray-cell"><span class="ring-slot" data-size="24" data-pct="93" data-sev="crit"></span>24 px · 93 %</div>
+          <div class="tray-cell"><span class="ring-slot" data-size="24" data-pct="13" data-stale="1"></span>24 px · stale</div>
+        </div>
+        <div class="tray-row">
+          <div class="tray-cell"><span class="ring-slot" data-size="32" data-pct="13"></span>32 px · 13 %</div>
+          <div class="tray-cell"><span class="ring-slot" data-size="32" data-pct="72" data-sev="warn"></span>32 px · 72 %</div>
+          <div class="tray-cell"><span class="ring-slot" data-size="32" data-pct="93" data-sev="crit"></span>32 px · 93 %</div>
+          <div class="tray-cell"><span class="ring-slot" data-size="32" data-pct="13" data-stale="1"></span>32 px · stale</div>
+        </div>
+      </div>
+      <div class="tray-tile surface" data-mode="light" data-variant="system">
+        <p class="tray-h">LIGHT TASKBAR · tray-fg #1b1b1b</p>
+        <div class="tray-row">
+          <div class="tray-cell big"><span class="ring-slot" data-size="16" data-pct="13"></span>16 px · 13 %</div>
+          <div class="tray-cell big"><span class="ring-slot" data-size="16" data-pct="72" data-sev="warn"></span>16 px · 72 %</div>
+          <div class="tray-cell big"><span class="ring-slot" data-size="16" data-pct="93" data-sev="crit"></span>16 px · 93 %</div>
+          <div class="tray-cell big"><span class="ring-slot" data-size="16" data-pct="13" data-stale="1"></span>16 px · stale</div>
+        </div>
+        <div class="tray-row">
+          <div class="tray-cell"><span class="ring-slot" data-size="24" data-pct="13"></span>24 px · 13 %</div>
+          <div class="tray-cell"><span class="ring-slot" data-size="24" data-pct="72" data-sev="warn"></span>24 px · 72 %</div>
+          <div class="tray-cell"><span class="ring-slot" data-size="24" data-pct="93" data-sev="crit"></span>24 px · 93 %</div>
+          <div class="tray-cell"><span class="ring-slot" data-size="24" data-pct="13" data-stale="1"></span>24 px · stale</div>
+        </div>
+        <div class="tray-row">
+          <div class="tray-cell"><span class="ring-slot" data-size="32" data-pct="13"></span>32 px · 13 %</div>
+          <div class="tray-cell"><span class="ring-slot" data-size="32" data-pct="72" data-sev="warn"></span>32 px · 72 %</div>
+          <div class="tray-cell"><span class="ring-slot" data-size="32" data-pct="93" data-sev="crit"></span>32 px · 93 %</div>
+          <div class="tray-cell"><span class="ring-slot" data-size="32" data-pct="13" data-stale="1"></span>32 px · stale</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ====================================================================== -->
+  <section class="sec" id="sec-dash">
+    <div class="sec-h"><b>04</b><h2>Dashboard · Overview</h2><span>1200 x 760 window · Settings-app shell · light and dark</span></div>
+
+    <p class="dash-cap">Light · data-mode light, data-variant system</p>
+    <div class="win surface" id="dash-light" data-mode="light" data-variant="system">
+      <div class="win-cap"><span class="ring-slot" data-size="16" data-pct="13"></span>Claude Usage Monitor
+        <div class="cap-btns"><span>&#xE921;</span><span>&#xE922;</span><span>&#xE8BB;</span></div>
+      </div>
+      <div class="win-body">
+        <nav class="nav">
+          <a class="nav-item" aria-current="page"><i class="ic">&#xE80F;</i>Overview</a>
+          <a class="nav-item"><i class="ic">&#xE916;</i>Limits</a>
+          <a class="nav-item"><i class="ic">&#xE8C7;</i>Cost &amp; Value</a>
+          <a class="nav-item"><i class="ic">&#xE945;</i>Efficiency</a>
+          <a class="nav-item"><i class="ic">&#xE81C;</i>History</a>
+          <div class="nav-sep"></div>
+          <a class="nav-item"><i class="ic">&#xE713;</i>Settings</a>
+          <a class="nav-item"><i class="ic">&#xE946;</i>About</a>
+          <div class="nav-foot">Plan: Max 5x · $100 / month</div>
+        </nav>
+        <main class="main" data-dash="body"></main>
+      </div>
+    </div>
+
+    <p class="dash-cap" style="margin-top:22px">Dark · data-mode dark, data-variant system</p>
+    <div class="win surface" id="dash-dark" data-mode="dark" data-variant="system">
+      <div class="win-cap"><span class="ring-slot" data-size="16" data-pct="13"></span>Claude Usage Monitor
+        <div class="cap-btns"><span>&#xE921;</span><span>&#xE922;</span><span>&#xE8BB;</span></div>
+      </div>
+      <div class="win-body">
+        <nav class="nav">
+          <a class="nav-item" aria-current="page"><i class="ic">&#xE80F;</i>Overview</a>
+          <a class="nav-item"><i class="ic">&#xE916;</i>Limits</a>
+          <a class="nav-item"><i class="ic">&#xE8C7;</i>Cost &amp; Value</a>
+          <a class="nav-item"><i class="ic">&#xE945;</i>Efficiency</a>
+          <a class="nav-item"><i class="ic">&#xE81C;</i>History</a>
+          <div class="nav-sep"></div>
+          <a class="nav-item"><i class="ic">&#xE713;</i>Settings</a>
+          <a class="nav-item"><i class="ic">&#xE946;</i>About</a>
+          <div class="nav-foot">Plan: Max 5x · $100 / month</div>
+        </nav>
+        <main class="main" data-dash="body"></main>
+      </div>
+    </div>
+  </section>
+
+  <!-- ====================================================================== -->
+  <section class="sec" id="sec-variants">
+    <div class="sec-h"><b>05</b><h2>Variants and modes</h2><span>one widget per colour variant · light, dark and system</span></div>
+
+    <div class="seg"><span>Light</span><span class="on">Dark</span><span>System</span></div>
+    <div class="mode-row">
+      <div class="vcell wall wall-light surface" data-mode="light" data-variant="system">
+        <div class="vcap"><span class="vn">Light</span><span class="vh"></span></div>
+        <div data-gw="normal"></div>
+      </div>
+      <div class="vcell wall wall-dark surface" data-mode="dark" data-variant="system">
+        <div class="vcap"><span class="vn">Dark</span><span class="vh"></span></div>
+        <div data-gw="normal"></div>
+      </div>
+      <div class="vcell wall wall-dark surface" data-mode="system" data-mode-pref="system" data-variant="system">
+        <div class="vcap"><span class="vn">System</span><span class="vh">resolves to the OS app mode</span></div>
+        <div data-gw="normal"></div>
+      </div>
+    </div>
+
+    <p class="cap">Dark row · accent = --accent-d</p>
+    <div class="variants" data-variant-grid="dark"></div>
+
+    <p class="cap" style="margin-top:20px">Light row · accent = --accent-l</p>
+    <div class="variants" data-variant-grid="light"></div>
+  </section>
+
+  <!-- ====================================================================== -->
+  <section class="sec" id="sec-tokens">
+    <div class="sec-h"><b>06</b><h2>Token roles</h2><span>read from computed styles · the values the app should ship in gates.json</span></div>
+    <div class="toks" id="tokens"></div>
+  </section>
+
+</main>
+
+<script>
+(() => {
+  // ---- system mode: resolve data-mode-pref="system" from the OS app-mode preference
+  const prefersDark = matchMedia('(prefers-color-scheme: dark)');
+  const resolveSystem = () => document.querySelectorAll('[data-mode-pref="system"]').forEach(el => {
+    el.dataset.mode = prefersDark.matches ? 'dark' : 'light';
+  });
+  resolveSystem();
+  if (prefersDark.addEventListener) prefersDark.addEventListener('change', resolveSystem);
+
+  // ---- widget templates: the single source for every floating widget in the sheet
+  const NORMAL = [
+    { label: 'Session', win: '5H', pct: 13, time: 38, use: 13 },
+    { label: 'Weekly',  win: '7D', pct: 2,  time: 46, use: 2 },
+  ];
+  const FABLE = { label: 'Fable weekly', win: '50% share', pct: 0, time: 46, use: 0 };
+  const WARN = [
+    { label: 'Session', win: '5H', pct: 72, time: 58, use: 72, sev: 'warn' },
+    { label: 'Weekly',  win: '7D', pct: 41, time: 46, use: 41 },
+  ];
+  const CRIT = [
+    { label: 'Session', win: '5H', pct: 93, time: 81, use: 93, sev: 'crit' },
+    { label: 'Weekly',  win: '7D', pct: 52, time: 46, use: 52 },
+  ];
+  const SPEC = {
+    normal: { link: 'live',  age: '12 s',   rows: NORMAL },
+    fable:  { link: 'live',  age: '12 s',   rows: [...NORMAL, FABLE] },
+    warn:   { link: 'live',  age: '12 s',   rows: WARN },
+    crit:   { link: 'live',  age: '12 s',   rows: CRIT },
+    stale:  { link: 'stale', age: '14 min', rows: NORMAL },
+  };
+  const STATUS = { live: 'LIVE', stale: 'STALE', offline: 'OFFLINE', paused: 'PAUSED' };
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+
+  function gw(spec) {
+    const el = document.createElement('div');
+    el.className = 'gw';
+    el.dataset.link = spec.link;
+    const msg = spec.link === 'stale'
+      ? '<div class="gw-msg"><i class="ic">&#xE72E;</i>Sign-in expired · open Claude Code</div>' : '';
+    el.innerHTML =
+      '<div class="gw-head"><span class="lamp ' + (spec.link === 'live' ? '' : spec.link) + '"></span>' +
+      '<span class="gw-status">' + STATUS[spec.link] + '</span><span class="gw-age">' + spec.age + '</span></div>' +
+      msg +
+      spec.rows.map(r =>
+        '<div class="gw-row" data-sev="' + (r.sev || 'normal') + '">' +
+          '<div class="gw-meta"><span class="gw-label">' + esc(r.label) + '</span>' +
+          '<span class="gw-win">' + esc(r.win) + '</span><span class="gw-pct">' + r.pct + '%</span></div>' +
+          '<div class="gw-time" style="--t:' + r.time + '%"><i></i></div>' +
+          '<div class="gw-bar" style="--v:' + r.use + '%"><i></i></div>' +
+        '</div>').join('');
+    return el;
+  }
+
+  function tbStrip(sev) {
+    const rows = [
+      { k: '5H', pct: 13, time: 38, use: 13, sev: 'normal' },
+      { k: '7D', pct: 2,  time: 46, use: 2,  sev: 'normal' },
+    ];
+    if (sev === 'warn') { rows[0] = { k: '5H', pct: 72, time: 58, use: 72, sev: 'warn' }; }
+    const el = document.createElement('div');
+    el.className = 'tb-strip';
+    el.innerHTML = '<span class="lamp"></span><div class="tb-rows">' + rows.map(r =>
+      '<div class="tb-row" data-sev="' + r.sev + '"><span class="tb-k">' + r.k + '</span>' +
+        '<div class="tb-cell" style="--t:' + r.time + '%;--v:' + r.use + '%"><div class="tb-time"><i></i></div><div class="tb-trk"><i></i></div></div>' +
+        '<span class="tb-pct">' + r.pct + '%</span></div>').join('') + '</div>';
+    return el;
+  }
+
+  function ring(size, pct, opts) {
+    const cfg = { 16: { vb: 16, r: 5.25 }, 24: { vb: 24, r: 8 }, 32: { vb: 32, r: 11.5 } }[size];
+    const c = cfg.vb / 2;
+    const sev = opts && opts.sev;
+    const arc = sev === 'warn' ? 'var(--usage-warn)' : sev === 'crit' ? 'var(--usage-alert)' : '';
+    const stale = opts && opts.stale;
+    const num = size === 32 ? '<text class="rg-num" x="' + c + '" y="' + (c + 3.6) + '" text-anchor="middle">' + pct + '</text>' : '';
+    return '<svg class="ring ring-' + size + (stale ? ' stale' : '') + '" width="' + size + '" height="' + size +
+      '" viewBox="0 0 ' + cfg.vb + ' ' + cfg.vb + '"' + (arc ? ' style="--tray-arc:' + arc + '"' : '') + '>' +
+      '<circle class="rg-track" cx="' + c + '" cy="' + c + '" r="' + cfg.r + '" pathLength="100"/>' +
+      '<circle class="rg-arc" cx="' + c + '" cy="' + c + '" r="' + cfg.r + '" pathLength="100" stroke-dasharray="' +
+      pct + ' ' + (100 - pct) + '" transform="rotate(-90 ' + c + ' ' + c + ')"/>' + num + '</svg>';
+  }
+
+  // ---- fill placeholders
+  document.querySelectorAll('[data-gw]').forEach(el => el.replaceWith(gw(SPEC[el.dataset.gw])));
+  document.querySelectorAll('[data-tbstrip]').forEach(el => el.replaceWith(tbStrip(el.dataset.tbstrip)));
+  document.querySelectorAll('.ring-slot').forEach(el => {
+    el.innerHTML = ring(+el.dataset.size, +el.dataset.pct, { sev: el.dataset.sev, stale: !!el.dataset.stale });
+  });
+
+  // ---- variant grids
+  const VARIANTS = [
+    ['system', 'System accent (Windows default blue)'],
+    ['blue', 'Blue'], ['teal', 'Teal'], ['purple', 'Purple'],
+    ['rose', 'Rose'], ['orange', 'Orange'], ['green', 'Green'],
+  ];
+  const cellHTML = (mode, variant, label) =>
+    '<div class="vcell surface wall wall-' + mode + '" data-mode="' + mode + '" data-variant="' + variant + '">' +
+      '<div class="vcap"><span class="vn">' + label.split(' ')[0] + '</span><span class="vh"></span></div>' +
+      '<div class="vw"></div></div>';
+  ['dark', 'light'].forEach(mode => {
+    const grid = document.querySelector('[data-variant-grid="' + mode + '"]');
+    VARIANTS.forEach(([v, label]) => grid.insertAdjacentHTML('beforeend', cellHTML(mode, v, label)));
+    // legend cell: fixed semantic colours
+    grid.insertAdjacentHTML('beforeend',
+      '<div class="vcell legend surface wall wall-' + mode + '" data-mode="' + mode + '" data-variant="system">' +
+        '<div class="vcap"><span class="vn">Fixed roles</span><span class="vh">same in all variants</span></div>' +
+        '<div class="sw-row"><i style="background:var(--ok)"></i>ok · status lamp, usage OK chip</div>' +
+        '<div class="sw-row"><i style="background:var(--warn)"></i>warn · value and message text</div>' +
+        '<div class="sw-row"><i style="background:var(--usage-warn)"></i>usage-warn · bar at ~72 %</div>' +
+        '<div class="sw-row"><i style="background:var(--usage-alert)"></i>usage-alert · bar at ~93 %</div>' +
+        '<div class="sw-row"><i style="background:var(--stale)"></i>stale · grey lamp, dashed ring</div>' +
+        '<div class="sw-row"><i style="background:var(--accent)"></i>accent · the only variant colour</div>' +
+      '</div>');
+  });
+  // widgets + accent captions inside the variant cells
+  document.querySelectorAll('.variants .vcell:not(.legend)').forEach(cell => {
+    cell.querySelector('.vw').replaceWith(gw(SPEC.normal));
+    const v = cell.dataset.variant, mode = cell.dataset.mode;
+    const hex = getComputedStyle(cell).getPropertyValue(mode === 'dark' ? '--accent-d' : '--accent-l').trim();
+    cell.querySelector('.vh').textContent = hex.toUpperCase();
+    cell.querySelector('.vn').textContent = VARIANTS.find(x => x[0] === v)[1].split(' ')[0];
+  });
+
+  // ---- dashboard body (both frames share the same markup)
+  const dashBody = () => `
+    <header class="pagehead">
+      <div>
+        <h1>Overview</h1>
+        <p>Max 5x plan · October 2026 · cost figures are API-equivalent at list prices</p>
+      </div>
+      <div class="pagehead-r">
+        <span class="pill"><span class="lamp"></span>LIVE · updated 12 s ago</span>
+        <button class="btn"><i class="ic">&#xE72C;</i>Refresh</button>
+      </div>
+    </header>
+
+    <div class="row row-limits">
+      <section class="card">
+        <div class="card-h">Session<span class="tag">5H</span></div>
+        <div class="lim-top">
+          <div class="lim-pct">13<small>%</small></div>
+          <div class="lim-side"><span>Resets 10:39 PM</span><span class="chip ok">BEHIND PACE</span></div>
+        </div>
+        <div class="gauge" style="--w:38%">
+          <div class="g-row"><span class="g-k">Time</span><div class="g-tr t"><i style="width:38%"></i></div><span class="g-v">38%</span></div>
+          <div class="g-row"><span class="g-k">Usage</span><div class="g-tr"><i style="width:13%"></i></div><span class="g-v">13%</span></div>
+          <div class="g-scale"></div>
+        </div>
+        <p class="lim-note">13% used, 38% of the 5-hour window gone.</p>
+      </section>
+      <section class="card">
+        <div class="card-h">Weekly<span class="tag">7D</span></div>
+        <div class="lim-top">
+          <div class="lim-pct">2<small>%</small></div>
+          <div class="lim-side"><span>Resets Wed 4:00 PM</span><span class="chip ok">BEHIND PACE</span></div>
+        </div>
+        <div class="gauge">
+          <div class="g-row"><span class="g-k">Time</span><div class="g-tr t"><i style="width:46%"></i></div><span class="g-v">46%</span></div>
+          <div class="g-row"><span class="g-k">Usage</span><div class="g-tr"><i style="width:2%"></i></div><span class="g-v">2%</span></div>
+          <div class="g-scale"></div>
+        </div>
+        <p class="lim-note">2% used, 46% of the 7-day window gone.</p>
+      </section>
+      <section class="card">
+        <div class="card-h">Fable weekly<span class="tag">50% share</span></div>
+        <div class="lim-top">
+          <div class="lim-pct">0<small>%</small></div>
+          <div class="lim-side"><span>Resets Wed 4:00 PM</span><span class="chip ok">BEHIND PACE</span></div>
+        </div>
+        <div class="gauge">
+          <div class="g-row"><span class="g-k">Time</span><div class="g-tr t"><i style="width:46%"></i></div><span class="g-v">46%</span></div>
+          <div class="g-row"><span class="g-k">Usage</span><div class="g-tr"><i style="width:0%"></i></div><span class="g-v">0%</span></div>
+          <div class="g-scale"></div>
+        </div>
+        <p class="lim-note">Nothing used yet this week.</p>
+      </section>
+    </div>
+
+    <div class="row row-kpi">
+      <section class="card tile">
+        <div class="tile-k">API-equivalent · month</div>
+        <div class="tile-v">$1,659</div>
+        <div class="tile-s">16.6× your Max 5x plan ($100)</div>
+      </section>
+      <section class="card tile">
+        <div class="tile-k">Today</div>
+        <div class="tile-v">$84.20</div>
+        <div class="tile-s">Since midnight, at list prices</div>
+      </section>
+      <section class="card tile">
+        <div class="tile-k">Caching saved · month</div>
+        <div class="tile-v">$14.1K</div>
+        <div class="tile-s">Cache hit rate 96.4%</div>
+      </section>
+      <section class="card tile">
+        <div class="tile-k">Burn rate</div>
+        <div class="tile-v">1,240<small>tok/min</small></div>
+        <div class="tile-s">$6.10 / h <span class="chip ok">NORMAL</span></div>
+      </section>
+    </div>
+
+    <div class="row row-chart">
+      <section class="card">
+        <div class="card-h">30 days · daily cost<span class="tag">API-equivalent at list prices</span></div>
+        <svg class="chart-svg spark" viewBox="0 0 500 112" preserveAspectRatio="xMinYMid meet"></svg>
+        <div class="axis"><span>Sep 22</span><span>Oct 21 · today $84.20</span></div>
+      </section>
+      <section class="card">
+        <div class="card-h">Model mix · month</div>
+        <div class="mix"><i></i><i></i><i></i><i></i></div>
+        <div style="margin-top:10px">
+          <div class="leg"><i style="background:var(--accent)"></i><span>Opus 5.5</span><b>86%</b></div>
+          <div class="leg"><i style="background:color-mix(in srgb, var(--accent) 70%, var(--surface))"></i><span>Sonnet 5.5</span><b>7%</b></div>
+          <div class="leg"><i style="background:color-mix(in srgb, var(--accent) 45%, var(--surface))"></i><span>Haiku 4.5</span><b>6%</b></div>
+          <div class="leg"><i style="background:color-mix(in srgb, var(--accent) 25%, var(--surface))"></i><span>Haiku 5.5</span><b>1%</b></div>
+        </div>
+      </section>
+    </div>
+
+    <div class="row row-misc">
+      <section class="card">
+        <div class="card-h">Where the week went</div>
+        <div class="hrow"><span>Claude Code</span><div class="hbar"><i style="--v:100%"></i></div><b>100%</b></div>
+        <div class="hrow"><span>Chats</span><div class="hbar"><i style="--v:0%"></i></div><b>0%</b></div>
+        <div class="hrow"><span>Cowork</span><div class="hbar"><i style="--v:0%"></i></div><b>0%</b></div>
+      </section>
+      <section class="card">
+        <div class="card-h">Efficiency</div>
+        <div class="hrow"><span>Cache hit rate</span><div class="hbar"><i style="--v:96.4%"></i></div><b>96.4%</b></div>
+        <div class="hrow"><span>Thinking share</span><div class="hbar"><i style="--v:38%"></i></div><b>38%</b></div>
+        <p class="lim-note" style="margin-top:6px">Thinking tokens as a share of all output this month.</p>
+      </section>
+      <section class="card">
+        <div class="card-h">Data health</div>
+        <div class="kv"><span>Feed</span><b class="dot-ok">LIVE</b></div>
+        <div class="kv"><span>Last sample</span><b>12 s ago</b></div>
+        <div class="kv"><span>Refresh cadence</span><b>60 s</b></div>
+        <div class="kv"><span>Sign-in</span><b>Valid</b></div>
+      </section>
+    </div>`;
+  document.querySelectorAll('[data-dash="body"]').forEach(el => { el.innerHTML = dashBody(); });
+
+  // ---- 30-day sparkline: Sep 22 - Sep 30 then Oct 1 - Oct 21 (today = 84.20). Oct sums to 1,659.2
+  const vals = [55, 63, 41, 28, 70, 66, 58, 49, 61,
+                79, 84, 76, 92, 66, 40, 48, 88, 96, 78, 78, 81, 102, 90, 70, 77, 85, 72, 94, 79, 84.2];
+  const NS = 'http://www.w3.org/2000/svg';
+  document.querySelectorAll('svg.spark').forEach(svg => {
+    const W = 500, base = 96, top = 6, max = 120;
+    const k = (base - top) / max;
+    const padL = 36, slot = (W - padL) / vals.length, bw = 9;
+    const mk = (tag, attrs, style) => {
+      const n = document.createElementNS(NS, tag);
+      Object.entries(attrs).forEach(([a, b]) => n.setAttribute(a, b));
+      if (style) n.setAttribute('style', style);
+      return n;
+    };
+    [100, 50].forEach(v => {
+      const y = base - v * k;
+      svg.appendChild(mk('line', { x1: padL, x2: W, y1: y, y2: y }, 'stroke:var(--border);stroke-width:1;stroke-dasharray:2 3'));
+      const t = mk('text', { x: 0, y: y + 3.5 }, 'font-family:var(--font-mono);font-size:10.5px;fill:var(--text-dim)');
+      t.textContent = '$' + v; svg.appendChild(t);
+    });
+    svg.appendChild(mk('line', { x1: padL, x2: W, y1: base + .5, y2: base + .5 }, 'stroke:var(--border);stroke-width:1'));
+    vals.forEach((v, i) => {
+      const h = v * k, x = padL + i * slot + (slot - bw) / 2;
+      const today = i === vals.length - 1;
+      svg.appendChild(mk('rect', { x: x, y: base - h, width: bw, height: h, rx: 2 },
+        'fill:var(--accent);fill-opacity:' + (today ? 1 : .42)));
+    });
+  });
+
+  // ---- token roles table (values read from the computed styles of each mode)
+  const ROLES = ['bg', 'surface', 'surface-alt', 'border', 'text', 'text-dim', 'accent', 'accent-alt', 'ok', 'warn',
+                 'alert', 'track', 'glow', 'stale', 'time', 'time-track', 'usage-warn', 'usage-alert', 'widget-bg', 'tb-bg', 'tray-fg'];
+  const tok = document.getElementById('tokens');
+  tok.innerHTML = '<div class="h">role</div><div class="h">light</div><div class="h">dark</div>';
+  const probeL = document.createElement('div'); probeL.className = 'surface'; probeL.dataset.mode = 'light'; probeL.dataset.variant = 'system'; document.body.appendChild(probeL);
+  const probeD = document.createElement('div'); probeD.className = 'surface'; probeD.dataset.mode = 'dark'; probeD.dataset.variant = 'system'; document.body.appendChild(probeD);
+  ROLES.forEach(role => {
+    const l = getComputedStyle(probeL).getPropertyValue('--' + role).trim();
+    const d = getComputedStyle(probeD).getPropertyValue('--' + role).trim();
+    tok.insertAdjacentHTML('beforeend',
+      '<div><span class="sw surface" data-mode="light" data-variant="system" style="background:var(--' + role + ')"></span>--' + role + '</div>' +
+      '<div><span class="sw" style="background:' + l + '"></span>' + esc(l) + '</div>' +
+      '<div><span class="sw" style="background:' + d + '"></span>' + esc(d) + '</div>');
+  });
+  probeL.remove(); probeD.remove();
+})();
+</script>
+</body>
+</html>

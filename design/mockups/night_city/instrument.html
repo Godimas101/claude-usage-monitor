@@ -1,0 +1,995 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Night City · Instrument · Usage Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+/* =====================================================================
+   1. TOKENS
+   Every colour a component uses is a custom property defined here.
+   Street Red is the default (:root). Each [data-variant] block redefines
+   the same names, so one attribute re-themes a whole subtree.
+   Derived tokens are written out per block on purpose: a variant
+   override on an ancestor does not re-resolve a var() chain.
+   The --win-* tokens are board-only Windows chrome, not part of the theme.
+   ===================================================================== */
+:root,
+[data-variant="street"] {
+  color-scheme: dark;
+  --nc-bg:       #0a0607;  /* page and window base */
+  --nc-panel:    #140c0e;  /* widget and card body */
+  --nc-panel-2:  #1c1214;  /* buttons, inset tiles */
+  --nc-track:    #2a1719;  /* empty bar track */
+  --nc-line:     #4d2822;  /* hairline dividers */
+  --nc-line-2:   #7a3f35;  /* frame outline */
+  --nc-ring:     #54291f;  /* tray ring track: sits back so the fill reads at 16 px */
+  --nc-scan:     rgba(0, 0, 0, .20);  /* dashboard scanline shade, shared by all variants */
+  --nc-ink:      #f3b8a0;  /* primary: off-red / salmon */
+  --nc-ink-2:    #d39a86;  /* secondary text */
+  --nc-ink-3:    #a27664;  /* labels and data-noise */
+  --nc-bar:      #ff5234;  /* usage fill, normal */
+  --nc-bar-soft: rgba(255, 82, 52, .16);
+  --nc-time:     #f3b8a0;  /* elapsed-window line (pace) */
+  --nc-hot:      #ffe63a;  /* signature yellow: emphasis, brackets, active tab */
+  --nc-warn:     #ffe63a;  /* usage fill at 70 % and up */
+  --nc-crit:     #ff2e2e;  /* usage fill at 90 % and up */
+  --nc-ok:       #2fe6ff;  /* LIVE and data health: cyan */
+  --nc-haz-a:    #ffe63a;  /* hazard stripe, yellow */
+  --nc-haz-b:    #0a0607;  /* hazard stripe, black */
+  --nc-m1: #ff5234; --nc-m2: #f3b8a0; --nc-m3: #a27664; --nc-m4: #2fe6ff;
+  --nc-ui:  "Rajdhani", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --nc-num: "Share Tech Mono", "Cascadia Mono", Consolas, monospace;
+  --win-tb:   #1e1e21;
+  --win-edge: #34343a;
+  --win-fg:   #f3f3f5;
+  --win-fg-2: #bdbdc6;
+  --win-chip: #2d2d33;
+}
+
+[data-variant="cyan"] {
+  color-scheme: dark;
+  --nc-bg:       #03080a;
+  --nc-panel:    #071215;
+  --nc-panel-2:  #0b181c;
+  --nc-track:    #12262b;
+  --nc-line:     #1b4a53;
+  --nc-line-2:   #2b7180;
+  --nc-ring:     #14343b;
+  --nc-ink:      #bff6ff;
+  --nc-ink-2:    #8ed6e2;
+  --nc-ink-3:    #5f9eaa;
+  --nc-bar:      #2fe6ff;
+  --nc-bar-soft: rgba(47, 230, 255, .14);
+  --nc-time:     #bff6ff;
+  --nc-hot:      #ffe63a;
+  --nc-warn:     #ffe63a;
+  --nc-crit:     #ff3d6e;
+  --nc-ok:       #7dfff0;
+  --nc-haz-a:    #ffe63a;
+  --nc-haz-b:    #03080a;
+  --nc-m1: #2fe6ff; --nc-m2: #bff6ff; --nc-m3: #5f9eaa; --nc-m4: #7dfff0;
+}
+
+[data-variant="yellow"] {
+  color-scheme: dark;
+  --nc-bg:       #0b0a04;
+  --nc-panel:    #15130a;
+  --nc-panel-2:  #1d1a0d;
+  --nc-track:    #2b2710;
+  --nc-line:     #54491c;
+  --nc-line-2:   #8a7a2c;
+  --nc-ring:     #3e3813;
+  --nc-ink:      #f6ecb4;
+  --nc-ink-2:    #d6c77f;
+  --nc-ink-3:    #a09352;
+  --nc-bar:      #f7e63a;
+  --nc-bar-soft: rgba(247, 230, 58, .14);
+  --nc-time:     #f6ecb4;
+  --nc-hot:      #fff27a;
+  --nc-warn:     #ffa926;
+  --nc-crit:     #ff4b1f;
+  --nc-ok:       #2fe6ff;
+  --nc-haz-a:    #ffe63a;
+  --nc-haz-b:    #0b0a04;
+  --nc-m1: #f7e63a; --nc-m2: #f6ecb4; --nc-m3: #a09352; --nc-m4: #2fe6ff;
+}
+
+[data-variant="pink"] {
+  color-scheme: dark;
+  --nc-bg:       #0a0408;
+  --nc-panel:    #150a12;
+  --nc-panel-2:  #1d111a;
+  --nc-track:    #2c1426;
+  --nc-line:     #56204a;
+  --nc-line-2:   #8d3576;
+  --nc-ring:     #4a1a36;
+  --nc-ink:      #ffc4e0;
+  --nc-ink-2:    #e192bb;
+  --nc-ink-3:    #a86a8f;
+  --nc-bar:      #ff3d9a;
+  --nc-bar-soft: rgba(255, 61, 154, .16);
+  --nc-time:     #ffc4e0;
+  --nc-hot:      #ffe63a;
+  --nc-warn:     #ffe63a;
+  --nc-crit:     #ff2440;
+  --nc-ok:       #2fe6ff;
+  --nc-haz-a:    #ffe63a;
+  --nc-haz-b:    #0a0408;
+  --nc-m1: #ff3d9a; --nc-m2: #ffc4e0; --nc-m3: #a86a8f; --nc-m4: #2fe6ff;
+}
+
+/* =====================================================================
+   2. BASE
+   ===================================================================== */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; background: var(--nc-bg); color: var(--nc-ink); font-family: var(--nc-ui); }
+body { min-width: 1400px; }
+svg { display: block; }
+
+/* =====================================================================
+   3. COMPONENTS
+   Order: primitives, chamfer frame, floating widget, taskbar strip,
+   tray icon, dashboard. Each block reads only tokens and its own vars.
+   ===================================================================== */
+
+/* 3a. primitives */
+.nc-dot { display: inline-block; width: 6px; height: 6px; background: currentColor; flex: none; }
+.nc-pulse { animation: nc-pulse 2.4s ease-in-out infinite; }
+@keyframes nc-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+.nc-noise { font: 400 10px/1 var(--nc-num); letter-spacing: .06em; color: var(--nc-ink-3); white-space: nowrap; }
+.nc-kicker { font: 600 12px/1 var(--nc-ui); letter-spacing: .14em; text-transform: uppercase; color: var(--nc-ink-3); white-space: nowrap; }
+.nc-status { --st: var(--nc-ok); display: inline-flex; align-items: center; gap: 5px; font: 700 11px/1 var(--nc-ui); letter-spacing: .16em; text-transform: uppercase; color: var(--st); }
+.nc-br { position: absolute; width: 7px; height: 7px; border: 0 solid var(--nc-hot); }
+.nc-br.tr { top: 3px; right: 3px; border-top-width: 2px; border-right-width: 2px; }
+.nc-br.bl { bottom: 3px; left: 3px; border-bottom-width: 2px; border-left-width: 2px; }
+
+/* glitch hit: runs once when data refreshes, never loops */
+.nc-hit { animation: nc-hit .28s steps(4, end) 1; }
+@keyframes nc-hit {
+  0%   { transform: translateX(0);    text-shadow: none; }
+  25%  { transform: translateX(-2px); text-shadow: 2px 0 0 color-mix(in srgb, var(--nc-ok) 85%, transparent), -2px 0 0 color-mix(in srgb, var(--nc-crit) 85%, transparent); }
+  50%  { transform: translateX(1px);  text-shadow: -1px 0 0 color-mix(in srgb, var(--nc-ok) 60%, transparent), 1px 0 0 color-mix(in srgb, var(--nc-crit) 60%, transparent); }
+  75%  { transform: translateX(0);    text-shadow: 1px 0 0 color-mix(in srgb, var(--nc-ok) 40%, transparent); }
+  100% { transform: none;             text-shadow: none; }
+}
+@media (prefers-reduced-motion: reduce) { .nc-pulse, .nc-hit { animation: none; } }
+
+/* 3b. chamfer frame: the outer shape paints a 1 px outline, the inner shape paints the body.
+   Pillow equivalent: polygon fill in --line-2, then the same polygon inset 1 px in --panel. */
+.nc-fr {
+  --c: 10px;
+  position: relative;
+  padding: 1px;
+  background: var(--nc-line-2);
+  clip-path: polygon(var(--c) 0, 100% 0, 100% calc(100% - var(--c)), calc(100% - var(--c)) 100%, 0 100%, 0 var(--c));
+}
+.nc-fr > .nc-in {
+  --ci: calc(var(--c) - .6px);
+  position: relative;
+  height: 100%;
+  background: var(--nc-panel);
+  clip-path: polygon(var(--ci) 0, 100% 0, 100% calc(100% - var(--ci)), calc(100% - var(--ci)) 100%, 0 100%, 0 var(--ci));
+}
+
+/* 3c. FLOATING WIDGET, 280 px wide. Heights: 92 (2 rows), 122 (3 rows), 108 (stale). */
+.nc-widget {
+  --c: 10px;
+  position: relative;
+  width: 280px;
+  height: 92px;
+  flex: none;
+  color: var(--nc-ink);
+  --nc-bar-now: var(--nc-bar);
+}
+.nc-widget.is-3row { height: 122px; }
+.nc-widget.is-stale { height: 108px; --nc-bar-now: var(--nc-ink-3); --nc-time: var(--nc-ink-3); }
+.nc-widget > .nc-fr { position: absolute; inset: 0; }
+
+.nc-widget .nc-head {
+  position: absolute; left: 12px; right: 14px; top: 9px; height: 13px;
+  display: flex; align-items: center; justify-content: space-between; z-index: 3;
+}
+.nc-widget .nc-br { z-index: 3; }
+.nc-widget .nc-chip { display: inline-flex; height: 13px; font: 700 10px/13px var(--nc-ui); letter-spacing: .14em; text-transform: uppercase; }
+.nc-widget .nc-chip > i { width: 7px; background: repeating-linear-gradient(-45deg, var(--nc-haz-a) 0 2px, var(--nc-haz-b) 2px 4px); }
+.nc-widget .nc-chip > span { padding: 0 6px 0 5px; background: var(--nc-haz-b); color: var(--nc-hot); }
+
+.nc-rows {
+  position: absolute; left: 12px; right: 12px; top: 30px; z-index: 2;
+  display: flex; flex-direction: column; gap: 5px;
+}
+.nc-row { height: 25px; display: flex; flex-direction: column; }
+.nc-row.is-warn { --nc-bar-now: var(--nc-warn); }
+.nc-row.is-warn .nc-val { color: var(--nc-warn); }
+.nc-row.is-crit { --nc-bar-now: var(--nc-crit); }
+.nc-row.is-crit .nc-val { color: var(--nc-crit); }
+.nc-row-top { height: 12px; display: flex; align-items: center; justify-content: space-between; }
+.nc-lbl { display: flex; align-items: center; gap: 6px; font: 600 11px/12px var(--nc-ui); letter-spacing: .1em; text-transform: uppercase; color: var(--nc-ink-2); }
+.nc-tag { font: 400 10px/1 var(--nc-num); letter-spacing: .04em; color: var(--nc-ink-3); }
+.nc-val { font: 400 13px/12px var(--nc-num); color: var(--nc-ink); }
+/* pace: thin line above = share of the window elapsed; bar below = usage */
+.nc-time { position: relative; margin-top: 3px; height: 2px; background: var(--nc-track); }
+.nc-time > i { position: absolute; left: 0; top: 0; bottom: 0; width: var(--t); background: var(--nc-time); }
+.nc-bar { position: relative; margin-top: 2px; height: 6px; background: var(--nc-track); }
+.nc-bar > i { position: absolute; left: 0; top: 0; bottom: 0; width: var(--p); background: var(--nc-bar-now); }
+
+.nc-foot {
+  position: absolute; left: 12px; right: 12px; bottom: 7px; height: 12px; z-index: 2;
+  display: flex; align-items: center; gap: 6px;
+  font: 600 10px/12px var(--nc-ui); letter-spacing: .12em; text-transform: uppercase; color: var(--nc-ink-2);
+}
+.nc-foot b { font-weight: 700; color: var(--nc-hot); }
+
+.nc-widget.is-stale .nc-status { --st: var(--nc-ink-3); }
+.nc-widget.is-stale .nc-lbl, .nc-widget.is-stale .nc-val { color: var(--nc-ink-3); }
+.nc-widget.is-stale .nc-br { border-color: var(--nc-ink-3); }
+
+/* 3d. TASKBAR STRIP, 240 x 40 px inside the 48 px taskbar. */
+.nc-strip { --c: 7px; position: relative; width: 240px; height: 40px; flex: none; color: var(--nc-ink); --nc-bar-now: var(--nc-bar); }
+.nc-strip > .nc-fr { position: absolute; inset: 0; }
+.nc-srow { position: absolute; left: 9px; right: 24px; height: 14px; display: flex; align-items: center; gap: 6px; z-index: 2; }
+.nc-srow.r1 { top: 5px; }
+.nc-srow.r2 { top: 21px; }
+.nc-srow.is-warn { --nc-bar-now: var(--nc-warn); }
+.nc-srow.is-warn .nc-sval { color: var(--nc-warn); }
+.nc-srow.is-crit { --nc-bar-now: var(--nc-crit); }
+.nc-srow.is-crit .nc-sval { color: var(--nc-crit); }
+.nc-slbl { width: 19px; font: 700 11px/1 var(--nc-ui); letter-spacing: .08em; color: var(--nc-ink-2); }
+.nc-sbar { position: relative; flex: 1; height: 10px; }
+.nc-sbar > .t { position: absolute; left: 0; right: 0; top: 0; height: 2px; background: var(--nc-track); }
+.nc-sbar > .t > i { position: absolute; left: 0; top: 0; bottom: 0; width: var(--t); background: var(--nc-time); }
+.nc-sbar > .b { position: absolute; left: 0; right: 0; top: 4px; height: 6px; background: var(--nc-track); }
+.nc-sbar > .b > i { position: absolute; left: 0; top: 0; bottom: 0; width: var(--p); background: var(--nc-bar-now); }
+.nc-sval { width: 34px; text-align: right; font: 400 12px/1 var(--nc-num); color: var(--nc-ink); }
+.nc-sdot { position: absolute; right: 9px; top: 50%; margin-top: -3px; z-index: 2; color: var(--nc-ok); }
+.nc-strip.is-stale { --nc-bar-now: var(--nc-ink-3); --nc-time: var(--nc-ink-3); }
+.nc-strip.is-stale .nc-slbl, .nc-strip.is-stale .nc-sval { color: var(--nc-ink-3); }
+.nc-strip.is-stale .nc-sdot { color: var(--nc-ink-3); }
+
+/* 3e. NOTIFICATION-AREA ICON: octagon ring, fill = session %, clockwise from 12 o'clock.
+   Sizes 16 / 24 / 32 px are drawn as separate masters (stroke 2 / 2.5 / 3). */
+.nc-tray { display: block; flex: none; --nc-bar-now: var(--nc-bar); }
+.nc-tray.is-warn { --nc-bar-now: var(--nc-warn); }
+.nc-tray.is-crit { --nc-bar-now: var(--nc-crit); }
+.nc-tray.is-stale { --nc-bar-now: var(--nc-ink-3); }
+.nc-tray .trk { fill: none; stroke: var(--nc-ring); }
+.nc-tray .fil { fill: none; stroke: var(--nc-bar-now); }
+.nc-tray .core { fill: var(--nc-bar-now); }
+
+/* 3f. DASHBOARD (1200 x 760 WebView2 window). The only surface with scanlines and loops. */
+.nc-win {
+  position: relative; width: 1200px; height: 760px; flex: none;
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--nc-bg); outline: 1px solid var(--nc-line-2);
+}
+.nc-win::after {
+  content: ""; position: absolute; inset: 0; z-index: 20; pointer-events: none;
+  background: repeating-linear-gradient(0deg, var(--nc-scan) 0 1px, transparent 1px 3px);
+}
+.nc-titlebar { flex: none; height: 32px; display: flex; align-items: center; justify-content: space-between; padding-left: 12px; background: var(--nc-panel); border-bottom: 1px solid var(--nc-line); }
+.nc-titlebar .tt { display: flex; align-items: center; gap: 10px; font: 600 12px/1 var(--nc-ui); letter-spacing: .12em; text-transform: uppercase; color: var(--nc-ink-2); }
+.wc { display: flex; height: 100%; }
+.wc > span { position: relative; width: 46px; height: 32px; }
+.w-min::before { content: ""; position: absolute; left: 18px; top: 16px; width: 10px; height: 1px; background: var(--nc-ink-2); }
+.w-max::before { content: ""; position: absolute; left: 19px; top: 11px; width: 9px; height: 9px; border: 1px solid var(--nc-ink-2); }
+.w-x::before, .w-x::after { content: ""; position: absolute; left: 17px; top: 15px; width: 13px; height: 1px; background: var(--nc-ink-2); transform: rotate(45deg); }
+.w-x::after { transform: rotate(-45deg); }
+
+.nc-mark { position: relative; width: 26px; height: 26px; flex: none; background: var(--nc-bar); clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px); }
+.nc-mark::after { content: ""; position: absolute; left: 6px; top: 11px; width: 14px; height: 4px; background: var(--nc-hot); }
+.nc-mark.sm { width: 14px; height: 14px; }
+.nc-mark.sm::after { left: 3px; top: 5px; width: 8px; height: 2px; }
+
+.nc-head2 { flex: none; height: 60px; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; border-bottom: 1px solid var(--nc-line); }
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand-name { font: 700 20px/1 var(--nc-ui); letter-spacing: .16em; color: var(--nc-ink); margin-bottom: 4px; }
+.health { display: flex; align-items: center; gap: 12px; }
+.hl { font: 600 12px/1 var(--nc-ui); letter-spacing: .14em; text-transform: uppercase; color: var(--nc-ink-3); }
+.live { display: flex; align-items: center; gap: 7px; font: 700 15px/1 var(--nc-ui); letter-spacing: .14em; color: var(--nc-ok); }
+.btn {
+  font: 700 12px/1 var(--nc-ui); letter-spacing: .16em; color: var(--nc-hot);
+  background: var(--nc-panel-2); border: 0; padding: 9px 16px; margin-left: 6px; cursor: pointer;
+  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+}
+
+.nc-tabs { flex: none; height: 40px; display: flex; align-items: stretch; gap: 6px; padding: 0 20px; border-bottom: 1px solid var(--nc-line); }
+.nc-tab {
+  position: relative; display: flex; align-items: center; padding: 0 16px;
+  transform: skewX(-14deg);
+  font: 700 13px/1 var(--nc-ui); letter-spacing: .12em; text-transform: uppercase; color: var(--nc-ink-3);
+  text-decoration: none; cursor: pointer;
+}
+.nc-tab > span { transform: skewX(14deg); }
+.nc-tab.is-active { color: var(--nc-hot); background: var(--nc-bar-soft); }
+.nc-tab.is-active::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: var(--nc-hot); }
+.plan { margin-left: auto; display: flex; align-items: center; gap: 8px; align-self: center; }
+.plan b { font: 400 13px/1 var(--nc-num); color: var(--nc-ink); }
+
+.nc-main { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 16px 20px 14px; }
+.nc-main .nc-fr { --c: 12px; }
+.nc-main .nc-fr > .nc-in { display: flex; flex-direction: column; }
+
+/* limit cards */
+.cards { flex: none; height: 172px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.card { height: 100%; }
+.card > .nc-in { gap: 8px; padding: 12px 16px; }
+.ctop { display: flex; justify-content: space-between; align-items: center; }
+.cnum { display: flex; align-items: baseline; gap: 4px; }
+.big { font: 400 60px/1 var(--nc-num); color: var(--nc-ink); letter-spacing: -.02em; }
+.pct { font: 400 24px/1 var(--nc-num); color: var(--nc-ink-2); }
+.cap { margin-left: auto; font: 600 12px/1 var(--nc-ui); letter-spacing: .14em; text-transform: uppercase; color: var(--nc-ink-3); }
+.pace { display: flex; flex-direction: column; gap: 8px; }
+.pr { display: grid; grid-template-columns: 54px 1fr 44px; align-items: center; gap: 10px; font: 600 12px/1 var(--nc-ui); letter-spacing: .12em; color: var(--nc-ink-3); }
+.pb { position: relative; height: 8px; background: var(--nc-track); }
+.pb > i { position: absolute; left: 0; top: 0; bottom: 0; width: var(--p); background: var(--nc-bar); }
+.pb.tm > i { background: color-mix(in srgb, var(--nc-time) 55%, transparent); }
+.pr b { font: 400 14px/1 var(--nc-num); color: var(--nc-ink); text-align: right; }
+.cfoot { display: flex; justify-content: space-between; align-items: center; font: 600 12px/1 var(--nc-ui); letter-spacing: .12em; text-transform: uppercase; color: var(--nc-ink-3); }
+.verdict { font: 700 12px/1 var(--nc-ui); letter-spacing: .14em; color: var(--nc-ok); border: 1px solid currentColor; padding: 3px 6px 2px; }
+.verdict.warn { color: var(--nc-warn); }
+.verdict.idle { color: var(--nc-ink-3); }
+
+/* hero + tiles */
+.hero { flex: none; height: 188px; display: grid; grid-template-columns: 430px 1fr; gap: 12px; }
+.hc > .nc-in { gap: 6px; padding: 14px 18px; }
+.ktop { display: flex; justify-content: space-between; align-items: center; }
+.cost { font: 400 72px/0.95 var(--nc-num); color: var(--nc-ink); letter-spacing: -.02em; margin-top: 2px; }
+.cost .cur { font-size: 40px; color: var(--nc-ink-2); vertical-align: top; margin-right: 6px; }
+.ratio { font: 500 17px/1 var(--nc-ui); color: var(--nc-ink-2); display: flex; align-items: baseline; gap: 6px; }
+.ratio b { font: 700 22px/1 var(--nc-ui); color: var(--nc-hot); }
+.plan-bar { position: relative; height: 8px; background: var(--nc-track); margin-top: 2px; }
+.plan-bar > i { position: absolute; left: 0; top: 0; bottom: 0; right: 0; background: var(--nc-bar); }
+.plan-bar > em { position: absolute; top: -4px; bottom: -4px; left: 6.03%; width: 2px; background: var(--nc-hot); }
+.plan-lbl { display: flex; justify-content: space-between; font: 600 11px/1 var(--nc-ui); letter-spacing: .12em; text-transform: uppercase; color: var(--nc-ink-3); }
+
+.tiles { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: 1fr 1fr; gap: 12px; }
+.tile > .nc-in { justify-content: space-between; padding: 10px 14px; }
+.tv { font: 400 28px/1 var(--nc-num); color: var(--nc-ink); }
+.tv small { font-size: 14px; color: var(--nc-ink-2); margin-left: 4px; }
+.tile .pb { height: 6px; }
+.okchip { font: 700 11px/1 var(--nc-ui); letter-spacing: .14em; text-transform: uppercase; color: var(--nc-ok); border: 1px solid currentColor; padding: 3px 6px 2px; }
+
+/* panels */
+.panels { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr 1.2fr; gap: 12px; }
+.pn > .nc-in { gap: 12px; padding: 12px 14px; }
+.pn-h { display: flex; justify-content: space-between; align-items: baseline; }
+.stack { display: flex; height: 12px; background: var(--nc-track); }
+.stack i { display: block; height: 100%; width: var(--w); }
+.legend, .wk { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
+.legend li { display: grid; grid-template-columns: 10px 1fr auto; gap: 10px; align-items: center; font: 600 15px/1 var(--nc-ui); color: var(--nc-ink-2); }
+.legend li i { width: 10px; height: 10px; }
+.legend li b { font: 400 14px/1 var(--nc-num); color: var(--nc-ink); }
+.wk li { display: grid; grid-template-columns: 100px 1fr 44px; gap: 10px; align-items: center; font: 600 15px/1 var(--nc-ui); color: var(--nc-ink-2); }
+.wk li b { font: 400 14px/1 var(--nc-num); color: var(--nc-ink); text-align: right; }
+.pn-note { font: 500 13px/1.3 var(--nc-ui); color: var(--nc-ink-3); }
+.spark { position: relative; height: 100px; }
+.spark svg { width: 100%; height: 100%; }
+.spark .pd { fill: var(--nc-line-2); }
+.spark .mt { fill: var(--nc-bar); }
+.spark .td { fill: var(--nc-hot); }
+.spark .av { stroke: var(--nc-ink-2); stroke-width: 1; stroke-dasharray: 3 3; }
+.spark .bl { stroke: var(--nc-line-2); stroke-width: 1; }
+.spk-x { position: relative; height: 12px; }
+.spk-x span { position: absolute; top: 0; font: 400 10px/1 var(--nc-num); color: var(--nc-ink-3); }
+
+.nc-sfoot {
+  flex: none; height: 34px; display: flex; align-items: center; justify-content: space-between;
+  padding: 0 20px; border-top: 1px solid var(--nc-line);
+  font: 600 12px/1 var(--nc-ui); letter-spacing: .12em; text-transform: uppercase; color: var(--nc-ink-3);
+}
+.nc-sfoot span { display: flex; align-items: center; gap: 8px; }
+.nc-sfoot .nc-dot { color: var(--nc-ok); }
+
+/* =====================================================================
+   4. BOARD (presentation only, not for the app)
+   ===================================================================== */
+.board { width: 1320px; margin: 0 auto; padding: 56px 0 96px; }
+.bd-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 40px; padding-bottom: 28px; border-bottom: 2px solid var(--nc-hot); }
+.bd-kick { font: 600 13px/1 var(--nc-ui); letter-spacing: .22em; text-transform: uppercase; color: var(--nc-hot); }
+.bd-title { margin: 12px 0 10px; font: 700 60px/1 var(--nc-ui); letter-spacing: .02em; color: var(--nc-ink); }
+.bd-sub { margin: 0; max-width: 760px; font: 500 17px/1.4 var(--nc-ui); color: var(--nc-ink-2); }
+.bd-meta { margin: 0; display: grid; grid-template-columns: repeat(2, auto); gap: 10px 36px; }
+.bd-meta div { display: flex; flex-direction: column; gap: 4px; }
+.bd-meta dt { font: 600 11px/1 var(--nc-ui); letter-spacing: .18em; color: var(--nc-ink-3); }
+.bd-meta dd { margin: 0; font: 700 15px/1 var(--nc-ui); letter-spacing: .1em; color: var(--nc-ink); }
+
+.bd-sec { margin-top: 64px; }
+.bd-sech { display: flex; align-items: baseline; gap: 16px; border-bottom: 1px solid var(--nc-line); padding-bottom: 10px; margin-bottom: 26px; }
+.bd-idx { font: 400 15px/1 var(--nc-num); color: var(--nc-hot); }
+.bd-sech h2 { margin: 0; font: 700 26px/1 var(--nc-ui); letter-spacing: .08em; text-transform: uppercase; color: var(--nc-ink); }
+.bd-note { margin-left: auto; font: 400 12px/1 var(--nc-num); color: var(--nc-ink-3); }
+
+.wall {
+  position: relative; height: 330px; overflow: hidden; outline: 1px solid var(--nc-line);
+  background:
+    radial-gradient(60% 80% at 84% 16%, rgba(120, 44, 34, .55), rgba(120, 44, 34, 0) 62%),
+    radial-gradient(70% 90% at 10% 100%, rgba(16, 76, 90, .55), rgba(16, 76, 90, 0) 64%),
+    linear-gradient(164deg, #1b1417 0%, #0c0e12 55%, #050507 100%);
+}
+.wall-tag { position: absolute; left: 14px; top: 12px; font: 400 11px/1 var(--nc-num); letter-spacing: .08em; color: var(--nc-ink-3); }
+.wall .pos-a { position: absolute; left: 40px; top: 44px; }
+.wall .pos-b { position: absolute; right: 44px; bottom: 40px; }
+
+.states { display: grid; grid-template-columns: repeat(4, 280px); justify-content: space-between; gap: 24px; margin-top: 28px; }
+.states figure { margin: 0; display: flex; flex-direction: column; gap: 12px; }
+.states figcaption { display: flex; flex-direction: column; gap: 5px; }
+.states figcaption b { font: 700 15px/1 var(--nc-ui); letter-spacing: .14em; color: var(--nc-hot); }
+.states figcaption span { font: 500 13px/1.2 var(--nc-ui); color: var(--nc-ink-3); }
+.keyrow { display: flex; align-items: center; gap: 22px; margin-top: 24px; }
+
+.zoomrow { display: flex; flex-direction: column; gap: 14px; margin-top: 40px; }
+.zoom-cap { display: flex; align-items: baseline; gap: 14px; }
+.zoom-cap b { font: 700 14px/1 var(--nc-ui); letter-spacing: .14em; color: var(--nc-hot); }
+.zoom-cap span { font: 400 12px/1 var(--nc-num); color: var(--nc-ink-3); }
+.zoom-box { display: flex; align-items: flex-start; }
+#float-zoom { zoom: 3; }
+
+.hitdemo { display: flex; align-items: center; gap: 26px; margin-top: 36px; padding-top: 18px; border-top: 1px solid var(--nc-line); }
+.hf { font: 500 16px/1 var(--nc-num); color: var(--nc-ink); width: 150px; }
+.hf.f2 { transform: translateX(-2px); text-shadow: 2px 0 0 var(--nc-ok), -2px 0 0 var(--nc-crit); }
+.hf.f3 { transform: translateX(1px); text-shadow: -1px 0 0 var(--nc-ok), 1px 0 0 var(--nc-crit); }
+
+/* taskbar */
+.tb { position: relative; width: 1320px; height: 48px; background: var(--win-tb); border-top: 1px solid var(--win-edge); }
+.tb-apps { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; gap: 4px; }
+.tb-app { position: relative; width: 38px; height: 36px; border-radius: 6px; display: grid; place-items: center; color: var(--win-fg); }
+.tb-app svg { width: 18px; height: 18px; }
+.tb-app.on::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: 1px; height: 3px; border-radius: 2px; background: var(--win-fg-2); }
+.tb-app.grid svg { width: 16px; height: 16px; }
+.tb-right { position: absolute; right: 10px; top: 0; bottom: 0; display: flex; align-items: center; gap: 2px; }
+.tb-strip { margin-right: 12px; }
+.tb-btn { width: 32px; height: 32px; border-radius: 6px; display: grid; place-items: center; color: var(--win-fg); }
+.tb-btn svg { width: 16px; height: 16px; }
+.tb-clock { margin-left: 8px; padding: 0 8px 0 6px; text-align: right; font: 400 12px/1.25 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; color: var(--win-fg); white-space: nowrap; }
+.tb-crop { width: max-content; height: 48px; display: flex; align-items: center; gap: 2px; padding: 0 12px 0 10px; background: var(--win-tb); }
+.tb-crop .tb-strip { margin-right: 10px; }
+#tb-zoom { zoom: 3; }
+
+/* tray grid */
+.trays { display: grid; grid-template-columns: 160px repeat(4, 1fr); row-gap: 16px; align-items: end; }
+.trays .th { font: 700 12px/1 var(--nc-ui); letter-spacing: .14em; text-transform: uppercase; color: var(--nc-ink-3); padding-bottom: 6px; }
+.trays .rl { font: 400 12px/1 var(--nc-num); color: var(--nc-ink-2); align-self: center; }
+.trays .tc { display: flex; align-items: flex-end; gap: 0; }
+.tr-cap { margin-left: 14px; display: flex; flex-direction: column; gap: 4px; }
+.tr-cap b { font: 700 13px/1 var(--nc-ui); letter-spacing: .12em; text-transform: uppercase; color: var(--nc-ink); }
+.tr-cap span { font: 400 11px/1 var(--nc-num); color: var(--nc-ink-3); }
+#tray-zoom { zoom: 4; display: flex; flex-direction: column; gap: 22px; align-items: flex-start; }
+.tz-row { display: flex; align-items: flex-end; gap: 22px; }
+
+/* dashboard board wrapper */
+.dash-wrap { display: flex; justify-content: center; }
+
+/* variants */
+.variants { display: grid; grid-template-columns: repeat(4, 312px); justify-content: space-between; gap: 24px; }
+.variant { display: flex; flex-direction: column; gap: 14px; padding: 18px 16px 16px; background: var(--nc-bg); outline: 1px solid var(--nc-line); }
+.variant .vn { font: 700 15px/1 var(--nc-ui); letter-spacing: .14em; text-transform: uppercase; color: var(--nc-hot); }
+.variant .vid { font: 400 11px/1 var(--nc-num); color: var(--nc-ink-3); }
+.swatches { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+.swatches figure { margin: 0; display: flex; flex-direction: column; gap: 5px; }
+.swatches figure i { display: block; height: 18px; }
+.swatches figure span { font: 400 9px/1 var(--nc-num); color: var(--nc-ink-3); }
+
+.bd-foot { margin-top: 72px; padding-top: 22px; border-top: 1px solid var(--nc-line); display: grid; grid-template-columns: 1fr 1fr; gap: 28px; font: 500 14px/1.5 var(--nc-ui); color: var(--nc-ink-2); }
+.bd-foot b { font-weight: 700; letter-spacing: .08em; color: var(--nc-ink); }
+</style>
+</head>
+<body>
+<main class="board">
+
+  <header class="bd-head">
+    <div>
+      <div class="bd-kick">Night City // Instrument // mock 0.3</div>
+      <h1 class="bd-title">Claude Usage Monitor</h1>
+      <p class="bd-sub">Precision over noise. Hairline frames, chamfers and tabular figures carry the theme. Yellow is spent only where a decision is needed. The glitch fires once when data refreshes and never loops.</p>
+    </div>
+    <dl class="bd-meta">
+      <div><dt>THEME</dt><dd>NIGHT CITY</dd></div>
+      <div><dt>ANGLE</dt><dd>INSTRUMENT</dd></div>
+      <div><dt>DEFAULT</dt><dd>STREET RED</dd></div>
+      <div><dt>TYPE</dt><dd>RAJDHANI / SHARE TECH MONO</dd></div>
+    </dl>
+  </header>
+
+  <!-- 01 FLOATING WIDGET -->
+  <section class="bd-sec" id="sec-widget">
+    <div class="bd-sech">
+      <span class="bd-idx">01</span>
+      <h2>Floating widget</h2>
+      <span class="bd-note">280 px wide · 92 px two rows · 122 px with FABLE · 108 px stale</span>
+    </div>
+
+    <div class="wall">
+      <span class="wall-tag">DESKTOP · 100% · WALLPAPER IS BOARD ONLY</span>
+      <div class="pos-a" id="wall-fable"></div>
+      <div class="pos-b" id="wall-normal"></div>
+    </div>
+
+    <div class="states">
+      <figure>
+        <figcaption><b>NORMAL</b><span>LIVE · both windows under 70 %</span></figcaption>
+        <div id="st-normal"></div>
+      </figure>
+      <figure>
+        <figcaption><b>WARNING</b><span>LIVE · session 72 %, pace well ahead</span></figcaption>
+        <div id="st-warn"></div>
+      </figure>
+      <figure>
+        <figcaption><b>CRITICAL</b><span>LIVE · session 93 %, hazard chip</span></figcaption>
+        <div id="st-crit"></div>
+      </figure>
+      <figure>
+        <figcaption><b>STALE</b><span>last good data, dimmed, relink prompt</span></figcaption>
+        <div id="st-stale"></div>
+      </figure>
+    </div>
+
+    <div class="keyrow">
+      <span class="nc-kicker">Status key</span>
+      <span class="nc-status" style="--st: var(--nc-ok)"><i class="nc-dot nc-pulse"></i>LIVE</span>
+      <span class="nc-status" style="--st: var(--nc-ink-3)"><i class="nc-dot"></i>STALE</span>
+      <span class="nc-status" style="--st: var(--nc-crit)"><i class="nc-dot"></i>OFFLINE</span>
+      <span class="nc-status" style="--st: var(--nc-hot)"><i class="nc-dot"></i>PAUSED</span>
+    </div>
+
+    <div class="zoomrow">
+      <div class="zoom-cap"><b>3× INSPECTION COPY</b><span>same component · CSS zoom 3 · 840 × 366 px</span></div>
+      <div class="zoom-box"><div id="float-zoom"></div></div>
+    </div>
+
+    <div class="hitdemo">
+      <span class="nc-kicker">Refresh hit · 3 frames</span>
+      <span class="hf f1">SESSION 13%</span>
+      <span class="hf f2">SESSION 13%</span>
+      <span class="hf f3">SESSION 13%</span>
+      <span class="nc-noise">frame 2: x −2 px with cyan and red split · frame 3: x +1 px · then clean</span>
+    </div>
+  </section>
+
+  <!-- 02 TASKBAR STRIP -->
+  <section class="bd-sec" id="sec-taskbar">
+    <div class="bd-sech">
+      <span class="bd-idx">02</span>
+      <h2>Taskbar strip</h2>
+      <span class="bd-note">Windows 11 taskbar 48 px · strip 240 × 40 px · sits left of the clock</span>
+    </div>
+
+    <div class="tb" id="tb">
+      <div class="tb-apps">
+        <span class="tb-app grid"><svg viewBox="0 0 16 16" fill="currentColor"><rect x="2" y="2" width="3" height="3" rx=".6"/><rect x="6.5" y="2" width="3" height="3" rx=".6"/><rect x="11" y="2" width="3" height="3" rx=".6"/><rect x="2" y="6.5" width="3" height="3" rx=".6"/><rect x="6.5" y="6.5" width="3" height="3" rx=".6"/><rect x="11" y="6.5" width="3" height="3" rx=".6"/><rect x="2" y="11" width="3" height="3" rx=".6"/><rect x="6.5" y="11" width="3" height="3" rx=".6"/><rect x="11" y="11" width="3" height="3" rx=".6"/></svg></span>
+        <span class="tb-app on"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="5"/><path d="M12 12l4 4"/></svg></span>
+        <span class="tb-app on"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 5h5l2 2h7v8H2z"/></svg></span>
+        <span class="tb-app"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="9" cy="9" r="6.5"/><path d="M2.5 9h13M9 2.5c2 2.2 2 10.8 0 13M9 2.5c-2 2.2-2 10.8 0 13"/></svg></span>
+        <span class="tb-app"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 5l4 4-4 4M9 13h6"/></svg></span>
+        <span class="tb-app"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M7 13V4l7-1.5V11"/><circle cx="5" cy="13" r="2"/><circle cx="12" cy="11.5" r="2"/></svg></span>
+      </div>
+      <div class="tb-right">
+        <div class="tb-strip" id="tb-strip"></div>
+        <span class="tb-btn"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M4 10l4-4 4 4"/></svg></span>
+        <span class="tb-btn"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2 6.2a8.5 8.5 0 0 1 12 0M4.3 8.6a5.2 5.2 0 0 1 7.4 0M6.6 11a2 2 0 0 1 2.8 0"/></svg></span>
+        <span class="tb-btn"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2.5 6.2h2.2L8 3.5v9L4.7 9.8H2.5z"/><path d="M10.5 6a3 3 0 0 1 0 4"/></svg></span>
+        <span class="tb-btn"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="2" y="5" width="10.5" height="6" rx="1"/><path d="M14 7v2"/><rect x="3.5" y="6.5" width="6" height="3" fill="currentColor" stroke="none"/></svg></span>
+        <span class="tb-btn" id="tb-ring"></span>
+        <div class="tb-clock">4:12 PM<br>2026-10-21</div>
+      </div>
+    </div>
+
+    <div class="zoomrow">
+      <div class="zoom-cap"><b>3× INSPECTION COPY</b><span>strip + notification-area icon · CSS zoom 3</span></div>
+      <div class="zoom-box"><div id="tb-zoom" class="tb-crop"></div></div>
+    </div>
+  </section>
+
+  <!-- 03 TRAY ICON -->
+  <section class="bd-sec" id="sec-tray">
+    <div class="bd-sech">
+      <span class="bd-idx">03</span>
+      <h2>Notification-area icon</h2>
+      <span class="bd-note">ring fill = session %, clockwise from 12 o'clock · masters at 16 / 24 / 32 px</span>
+    </div>
+    <div class="trays" id="trays"></div>
+
+    <div class="zoomrow">
+      <div class="zoom-cap"><b>4× INSPECTION COPY</b><span>16 px and 24 px masters · CSS zoom 4</span></div>
+      <div class="zoom-box"><div id="tray-zoom"></div></div>
+    </div>
+  </section>
+
+  <!-- 04 DASHBOARD -->
+  <section class="bd-sec" id="sec-dash">
+    <div class="bd-sech">
+      <span class="bd-idx">04</span>
+      <h2>Dashboard · Overview</h2>
+      <span class="bd-note">1200 × 760 WebView2 window · scanlines and the one-shot refresh hit live only here</span>
+    </div>
+
+    <div class="dash-wrap">
+      <div class="nc-win" id="dash">
+
+        <div class="nc-titlebar">
+          <div class="tt"><span class="nc-mark sm"></span><span>Overview</span></div>
+          <div class="wc"><span class="w-min"></span><span class="w-max"></span><span class="w-x"></span></div>
+        </div>
+
+        <div class="nc-head2">
+          <div class="brand">
+            <span class="nc-mark"></span>
+            <div>
+              <div class="brand-name">CLAUDE USAGE MONITOR</div>
+              <div class="nc-noise">NC//INSTRUMENT · REV 1.4 · BUILD 0xB7F2</div>
+            </div>
+          </div>
+          <div class="health">
+            <span class="hl">Data</span>
+            <span class="live"><i class="nc-dot nc-pulse"></i>LIVE</span>
+            <span class="nc-noise">UPDATED 12 S AGO · 3 SOURCES · 0 ERR</span>
+            <button class="btn" id="sync" type="button">SYNC</button>
+          </div>
+        </div>
+
+        <nav class="nc-tabs">
+          <a class="nc-tab is-active"><span>Overview</span></a>
+          <a class="nc-tab"><span>Limits</span></a>
+          <a class="nc-tab"><span>Cost &amp; Value</span></a>
+          <a class="nc-tab"><span>Efficiency</span></a>
+          <a class="nc-tab"><span>History</span></a>
+          <a class="nc-tab"><span>Settings</span></a>
+          <a class="nc-tab"><span>About</span></a>
+          <span class="plan"><span class="nc-noise">PLAN</span><b>MAX 5×</b><span class="nc-noise">$100 / MO</span></span>
+        </nav>
+
+        <div class="nc-main">
+
+          <div class="cards">
+            <div class="nc-fr card"><div class="nc-in">
+              <i class="nc-br tr"></i><i class="nc-br bl"></i>
+              <div class="ctop"><span class="nc-kicker">Session</span><span class="nc-noise">LIMIT 01 · 5H WINDOW</span></div>
+              <div class="cnum"><span class="big" data-hit>13</span><span class="pct">%</span><span class="cap">used</span></div>
+              <div class="pace">
+                <div class="pr"><span>USAGE</span><div class="pb"><i style="--p: 13%"></i></div><b>13%</b></div>
+                <div class="pr"><span>TIME</span><div class="pb tm"><i style="--p: 22%"></i></div><b>22%</b></div>
+              </div>
+              <div class="cfoot"><span>Resets 10:39 PM</span><span class="verdict">Under pace</span></div>
+            </div></div>
+
+            <div class="nc-fr card"><div class="nc-in">
+              <i class="nc-br tr"></i><i class="nc-br bl"></i>
+              <div class="ctop"><span class="nc-kicker">Weekly</span><span class="nc-noise">LIMIT 02 · 7D WINDOW</span></div>
+              <div class="cnum"><span class="big" data-hit>2</span><span class="pct">%</span><span class="cap">used</span></div>
+              <div class="pace">
+                <div class="pr"><span>USAGE</span><div class="pb"><i style="--p: 2%"></i></div><b>2%</b></div>
+                <div class="pr"><span>TIME</span><div class="pb tm"><i style="--p: 58%"></i></div><b>58%</b></div>
+              </div>
+              <div class="cfoot"><span>Resets Wed 4:00 PM</span><span class="verdict">Under pace</span></div>
+            </div></div>
+
+            <div class="nc-fr card"><div class="nc-in">
+              <i class="nc-br tr"></i><i class="nc-br bl"></i>
+              <div class="ctop"><span class="nc-kicker">Fable weekly</span><span class="nc-noise">LIMIT 03 · FABLE</span></div>
+              <div class="cnum"><span class="big" data-hit>0</span><span class="pct">%</span><span class="cap">of 50% share</span></div>
+              <div class="pace">
+                <div class="pr"><span>USAGE</span><div class="pb"><i style="--p: 0%"></i></div><b>0%</b></div>
+                <div class="pr"><span>TIME</span><div class="pb tm"><i style="--p: 58%"></i></div><b>58%</b></div>
+              </div>
+              <div class="cfoot"><span>Resets Wed 4:00 PM</span><span class="verdict idle">Idle</span></div>
+            </div></div>
+          </div>
+
+          <div class="hero">
+            <div class="nc-fr hc"><div class="nc-in">
+              <i class="nc-br tr"></i><i class="nc-br bl"></i>
+              <div class="ktop"><span class="nc-kicker">Cost · month to date</span><span class="nc-noise">API-equivalent at list prices</span></div>
+              <div class="cost"><span class="cur">$</span><span data-hit>1,659</span></div>
+              <div class="ratio"><b>16.6×</b> your plan <span class="nc-noise">MAX 5× · $100 / MO</span></div>
+              <div class="plan-bar"><i></i><em></em></div>
+              <div class="plan-lbl"><span>Plan $100</span><span>API-eq $1,659</span></div>
+            </div></div>
+
+            <div class="tiles">
+              <div class="nc-fr tile"><div class="nc-in">
+                <div class="nc-kicker">Today</div>
+                <div class="tv" data-hit>$84.20</div>
+                <div class="nc-noise">API-EQ · SINCE 00:00</div>
+              </div></div>
+              <div class="nc-fr tile"><div class="nc-in">
+                <div class="nc-kicker">Caching saved</div>
+                <div class="tv" data-hit>$14.1K</div>
+                <div class="nc-noise">MTD · VS UNCACHED INPUT</div>
+              </div></div>
+              <div class="nc-fr tile"><div class="nc-in">
+                <div class="nc-kicker">Cache hit rate</div>
+                <div class="tv" data-hit>96.4<small>%</small></div>
+                <div class="pb"><i style="--p: 96.4%"></i></div>
+              </div></div>
+              <div class="nc-fr tile"><div class="nc-in">
+                <div class="nc-kicker">Thinking share of output</div>
+                <div class="tv" data-hit>38<small>%</small></div>
+                <div class="pb"><i style="--p: 38%"></i></div>
+              </div></div>
+              <div class="nc-fr tile"><div class="nc-in">
+                <div class="ktop"><span class="nc-kicker">Burn rate</span><span class="okchip">Normal</span></div>
+                <div class="tv" data-hit>1,240<small>tok / min</small></div>
+                <div class="nc-noise">$6.10 / H · API-EQ</div>
+              </div></div>
+              <div class="nc-fr tile"><div class="nc-in">
+                <div class="nc-kicker">Data health</div>
+                <div class="tv" style="color: var(--nc-ok)">LIVE</div>
+                <div class="nc-noise">UPDATED 12 S AGO · 0 ERR</div>
+              </div></div>
+            </div>
+          </div>
+
+          <div class="panels">
+            <div class="nc-fr pn"><div class="nc-in">
+              <div class="pn-h"><span class="nc-kicker">Model mix · MTD</span><span class="nc-noise">SHARE</span></div>
+              <div class="stack">
+                <i style="--w: 86%; background: var(--nc-m1)"></i><i style="--w: 7%; background: var(--nc-m2)"></i><i style="--w: 6%; background: var(--nc-m3)"></i><i style="--w: 1%; background: var(--nc-m4)"></i>
+              </div>
+              <ul class="legend">
+                <li><i style="background: var(--nc-m1)"></i><span>Opus 5.5</span><b>86%</b></li>
+                <li><i style="background: var(--nc-m2)"></i><span>Sonnet 5.5</span><b>7%</b></li>
+                <li><i style="background: var(--nc-m3)"></i><span>Haiku 4.5</span><b>6%</b></li>
+                <li><i style="background: var(--nc-m4)"></i><span>Haiku 5.5</span><b>1%</b></li>
+              </ul>
+            </div></div>
+
+            <div class="nc-fr pn"><div class="nc-in">
+              <div class="pn-h"><span class="nc-kicker">Where the week went</span><span class="nc-noise">MON–SUN · SPEND</span></div>
+              <ul class="wk">
+                <li><span>Claude Code</span><div class="pb"><i style="--p: 100%"></i></div><b>100%</b></li>
+                <li><span>Chats</span><div class="pb"><i style="--p: 0%"></i></div><b>0%</b></li>
+                <li><span>Cowork</span><div class="pb"><i style="--p: 0%"></i></div><b>0%</b></li>
+              </ul>
+              <div class="pn-note">Idle sources stay listed at 0 % so nothing vanishes from the view.</div>
+            </div></div>
+
+            <div class="nc-fr pn"><div class="nc-in">
+              <div class="pn-h"><span class="nc-kicker">Daily cost · 30 days</span><span class="nc-noise">AVG 79 · TODAY 84.20</span></div>
+              <div class="spark"><svg id="spark" viewBox="0 0 300 100" preserveAspectRatio="none"></svg></div>
+              <div class="spk-x"><span style="left: 0">SEP 22</span><span style="left: 30%">OCT 1</span><span style="right: 0">OCT 21</span></div>
+            </div></div>
+          </div>
+
+        </div>
+
+        <div class="nc-sfoot">
+          <span><i class="nc-dot nc-pulse"></i>Data source · local session logs · parse OK</span>
+          <span>All costs are API-equivalent at list prices · not a bill</span>
+          <span>NC//0x7F3A · 21 OCT 2026 16:12</span>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- 05 VARIANTS -->
+  <section class="bd-sec" id="sec-variants">
+    <div class="bd-sech">
+      <span class="bd-idx">05</span>
+      <h2>Colour variants</h2>
+      <span class="bd-note">one data-variant attribute swaps the full token set · widget at 100 %</span>
+    </div>
+
+    <div class="variants">
+      <div class="variant" data-variant="street">
+        <div class="vn">Street Red</div>
+        <div class="vid">data-variant="street" · default</div>
+        <div id="v-street"></div>
+        <div class="swatches">
+          <figure><i style="background: var(--nc-bar)"></i><span>BAR</span></figure>
+          <figure><i style="background: var(--nc-time)"></i><span>TIME</span></figure>
+          <figure><i style="background: var(--nc-warn)"></i><span>WARN</span></figure>
+          <figure><i style="background: var(--nc-crit)"></i><span>CRIT</span></figure>
+          <figure><i style="background: var(--nc-ok)"></i><span>LIVE</span></figure>
+          <figure><i style="background: var(--nc-ink)"></i><span>INK</span></figure>
+        </div>
+      </div>
+      <div class="variant" data-variant="cyan">
+        <div class="vn">Netrunner Cyan</div>
+        <div class="vid">data-variant="cyan"</div>
+        <div id="v-cyan"></div>
+        <div class="swatches">
+          <figure><i style="background: var(--nc-bar)"></i><span>BAR</span></figure>
+          <figure><i style="background: var(--nc-time)"></i><span>TIME</span></figure>
+          <figure><i style="background: var(--nc-warn)"></i><span>WARN</span></figure>
+          <figure><i style="background: var(--nc-crit)"></i><span>CRIT</span></figure>
+          <figure><i style="background: var(--nc-ok)"></i><span>LIVE</span></figure>
+          <figure><i style="background: var(--nc-ink)"></i><span>INK</span></figure>
+        </div>
+      </div>
+      <div class="variant" data-variant="yellow">
+        <div class="vn">Signal Yellow</div>
+        <div class="vid">data-variant="yellow"</div>
+        <div id="v-yellow"></div>
+        <div class="swatches">
+          <figure><i style="background: var(--nc-bar)"></i><span>BAR</span></figure>
+          <figure><i style="background: var(--nc-time)"></i><span>TIME</span></figure>
+          <figure><i style="background: var(--nc-warn)"></i><span>WARN</span></figure>
+          <figure><i style="background: var(--nc-crit)"></i><span>CRIT</span></figure>
+          <figure><i style="background: var(--nc-ok)"></i><span>LIVE</span></figure>
+          <figure><i style="background: var(--nc-ink)"></i><span>INK</span></figure>
+        </div>
+      </div>
+      <div class="variant" data-variant="pink">
+        <div class="vn">Neon Pink</div>
+        <div class="vid">data-variant="pink"</div>
+        <div id="v-pink"></div>
+        <div class="swatches">
+          <figure><i style="background: var(--nc-bar)"></i><span>BAR</span></figure>
+          <figure><i style="background: var(--nc-time)"></i><span>TIME</span></figure>
+          <figure><i style="background: var(--nc-warn)"></i><span>WARN</span></figure>
+          <figure><i style="background: var(--nc-crit)"></i><span>CRIT</span></figure>
+          <figure><i style="background: var(--nc-ok)"></i><span>LIVE</span></figure>
+          <figure><i style="background: var(--nc-ink)"></i><span>INK</span></figure>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="bd-foot">
+    <div>
+      <b>FONTS</b><br>
+      Rajdhani (400, 500, 600, 700): SIL Open Font License 1.1, Google Fonts. Used for every label, heading and status word.<br>
+      Share Tech Mono (400): SIL Open Font License 1.1, Google Fonts. Used for every figure, noise tag and hex code.<br>
+      Segoe UI Variable Text: Windows 11 system font, taskbar clock only (board mock, not bundled).
+    </div>
+    <div>
+      <b>NOT USED</b><br>
+      No franchise marks, logos or game assets. The taskbar app icons and tray glyphs are generic placeholders. Windows marks are deliberately absent.<br>
+      <b>SOURCE</b><br>
+      Mock for the Pillow widget reference and the WebView2 dashboard CSS. Tokens sit at the top of the style block.
+    </div>
+  </footer>
+
+</main>
+
+<script>
+(function () {
+  const put = (id, html) => { const n = document.getElementById(id); if (n) n.innerHTML = html; };
+
+  /* ---------- builders (mirror the Pillow draw calls) ---------- */
+  function row(r) {
+    const cls = ['nc-row'];
+    if (r.lvl) cls.push('is-' + r.lvl);
+    return `<div class="${cls.join(' ')}">
+      <div class="nc-row-top"><span class="nc-lbl">${r.k}${r.tag ? `<span class="nc-tag">${r.tag}</span>` : ''}</span><span class="nc-val">${r.val}</span></div>
+      <div class="nc-time"><i style="--t: ${r.t}%"></i></div>
+      <div class="nc-bar"><i style="--p: ${r.u}%"></i></div>
+    </div>`;
+  }
+
+  function widget(o) {
+    const cls = ['nc-widget'];
+    if (o.rows.length > 2) cls.push('is-3row');
+    if (o.stale) cls.push('is-stale');
+    const pulse = o.pulse ? ' nc-pulse' : '';
+    const status = `<span class="nc-status"${o.st ? ` style="--st: ${o.st}"` : ''}><i class="nc-dot${pulse}"></i>${o.status}</span>`;
+    const right = o.chip
+      ? `<span class="nc-chip"><i></i><span>${o.chip}</span></span>`
+      : `<span class="nc-noise">${o.meta}</span>`;
+    return `<div class="${cls.join(' ')}">
+      <div class="nc-fr"><div class="nc-in"></div></div>
+      <i class="nc-br tr"></i><i class="nc-br bl"></i>
+      <div class="nc-head">${status}${right}</div>
+      <div class="nc-rows">${o.rows.map(row).join('')}</div>
+      ${o.foot ? `<div class="nc-foot">${o.foot}</div>` : ''}
+    </div>`;
+  }
+
+  function strip(o) {
+    return `<div class="nc-strip${o.stale ? ' is-stale' : ''}">
+      <div class="nc-fr"><div class="nc-in"></div></div>
+      ${o.rows.map((r, i) => `<div class="nc-srow r${i + 1}${r.lvl ? ' is-' + r.lvl : ''}">
+        <span class="nc-slbl">${r.k}</span>
+        <div class="nc-sbar"><div class="t"><i style="--t: ${r.t}%"></i></div><div class="b"><i style="--p: ${r.u}%"></i></div></div>
+        <span class="nc-sval">${r.val}</span>
+      </div>`).join('')}
+      <i class="nc-dot nc-sdot${o.stale ? '' : ' nc-pulse'}"></i>
+    </div>`;
+  }
+
+  /* octagon ring, clockwise from 12 o'clock; inset / chamfer / stroke per master size */
+  const MASTER = { 16: { inset: 1, ch: 4, sw: 2, core: 2 }, 24: { inset: 1.5, ch: 6, sw: 2.5, core: 3 }, 32: { inset: 2, ch: 8, sw: 3, core: 4 } };
+  function tray(size, pct, state) {
+    const g = MASTER[size], a = g.inset, b = size - g.inset, c = g.ch, m = size / 2;
+    const d = `M${m} ${a} H${b - c} L${b} ${a + c} V${b - c} L${b - c} ${b} H${a + c} L${a} ${b - c} V${a + c} L${a + c} ${a} H${m} Z`;
+    return `<svg class="nc-tray${state ? ' is-' + state : ''}" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" role="img" aria-label="Session ${pct} percent">
+      <path class="trk" d="${d}" pathLength="100" stroke-width="${g.sw}"/>
+      <path class="fil" d="${d}" pathLength="100" stroke-width="${g.sw}" stroke-dasharray="${pct} 100"/>
+      <rect class="core" x="${m - g.core / 2}" y="${m - g.core / 2}" width="${g.core}" height="${g.core}"/>
+    </svg>`;
+  }
+
+  /* ---------- data (sample values from the brief) ---------- */
+  const SESSION = { k: 'Session', tag: '5H', val: '13%', u: 13, t: 22 };
+  const WEEKLY  = { k: 'Weekly',  tag: '7D', val: '2%',  u: 2,  t: 58 };
+  const FABLE   = { k: 'Fable weekly', tag: '50% share', val: '0%', u: 0, t: 58 };
+
+  put('wall-normal', widget({ rows: [SESSION, WEEKLY], status: 'LIVE', pulse: true, meta: 'SYNC 12 S' }));
+  put('wall-fable',  widget({ rows: [SESSION, WEEKLY, FABLE], status: 'LIVE', pulse: true, meta: 'SYNC 12 S' }));
+
+  put('st-normal', widget({ rows: [SESSION, WEEKLY], status: 'LIVE', pulse: true, meta: 'SYNC 12 S' }));
+  put('st-warn',   widget({
+    rows: [Object.assign({}, SESSION, { val: '72%', u: 72, lvl: 'warn' }), Object.assign({}, WEEKLY, { val: '31%', u: 31 })],
+    status: 'LIVE', pulse: true, meta: 'SYNC 12 S' }));
+  put('st-crit',   widget({
+    rows: [Object.assign({}, SESSION, { val: '93%', u: 93, lvl: 'crit' }), Object.assign({}, WEEKLY, { val: '58%', u: 58 })],
+    status: 'LIVE', pulse: true, chip: 'CRIT 93' }));
+  put('st-stale',  widget({
+    rows: [SESSION, WEEKLY], status: 'STALE', st: 'var(--nc-ink-3)', meta: 'LAST 14 M', stale: true,
+    foot: '<b>NO SIGNAL</b> // open Claude Code to relink' }));
+
+  put('float-zoom', widget({ rows: [SESSION, WEEKLY, FABLE], status: 'LIVE', pulse: true, meta: 'SYNC 12 S' }));
+
+  /* strip + ring in the taskbar, and inside the 3x crop */
+  const STRIP_ROWS = [
+    { k: '5H', val: '13%', u: 13, t: 22 },
+    { k: '7D', val: '2%',  u: 2,  t: 58 }
+  ];
+  put('tb-strip', strip({ rows: STRIP_ROWS }));
+  put('tb-ring', tray(16, 13));
+  put('tb-zoom', strip({ rows: STRIP_ROWS }) +
+    `<span class="tb-btn" style="width: 32px">${tray(16, 13)}</span>` +
+    `<span class="tb-btn"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2 6.2a8.5 8.5 0 0 1 12 0M4.3 8.6a5.2 5.2 0 0 1 7.4 0M6.6 11a2 2 0 0 1 2.8 0"/></svg></span>`);
+
+  /* tray grid: rows = master size, columns = state */
+  const STATES = [
+    { pct: 13, state: '',      cap: 'Normal', sub: 'session 13 %' },
+    { pct: 72, state: 'warn',  cap: 'Warning', sub: '72 %, yellow' },
+    { pct: 93, state: 'crit',  cap: 'Critical', sub: '93 %, red' },
+    { pct: 13, state: 'stale', cap: 'Stale', sub: 'last 13 %, dim' }
+  ];
+  let trays = '<span class="th"></span>' + STATES.map(s => `<span class="th">${s.cap}</span>`).join('');
+  [16, 24, 32].forEach(size => {
+    trays += `<span class="rl">${size} PX</span>`;
+    trays += STATES.map(s => `<span class="tc">${tray(size, s.pct, s.state)}<span class="tr-cap"><b>${s.pct}%</b></span></span>`).join('');
+  });
+  put('trays', trays);
+
+  put('tray-zoom',
+    `<div class="tz-row">${STATES.map(s => tray(16, s.pct, s.state)).join('')}</div>` +
+    `<div class="tz-row">${STATES.map(s => tray(24, s.pct, s.state)).join('')}</div>`);
+
+  /* variant widgets */
+  ['v-street', 'v-cyan', 'v-yellow', 'v-pink'].forEach(id =>
+    put(id, widget({ rows: [SESSION, WEEKLY], status: 'LIVE', pulse: true, meta: 'SYNC 12 S' })));
+
+  /* 30-day daily cost: 9 prior days (dim), 21 month-to-date days (bright), today in yellow.
+     MTD bars are scaled so they sum to the 1,659 headline; today is fixed at 84.20. */
+  const prior = [48, 71, 66, 39, 58, 84, 92, 61, 55];
+  const mtdBase = [62.40, 71.85, 58.90, 80.30, 95.10, 47.60, 33.20, 88.75, 102.40, 76.50, 69.00, 91.30, 64.80, 77.20, 85.60, 98.90, 73.10, 66.00, 81.40, 79.90];
+  const today = 84.20;
+  const k = (1659 - today) / mtdBase.reduce((a, b) => a + b, 0);
+  const mtd = mtdBase.map(v => v * k).concat([today]);
+  const all = prior.concat(mtd);
+  const max = Math.max.apply(null, all);
+  const W = 10, BW = 6, TOP = 4, BASE = 98;
+  let bars = '';
+  all.forEach((v, i) => {
+    const h = Math.max(2, (v / max) * (BASE - TOP));
+    const cls = i < prior.length ? 'pd' : (i === all.length - 1 ? 'td' : 'mt');
+    bars += `<rect class="${cls}" x="${i * W}" y="${BASE - h}" width="${BW}" height="${h}"/>`;
+  });
+  const avgY = BASE - (1659 / 21 / max) * (BASE - TOP);
+  bars += `<line class="bl" x1="0" y1="${BASE + .5}" x2="300" y2="${BASE + .5}"/>`;
+  bars += `<line class="av" x1="${prior.length * W}" y1="${avgY}" x2="300" y2="${avgY}"/>`;
+  put('spark', bars);
+
+  /* refresh hit: once on load and on every SYNC press, never looping */
+  function hit() {
+    document.querySelectorAll('[data-hit]').forEach(el => {
+      el.classList.remove('nc-hit');
+      void el.offsetWidth;
+      el.classList.add('nc-hit');
+    });
+  }
+  const sync = document.getElementById('sync');
+  if (sync) sync.addEventListener('click', hit);
+  hit();
+})();
+</script>
+</body>
+</html>
