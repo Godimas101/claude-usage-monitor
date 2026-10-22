@@ -260,6 +260,8 @@ class UsageClient:
 - Redirects are refused (a 3xx is an error → `OFFLINE`), so the bearer token never follows a
   redirect. Response bodies are read through `data/netread.read_capped` (size cap plus a 10 s
   total time budget); a trickling body → `OFFLINE` "timed out". Pricing downloads use the same.
+- `parse_usage` rounds every `resets_at` to the nearest minute (the API jitters the same
+  window end by up to a second between fetches).
 - `parse_usage` prefers `limits[]`, attaches `weekly_scoped_shares` by `limit_index`, maps
   legacy `five_hour` / `seven_day` onto session / weekly (`locked_reason`, `*_dollars`), and
   falls back to legacy windows when `limits[]` is absent. Null codename windows are ignored.

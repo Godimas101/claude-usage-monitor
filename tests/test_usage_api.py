@@ -146,7 +146,7 @@ def test_current_fixture_maps_limits_in_api_order():
     session, weekly, fable = snap.limits
     assert session.kind == "session" and session.group == "session"
     assert session.percent == 13.0 and session.severity == "normal" and session.is_active is True
-    assert session.resets_at == datetime(2026, 10, 22, 2, 39, 59, 903338, tzinfo=UTC)
+    assert session.resets_at == datetime(2026, 10, 22, 2, 40, tzinfo=UTC)  # 02:39:59.903338, rounded
     assert session.window_seconds == 18_000
     assert weekly.kind == "weekly_all" and weekly.percent == 2.0 and weekly.is_active is False
     assert weekly.window_seconds == 604_800
@@ -205,7 +205,7 @@ def test_legacy_shape_maps_to_session_weekly_and_opus_scoped():
     session, weekly, opus = snap.limits
     assert (session.kind, session.group, session.percent, session.window_seconds) == (
         "session", "session", 41.0, 18_000)
-    assert session.resets_at == datetime(2026, 10, 22, 2, 39, 59, 903000, tzinfo=UTC)  # "...903Z"
+    assert session.resets_at == datetime(2026, 10, 22, 2, 40, tzinfo=UTC)  # "...59.903Z", rounded
     assert (weekly.kind, weekly.percent, weekly.window_seconds) == ("weekly_all", 17.5, 604_800)
     assert (opus.kind, opus.group, opus.scope_model, opus.percent) == (
         "weekly_scoped", "weekly", "Opus", 9.0)
@@ -787,3 +787,38 @@ def test_the_bearer_token_is_not_sent_to_a_redirect_target(tmp_path, monkeypatch
         for server in (origin, target):
             server.shutdown()
             server.server_close()
+
+
+# ── resets_at rounding ────────────────────────────────────────────────────────
+
+def _limits_payload(*resets):
+    return {"limits": [{"kind": "session", "group": "session", "percent": 40, "resets_at": r}
+                       for r in resets]}
+
+
+def test_resets_at_jitter_rounds_to_the_same_minute():
+    now = datetime(2026, 10, 22, 5, 0, tzinfo=timezone.utc)
+    a = ua.parse_usage(_limits_payload("2026-10-22T07:39:59.890288+00:00"), now).limits[0].resets_at
+    b = ua.parse_usage(_limits_payload("2026-10-22T07:40:00.392639+00:00"), now).limits[0].resets_at
+    assert a == b == datetime(2026, 10, 22, 7, 40, tzinfo=timezone.utc)
+
+
+def test_resets_at_rounds_half_minute_up_and_below_down():
+    now = datetime(2026, 10, 22, 5, 0, tzinfo=timezone.utc)
+    up = ua.parse_usage(_limits_payload("2026-10-22T07:39:30+00:00"), now).limits[0].resets_at
+    down = ua.parse_usage(_limits_payload("2026-10-22T07:39:29.999+00:00"), now).limits[0].resets_at
+    assert up == datetime(2026, 10, 22, 7, 40, tzinfo=timezone.utc)
+    assert down == datetime(2026, 10, 22, 7, 39, tzinfo=timezone.utc)
+
+
+def test_resets_at_rounding_survives_the_end_of_time():
+    now = datetime(2026, 10, 22, 5, 0, tzinfo=timezone.utc)
+    last = ua.parse_usage(_limits_payload("9999-12-31T23:59:45+00:00"), now).limits[0].resets_at
+    assert last == datetime(9999, 12, 31, 23, 59, tzinfo=timezone.utc)
+
+
+def test_legacy_window_resets_at_is_rounded_too():
+    now = datetime(2026, 10, 22, 5, 0, tzinfo=timezone.utc)
+    snap = ua.parse_usage({"five_hour": {"utilization": 12, "resets_at": "2026-10-22T07:40:00.48+00:00"}}, now)
+    assert snap.session is not None
+    assert snap.session.resets_at == datetime(2026, 10, 22, 7, 40, tzinfo=timezone.utc)
