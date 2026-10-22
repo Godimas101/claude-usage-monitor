@@ -53,8 +53,8 @@ usage_monitor/
     __init__.py           load + validate theme JSON, variants, v1 migration, system accent
     nostromo.json  night_city.json  gates.json
   webui/                  index.html, app.js, charts.js, themes/<theme>.css (+ optional .js),
-                          fonts/ (bundled OFL fonts)
-assets/fonts/             TTFs for Pillow (same families as webui/fonts)
+                          fonts/<family>/*.ttf + OFL.txt — bundled fonts, used by BOTH the
+                          dashboard (@font-face via /static/fonts) and the Pillow skins
 ```
 
 ## UI thread behaviour
@@ -78,23 +78,73 @@ assets/fonts/             TTFs for Pillow (same families as webui/fonts)
 - **Settings changes** (from any thread) post `WM_APP_SETTINGS`; the UI thread re-reads
   settings and re-renders. Theme changes apply live.
 
-## Renderer contract
+## Interfaces (binding for builders)
 
+### `themes/__init__.py`
 ```python
-class WidgetModel:          # render/model.py — plain data, no Win32
-    status: ApiStatus; status_text: str; rows: list[Row]   # session, weekly, scoped (opt-in/auto)
-    blink: bool; stale: bool; updated_text: str
-class Row: label, percent (0..100), time_fraction (0..1 | None), severity ("normal|warning|critical"),
-           resets_text, pace ("ahead|on_pace|behind" | None), share_text (scoped limits)
+@dataclass(frozen=True) class Variant: id, name, default: bool, mode: str | None, colors: dict[str, str], extras: dict
+@dataclass(frozen=True) class Theme:   id, name, tagline, fonts, shape, effects, bar, widget, variants: tuple[Variant, ...], extras
+    def variant(self, variant_id: str | None) -> Variant          # unknown/None -> the default variant
+load_themes(directory: Path | None = None) -> dict[str, Theme]     # validates; shipped files must pass
+get_theme(theme_id: str | None) -> Theme                          # cached; unknown -> nostromo
+resolve(settings) -> tuple[Theme, Variant]                        # theme_id / theme_variant / theme_mode (+ v1 "theme")
+migrate_v1(settings) -> bool                                       # v1 "theme" name -> theme_id + theme_variant, once
+css_variables(theme, variant) -> dict[str, str]                    # {"--bg": "#090909", ...} for the webui
+font_path(theme, role: "display" | "body" | "mono", weight: str = "regular") -> Path | None   # bundled or system TTF
+```
+Gates "system" variants take the live Windows accent and light/dark mode through injected
+callables (defaults read the registry via `ui/platform.py`). v1 map: Default→amber, Red, Blue,
+Green, Purple, Cyan, Orange, White → the Nostromo variants of the same colour.
 
-skin.render_floating(model, theme, variant, scale, opts) -> PIL.Image (RGBA)
+### `render/`
+```python
+# model.py — plain data, no Win32
+@dataclass class Row: key ("session" | "weekly" | "scoped:<name>"), label, percent (0..100+),
+                      time_fraction (0..1 | None), severity ("normal" | "warning" | "critical"),
+                      resets_at, resets_text, pace ("ahead" | "on_pace" | "behind" | None), share_text
+@dataclass class WidgetModel: status: ApiStatus, status_text, age_text, rows: list[Row],
+                              stale: bool, stale_message: str | None, blink_on: bool, updated_at
+build_model(state: MonitorState | None, now, *, show_scoped="auto", blink_on=True) -> WidgetModel
+# skins/__init__.py
+get_skin(theme_id) -> Skin       # Skin has the five functions below
+skin.floating_size(theme, model, scale) -> tuple[int, int]
+skin.render_floating(model, theme, variant, scale, opts) -> PIL.Image (RGBA)   # opts: transparent_bg, text_fx, reduce_motion, phase
 skin.render_taskbar(model, theme, variant, height_px, scale, opts) -> PIL.Image
 skin.render_tooltip(model, theme, variant, scale) -> PIL.Image
-skin.render_tray_icon(model, theme, variant, size_px) -> PIL.Image      # 16/20/24/32
+skin.render_tray_icon(model, theme, variant, size_px) -> PIL.Image          # 16 / 20 / 24 / 32
+```
+Skins draw at 2× and downsample (LANCZOS); colours come only from variant tokens; fonts from
+`usage_monitor/webui/fonts/` (bundled OFL) or Windows system fonts. Severity: the API's
+`severity` when present, else 75 % warning / 90 % critical (approved 2026-10-21, #16). Pace:
+ahead when usage − time > 10 points, behind when < −10, else on pace.
+
+### `ui/`
+```python
+class UIHost:                                   # host.py
+    def run(self) -> int; def quit(self)
+    def post(self, fn) -> None                   # thread-safe: run fn on the UI thread
+    def set_timer(self, ms: int, fn, *, repeat=True) -> int; def kill_timer(self, timer_id)
+    def on_session_change(self, cb) / on_settings_change(cb) / on_display_change(cb) / on_taskbar_created(cb)
+class LayeredWindow:                            # layered.py
+    def __init__(self, host, *, draggable: bool, topmost=True): ...
+    def update(self, image, x: int, y: int) -> None    # premultiplied BGRA via UpdateLayeredWindow
+    def move(self, x, y); show(); hide(); destroy(); bring_to_top(); set_click_through(on)
+    on_click / on_double_click / on_right_click(x, y) / on_drag_end(x, y) / on_hover(bool): callbacks
+    hwnd; dpi; rect; visible
+platform.py: taskbar_info(), work_areas(), dpi_for_point(x, y), is_fullscreen_foreground(),
+             is_locked(), screensaver_running(), windows_accent_hex(), apps_use_light_theme(),
+             clamp_to_work_area(x, y, w, h)
+menu.py:     show_menu(host, items: list[MenuItem], x, y)        # MenuItem(label, action, checked, enabled, separator)
+tray.py:     TrayIcon(host, tooltip, on_left_click, on_menu): set_images({16: img, 24: img, 32: img}),
+             set_tooltip(text), notify(title, body), remove()    # re-adds itself on TaskbarCreated
 ```
 
-Skins draw at 2× and downsample (LANCZOS). Colours come only from the variant's tokens.
-Severity: the API's `severity` when present, else 60 / 85 % thresholds.
+### Dev isolation
+`CUM_APPDATA_DIR=<dir>` puts settings, DB and log in `<dir>`. `CUM_DEV_INSTANCE=1` uses the
+mutex `Global\ClaudeUsageMonitor-dev` and tags the tray tooltip "(dev)", so a test build runs
+alongside an installed copy. `main.py --dump-frames <dir>` renders every theme × variant ×
+state × scale to PNGs without opening windows; `--smoke-test <seconds> <report.json>` runs the
+real app, exercises the API server, then exits with a report.
 
 ## Themes
 
