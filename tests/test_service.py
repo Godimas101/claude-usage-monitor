@@ -816,3 +816,11 @@ def test_start_after_a_stop_requested_by_a_subscriber_starts_a_new_loop(make):
     service.refresh_now()
     next_state(states)
     service.stop(timeout=5)
+
+
+def test_stop_closes_a_store_opened_by_a_cycle_without_a_thread(make):
+    service = make(Clock())
+    service._cycle()
+    assert service._store is not None
+    service.stop(timeout=1)
+    assert service._store is None

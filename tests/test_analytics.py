@@ -121,6 +121,22 @@ def build_store() -> Store:
     return store
 
 
+@pytest.fixture(autouse=True)
+def close_opened_stores(monkeypatch):
+    """Close every Store a test opens, including inline Store(":memory:") ones."""
+    opened: list[Store] = []
+    real_init = Store.__init__
+
+    def tracking_init(self, *args, **kwargs):
+        real_init(self, *args, **kwargs)
+        opened.append(self)
+
+    monkeypatch.setattr(Store, "__init__", tracking_init)
+    yield
+    for store in opened:
+        store.close()
+
+
 @pytest.fixture
 def data():
     store = build_store()

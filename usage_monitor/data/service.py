@@ -150,7 +150,10 @@ class DataService:
         if unsubscribe is not None:
             unsubscribe()
         self._wake.set()
-        if thread is None or thread is threading.current_thread():
+        if thread is None:
+            self._close_store()  # never started: no loop will close a store opened by a direct cycle
+            return
+        if thread is threading.current_thread():
             return
         thread.join(timeout)
         if thread.is_alive():

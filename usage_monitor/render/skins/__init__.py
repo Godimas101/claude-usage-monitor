@@ -10,6 +10,7 @@ and opts. Colours come only from the variant's tokens.
 """
 from __future__ import annotations
 
+import importlib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -78,7 +79,23 @@ def get_skin(theme_id: str | None) -> Skin:
     return _skins[key]
 
 
+# theme id -> (module in this package, class). A theme whose module does not exist yet, and any
+# unknown theme, renders through the Nostromo skin.
+SKIN_CLASSES: dict[str, tuple[str, str]] = {
+    "nostromo": ("nostromo", "NostromoSkin"),
+    "night_city": ("night_city", "NightCitySkin"),
+    "gates": ("gates", "GatesSkin"),
+}
+
+
 def _build(key: str) -> Skin:
-    # Only Nostromo has a skin so far. night_city and gates render through it until theirs land.
-    from usage_monitor.render.skins.nostromo import NostromoSkin
-    return NostromoSkin()
+    module_name, class_name = SKIN_CLASSES.get(key, SKIN_CLASSES["nostromo"])
+    qualified = f"{__name__}.{module_name}"
+    try:
+        module = importlib.import_module(qualified)
+    except ModuleNotFoundError as exc:
+        if exc.name != qualified:  # the skin exists but one of its own imports is missing
+            raise
+        module_name, class_name = SKIN_CLASSES["nostromo"]
+        module = importlib.import_module(f"{__name__}.{module_name}")
+    return getattr(module, class_name)()

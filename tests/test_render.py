@@ -490,10 +490,18 @@ def test_coerce_options_rejects_unknown_names():
 
 # ── Skin registry ─────────────────────────────────────────────────────────────
 
-def test_get_skin_returns_nostromo_and_falls_back_to_it():
+def test_get_skin_returns_each_theme_skin_and_falls_back_to_nostromo():
+    import importlib.util
+
+    from usage_monitor.render import skins
+
     assert isinstance(get_skin("nostromo"), NostromoSkin)
-    assert isinstance(get_skin("night_city"), NostromoSkin)
-    assert isinstance(get_skin("gates"), NostromoSkin)
+    for theme_id, (module_name, class_name) in skins.SKIN_CLASSES.items():
+        skin = get_skin(theme_id)
+        if importlib.util.find_spec(f"usage_monitor.render.skins.{module_name}") is None:
+            assert isinstance(skin, NostromoSkin)   # not built yet: renders through Nostromo
+        else:
+            assert type(skin).__name__ == class_name
     assert isinstance(get_skin(None), NostromoSkin)
     assert isinstance(get_skin("no-such-theme"), NostromoSkin)
 

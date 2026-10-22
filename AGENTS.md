@@ -76,8 +76,9 @@ python main.py            (console: Ctrl+C quits, errors print)     or    launch
 ```
 
 - `CUM_DEV_INSTANCE=1`: mutex `Global\ClaudeUsageMonitor-dev`, its own controller window class, tray
-  tooltip ends "(dev)", no repair of the sign-in (Run) entry at launch. The dashboard's *Launch on
-  startup* switch still writes the real entry from a dev instance, so leave it alone there.
+  tooltip ends "(dev)". A dev instance never reads, writes or repairs the HKCU Run entry; its *Start
+  with Windows* switch lives in memory. Only the frozen installed build repairs the entry at launch.
+  `--smoke-test` always runs as a dev instance.
 - `CUM_APPDATA_DIR`: settings, `usage.db` and logs go there instead of `%APPDATA%\ClaudeUsageMonitor`.
 - Logs: `monitor.log` (dashboard child: `dashboard.log`, hard crashes: `faults.log`).
 - `python main.py --smoke-test 45 report.json` runs the real app for 45 s (real server, dashboard,

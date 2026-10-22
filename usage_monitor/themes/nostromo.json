@@ -44,8 +44,8 @@
   "widget": {
     "floating": {
       "width": 280,
-      "height": 126,
-      "height_with_scoped": 94
+      "height": 94,
+      "height_with_scoped": 126
     },
     "taskbar": {
       "width": 264
@@ -492,7 +492,7 @@
         "ADVISORY",
         "CRITICAL"
       ],
-      "advisory_from_pct": 70,
+      "advisory_from_pct": 75,
       "critical_from_pct": 90,
       "note": "Thresholds are placeholders. The app decides them."
     },
