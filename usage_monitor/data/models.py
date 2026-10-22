@@ -80,6 +80,7 @@ class ToolCall:
     session_id: str | None
     ts: datetime
     is_subagent: bool
+    git_ops: str | None = None        # git operations a Bash / PowerShell command ran: "commit", "push", "pr" joined with "+" in that order; None when none
 
 
 @dataclass(slots=True)
@@ -102,6 +103,14 @@ class GitEvent:
     commit: bool
     push: bool
     pr: bool
+
+
+@dataclass(slots=True)
+class ToolError:
+    """A tool_result content block with is_error true. Dedupe key: tool_use_id."""
+    tool_use_id: str
+    session_id: str | None
+    ts: datetime
 
 
 @dataclass(slots=True)
@@ -142,7 +151,7 @@ class ApiErrorEvent:
     ts: datetime
 
 
-TranscriptItem = (RequestRecord | ToolCall | CodeChange | GitEvent | PullRequest
+TranscriptItem = (RequestRecord | ToolCall | CodeChange | GitEvent | ToolError | PullRequest
                   | SessionMeta | Compaction | ApiErrorEvent)
 
 

@@ -9,6 +9,10 @@ from __future__ import annotations
 import csv
 import io
 import json
+import os
+import shutil
+import subprocess
+import tempfile
 from datetime import datetime, timedelta, timezone, tzinfo
 
 import pytest
@@ -25,6 +29,7 @@ from usage_monitor.data.models import (
     RequestRecord,
     SessionMeta,
     ToolCall,
+    ToolError,
     UsageSnapshot,
 )
 from usage_monitor.data.pricing import Pricing
@@ -149,6 +154,7 @@ def test_every_report_on_an_empty_store_is_json_safe_and_zero():
     assert report["value"]["projected_cycle_cost_usd"] == 0.0
     assert report["monthly"] == [] and report["top_sessions_week"] == []
     assert report["breakdowns"]["by_model"] == [] and report["breakdowns"]["by_project"] == []
+    assert report["breakdowns"]["by_folder"] == []
     assert report["spend"] is None and report["basis"] == an.BASIS
 
     jsonable(an.efficiency_report(store, start=None, end=None))
@@ -186,7 +192,7 @@ def test_empty_window_efficiency_gives_zeros_and_none_ratios(data):
     assert report["context"] == {"requests": 0, "avg": None, "p50": None, "p95": None, "max": None}
     assert report["compactions"]["per_active_day"] is None
     assert report["active_days"] == 0
-    assert report["tools"] == {"total": 0, "builtin": [], "mcp": []}
+    assert report["tools"] == {"total": 0, "errors": 0, "error_rate": None, "builtin": [], "mcp": []}
     assert report["productivity"]["cost_per_pr_usd"] is None
     assert report["productivity"]["cost_per_100_lines_usd"] is None
     assert report["effort"] == [] and report["api_errors"] == 0
@@ -939,3 +945,336 @@ def test_window_edges_belong_to_the_window_that_starts_there():
         assert windows["all"]["requests"] == 2
     finally:
         store.close()
+
+
+# ── Git activity from shell commands, tool errors ────────────────────────────────
+
+def git_store(*items) -> Store:
+    store = Store(":memory:")
+    store.add_items(list(items), PRICING)
+    return store
+
+
+def productivity(store: Store, start=dt(10, 1), end=dt(11, 1)) -> dict:
+    return an.efficiency_report(store, start=start, end=end, tz=UTC)["productivity"]
+
+
+def shell(tool_id: str, ops: str | None, ts: datetime = dt(10, 5), name: str = "Bash") -> ToolCall:
+    return ToolCall(tool_id, name, None, "s1", ts, False, ops)
+
+
+def test_commits_and_pushes_union_git_events_with_shell_commands_without_double_counting():
+    store = git_store(
+        GitEvent("x1", "s1", dt(10, 5), True, True, False),         # old transcripts: result flags ...
+        shell("x1", "commit+push"),                                  # ... and the same call's command
+        shell("x2", "commit"),                                       # new transcripts: command only
+        shell("x3", "push", name="PowerShell"),
+        shell("x4", "commit+push+pr"),
+        GitEvent("x5", "s1", dt(10, 6), True, False, False),         # an event with no stored call
+        shell("x6", None),
+        shell("x7", "pr"),
+    )
+    result = productivity(store)
+    store.close()
+    assert result["commits"] == 4                                    # x1, x2, x4, x5
+    assert result["pushes"] == 3                                     # x1, x3, x4
+
+
+def test_a_failed_shell_commit_or_push_is_not_counted():
+    store = git_store(
+        shell("ok", "commit+push"),
+        shell("bad", "commit"),
+        shell("badpush", "push"),
+        ToolError("bad", "s1", dt(10, 5, 0, 1)),
+        ToolError("badpush", "s1", dt(10, 5, 0, 1)),
+        ToolError("elsewhere", "s1", dt(10, 5)),
+    )
+    result = productivity(store)
+    store.close()
+    assert result["commits"] == 1 and result["pushes"] == 1
+
+
+def test_a_failed_commit_and_push_still_counts_its_commit_but_not_its_push():
+    # `git commit && git push` that errors most likely lost the push (a failed commit would have
+    # short-circuited it), so the commit it made is still a commit.
+    store = git_store(
+        shell("a", "commit+push"), shell("b", "commit+push+pr"), shell("c", "commit+pr"),
+        shell("d", "push"), shell("e", "commit"),
+        *(ToolError(tool_id, "s1", dt(10, 5, 0, 1)) for tool_id in "abcde"),
+    )
+    result = productivity(store)
+    store.close()
+    assert result["commits"] == 2          # a, b: not c (commit+pr), not e (commit alone)
+    assert result["pushes"] == 0
+
+
+def test_a_call_whose_result_lands_in_the_next_window_is_counted_once():
+    # The same call, seen by two sources: its command at 23:59:58 and its result at 00:00:03.
+    store = git_store(
+        shell("x1", "commit+push", dt(10, 5, 23, 59) + timedelta(seconds=58)),
+        GitEvent("x1", "s1", dt(10, 6, 0, 0) + timedelta(seconds=3), True, True, False),
+        GitEvent("x2", "s1", dt(10, 6, 0, 0) + timedelta(seconds=3), True, False, False),   # no call row
+    )
+    first = productivity(store, dt(10, 5), dt(10, 6))
+    second = productivity(store, dt(10, 6), dt(10, 7))
+    everything = productivity(store, None, None)
+    store.close()
+    assert (first["commits"], second["commits"], everything["commits"]) == (1, 1, 2)
+    assert (first["pushes"], second["pushes"], everything["pushes"]) == (1, 0, 1)
+
+
+def test_a_git_event_still_counts_when_the_same_call_is_marked_failed():
+    # Only the shell-command source is filtered by errors; a gitOperation result is a success record.
+    store = git_store(GitEvent("g", "s1", dt(10, 5), True, False, False), ToolError("g", "s1", dt(10, 5)))
+    result = productivity(store)
+    store.close()
+    assert result["commits"] == 1
+
+
+def test_commit_and_push_counts_respect_the_window_for_both_sources():
+    store = git_store(
+        shell("in", "commit", dt(10, 5)),
+        shell("before", "commit", dt(9, 30, 23)),
+        shell("after", "push", dt(11, 1)),
+        GitEvent("ev-in", "s1", dt(10, 6), False, True, False),
+        GitEvent("ev-before", "s1", dt(9, 30), False, True, False),
+    )
+    inside = productivity(store)
+    everything = productivity(store, None, None)
+    store.close()
+    assert inside["commits"] == 1 and inside["pushes"] == 1
+    assert everything["commits"] == 2 and everything["pushes"] == 3
+
+
+def test_pr_count_stays_on_pull_request_urls_not_on_gh_pr_create_commands():
+    store = git_store(shell("p1", "pr"), shell("p2", "commit+pr"),
+                      PullRequest(url=PR_A, number=1, repository="o/r", session_id="s1", ts=dt(10, 5)))
+    result = productivity(store)
+    store.close()
+    assert result["prs"] == 1 and result["commits"] == 1
+
+
+def test_tool_errors_and_error_rate_count_only_calls_inside_the_window():
+    store = git_store(
+        shell("a", None, dt(10, 5)), shell("b", None, dt(10, 6)), shell("c", None, dt(10, 7)),
+        ToolCall("d", "Read", None, "s1", dt(10, 8), False),
+        shell("old", None, dt(9, 30, 23)),
+        ToolError("a", "s1", dt(10, 5, 0, 1)),
+        ToolError("c", "s1", dt(10, 7, 0, 1)),
+        ToolError("old", "s1", dt(9, 30, 23, 1)),                    # call and error both before the window
+        ToolError("old", "s1", dt(10, 9)),                           # (deduped: the first row stays)
+        ToolError("ghost", "s1", dt(10, 9)),                         # no tool call at all
+    )
+    tools = an.efficiency_report(store, start=dt(10, 1), end=dt(11, 1), tz=UTC)["tools"]
+    everything = an.efficiency_report(store, start=None, end=None, tz=UTC)["tools"]
+    straddle = an.efficiency_report(store, start=dt(10, 5, 0, 0), end=dt(10, 5, 0, 1), tz=UTC)["tools"]
+    store.close()
+    assert tools["total"] == 4 and tools["errors"] == 2
+    assert tools["error_rate"] == pytest.approx(0.5)
+    assert everything["total"] == 5 and everything["errors"] == 3
+    assert everything["error_rate"] == pytest.approx(0.6)
+    # The call is in this window but its failed result is not, so the error is not counted.
+    assert straddle["total"] == 1 and straddle["errors"] == 0 and straddle["error_rate"] == 0.0
+
+
+def test_error_rate_is_none_without_tool_calls():
+    store = git_store(ToolError("ghost", "s1", dt(10, 5)))
+    tools = an.efficiency_report(store, start=None, end=None, tz=UTC)["tools"]
+    store.close()
+    assert tools == {"total": 0, "errors": 0, "error_rate": None, "builtin": [], "mcp": []}
+
+
+# ── Spend by folder ───────────────────────────────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def fresh_folder_cache():
+    an._FOLDER_CACHE.clear()
+    yield
+    an._FOLDER_CACHE.clear()
+
+
+def folder_rows(store: Store, window: str = "all") -> list[dict]:
+    return cost(store, breakdown=window)["breakdowns"]["by_folder"]
+
+
+def test_by_folder_finds_the_repository_of_each_working_directory(tmp_path, monkeypatch):
+    monkeypatch.setattr(an, "_is_temp", lambda cwd: False)           # tmp_path itself lives in the temp dir
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / "src" / "deep").mkdir(parents=True)
+    worktree = tmp_path / "wt"
+    (worktree / "pkg").mkdir(parents=True)
+    (worktree / ".git").write_text("gitdir: ../repo/.git/worktrees/wt\n")      # a worktree has a .git file
+    plain = tmp_path / "plain" / "inner"
+    plain.mkdir(parents=True)
+    store = Store(":memory:")
+    store.add_items([
+        # All launched from one folder ("hub"), as in real use.
+        rec("F1", dt(10, 1), inp=M, project="hub", cwd=str(repo / "src" / "deep")),      # 4.0
+        rec("F2", dt(10, 2), inp=M, project="hub", cwd=str(repo)),                       # 4.0
+        rec("F3", dt(10, 3), inp=2 * M, project="hub", cwd=str(worktree / "pkg")),       # 8.0
+        rec("F4", dt(10, 4), inp=M, project="hub", cwd=str(plain)),                      # 4.0
+        rec("F5", dt(10, 5), inp=M, project="hub", cwd=None),                            # 4.0
+        rec("F6", dt(10, 6), inp=M // 2, project="hub", cwd=str(worktree)),              # 2.0
+    ], PRICING)
+    rows = folder_rows(store)
+    by_project = cost(store, breakdown="all")["breakdowns"]["by_project"]
+    store.close()
+    assert len(by_project) == 1                                      # by_project hides the split
+    assert [(r["folder"], r["name"], r["requests"], r["cost_usd"]) for r in rows] == [
+        (str(repo), "repo", 4, pytest.approx(18.0)),                 # its worktree's work is the repo's
+        ("(unknown)", "(unknown)", 1, pytest.approx(4.0)),           # equal cost: ordered by folder
+        (str(plain), "inner", 1, pytest.approx(4.0)),                # no .git anywhere: the cwd itself
+    ]
+    assert set(rows[0]) == {"folder", "name", "requests", "tokens", "cost_usd", "share"}
+    assert rows[0]["tokens"] == int(4.5 * M)
+    assert sum(r["share"] for r in rows) == pytest.approx(1.0)
+    assert rows[0]["share"] == pytest.approx(18.0 / 26.0)
+
+
+def test_by_folder_row_shape_matches_by_project(data):
+    breakdowns = cost(data, breakdown="all")["breakdowns"]
+    assert set(breakdowns["by_folder"][0]) - {"folder"} == set(breakdowns["by_project"][0]) - {"project"}
+
+
+def test_by_folder_uses_the_nearest_git_ancestor(tmp_path, monkeypatch):
+    monkeypatch.setattr(an, "_is_temp", lambda cwd: False)
+    outer = tmp_path / "outer"
+    inner = outer / "vendor" / "inner"
+    (outer / ".git").mkdir(parents=True)
+    (inner / ".git").mkdir(parents=True)                             # a nested repository wins
+    assert an._folder_of(str(inner / "src")) == str(inner)
+    assert an._folder_of(str(outer / "vendor")) == str(outer)
+    assert an._folder_of(str(outer / "vendor" / "gone" / "missing")) == str(outer)   # a deleted cwd
+    assert an._folder_of("") == "(unknown)" and an._folder_of(None) == "(unknown)"
+
+
+def test_a_worktree_belongs_to_its_main_repository(tmp_path, monkeypatch):
+    monkeypatch.setattr(an, "_is_temp", lambda cwd: False)
+    repo = tmp_path / "repo"
+    (repo / ".git" / "worktrees").mkdir(parents=True)
+    inside = repo / ".claude" / "worktrees" / "wf_1"
+    (inside / "src").mkdir(parents=True)
+    (inside / ".git").write_text(f"gitdir: {repo.as_posix()}/.git/worktrees/wf_1\n")          # git writes "/"
+    beside = tmp_path / "repo-wt"
+    (beside / "src").mkdir(parents=True)
+    (beside / ".git").write_text("gitdir: ../repo/.git/worktrees/repo-wt\r\n")                # older relative form
+    assert an._folder_of(str(inside)) == str(repo)
+    assert an._folder_of(str(inside / "src")) == str(repo)
+    assert an._folder_of(str(beside / "src")) == str(repo)
+    # A deleted worktree inside the repository is the repository too, so the answer does not
+    # change with what is on disk.
+    assert an._folder_of(str(repo / ".claude" / "worktrees" / "gone" / "src")) == str(repo)
+
+
+def test_a_submodule_and_an_unreadable_dot_git_file_stay_their_own_folder(tmp_path, monkeypatch):
+    monkeypatch.setattr(an, "_is_temp", lambda cwd: False)
+    repo = tmp_path / "repo"
+    (repo / ".git" / "modules" / "lib").mkdir(parents=True)
+    sub = repo / "lib"
+    sub.mkdir()
+    (sub / ".git").write_text("gitdir: ../.git/modules/lib\n")
+    odd = repo / "odd"
+    odd.mkdir()
+    (odd / ".git").write_text("not a gitdir line\n")
+    empty = repo / "empty"
+    empty.mkdir()
+    (empty / ".git").write_text("")
+    assert an._folder_of(str(sub)) == str(sub)
+    assert an._folder_of(str(odd)) == str(odd)
+    assert an._folder_of(str(empty)) == str(empty)
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+def test_by_folder_groups_real_git_worktrees_with_their_repository(tmp_path, monkeypatch):
+    monkeypatch.setattr(an, "_is_temp", lambda cwd: False)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.com",
+                        "-c", "commit.gpgsign=false", *args], check=True, capture_output=True)
+
+    git("init", "-q")
+    git("commit", "-q", "--allow-empty", "-m", "first")
+    live = repo / ".claude" / "worktrees" / "w1"
+    git("worktree", "add", "-q", "-b", "w1", str(live))
+    git("worktree", "add", "-q", "-b", "w2", str(tmp_path / "beside"))
+    for cwd in (live, live / ".claude", tmp_path / "beside"):
+        cwd.mkdir(exist_ok=True)
+        assert os.path.samefile(an._folder_of(str(cwd)), repo), cwd
+    shutil.rmtree(live)                                              # the worktree is gone ...
+    an._FOLDER_CACHE.clear()
+    assert os.path.samefile(an._folder_of(str(live)), repo)          # ... and the same work lands in the same row
+    assert os.path.samefile(an._folder_of(str(live / "src")), repo)
+
+
+def test_temp_directories_collapse_to_one_folder():
+    store = Store(":memory:")
+    cwds = [os.path.join(tempfile.gettempdir(), "scratch-one"),
+            os.path.join(tempfile.gettempdir(), "scratch-two", "deep"),
+            "C:\\Users\\someone\\AppData\\Local\\Temp\\claude\\abc\\scratchpad",
+            "c:/users/someone/appdata/local/temp",
+            "D:\\Other\\AppData\\Local\\Temp\\x"]
+    store.add_items([rec(f"T{i}", dt(10, 1 + i), inp=M, project="hub", cwd=cwd)
+                     for i, cwd in enumerate(cwds)], PRICING)
+    rows = folder_rows(store)
+    store.close()
+    assert [(r["folder"], r["name"], r["requests"]) for r in rows] == [("(temp)", "(temp)", 5)]
+    assert an._folder_of("C:\\Users\\someone\\AppData\\Local\\Tempo\\x") != "(temp)"   # whole segments only
+    assert an._folder_of("C:\\Users\\someone\\AppData\\Roaming\\Temp") != "(temp)"
+
+
+def test_by_folder_caches_the_lookup_per_distinct_cwd(tmp_path, monkeypatch):
+    monkeypatch.setattr(an, "_is_temp", lambda cwd: False)
+    (tmp_path / "r" / ".git").mkdir(parents=True)
+    calls = []
+    real = os.path.lexists
+    monkeypatch.setattr(an.os.path, "lexists", lambda p: calls.append(p) or real(p))
+    cwd = str(tmp_path / "r" / "src")
+    assert an._folder_of(cwd) == str(tmp_path / "r")
+    seen = len(calls)
+    assert seen >= 2 and an._FOLDER_CACHE[cwd] == str(tmp_path / "r")
+    for _ in range(3):
+        assert an._folder_of(cwd) == str(tmp_path / "r")
+    assert len(calls) == seen
+
+
+def test_by_folder_folds_everything_past_fifteen_into_other(monkeypatch):
+    monkeypatch.setattr(an, "_repo_root", lambda cwd: cwd)           # no filesystem lookups
+    store = Store(":memory:")
+    store.add_items([rec(f"P{i:02d}", dt(10, 1, 10), inp=(i + 1) * M, project="hub",
+                         cwd=f"C:/work/p{i:02d}") for i in range(17)], PRICING)
+    rows = folder_rows(store)
+    store.close()
+    assert len(rows) == 16
+    assert rows[0]["folder"] == "C:/work/p16" and rows[0]["name"] == "p16"
+    assert rows[14]["cost_usd"] == pytest.approx(12.0)
+    other = rows[15]
+    assert (other["folder"], other["name"], other["requests"]) == ("other", "Other", 2)
+    assert other["cost_usd"] == pytest.approx(12.0) and other["tokens"] == 3 * M
+    assert other["share"] == pytest.approx(12.0 / 612.0)
+
+
+def test_by_folder_follows_the_breakdown_window_and_is_empty_without_requests(data):
+    today = cost(data, breakdown="today")["breakdowns"]["by_folder"]
+    assert sum(r["requests"] for r in today) == 3
+    store = Store(":memory:")
+    assert folder_rows(store) == []
+    store.close()
+
+
+@pytest.mark.skipif(os.path.normcase("A") == "A", reason="paths are case-sensitive here")
+def test_by_folder_merges_spellings_that_differ_only_in_case_on_windows(monkeypatch):
+    monkeypatch.setattr(an, "_repo_root", lambda cwd: cwd)
+    store = Store(":memory:")
+    store.add_items([
+        rec("C1", dt(10, 1), inp=M, project="hub", cwd="d:\Games\Mod"),
+        rec("C2", dt(10, 2), inp=2 * M, project="hub", cwd="D:\Games\Mod"),
+        rec("C3", dt(10, 3), inp=M, project="hub", cwd="D:/Games/Mod"),
+    ], PRICING)
+    rows = folder_rows(store)
+    store.close()
+    assert len(rows) == 1 and rows[0]["requests"] == 3 and rows[0]["name"] == "Mod"
+    assert rows[0]["folder"] == "D:\Games\Mod"          # the spelling that carried the most cost
+    assert rows[0]["share"] == pytest.approx(1.0)

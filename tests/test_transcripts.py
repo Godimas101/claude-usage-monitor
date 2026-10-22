@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -18,6 +19,7 @@ from usage_monitor.data.models import (
     RequestRecord,
     SessionMeta,
     ToolCall,
+    ToolError,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures" / "transcripts"
@@ -99,6 +101,7 @@ def test_main_fixture_item_counts(main_items):
         "ToolCall": 3,
         "CodeChange": 3,
         "GitEvent": 2,
+        "ToolError": 1,
         "PullRequest": 2,
         "SessionMeta": 2,
         "Compaction": 1,
@@ -546,7 +549,7 @@ def test_parse_line_agrees_with_read_new(main_ctx):
 def test_scan_stats_for_main_fixture(main_ctx):
     st = tx.ScanStats()
     items, _ = tx.read_new(MAIN, 0, main_ctx, stats=st)
-    assert st.items == len(items) == 23
+    assert st.items == len(items) == 24
     assert st.synthetic == 1
     assert st.no_timestamp == 0 and st.no_key == 0 and st.malformed == 0
     assert st.prefiltered > 0
@@ -597,3 +600,228 @@ def test_a_lone_surrogate_from_a_json_escape_is_replaced_in_text_fields(main_ctx
     assert request.git_branch == "main?"
     request.cwd.encode("utf-8")
     request.git_branch.encode("utf-8")
+
+
+# ── Git activity in shell commands, and tool errors ───────────────────────────
+
+GIT_CASES = [
+    # (command, git_ops)
+    ("git commit -m x", "commit"),
+    ("git add -A && git commit -am 'fix it' && git push origin main", "commit+push"),
+    ("git push", "push"),
+    ("git push --force-with-lease origin feat/x", "push"),
+    ("gh pr create --title t --body b", "pr"),
+    ("git commit -m x && git push && gh pr create --fill", "commit+push+pr"),
+    ("gh pr create && git push && git commit -m x", "commit+push+pr"),     # always in fixed order
+    ("git commit --amend --no-edit", "commit"),
+    ("git --no-pager commit -m x", "commit"),
+    ("git -c user.name=a -c user.email=b commit -m x", "commit"),
+    ('git -C "C:/repos/my app" commit -m x', "commit"),
+    ("git -C 'D:/repos/my app' push", "push"),
+    ("git -C ../other commit -m x", "commit"),
+    ("git -C C:\\repos\\app commit -m x", "commit"),                        # Windows path, unquoted
+    ('git -C "C:\\Users\\Chris Carpenter\\repo" commit -m x', "commit"),    # Windows path, quoted
+    ('& git -C "D:\\Work Dir" push', "push"),                               # PowerShell call operator
+    ('git commit -m "x"; if ($?) { git push }', "commit+push"),             # PowerShell
+    ("git commit -m @'\nfix: mentions git push and gh pr create\n'@", "commit"),   # here-string
+    ('git commit -m "docs: mention git push in the guide"', "commit"),
+    ('git commit -m "say \\"git push\\" and \\"gh pr create\\""', "commit"),
+    ("git commit -m 'it''s fine'", "commit"),
+    ("git commit -F - <<'EOF'\nfeat: x\n\nthen git push and gh pr create\nEOF\n", "commit"),
+    ('git commit -m "$(cat <<\'EOF\'\nsubject\n\nbody says git push\nEOF\n)"', "commit"),
+    ("git commit -F - <<-EOF\n\tgit push\n\tEOF\n", "commit"),
+    ("git commit -F - <<~EOF\n  gh pr create\n  EOF\n", "commit"),
+    ("cat <<EOF\ngit push\nEOF\ngit commit -m x", "commit"),                # code after the heredoc counts
+    ("git commit -F - <<EOF && git push\nmsg\nEOF", "commit+push"),        # rest of the marker line counts
+    ("# push it later, it's not ready\ngit commit -m x\ngit push origin main", "commit+push"),   # a comment's apostrophe
+    ("git commit -m x # and then git push", "commit"),
+    ("echo $#; git push", "push"),                                          # $# is not a comment
+    ("git commit -m x#1 && git push origin issue#2", "commit+push"),
+    ("# git commit -m x", None),
+    ("git log --grep commit", None),
+    ("git log --oneline -5 --grep=push", None),
+    ("git commit-tree HEAD^{tree}", None),
+    ("git push-to-checkout", None),
+    ("git status && git diff", None),
+    ("echo 'git commit' > note.txt", None),
+    ('echo "git push; gh pr create"', None),
+    ("cat <<'EOF'\ngit commit -m x\nEOF\n", None),
+    ("cat <<EOF\ngit push\n", "push"),                                      # no closing line: not a heredoc
+    ("digit commit && github push", None),                                  # not the git word
+    ("gh pr list && gh pr view 3", None),
+    ("grep -r 'git commit' docs/", None),
+    # A "<<" inside a quoted string or arithmetic is not a heredoc.
+    ('python -c "print(1 << n)"\ngit commit -m x', "commit"),
+    ('git commit -m "use <<EOF syntax"\ngit push', "commit+push"),
+    ("echo 'x << y'\ngit push", "push"),
+    ("n=$((1 << n))\ngit commit -m x", "commit"),
+    # Delimiters beyond [A-Za-z_]\w*.
+    ("cat > f.sh <<\\EOF\ndon't\ngit push\nEOF\n", None),
+    ("cat <<'END-OF-FILE'\ngit commit -m x\nEND-OF-FILE\n", None),
+    ("cat <<END-OF-FILE\ngit commit -m x\nEND-OF-FILE\ngit push", "push"),
+    ('cat <<"EOF.1"\ngit push\nEOF.1\n', None),
+    ("cat <<A <<B\ngit push\nA\ngit commit\nB\ngit push", "push"),             # two heredocs on one line
+    ("git commit -m x <<< 'git push'", "commit"),                             # a here-string, not a heredoc
+    # Quotes inside a heredoc body or a $( ) cannot unbalance the pass.
+    ("git commit -m \"$(cat <<'EOF'\nit's \"quoted\n\ngit push\nEOF\n)\" && git push", "commit+push"),
+    # git by name with an extension.
+    ("git.exe commit -m x", "commit"),
+    ("git.exe -C D:\\repo push", "push"),
+    ("", None),
+]
+
+
+@pytest.mark.parametrize("command,expected", GIT_CASES)
+def test_git_ops_detection(command, expected):
+    assert tx.git_ops(command) == expected
+
+
+POWERSHELL_CASES = [
+    # (command, git_ops)
+    ('git -C "D:\\repo\\" commit -m "x"', "commit"),                           # backslash is not an escape
+    ('git -C "D:\\repo\\" push', "push"),
+    ('& "C:\\Program Files\\Git\\cmd\\git.exe" commit -m x', "commit"),        # a quoted path to git
+    ("& 'C:\\Program Files\\Git\\cmd\\git.exe' -C D:\\r push", "push"),
+    ('echo "git" push', None),                                                # a bare quoted word is not a path
+    ("git commit -m @'\nfix don't run\nmention git push twice\n'@", "commit"),
+    ("git commit -m @\"\nsay \"git push\" and it's fine\n\"@\ngit push", "commit+push"),
+    ('git commit -m "say `"git push`" now"', "commit"),                       # backtick escapes a quote
+    ('git commit -m "a ""git push"" b"', "commit"),                           # a doubled quote
+    ("git commit -m 'it''s git push'", "commit"),
+    ('git commit -m "x"; if ($?) { git push }', "commit+push"),
+    ("git commit -m @'\nonly a message\n'@ ; git push", "commit+push"),
+    ("git log --grep @'\ncommit\n'@", None),
+]
+
+
+@pytest.mark.parametrize("command,expected", POWERSHELL_CASES)
+def test_git_ops_detection_in_powershell(command, expected):
+    assert tx.git_ops(command, "PowerShell") == expected
+
+
+def test_a_trailing_backslash_in_a_quoted_path_is_an_escape_only_in_bash():
+    command = 'git -C "D:\\repo\\" commit -m "x"'
+    assert tx.git_ops(command, "PowerShell") == "commit"
+    assert tx.git_ops(command, "Bash") is None
+    assert tx.git_ops(command) is None
+
+
+def test_the_tool_name_picks_the_quoting_rules(main_ctx):
+    command = 'git -C "D:\\repo\\" commit -m "x"'
+    ops = {name: tx.parse_line(tool_use_line(name, {"command": command}), main_ctx)[0].git_ops
+           for name in ("Bash", "PowerShell")}
+    assert ops == {"Bash": None, "PowerShell": "commit"}
+
+
+def test_pathological_commands_are_scanned_in_linear_time():
+    commands = [
+        "git " + "-C -x " * 40 + "status",                      # used to be 2 ** n parses
+        "git " + "-c a=b -c  " * 2000 + "status",
+        'echo "' + '\\"' * 100_000,                             # an unterminated quote, many escapes
+        'echo "' + "$(" * 5000,                                 # unclosed command substitutions
+        'echo "a" "' * 20_000,
+        "echo '" + "<<EOF\n" * 20_000,
+        "git commit -m x\n" + "cat <<EOF\n" * 20_000,
+        "(" * 100_000,
+        "".join(f"cat <<W{i}\n" for i in range(20_000)) + "git push",   # many markers, none closed
+    ]
+    begin = time.perf_counter()
+    results = [tx.git_ops(command) for command in commands]
+    assert time.perf_counter() - begin < 5.0
+    assert results[0] is None and results[1] is None and results[6] == "commit"
+    assert tx.git_ops(commands[0], "PowerShell") is None
+
+
+def tool_use_line(name: str, tool_input, *, tool_id="toolu_G1", mid="msg_G1") -> str:
+    return json.dumps({
+        "type": "assistant", "uuid": f"u-{tool_id}", "sessionId": SESSION,
+        "timestamp": "2026-10-14T10:00:00Z", "requestId": "req_G1",
+        "message": {"id": mid, "model": "claude-opus-5-5",
+                    "content": [{"type": "tool_use", "id": tool_id, "name": name,
+                                 "input": tool_input}]},
+    })
+
+
+def test_bash_and_powershell_tool_calls_carry_git_ops(main_ctx):
+    for name in ("Bash", "PowerShell"):
+        items = tx.parse_line(tool_use_line(name, {"command": "git commit -m x && git push"}), main_ctx)
+        assert len(items) == 1 and isinstance(items[0], ToolCall)
+        assert items[0].name == name and items[0].git_ops == "commit+push"
+
+
+def test_tool_calls_without_git_have_no_git_ops(main_ctx):
+    def ops(name, tool_input):
+        return tx.parse_line(tool_use_line(name, tool_input), main_ctx)[0].git_ops
+
+    assert ops("Bash", {"command": "ls -la"}) is None
+    assert ops("Edit", {"command": "git commit -m x"}) is None           # not a shell tool
+    assert ops("Bash", {"command": 5}) is None                           # not a string
+    assert ops("Bash", {"command": None}) is None
+    assert ops("Bash", {}) is None
+    assert ops("Bash", "git commit") is None                             # input is not an object
+    assert ops("mcp__x__run", {"command": "git push"}) is None
+
+
+def test_the_command_itself_is_never_kept(main_ctx):
+    item = tx.parse_line(tool_use_line("Bash", {"command": "git commit -m secret-message"}), main_ctx)[0]
+    assert "secret" not in repr(item)
+
+
+def test_git_ops_in_the_main_fixture_are_none():
+    items = tx.read_new(MAIN, 0, tx.file_context(MAIN, PROJECTS))[0]
+    assert all(c.git_ops is None for c in of_type(items, ToolCall))
+
+
+def result_line(blocks, *, ts="2026-10-14T10:01:00Z", **extra) -> str:
+    rec = {"type": "user", "uuid": "u-res", "sessionId": SESSION, "timestamp": ts,
+           "message": {"role": "user", "content": blocks}}
+    rec.update(extra)
+    return json.dumps(rec)
+
+
+def test_error_tool_results_become_tool_errors(main_ctx):
+    line = result_line([
+        {"type": "tool_result", "tool_use_id": "toolu_BAD1", "is_error": True, "content": "boom"},
+        {"type": "tool_result", "tool_use_id": "toolu_OK1", "is_error": False, "content": "fine"},
+        {"type": "tool_result", "tool_use_id": "toolu_OK2", "content": "no flag"},
+        {"type": "tool_result", "tool_use_id": "toolu_BAD2", "is_error": True, "content": "bang"},
+        {"type": "tool_result", "tool_use_id": "toolu_BAD1", "is_error": True, "content": "again"},
+        {"type": "text", "text": "hello", "is_error": True},                # not a tool_result
+        {"type": "tool_result", "is_error": True, "content": "no id"},      # nothing to dedupe on
+        {"type": "tool_result", "tool_use_id": "toolu_STR", "is_error": "true", "content": "x"},
+    ])
+    items = tx.parse_line(line, main_ctx)
+    assert [(type(i).__name__, i.tool_use_id) for i in items] == [
+        ("ToolError", "toolu_BAD1"), ("ToolError", "toolu_BAD2")]
+    assert items[0] == ToolError("toolu_BAD1", SESSION, datetime(2026, 10, 14, 10, 1, tzinfo=UTC))
+
+
+def test_a_tool_error_does_not_need_a_tool_use_result(main_ctx):
+    line = result_line([{"type": "tool_result", "tool_use_id": "toolu_X", "is_error": True,
+                         "content": "Error: file not found"}], toolUseResult="Error: file not found")
+    assert [type(i).__name__ for i in tx.parse_line(line, main_ctx)] == ["ToolError"]
+
+
+def test_a_tool_error_next_to_a_code_change_yields_both(main_ctx):
+    line = result_line(
+        [{"type": "tool_result", "tool_use_id": "toolu_E2", "is_error": True, "content": "x"}],
+        toolUseResult={"type": "create", "content": "a\nb\n"})
+    items = tx.parse_line(line, main_ctx)
+    assert sorted(type(i).__name__ for i in items) == ["CodeChange", "ToolError"]
+
+
+def test_tool_error_lines_need_a_timestamp_and_are_otherwise_tolerant(main_ctx):
+    st = tx.ScanStats()
+    no_ts = result_line([{"type": "tool_result", "tool_use_id": "t", "is_error": True}], ts=None)
+    assert tx.parse_line(no_ts, main_ctx, stats=st) == [] and st.no_timestamp == 1
+    for content in ("text", None, 7, [None, "x", 3]):
+        line = json.dumps({"type": "user", "timestamp": "2026-10-14T10:00:00Z",
+                           "message": {"content": content}, "x": '"is_error":true'})
+        assert tx.parse_line(line, main_ctx) == []
+
+
+def test_successful_tool_results_skip_the_prefilter(main_ctx):
+    st = tx.ScanStats()
+    line = result_line([{"type": "tool_result", "tool_use_id": "t", "is_error": False,
+                         "content": "ok"}])
+    assert tx.parse_line(line, main_ctx, stats=st) == [] and st.prefiltered == 1

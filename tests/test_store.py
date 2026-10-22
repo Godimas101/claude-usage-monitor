@@ -25,6 +25,7 @@ from usage_monitor.data.models import (
     SessionMeta,
     TokenTotals,
     ToolCall,
+    ToolError,
     UsageSnapshot,
 )
 from usage_monitor.data.pricing import BUNDLED_PATH, Pricing
@@ -103,10 +104,10 @@ def file_store(tmp_path):
 
 # ── Open, schema and migrations ───────────────────────────────────────────────────
 
-def test_new_database_is_schema_v2_wal_with_foreign_keys_off(tmp_path):
+def test_new_database_is_schema_v3_wal_with_foreign_keys_off(tmp_path):
     path = tmp_path / "usage.db"
     with Store(path) as s:
-        assert s.schema_version() == 2
+        assert s.schema_version() == 3
         assert s.table_counts()["requests"] == 0
         assert s._rows("PRAGMA foreign_keys")[0][0] == 0
     assert raw(path, "PRAGMA journal_mode")[0][0] == "wal"
@@ -119,7 +120,7 @@ def test_reopening_keeps_data_and_does_not_migrate_again(tmp_path):
     with Store(path) as s:
         s.add_items([make_rec()], PRICING)
     with Store(path) as s:
-        assert s.schema_version() == 2
+        assert s.schema_version() == 3
         assert s.totals(None, None).requests == 1
 
 
@@ -138,16 +139,16 @@ def test_forward_migration_runs_once_per_new_version(tmp_path, monkeypatch):
     path = tmp_path / "usage.db"
     Store(path).close()
 
-    def create_v3(conn: sqlite3.Connection) -> None:
-        conn.execute("CREATE TABLE demo_v3 (x INTEGER)")
+    def create_v4(conn: sqlite3.Connection) -> None:
+        conn.execute("CREATE TABLE demo_v4 (x INTEGER)")
 
-    monkeypatch.setitem(store_mod._MIGRATIONS, 3, create_v3)
-    monkeypatch.setattr(store_mod, "SCHEMA_VERSION", 3)
+    monkeypatch.setitem(store_mod._MIGRATIONS, 4, create_v4)
+    monkeypatch.setattr(store_mod, "SCHEMA_VERSION", 4)
     with Store(path) as s:
-        assert s.schema_version() == 3
-        assert s.table_counts()["demo_v3"] == 0
-    with Store(path) as s:  # already at 3: nothing runs again
-        assert s.schema_version() == 3
+        assert s.schema_version() == 4
+        assert s.table_counts()["demo_v4"] == 0
+    with Store(path) as s:  # already at 4: nothing runs again
+        assert s.schema_version() == 4
 
 
 def test_context_manager_closes_and_close_is_idempotent(tmp_path):
@@ -662,3 +663,96 @@ def test_pull_requests_in_one_batch_merge_like_separate_batches(store):
     ], PRICING)
     rows = store.query("SELECT number, repository, session_id, ts FROM pull_requests")
     assert [tuple(row) for row in rows] == [(9, "o/r", "s", (T0 + timedelta(hours=1)).timestamp())]
+
+
+# ── Schema 3: git_ops, tool_errors, bookmark reset ────────────────────────────────
+
+def make_v2_database(path: Path) -> None:
+    """A database as the previous build left it: schema 2, with data and ingest bookmarks."""
+    conn = sqlite3.connect(path)
+    conn.isolation_level = None
+    conn.execute(store_mod._SCHEMA_META)
+    store_mod._create_v1(conn)
+    store_mod._add_tail_to_file_state(conn)
+    conn.execute("INSERT INTO meta (key, value) VALUES ('schema_version', '2')")
+    conn.execute("INSERT INTO tool_calls (tool_use_id, name, request_key, session_id, ts, is_subagent)"
+                 " VALUES ('toolu_OLD', 'Bash', NULL, 'sess-1', 1000.0, 0)")
+    conn.execute("INSERT INTO git_events (tool_use_id, session_id, ts, is_commit, is_push, is_pr)"
+                 " VALUES ('toolu_GIT', 'sess-1', 1000.0, 1, 0, 0)")
+    conn.execute("INSERT INTO file_state (path, size, mtime, offset, tail) VALUES ('a.jsonl', 10, 1.0, 10, 'x')")
+    conn.execute("INSERT INTO file_state (path, size, mtime, offset, tail) VALUES ('b.jsonl', 20, 2.0, 20, NULL)")
+    conn.close()
+
+
+def test_v2_database_migrates_to_v3_and_clears_bookmarks_but_keeps_data(tmp_path):
+    path = tmp_path / "usage.db"
+    make_v2_database(path)
+    with Store(path) as s:
+        assert s.schema_version() == 3
+        assert s.known_files() == []                       # the next ingest re-reads every transcript
+        assert s.file_states() == {}
+        row = s.query("SELECT tool_use_id, name, git_ops FROM tool_calls")[0]
+        assert tuple(row) == ("toolu_OLD", "Bash", None)   # kept, git_ops still to be back-filled
+        assert s.query("SELECT COUNT(*) FROM git_events")[0][0] == 1
+        assert s.table_counts()["tool_errors"] == 0
+    columns = {row[1]: row for row in raw(path, "PRAGMA table_info(tool_calls)")}
+    assert columns["git_ops"][2] == "TEXT" and columns["git_ops"][3] == 0
+    errors = {row[1]: row for row in raw(path, "PRAGMA table_info(tool_errors)")}
+    assert list(errors) == ["tool_use_id", "session_id", "ts"]
+    assert errors["tool_use_id"][5] == 1 and errors["ts"][3] == 1       # primary key; ts NOT NULL
+    indexes = {row[0] for row in raw(path, "SELECT name FROM sqlite_master WHERE type = 'index'")}
+    assert "tool_errors_ts" in indexes
+    with Store(path) as s:                                              # a second open changes nothing
+        assert s.schema_version() == 3
+        assert s.query("SELECT COUNT(*) FROM tool_calls")[0][0] == 1
+
+
+def test_a_fresh_database_has_the_v3_columns_and_table(tmp_path):
+    path = tmp_path / "usage.db"
+    Store(path).close()
+    assert "git_ops" in {row[1] for row in raw(path, "PRAGMA table_info(tool_calls)")}
+    assert raw(path, "SELECT COUNT(*) FROM tool_errors")[0][0] == 0
+
+
+def tool_call(tool_id: str = "toolu_1", git_ops: str | None = None) -> ToolCall:
+    return ToolCall(tool_id, "Bash", "msg_A|req_A", "sess-1", T0, False, git_ops)
+
+
+def stored_git_ops(s: Store) -> list[tuple]:
+    return [tuple(row) for row in s.query("SELECT tool_use_id, git_ops FROM tool_calls ORDER BY tool_use_id")]
+
+
+def test_tool_call_upsert_fills_git_ops_only_while_the_stored_value_is_null(store):
+    store.add_items([tool_call()], PRICING)
+    assert stored_git_ops(store) == [("toolu_1", None)]
+    store.add_items([tool_call(git_ops="commit")], PRICING)            # re-read after the migration
+    assert stored_git_ops(store) == [("toolu_1", "commit")]
+    store.add_items([tool_call(git_ops="push")], PRICING)              # a stored value is never replaced
+    store.add_items([tool_call()], PRICING)                            # ... nor cleared
+    assert stored_git_ops(store) == [("toolu_1", "commit")]
+    assert store.table_counts()["tool_calls"] == 1
+
+
+def test_tool_call_upsert_keeps_every_other_column_of_the_first_sighting(store):
+    store.add_items([tool_call()], PRICING)
+    later = ToolCall("toolu_1", "Other", "msg_B|req_B", "sess-2", T0 + timedelta(hours=1), True, "push")
+    store.add_items([later], PRICING)
+    row = store.query("SELECT * FROM tool_calls")[0]
+    assert (row["name"], row["request_key"], row["session_id"], row["ts"], row["is_subagent"]) == (
+        "Bash", "msg_A|req_A", "sess-1", T0.timestamp(), 0)
+    assert row["git_ops"] == "push"
+
+
+def test_tool_calls_in_one_batch_each_keep_their_own_git_ops(store):
+    store.add_items([tool_call("toolu_a", "commit"), tool_call("toolu_b", "commit+push"),
+                     tool_call("toolu_c")], PRICING)
+    assert stored_git_ops(store) == [("toolu_a", "commit"), ("toolu_b", "commit+push"), ("toolu_c", None)]
+
+
+def test_tool_errors_dedupe_by_tool_use_id(store):
+    first = ToolError("toolu_1", "sess-1", T0)
+    stored = store.add_items([first, ToolError("toolu_2", None, T0), first,
+                              replace(first, ts=T0 + timedelta(hours=1))], PRICING)
+    assert stored == {"tool_error": 4}
+    rows = [tuple(row) for row in store.query("SELECT tool_use_id, session_id, ts FROM tool_errors ORDER BY 1")]
+    assert rows == [("toolu_1", "sess-1", T0.timestamp()), ("toolu_2", None, T0.timestamp())]

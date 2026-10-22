@@ -36,6 +36,7 @@ from usage_monitor.data.models import (
     SessionMeta,
     TokenTotals,
     ToolCall,
+    ToolError,
     TranscriptItem,
     UsageSnapshot,
 )
@@ -45,7 +46,7 @@ from usage_monitor.log import get_logger
 
 log = get_logger(__name__)
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 SNAPSHOT_RETENTION = timedelta(days=180)
 _IN_CHUNK = 500             # bound parameters per IN (...) query
 _REPRICE_CHUNK = 5000       # requests repriced per transaction
@@ -147,8 +148,19 @@ def _add_tail_to_file_state(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE file_state ADD COLUMN tail TEXT")
 
 
+def _add_git_ops_and_tool_errors(conn: sqlite3.Connection) -> None:
+    conn.execute("ALTER TABLE tool_calls ADD COLUMN git_ops TEXT")
+    conn.execute("CREATE TABLE IF NOT EXISTS tool_errors ("
+                 " tool_use_id TEXT PRIMARY KEY, session_id TEXT, ts REAL NOT NULL)")
+    conn.execute("CREATE INDEX IF NOT EXISTS tool_errors_ts ON tool_errors (ts)")
+    # Existing rows lack git_ops and tool_errors. With no bookmarks the next ingest re-reads
+    # every transcript, and dedupe keeps that safe while the upsert fills git_ops.
+    conn.execute("DELETE FROM file_state")
+
+
 # Forward migrations: _MIGRATIONS[n] upgrades a version n-1 database to version n.
-_MIGRATIONS: dict[int, Any] = {1: _create_v1, 2: _add_tail_to_file_state}
+_MIGRATIONS: dict[int, Any] = {1: _create_v1, 2: _add_tail_to_file_state,
+                               3: _add_git_ops_and_tool_errors}
 
 _RECORD_SELECT = ", ".join(_RECORD_FIELDS)
 _REQUEST_UPSERT_SQL = (
@@ -159,12 +171,16 @@ _REPRICE_SQL = (
     "UPDATE requests SET " + ", ".join(f"{col} = ?" for col in _COST_COLUMNS + ("pricing_version",))
     + " WHERE key = ?"
 )
-_TOOL_CALL_SQL = ("INSERT OR IGNORE INTO tool_calls (tool_use_id, name, request_key, session_id, ts, "
-                  "is_subagent) VALUES (?, ?, ?, ?, ?, ?)")
+# A repeat sighting changes nothing except to fill git_ops where the stored row has none.
+_TOOL_CALL_SQL = ("INSERT INTO tool_calls (tool_use_id, name, request_key, session_id, ts, "
+                  "is_subagent, git_ops) VALUES (?, ?, ?, ?, ?, ?, ?) "
+                  "ON CONFLICT (tool_use_id) DO UPDATE SET git_ops = excluded.git_ops "
+                  "WHERE tool_calls.git_ops IS NULL AND excluded.git_ops IS NOT NULL")
 _CODE_CHANGE_SQL = ("INSERT OR IGNORE INTO code_changes (tool_use_id, session_id, ts, lines_added, "
                     "lines_removed, is_new_file) VALUES (?, ?, ?, ?, ?, ?)")
 _GIT_EVENT_SQL = ("INSERT OR IGNORE INTO git_events (tool_use_id, session_id, ts, is_commit, is_push, "
                   "is_pr) VALUES (?, ?, ?, ?, ?, ?)")
+_TOOL_ERROR_SQL = "INSERT OR IGNORE INTO tool_errors (tool_use_id, session_id, ts) VALUES (?, ?, ?)"
 # Keeps the earliest ts for a URL (a PR counts where it first appeared) and the session that
 # earliest sighting belongs to; number and repository only fill in while they are still null.
 # All right-hand sides read the row as it was before the update, so the ts test is the same
@@ -575,6 +591,7 @@ _KIND_BY_TYPE: dict[type, str] = {
     ToolCall: "tool_call",
     CodeChange: "code_change",
     GitEvent: "git_event",
+    ToolError: "tool_error",
     PullRequest: "pull_request",
     SessionMeta: "session_meta",
     Compaction: "compaction",
@@ -635,7 +652,11 @@ def _record_from_row(row: sqlite3.Row) -> RequestRecord:
 
 def _tool_call_row(item: ToolCall) -> tuple[Any, ...]:
     return (item.tool_use_id, item.name, item.request_key, item.session_id,
-            _to_epoch(item.ts), int(item.is_subagent))
+            _to_epoch(item.ts), int(item.is_subagent), item.git_ops)
+
+
+def _tool_error_row(item: ToolError) -> tuple[Any, ...]:
+    return (item.tool_use_id, item.session_id, _to_epoch(item.ts))
 
 
 def _code_change_row(item: CodeChange) -> tuple[Any, ...]:
@@ -670,6 +691,7 @@ _ROW_WRITES: dict[str, tuple[str, Any]] = {
     "tool_call": (_TOOL_CALL_SQL, _tool_call_row),
     "code_change": (_CODE_CHANGE_SQL, _code_change_row),
     "git_event": (_GIT_EVENT_SQL, _git_event_row),
+    "tool_error": (_TOOL_ERROR_SQL, _tool_error_row),
     "pull_request": (_PULL_REQUEST_SQL, _pull_request_row),
     "session_meta": (_TITLE_SQL, _title_row),
     "compaction": (_COMPACTION_SQL, _compaction_row),

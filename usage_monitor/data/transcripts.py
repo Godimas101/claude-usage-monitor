@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+from bisect import bisect_left
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,6 +32,7 @@ from usage_monitor.data.models import (
     RequestRecord,
     SessionMeta,
     ToolCall,
+    ToolError,
     TranscriptItem,
 )
 
@@ -57,6 +59,8 @@ PREFILTER_TOKENS: tuple[str, ...] = (
     '"structuredPatch"',   # user toolUseResult with a diff -> CodeChange
     '"create"',            # user toolUseResult with type "create" -> CodeChange
     '"gitOperation"',      # user toolUseResult -> GitEvent
+    '"is_error":true',     # user tool_result block -> ToolError (compact JSON, as Claude Code writes it)
+    '"is_error": true',    # ... and the spaced spelling
     '"pr-link"',           # -> PullRequest
     '"ai-title"',          # -> SessionMeta
     '"custom-title"',      # -> SessionMeta
@@ -66,6 +70,214 @@ PREFILTER_TOKENS: tuple[str, ...] = (
 # One alternation: a single C-level scan per line (about 3x faster than a loop of `in` checks).
 _PREFILTER_RX = re.compile("|".join(re.escape(tok) for tok in PREFILTER_TOKENS))
 _PREFILTER_RX_BYTES = re.compile(b"|".join(re.escape(tok.encode("ascii")) for tok in PREFILTER_TOKENS))
+
+
+# ── Git activity in shell commands ────────────────────────────────────────────
+# Since Claude Code 2.1.284 a commit no longer leaves toolUseResult.gitOperation, so Bash and
+# PowerShell commands are read for git verbs. Only the verbs are kept, never the command.
+
+SHELL_TOOLS = ("Bash", "PowerShell")
+# << WORD, <<- WORD, <<~ WORD, with WORD bare, 'quoted', "quoted" or \escaped (not <<<, a here-string).
+_HEREDOC = re.compile(r"""<<[-~]?[ \t]*(?:\\([^\s'"<>|&;()]+)|'([^'\s]+)'|"([^"\s]+)"|([^\s'"<>|&;()\\]+))""")
+_SCAN_NORMAL = re.compile(r"""['"#<\n]""")
+_SCAN_NESTED = re.compile(r"""['"#<\n()]""")
+_DQ_BASH = re.compile(r"""[\\"$]""")
+_DQ_POWERSHELL = re.compile(r"""[`"$]""")
+_MAX_NESTING = 16                      # $( ... ) inside "..." inside $( ... ): deeper is left as text
+# A quoted path to git, kept as the word "git" so that `& "C:\Program Files\Git\cmd\git.exe" commit` counts.
+_QUOTED_GIT = re.compile(r"(?:.*[\\/])?git\.exe|.*[\\/]git", re.IGNORECASE | re.DOTALL)
+# The options between "git" and the verb. -c / -C take a value; no other branch can match them,
+# so a failed match has one way to parse the options, not two to the power of their number.
+_GIT_PREFIX = (r"""\bgit(?:\.exe)?\b(?:\s+(?:-[cC]\s+(?:"[^"]*"|'[^']*'|[^\s"']\S*)"""
+               r"""|(?!-[cC]\b)--?[A-Za-z][\w-]*(?:=\S+)?))*\s+""")
+_GIT_VERBS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("commit", re.compile(_GIT_PREFIX + r"commit(?![\w-])")),
+    ("push", re.compile(_GIT_PREFIX + r"push(?![\w-])")),
+    ("pr", re.compile(r"\bgh\s+pr\s+create\b")),
+)
+
+
+def git_ops(command: str, tool: str = "Bash") -> str | None:
+    """The git operations a shell command runs: "commit", "push", "pr" joined with "+", else None.
+
+    Heredoc bodies, PowerShell here-strings and the contents of quoted strings are blanked first,
+    so a commit message that mentions "git push" does not count, and neither does
+    "git log --grep commit". ``tool`` picks the quoting rules: PowerShell escapes with a backtick
+    and doubles its quotes, Bash escapes with a backslash.
+    """
+    text = _Blanker(command, tool == "PowerShell").run()
+    found = [name for name, rx in _GIT_VERBS if rx.search(text)]
+    return "+".join(found) if found else None
+
+
+class _Blanker:
+    """One left-to-right pass that empties every '...' and "..." string (keeping its quotes), the
+    bodies of heredocs and PowerShell here-strings, and # comments. A single pass is needed
+    because each construct hides the others: a "<<" or an apostrophe inside a string or a
+    heredoc body means nothing. Work is linear in the length of the command."""
+
+    def __init__(self, text: str, powershell: bool) -> None:
+        self.text = text
+        self.powershell = powershell
+        self.dq_dead = False        # a " found no closing quote, so no later " can close one either
+        self.lines: tuple[dict[str, list[int]], dict[str, list[int]]] | None = None   # line text -> starts
+
+    def run(self) -> str:
+        out: list[str] = []
+        self._scan(0, out, 0)
+        return "".join(out)
+
+    def _scan(self, pos: int, out: list[str] | None, depth: int) -> int:
+        """Blank text[pos:] into ``out`` (None: discard). At depth > 0 this is the inside of a
+        $( ... ) and the scan stops after its closing paren; -1 when there is none."""
+        text = self.text
+        size = len(text)
+        special = _SCAN_NESTED if depth else _SCAN_NORMAL
+        pending: list[tuple[str, bool]] = []     # heredocs whose bodies start after this line
+        parens = 0
+        while True:
+            found = special.search(text, pos)
+            end = size if found is None else found.start()
+            if out is not None:
+                out.append(text[pos:end])
+            if found is None:
+                return -1 if depth else size
+            char = found.group()
+            pos = end + 1
+            if char == "\n":
+                if out is not None:
+                    out.append("\n")
+                if pending:
+                    pos = self._skip_bodies(pending, pos)
+                    pending = []
+            elif char == "(":
+                parens += 1
+                if out is not None:
+                    out.append(char)
+            elif char == ")":
+                if not parens:
+                    return pos
+                parens -= 1
+                if out is not None:
+                    out.append(char)
+            elif char == "#":
+                if end == 0 or text[end - 1] in " \t\r\n;&|(":
+                    stop = text.find("\n", pos)
+                    pos = size if stop < 0 else stop      # the comment goes, its newline stays
+                elif out is not None:
+                    out.append(char)
+            elif char == "<":
+                marker = _HEREDOC.match(text, end) if self._starts_heredoc(end) else None
+                if marker is not None:
+                    pending.append((next(group for group in marker.groups() if group), text[end + 2] in "-~"))
+                    pos = marker.end()
+                if out is not None:
+                    out.append("<<" if marker is not None else char)
+            else:
+                pos = self._string(char, end, out, depth)
+
+    def _starts_heredoc(self, at: int) -> bool:
+        text = self.text
+        if not text.startswith("<<", at) or text[at - 1:at] == "<" or text[at + 2:at + 3] == "<":
+            return False
+        marker = _HEREDOC.match(text, at)
+        if marker is None:
+            return False
+        eol = text.find("\n", marker.end())
+        if eol < 0:
+            return False
+        word = next(group for group in marker.groups() if group)
+        # A marker with no closing line is not a heredoc (`$((1 << n))`).
+        return self._closing_line(word, text[at + 2] in "-~", eol + 1) is not None
+
+    def _closing_line(self, word: str, strip: bool, start: int) -> int | None:
+        """Index just past the first line at or after ``start`` that equals ``word``, else None."""
+        if self.lines is None:      # indexed once, so many markers do not each rescan the command
+            self.lines = ({}, {})
+            offset = 0
+            for line in self.text.split("\n"):
+                plain = line.rstrip("\r")
+                self.lines[0].setdefault(plain, []).append(offset)
+                self.lines[1].setdefault(plain.strip(), []).append(offset)
+                offset += len(line) + 1
+        starts = self.lines[1 if strip else 0].get(word, ())
+        at = bisect_left(starts, start)
+        if at == len(starts):
+            return None
+        stop = self.text.find("\n", starts[at])
+        return len(self.text) if stop < 0 else stop + 1
+
+    def _skip_bodies(self, pending: list[tuple[str, bool]], pos: int) -> int:
+        for word, strip in pending:
+            after = self._closing_line(word, strip, pos)
+            if after is None:
+                return len(self.text)
+            pos = after
+        return pos
+
+    def _string(self, quote: str, at: int, out: list[str] | None, depth: int) -> int:
+        """Handle the quote character at ``at`` and return where scanning resumes."""
+        text = self.text
+        if self.powershell and text[at - 1:at] == "@":
+            here = self._here_string(quote, at)
+            if here is not None:
+                if out is not None:
+                    out.append(quote * 2)
+                return here
+        end = self._end_single(at) if quote == "'" else self._end_double(at, depth)
+        if end < 0:
+            if quote == '"':
+                self.dq_dead = True
+            if out is not None:
+                out.append(quote)
+            return at + 1
+        if out is not None:
+            content = text[at + 1:end]
+            quoted_git = len(content) < 512 and _QUOTED_GIT.fullmatch(content)
+            out.append("git" if quoted_git else quote * 2)
+        return end + 1
+
+    def _here_string(self, quote: str, at: int) -> int | None:
+        """PowerShell @'...'@ / @"..."@: the opener ends its line and the closer starts one."""
+        text = self.text
+        eol = text.find("\n", at + 1)
+        if eol < 0 or text[at + 1:eol].strip():
+            return None
+        close = text.find("\n" + quote + "@", eol)
+        return None if close < 0 else close + 3
+
+    def _end_single(self, at: int) -> int:
+        text = self.text
+        end = text.find("'", at + 1)
+        while self.powershell and end >= 0 and text[end + 1:end + 2] == "'":     # '' is a quote in the string
+            end = text.find("'", end + 2)
+        return end
+
+    def _end_double(self, at: int, depth: int) -> int:
+        """Index of the quote closing the string opened at ``at``, else -1."""
+        if self.dq_dead:
+            return -1
+        text = self.text
+        special = _DQ_POWERSHELL if self.powershell else _DQ_BASH
+        pos = at + 1
+        while True:
+            found = special.search(text, pos)
+            if found is None:
+                return -1
+            pos = found.start() + 1
+            char = found.group()
+            if char == '"':
+                if self.powershell and text[pos:pos + 1] == '"':
+                    pos += 1
+                else:
+                    return pos - 1
+            elif char == "$":
+                if text[pos:pos + 1] == "(" and depth < _MAX_NESTING:
+                    pos = self._scan(pos + 1, None, depth + 1)       # a command substitution has quotes of its own
+                    if pos < 0:
+                        return -1
+            else:
+                pos += 1                                              # the escaped character
 
 
 @dataclass(slots=True)
@@ -268,13 +480,15 @@ def _assistant_items(rec: dict[str, Any], ctx: FileContext, st: ScanStats) -> li
         if tool_id is None:
             st.no_key += 1
             continue
+        name = _str(block.get("name")) or "unknown"
         items.append(ToolCall(
             tool_use_id=tool_id,
-            name=_str(block.get("name")) or "unknown",
+            name=name,
             request_key=key,
             session_id=session,
             ts=ts,
             is_subagent=is_sub,
+            git_ops=_shell_git_ops(name, block),
         ))
     return items
 
@@ -325,21 +539,24 @@ def _request_record(
 
 def _tool_result_items(rec: dict[str, Any], ctx: FileContext, st: ScanStats) -> list[TranscriptItem]:
     tur = rec.get("toolUseResult")
-    if not isinstance(tur, dict):
-        return []
-    change = _code_change(tur)
-    git = _git_flags(tur)
-    if change is None and git is None:
-        return []
-    ref = _tool_result_ref(rec, _as_dict(rec.get("message")))
-    if ref is None:
-        st.no_key += 1
+    msg = _as_dict(rec.get("message"))
+    failed = _failed_tool_ids(msg)
+    change = _code_change(tur) if isinstance(tur, dict) else None
+    git = _git_flags(tur) if isinstance(tur, dict) else None
+    if change is None and git is None and not failed:
         return []
     ts = _record_ts(rec, st)
     if ts is None:
         return []
     session = _str(rec.get("sessionId")) or ctx.session_hint
-    items: list[TranscriptItem] = []
+    items: list[TranscriptItem] = [ToolError(tool_use_id=tool_id, session_id=session, ts=ts)
+                                   for tool_id in failed]
+    if change is None and git is None:
+        return items
+    ref = _tool_result_ref(rec, msg)
+    if ref is None:
+        st.no_key += 1
+        return items
     if change is not None:
         added, removed, is_new = change
         items.append(CodeChange(
@@ -417,6 +634,23 @@ def _request_key(rec: dict[str, Any], msg: dict[str, Any]) -> str | None:
         return f"{mid}|{_str(rec.get('requestId')) or ''}"
     uuid = _str(rec.get("uuid"))
     return f"uuid|{uuid}" if uuid is not None else None
+
+
+def _shell_git_ops(name: str, block: dict[str, Any]) -> str | None:
+    if name not in SHELL_TOOLS:
+        return None
+    command = _as_dict(block.get("input")).get("command")
+    return git_ops(command, name) if isinstance(command, str) else None
+
+
+def _failed_tool_ids(msg: dict[str, Any]) -> list[str]:
+    """tool_use_ids of the tool_result blocks marked is_error, in order and without repeats."""
+    ids: list[str] = []
+    for block in _blocks(msg):
+        tool_id = _str(block.get("tool_use_id"))
+        if block.get("type") == "tool_result" and block.get("is_error") is True                 and tool_id is not None and tool_id not in ids:
+            ids.append(tool_id)
+    return ids
 
 
 def _tool_result_ref(rec: dict[str, Any], msg: dict[str, Any]) -> str | None:

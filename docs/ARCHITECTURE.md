@@ -35,7 +35,8 @@ v1.2 (Phase 1 exit) keeps the v1 Tk UI (`widget.py`, `options.py`, `tray.py`, `t
 
 1. **Privacy.** Never store or log message text, prompts, tool inputs/outputs, file contents
    or the OAuth token. Allowed: ids, model ids, token counts, timestamps, project slug, cwd,
-   git branch, session titles (`ai-title` / `custom-title`), tool *names*, line counts, PR URLs.
+   git branch, session titles (`ai-title` / `custom-title`), tool *names*, line counts, PR URLs,
+   and the git verbs (`commit` / `push` / `pr`) a shell command ran, never the command itself.
 2. **Tolerance.** The transcript format "is internal to Claude Code and changes between
    versions" (Claude Code docs). Parsers never raise on bad input: skip, count, log at debug.
    Every field is optional.
@@ -129,13 +130,49 @@ proven equivalent to a full parse on real data.
 | Record | Item |
 |---|---|
 | `type:"assistant"` with `message.usage` (model ≠ `<synthetic>`) | `RequestRecord` — key `"<message.id>\|<requestId>"`, fallback `"uuid\|<record uuid>"` |
-| assistant `message.content[]` blocks `type:"tool_use"` | `ToolCall` (key `tool_use_id`) |
+| assistant `message.content[]` blocks `type:"tool_use"` | `ToolCall` (key `tool_use_id`); `git_ops` for `Bash` / `PowerShell` |
+| user `message.content[]` blocks `type:"tool_result"` with `is_error: true` | `ToolError` (key `tool_use_id`) |
 | user record `toolUseResult.structuredPatch` (+ / − lines) or `toolUseResult.type=="create"` with `content` | `CodeChange` (key: the user record's `tool_result.tool_use_id`) |
 | `toolUseResult.gitOperation` (`commit` / `push` / `pr` keys) | `GitEvent` |
 | `type:"pr-link"` | `PullRequest` (key `prUrl`) |
 | `type:"ai-title"` / `"custom-title"` | `SessionMeta` |
 | `type:"system"`, `subtype:"compact_boundary"` | `Compaction` (`compactMetadata.trigger/preTokens/postTokens`) |
 | `type:"system"`, `subtype:"api_error"` | `ApiErrorEvent` |
+
+Git activity from shell commands. Since Claude Code 2.1.284 a commit no longer writes
+`toolUseResult.gitOperation` (only `pr` and `push` still appear), so for `tool_use` blocks named
+`Bash` or `PowerShell` whose `input.command` is a string the parser sets `ToolCall.git_ops`:
+`"commit"`, `"push"` and `"pr"` joined with `+` in that order, else `None`. `git_ops(command, tool)`
+takes the tool name because the quoting rules differ. Detection runs on a copy of the command
+blanked by one linear left-to-right pass (a `<<` or an apostrophe inside a string or a heredoc
+body means nothing, so the constructs cannot be blanked one kind after the other):
+- a heredoc body is the text after a `<<`, `<<-` or `<<~` marker up to the line equal to the word.
+  The word is any run without whitespace or shell operators, bare, `'quoted'`, `"quoted"` or
+  `\escaped` (`END-OF-FILE`, `EOF.1`). A marker with no closing line is not a heredoc (so
+  `$((1 << n))` is not), and a `<<` inside a quoted string is never a marker. `<<<` is a here-string.
+- a quoted string loses its contents but keeps its quotes. Bash: `\` escapes inside `"..."`.
+  PowerShell: a backtick escapes inside `"..."`, a backslash is an ordinary character (so
+  `git -C "D:\repo\" commit` works), and a doubled quote (`''`, `""`) stays inside the string.
+  `$( ... )` inside `"..."` is scanned with the same rules, so quotes in a heredoc body there cannot
+  unbalance the string. A `"` with no closing quote is plain text.
+- PowerShell here-strings `@'...'@` and `@"..."@` are blanked whole, whatever apostrophes the body holds.
+- a `#` comment is dropped, so an apostrophe in a comment cannot open a string.
+- a quoted path ending in `\git.exe`, `/git.exe` or `/git` becomes the bare word `git`, so
+  `& "C:\Program Files\Git\cmd\git.exe" commit` counts.
+
+Then:
+- commit: `\bgit(?:\.exe)?\b(?:\s+(?:-[cC]\s+VALUE|(?!-[cC]\b)--?[A-Za-z][\w-]*(?:=\S+)?))*\s+commit(?![\w-])`,
+  with `VALUE` = `"[^"]*"`, `'[^']*'` or a word not starting with a quote. The branches cannot both
+  match one option, so a failed match costs linear time, not 2 to the power of the option count.
+- push: the same with `push`
+- pr: `\bgh\s+pr\s+create\b`
+
+So `git -C "C:/repo" commit` and `git -c user.name=x commit` count, while `git log --grep commit`,
+`git commit-tree`, `echo "git push"` and a commit message that mentions `git push` do not.
+Known limits: a git command that only runs inside a script written to a file by a heredoc is not
+a commit; `--dry-run` still counts. A `tool_result` block with `is_error: true` yields a
+`ToolError` whether or not the record has a `toolUseResult`. The prefilter has the two spellings
+of `"is_error":true` for it.
 
 Usage fields: `input_tokens`, `output_tokens`, `cache_read_input_tokens`,
 `cache_creation.ephemeral_5m_input_tokens` / `ephemeral_1h_input_tokens` (fallback: all of
@@ -167,6 +204,7 @@ class Store:
     def unpriced_models(self) -> list[str]
     def recent_requests(self, since: datetime) -> list[tuple[datetime, int, float]]   # (ts, output_tokens, cost)
     def usage_snapshots(self, since: datetime) -> list[dict]
+    def query(self, sql: str, params: Sequence = ()) -> list[sqlite3.Row]   # the read path for analytics
 ```
 - `requests` has one row per key. Merging a duplicate takes the **max** of every token field,
   fills missing metadata, and recomputes cost from the merged tokens (in Python).
@@ -175,7 +213,16 @@ class Store:
 - `usage_snapshots` keeps compact numbers per fetch (session/weekly percent + resets + a
   compact JSON of all limits); the latest full raw response lives in `meta`. Snapshots older
   than 180 days are pruned.
-- Schema version 2 (adds `file_state.tail`) through a forward migration. Token sums are
+- `query` runs exactly one statement, which must be a `SELECT` or `WITH` (leading whitespace and
+  comments allowed); anything else, or a second statement, raises `ValueError`. It runs with
+  `PRAGMA query_only` on, so a `WITH ... DELETE` fails instead of writing.
+- Schema version 3 through forward migrations: 2 adds `file_state.tail`; 3 adds
+  `tool_calls.git_ops TEXT` and the table `tool_errors(tool_use_id TEXT PRIMARY KEY, session_id,
+  ts REAL NOT NULL)` with a `ts` index. The 2 to 3 migration also deletes every `file_state` row,
+  so the next ingest re-reads all transcripts (dedupe keeps that safe) and back-fills `git_ops`
+  and `tool_errors`. The `tool_calls` insert is an upsert: a repeat sighting changes nothing
+  except to fill `git_ops` when the stored value is NULL (a stored value is never replaced, so a
+  later change to the detection rule needs a re-ingest into a fresh database). Token sums are
   computed as REAL (no int64 overflow). `add_items` binds the batch first and only falls back
   to row-by-row inside a savepoint when SQLite refuses a value, logging the skipped rows.
 - One connection per `Store`, guarded by a lock. Readers in other threads open their own
@@ -266,7 +313,7 @@ def resolve_window(name: str, store: Store, *, now: datetime, usage: UsageSnapsh
 def project_name(project: str, cwd: str | None) -> str     # basename of cwd, else the slug
 def cost_report(store, pricing, *, now, usage, plan: PlanInfo, plan_price: float | None,
                 billing_day: int | None, breakdown_window: str = "cycle", tz=None) -> dict
-def efficiency_report(store, *, start, end) -> dict
+def efficiency_report(store, *, start, end, tz: tzinfo | None = None) -> dict   # tz only sets how active_days counts local days
 def pacing_report(store, *, now, usage: UsageSnapshot | None) -> dict
 def history_report(store, *, now, tz=None, days: int = 371) -> dict
 def sessions_report(store, pricing, *, start, end, limit: int = 25) -> dict
@@ -280,8 +327,10 @@ Shared rules:
   float (not rounded); tokens are int. Every report that shows cost carries
   `"basis": "API-equivalent at list prices"`.
 - Windows come from `data/windows.py` (`resolve_window`): `session` and `week` follow the
-  usage API windows when known; `cycle` = `windows.cycle(now, billing_day)` (calendar month
-  when `billing_day` is None); `all` = (None, None). Unknown name → `ValueError`.
+  usage API windows when known; a `session` with no API window falls back to the 5-hour block
+  holding `now`, and is `(now, now)` when no block does; `cycle` = `windows.cycle(now,
+  billing_day)` (calendar month when `billing_day` is None); `all` = (None, None). Unknown name →
+  `ValueError`.
 - Local days and hours use `tz` (None = the machine's local zone) and must be DST-correct:
   aggregate in SQL into 900-second UTC buckets, convert buckets to local time in Python.
 - SQL lives in `analytics.py` and goes through `Store.query(sql, params=()) -> list[sqlite3.Row]`
@@ -293,6 +342,8 @@ Shared rules:
 `cost_report` → `{basis, windows: {name: W}, plan, value, monthly, breakdowns, top_sessions_week, spend}`
 - `W` = `{start, end, requests, tokens: {input, output, cache_read, cache_write, thinking, total},
   cost_usd, nocache_cost_usd, unpriced_requests}` for every name in `WINDOW_NAMES`.
+  `tokens.total` = input + output + cache read + cache write; it excludes `thinking`, which is
+  already part of output and is reported separately.
 - `plan` = `{name, subscription_type, rate_limit_tier, price_usd, price_source}`; `price_usd`
   = `plan_price` (source `"override"`), else `plan.monthly_price_usd` (`"detected"`), else None.
 - `value` = `{cycle_start, cycle_end, cycle_cost_usd, multiplier, projected_cycle_cost_usd}`;
@@ -301,10 +352,29 @@ Shared rules:
 - `monthly` = one row per local calendar month with activity, oldest first:
   `{month: "YYYY-MM", requests, tokens, cost_usd, multiplier}`.
 - `breakdowns` (for `breakdown_window`): `window`; `by_model` `[{model, name, requests,
-  tokens, cost_usd, share}]` (cost desc; `name` = `pricing.display_name`); `by_project` (same
-  shape with `project` and `name`; top 15, then one `"other"` row); `by_thread` `{main,
+  tokens, cost_usd, share}]` (cost desc; `name` = `pricing.display_name`; `share` is the share of
+  the window's cost, not of requests or tokens); `by_project` (same shape with `project` and `name`;
+  top 15, then one `"other"` row); `by_folder` (same shape with `folder` and `name`; see below);
+  `by_thread` `{main,
   subagent}`; `haiku` `{main, subagent}` (Haiku-family models only); `fast` `{requests,
   cost_usd}` (`speed == "fast"`). Thread and haiku values are `{requests, tokens, cost_usd}`.
+- `by_folder` groups by where the work happened rather than by the folder Claude Code was
+  launched from (`requests.project` hides that when one launch folder is used for everything).
+  `folder` = the nearest ancestor of the request `cwd`, the `cwd` itself included, that contains a
+  `.git` entry; else the `cwd` itself. When that entry is a file naming a linked worktree
+  (`gitdir: <main>/.git/worktrees/<name>`, absolute or relative), the folder is `<main>`: a
+  worktree's work belongs to its repository, and so a worktree that is live or deleted lands in the
+  same row (a deleted one inside the repository, as `<repo>\.claude\worktrees\<name>`, finds
+  `<repo>` by the walk). A submodule's `.git` file (`gitdir: ...\.git\modules\<name>`) is a
+  repository of its own and stays one. A `cwd` under the
+  system temp directory (`tempfile.gettempdir()`, compared case-insensitively on Windows) or any
+  path containing `\AppData\Local\Temp\` collapses to `"(temp)"`; a missing `cwd` is
+  `"(unknown)"`. `name` = basename of the folder. Folders that differ only in case on Windows are
+  one row, shown with the spelling that carried the most cost. The lookup is cached per distinct
+  `cwd` in a module-level dict (cleared at 4096 entries), so a repository created later is not
+  seen until the process restarts. It reuses the grouped breakdown query, which already carries
+  `cwd`. The `cwd` is the session's working directory as Claude Code records it; work that
+  `cd`s elsewhere inside one session still counts under the session's folder.
 - `top_sessions_week` = the 5 most expensive sessions in the `week` window (rows as in
   `sessions_report`).
 - `spend` = the usage API's `Spend` as a dict (real money), or None. Never added to cost.
@@ -319,11 +389,23 @@ tools, productivity, effort, api_errors, web}`
   `{requests, avg, p50, p95, max}`.
 - `compactions` = `{count, auto, manual, per_active_day, avg_pre_tokens}`. `active_days` =
   local days with ≥ 1 request in the window.
-- `tools` = `{total, builtin: [{name, count}], mcp: [{server, count, tools}]}`. MCP tool names
-  `mcp__<server>__<tool>` are grouped by server (`tools` = distinct tool names); sorted by count.
+- `tools` = `{total, errors, error_rate, builtin: [{name, count}], mcp: [{server, count, tools}]}`.
+  MCP tool names `mcp__<server>__<tool>` are grouped by server (`tools` = distinct tool names);
+  sorted by count. `errors` = `tool_errors` rows in the window whose `tool_use_id` is a tool call
+  in the window; `error_rate` = errors / total, None when total is 0.
 - `productivity` = `{lines_added, lines_removed, files_created, commits, pushes, prs,
-  cost_per_pr_usd, cost_per_100_lines_usd}`. PRs = distinct `pull_requests` URLs whose `ts`
-  is in the window. Ratios are None when the divisor is 0.
+  cost_per_pr_usd, cost_per_100_lines_usd}`. `commits` / `pushes` = distinct `tool_use_id`s in the
+  window from two sources, unioned so one call counts once: `git_events` rows with `is_commit` /
+  `is_push` (older transcripts), and `tool_calls` whose `git_ops` contains the op and that have no
+  `tool_errors` row (a failed command did not commit). A `git_events` row is a success record and
+  is not filtered by errors. Each id has one timestamp: the call's `tool_calls.ts` when that row
+  exists, else the `git_events.ts` of the result, so an id whose command and result straddle a
+  window edge is counted in one window, and daily or weekly counts add up to the total. One
+  exception to the error rule: a `commit` is still counted for an errored call whose `git_ops` is
+  `commit+push` or `commit+push+pr`, because a failed commit short-circuits the `&&` before the
+  push runs, so the error is far more often a rejected push after a good commit. The push (and
+  PR) of that call is not counted. The heuristic can over-count a commit that itself failed. PRs stay as they were: distinct `pull_requests` URLs whose `ts` is in
+  the window, never `gh pr create` commands. Ratios are None when the divisor is 0.
 - `effort` = `[{effort, requests, cost_usd}]` (a None effort is reported as `"default"`);
   `api_errors` = count; `web` = `{searches, fetches}`.
 - An empty window gives zeros and None ratios, never an exception.
@@ -335,7 +417,7 @@ tools, productivity, effort, api_errors, web}`
   squares over the points from the last 90 minutes; it needs ≥ 2 points spanning ≥ 10 minutes.
   Verdict: percent ≥ 100 → `LIMITED`; no slope → `UNKNOWN`; slope < 0.5 %/h → `IDLE`;
   projected time (now + (100 − pct) / slope) ≥ resets_at → `SAFE`; otherwise `AT_RISK`, with
-  `projected_limit_at`.
+  `projected_limit_at` (it is set only for `AT_RISK`, None for every other verdict).
 - `weekly` = `{percent, resets_at, window_start, elapsed_pct, pace_delta_pp, verdict,
   daily_budget_pct, even_daily_pct, projected_end_pct, points}`. Window = [resets_at − 7 d,
   resets_at); `pace_delta_pp` = percent − elapsed_pct. Verdict `AHEAD` (> +5), `BEHIND`
@@ -343,8 +425,8 @@ tools, productivity, effort, api_errors, web}`
   percent) / max(days left, 1); `even_daily_pct` = 100/7; `projected_end_pct` = percent /
   elapsed fraction (None while elapsed < 5 %). Points are downsampled to one per hour.
 - `scoped` = one entry per scoped limit (for example the Fable weekly) with the `weekly`
-  fields (window from its `window_seconds`, default 7 d), plus `label`, `model`,
-  `allowance_pct` and `used_pct_of_weekly`.
+  fields (window from its `window_seconds`, default 7 d), plus `label`, `model` (the scoped
+  model's display name; not `scope_model`), `allowance_pct` and `used_pct_of_weekly`.
 - Every limit block is None-safe: missing usage → percent None, verdict `UNKNOWN`.
 
 `history_report` → `{tz, days, hour_weekday, streaks, busiest_day, first_use, active_days, odometer}`
@@ -368,7 +450,8 @@ prs}`. `title` = the custom title, else the AI title, else None.
 `daily_rollups` → one row per local day with activity, oldest first: `{date, requests,
 input_tokens, output_tokens, cache_read_tokens, cache_write_5m_tokens, cache_write_1h_tokens,
 thinking_tokens, cost_usd, nocache_cost_usd}`. `export_csv` writes a header row plus one row
-per dict (stable column order, CRLF line ends); `export_json` writes `{"basis": ..., "rows": [...]}`.
+per dict (columns in first-seen order, CRLF line ends; no rows gives `""`, since there are no
+columns to name); `export_json` writes `{"basis": ..., "rows": [...]}`.
 
 Store change: `pull_requests` keeps the earliest `ts` for a URL (upsert with `MIN`), so a PR
 counts in the window where it first appeared.
@@ -391,7 +474,10 @@ New settings (in `DEFAULTS`, with value rules): `alerts_enabled` (True), `alert_
 `alert_on_credits` (True), `alert_quiet_hours` (None, or `{"start": "HH:MM", "end": "HH:MM"}`
 in local time; may wrap midnight).
 - Runs only when `state.status` is `LIVE` and `state.usage` is set. Limits: session, weekly
-  and each scoped limit. A limit's window identity is (kind, label, resets_at to the minute).
+  and each scoped limit. A limit's window identity is (kind, label) plus `resets_at` within a 60 s
+  tolerance (the API jitters it); each window also keeps a high-water mark, the highest percent
+  seen in it, and a threshold at or below that mark never fires (so a threshold added or lowered
+  in settings does not toast for a level already passed).
 - The first evaluation with usage records a baseline and returns nothing (no toasts for
   levels already reached at startup).
 - Threshold: the first time percent ≥ T in a window → one alert for the highest T crossed;

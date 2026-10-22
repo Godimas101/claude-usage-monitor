@@ -16,7 +16,9 @@ import dataclasses
 import io
 import json
 import math
+import os
 import re
+import tempfile
 from collections import Counter, defaultdict
 from collections.abc import Sequence
 from datetime import date, datetime, timedelta, timezone, tzinfo
@@ -31,6 +33,7 @@ WINDOW_NAMES = ("session", "today", "week", "month", "cycle", "all")
 BASIS = "API-equivalent at list prices"
 BUCKET_S = 900                  # aggregation bucket in seconds; zone offsets are multiples of it
 TOP_PROJECTS = 15
+TOP_FOLDERS = 15
 TOP_SESSIONS_WEEK = 5
 _CHUNK = 500                    # ids per IN (...) list, well under SQLite's variable limit
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -357,6 +360,7 @@ def cost_report(store: Store, pricing: Pricing, *, now: datetime, usage: UsageSn
             "window": breakdown_window,
             "by_model": _by_model(groups, pricing),
             "by_project": _by_project(groups),
+            "by_folder": _by_folder(groups),
             "by_thread": {"main": _brief_light(_pick(groups, subagent=False)),
                           "subagent": _brief_light(_pick(groups, subagent=True))},
             "haiku": {"main": _brief_light(_pick(groups, subagent=False, haiku=True)),
@@ -472,6 +476,103 @@ def _project_rows(totals: dict[str, list[float]], cwds: dict[str, Counter]) -> l
     return rows
 
 
+_FOLDER_CACHE: dict[str | None, str] = {}   # request cwd -> folder; filled lazily, cleared when large
+_FOLDER_CACHE_MAX = 4096
+TEMP_FOLDER = "(temp)"
+UNKNOWN_FOLDER = "(unknown)"
+_APPDATA_TEMP = "\\appdata\\local\\temp\\"
+
+
+def _by_folder(groups: Sequence[tuple]) -> list[dict]:
+    """Spend by the folder the work happened in, not the folder Claude Code was launched from."""
+    totals: dict[str, list[float]] = {}
+    spelled: dict[str, Counter] = defaultdict(Counter)    # one folder can arrive as "d:\x" and "D:\x"
+    for _, _, _, _, cwd, n_req, cost, tokens in groups:
+        folder = _folder_of(cwd)
+        key = os.path.normcase(folder)
+        _tally(totals, key, (n_req, cost, tokens))
+        spelled[key][folder] += cost
+    grand = sum(item[1] for item in totals.values())
+    ranked = sorted(totals.items(), key=lambda item: (-item[1][1], item[0]))
+    rows = []
+    for key, item in ranked[:TOP_FOLDERS]:
+        folder = min(spelled[key].items(), key=lambda spelling: (-spelling[1], spelling[0]))[0]
+        rows.append(_row({"folder": folder, "name": _folder_name(folder)}, int(item[0]), item[2], item[1], grand))
+    rest = [item for _, item in ranked[TOP_FOLDERS:]]
+    if rest:
+        folded = [sum(values) for values in zip(*rest)]
+        rows.append(_row({"folder": "other", "name": "Other"}, int(folded[0]), folded[2],
+                         folded[1], grand))
+    return rows
+
+
+def _folder_name(folder: str) -> str:
+    return project_name(folder, folder)
+
+
+def _folder_of(cwd: str | None) -> str:
+    """The repository folder of a working directory: its nearest ancestor (itself included) that
+    holds a ".git" entry, else the directory itself. Temp directories collapse to "(temp)"."""
+    if not cwd:
+        return UNKNOWN_FOLDER
+    found = _FOLDER_CACHE.get(cwd)
+    if found is None:
+        found = TEMP_FOLDER if _is_temp(cwd) else _repo_root(cwd)
+        if len(_FOLDER_CACHE) >= _FOLDER_CACHE_MAX:
+            _FOLDER_CACHE.clear()
+        _FOLDER_CACHE[cwd] = found
+    return found
+
+
+_WORKTREE_GITDIR = re.compile(r"(.+)/\.git/worktrees/[^/]+/?")
+
+
+def _repo_root(cwd: str) -> str:
+    current = cwd
+    while True:
+        try:
+            dot_git = os.path.join(current, ".git")
+            if os.path.lexists(dot_git):
+                return _worktree_main(dot_git, current) or current
+        except (OSError, ValueError):
+            return cwd
+        parent = os.path.dirname(current)
+        if not parent or parent == current:
+            return cwd
+        current = parent
+
+
+def _worktree_main(dot_git: str, folder: str) -> str | None:
+    """The main repository of a linked worktree, else None.
+
+    A worktree's ".git" is a file whose first line reads "gitdir: <main>/.git/worktrees/<name>",
+    so its work belongs to <main>. A submodule's ("gitdir: ../.git/modules/<name>") is a
+    repository of its own and is left alone.
+    """
+    if not os.path.isfile(dot_git):
+        return None
+    try:
+        with open(dot_git, encoding="utf-8", errors="replace") as handle:
+            first = handle.readline(4096).strip()
+    except OSError:
+        return None
+    if not first.startswith("gitdir:"):
+        return None
+    target = os.path.join(folder, first[len("gitdir:"):].strip())      # a relative gitdir starts at folder
+    found = _WORKTREE_GITDIR.fullmatch(os.path.normpath(target).replace("\\", "/"))
+    return os.path.normpath(found.group(1)) if found else None
+
+
+def _is_temp(cwd: str) -> bool:
+    """True under the system temp directory (case-insensitive on Windows) or any ...\\AppData\\Local\\Temp."""
+    return _slashed(cwd).startswith(_slashed(tempfile.gettempdir())) or _APPDATA_TEMP in _slashed(cwd).lower()
+
+
+def _slashed(path: str) -> str:
+    """The normalized path with backslashes and one trailing separator, so prefixes compare whole segments."""
+    return os.path.normcase(os.path.normpath(path)).replace("/", "\\").rstrip("\\") + "\\"
+
+
 # ── Efficiency ────────────────────────────────────────────────────────────────
 
 def efficiency_report(store: Store, *, start: datetime | None, end: datetime | None,
@@ -514,14 +615,13 @@ def efficiency_report(store: Store, *, start: datetime | None, end: datetime | N
         "SELECT COALESCE(SUM(lines_added), 0) AS added, "
         "COALESCE(SUM(lines_removed), 0) AS removed, "
         f"COALESCE(SUM(is_new_file), 0) AS created FROM code_changes{where}", params)[0]
-    git = store.query(
-        "SELECT COALESCE(SUM(is_commit), 0) AS commits, COALESCE(SUM(is_push), 0) AS pushes "
-        f"FROM git_events{where}", params)[0]
+    commits = _git_count(store, "commit", start, end)
+    pushes = _git_count(store, "push", start, end)
     prs = store.query(f"SELECT COUNT(*) AS n FROM pull_requests{where}", params)[0]["n"]
     lines = code["added"] + code["removed"]
     productivity = {
         "lines_added": code["added"], "lines_removed": code["removed"],
-        "files_created": code["created"], "commits": git["commits"], "pushes": git["pushes"],
+        "files_created": code["created"], "commits": commits, "pushes": pushes,
         "prs": prs,
         "cost_per_pr_usd": _ratio(totals.cost_usd, prs),
         "cost_per_100_lines_usd": _ratio(totals.cost_usd * 100, lines),
@@ -539,7 +639,7 @@ def efficiency_report(store: Store, *, start: datetime | None, end: datetime | N
         "start": _iso(start), "end": _iso(end), "basis": BASIS,
         "cache": cache, "thinking": thinking, "context": context,
         "compactions": compactions, "active_days": len(active),
-        "tools": _tools(store, where, params),
+        "tools": _tools(store, start, end),
         "productivity": productivity, "effort": effort, "api_errors": api_errors,
         "web": {"searches": int(values[10]), "fetches": int(values[11])},
     })
@@ -571,8 +671,38 @@ def _active_dates(store: Store, start: datetime | None, end: datetime | None,
     return {_local(epoch, tz).date() for epoch, _ in _buckets(store, "COUNT(*)", start, end)}
 
 
-def _tools(store: Store, where: str, params: Sequence[Any]) -> dict:
-    rows = store.query(f"SELECT name, COUNT(*) AS n FROM tool_calls{where} GROUP BY name", params)
+def _git_count(store: Store, op: str, start: datetime | None, end: datetime | None) -> int:
+    """Distinct tool_use_ids that ran ``op`` ("commit" or "push") in the window.
+
+    Two sources, one id counted once: transcripts that still carry toolUseResult.gitOperation
+    (git_events), and shell commands read for git verbs (tool_calls.git_ops) that did not fail.
+    An id has one timestamp: its call time when a tool_calls row exists, else the event time, so
+    a call whose result lands just past a window edge is not counted in both windows.
+    A failed "commit && push" still counts its commit (see ARCHITECTURE.md).
+    """
+    event_clauses, params = _span(start, end, "COALESCE(c.ts, g.ts)")
+    call_clauses, _ = _span(start, end, "tool_calls.ts")
+    flag = "is_commit" if op == "commit" else "is_push"
+    # An errored "commit+push" most likely lost its push, not its commit: a failed commit
+    # short-circuits the && before the push runs, so the error is rarely the commit's.
+    failed_ok = " OR git_ops IN ('commit+push', 'commit+push+pr')" if op == "commit" else ""
+    rows = store.query(
+        "SELECT COUNT(*) AS n FROM ("
+        "SELECT g.tool_use_id FROM git_events g LEFT JOIN tool_calls c ON c.tool_use_id = g.tool_use_id "
+        f"WHERE g.{flag} = 1{''.join(f' AND {clause}' for clause in event_clauses)} "
+        "UNION SELECT tool_use_id FROM tool_calls "
+        f"WHERE instr('+' || COALESCE(git_ops, '') || '+', '+{op}+') > 0"
+        f"{''.join(f' AND {clause}' for clause in call_clauses)} "
+        "AND (NOT EXISTS (SELECT 1 FROM tool_errors e WHERE e.tool_use_id = tool_calls.tool_use_id)"
+        f"{failed_ok}))",
+        [*params, *params])
+    return rows[0]["n"]
+
+
+def _tools(store: Store, start: datetime | None, end: datetime | None) -> dict:
+    clauses, params = _span(start, end)
+    rows = store.query(f"SELECT name, COUNT(*) AS n FROM tool_calls{_where(clauses)} GROUP BY name",
+                       params)
     builtin: list[dict] = []
     servers: dict[str, dict] = {}
     for row in rows:
@@ -587,7 +717,17 @@ def _tools(store: Store, where: str, params: Sequence[Any]) -> dict:
     mcp = sorted(({"server": name, "count": entry["count"], "tools": len(entry["tools"])}
                   for name, entry in servers.items()),
                  key=lambda item: (-item["count"], item["server"]))
-    return {"total": sum(row["n"] for row in rows), "builtin": builtin, "mcp": mcp}
+    total = sum(row["n"] for row in rows)
+    # Errors of the window's own calls: both the call and its failed result are in the window.
+    err_clauses, err_params = _span(start, end, "e.ts")
+    call_clauses, call_params = _span(start, end, "c.ts")
+    errors = store.query(
+        f"SELECT COUNT(*) AS n FROM tool_errors e{_where(err_clauses)} "
+        f"{'AND' if err_clauses else 'WHERE'} EXISTS (SELECT 1 FROM tool_calls c "
+        f"WHERE c.tool_use_id = e.tool_use_id{''.join(' AND ' + c for c in call_clauses)})",
+        [*err_params, *call_params])[0]["n"]
+    return {"total": total, "errors": errors, "error_rate": _ratio(errors, total),
+            "builtin": builtin, "mcp": mcp}
 
 
 # ── Pacing ────────────────────────────────────────────────────────────────────
