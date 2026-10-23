@@ -2332,20 +2332,49 @@
 
   // ── About ───────────────────────────────────────────────────────────────────────
 
+  /* The fonts the app bundles, by theme. All are under the SIL Open Font License 1.1, and each family's licence
+   * text ships beside its files. Gates reads the fonts Windows already has and bundles none. */
+  var BUNDLED_FONTS = [
+    { theme: "Nostromo", families: ["Michroma", "IBM Plex Mono", "VT323"] },
+    { theme: "Night City", families: ["Chakra Petch", "Rajdhani", "Share Tech Mono"] }
+  ];
+
+  function fontsCardBody() {
+    return BUNDLED_FONTS.map(function (group) {
+      return '<p class="nm-note nm-tier">' + esc(group.theme) + '</p><ul class="nm-supp">' +
+        group.families.map(function (name) { return "<li>" + esc(name) + "</li>"; }).join("") + "</ul>";
+    }).join("") +
+      '<p class="nm-note nm-disc">Gates uses fonts from your own Windows install (Segoe UI Variable, Segoe Fluent Icons and Cascadia Mono, with Segoe UI and Consolas as fallbacks) and bundles none. ' +
+      "The licence text of each bundled font sits beside it in the app&rsquo;s fonts folder.</p>";
+  }
+
   function aboutPage(main) {
     if (S.formKey !== "about") {
       S.formKey = "about";
       S.sig = "";
       main.innerHTML = pageHead("about") +
         '<div class="nm-pgrid">' +
-        '<section class="nm-card" aria-label="Claude Usage Monitor"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Claude Usage Monitor</h2><span class="nm-meta-t" id="about-version"></span></div>' +
-        '<p class="nm-lede">A local monitor for Claude Code plan limits. It reads your own transcripts and the usage API. It never sends a model request.</p>' +
-        '<div class="nm-kv nm-authors"><span>AUTHORS</span><b>CHRIS CARPENTER, WITH CLAUDE</b></div>' +
-        '<p class="nm-note nm-disc">Money figures are ' + BASIS + ", not amounts billed to your plan.</p></div></section>" +
-        '<section class="nm-card" aria-label="Links"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Links</h2><span class="nm-meta-t">opens in your browser</span></div>' +
-        '<div class="nm-links"><a href="' + esc(LINKS.repo) + '" data-external="1">Repository on GitHub</a>' +
-        '<a href="' + esc(LINKS.bug) + '" data-external="1">Report a bug</a>' +
-        '<a href="' + esc(LINKS.patreon) + '" data-external="1">Support on Patreon</a></div></div></section>' +
+        card({
+          title: "Claude Usage Monitor", metaHtml: '<span class="nm-meta-t" id="about-version"></span>',
+          body: '<p class="nm-lede">A local monitor for Claude Code plan limits. It reads the usage API with your existing Claude Code sign-in, ' +
+            "and your own transcripts. It never sends a model request.</p>" +
+            '<p class="nm-lede">Free and open source, under the MIT licence.</p>' +
+            '<p class="nm-note nm-disc">Cost figures are ' + BASIS + ": what the same tokens would cost at the published API prices. " +
+            "They are not amounts billed to your plan. Only the usage credits card shows real money.</p>"
+        }) +
+        card({
+          title: "Links", meta: "opens in your browser",
+          body: '<div class="nm-links"><a href="' + esc(LINKS.repo) + '" data-external="1">Repository on GitHub</a>' +
+            '<a href="' + esc(LINKS.bug) + '" data-external="1">Issues: report a bug</a>' +
+            '<a href="' + esc(LINKS.patreon) + '" data-external="1">Support on Patreon</a></div>'
+        }) +
+        card({
+          title: "Credits", meta: "built with Claude Code",
+          body: '<div class="nm-kv nm-authors"><span>AUTHORS</span><b>CHRIS CARPENTER, WITH CLAUDE</b></div>' +
+            '<p class="nm-lede">Version 2 was built with Claude Code: Claude Opus 5.5, with Sonnet 5.5 and Haiku 5.5 subagents.</p>' +
+            '<p class="nm-lede">Version 1 was built with Claude Sonnet 4.6.</p>'
+        }) +
+        card({ title: "Fonts", meta: "SIL Open Font License 1.1", body: fontsCardBody() }) +
         '<section class="nm-card wide" aria-label="Supporters"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Supporters</h2><span class="nm-meta-t" id="about-supporters-meta">thank you</span></div>' +
         '<div id="about-supporters"><p class="nm-empty">Loading the supporters list&hellip;</p></div></div></section>' +
         "</div>";
@@ -2617,7 +2646,21 @@
     } else if (action === "install-update") {
       S.update = { text: "INSTALLING\u2026" };
       api("POST", "/api/update/apply").then(function (res) {
-        S.update = { text: res.ok ? "THE UPDATE WILL INSTALL WHEN THE MONITOR RESTARTS." : "UPDATE FAILED: " + errorText(res) };
+        /* The monitor says what it did. "browser": it opened the release page (a source run, or a release it will not install
+         * silently). "installer": it started the checked silent update, and only restarts if the download passes the check.
+         * One sentence per text: the Gates theme writes sentence case and capitalises only the first letter of a string. */
+        var mode = res.ok && res.data && res.data.result ? res.data.result.mode : "";
+        var text;
+        if (!res.ok) {
+          text = "UPDATE FAILED: " + errorText(res);
+        } else if (mode === "browser") {
+          text = "OPENED THE RELEASE PAGE IN YOUR BROWSER.";
+        } else if (mode === "installer") {
+          text = "DOWNLOADING AND CHECKING THE UPDATE; IF IT CHECKS OUT, THE MONITOR CLOSES AND RESTARTS BY ITSELF.";
+        } else {
+          text = "NO UPDATE WAS STARTED.";
+        }
+        S.update = { text: text };
         syncSettings($("#main"));
       });
     } else if (action === "skip-update") {

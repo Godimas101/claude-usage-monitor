@@ -1,0 +1,13 @@
+{
+  "poll_interval_ms": 300000,
+  "position": {
+    "x": 1200,
+    "y": 640
+  },
+  "show_floating": false,
+  "show_taskbar": true,
+  "check_updates": true,
+  "skip_version": "",
+  "theme": "Cyan",
+  "taskbar_transparent_bg": false
+}

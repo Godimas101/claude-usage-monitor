@@ -39,15 +39,43 @@ jobs:
         if: steps.exists.outputs.skip == 'false'
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.14'   # what the release is smoke-tested with (docs/RELEASING.md)
 
       - name: Install dependencies
         if: steps.exists.outputs.skip == 'false'
-        run: pip install -r requirements.txt pyinstaller
+        run: pip install -r requirements.txt pyinstaller -c constraints-build.txt
 
       - name: Build the exe
         if: steps.exists.outputs.skip == 'false'
         run: pyinstaller --noconfirm ClaudeUsageMonitor.spec
+
+      - name: Check the built exe
+        if: steps.exists.outputs.skip == 'false'
+        shell: pwsh
+        run: |
+          # The exe that is about to be offered to every installed copy must start and say which version it is.
+          $exe = "dist\ClaudeUsageMonitor\ClaudeUsageMonitor.exe"
+          $p = Start-Process $exe -ArgumentList '--print-version', 'built.txt' -Wait -PassThru
+          $built = (Get-Content built.txt -Raw).Trim()
+          if ($p.ExitCode -ne 0 -or $built -ne '${{ steps.ver.outputs.version }}') {
+            throw "the built exe reports '$built' (exit code $($p.ExitCode)), but VERSION says ${{ steps.ver.outputs.version }}"
+          }
+
+      - name: Smoke-test the built exe
+        if: steps.exists.outputs.skip == 'false'
+        # Runs the real exe (widgets, dashboard, local API) for 30 seconds on empty data. It has not been tried on a runner:
+        # run this workflow by hand from a branch first, and drop continue-on-error once it has passed there.
+        continue-on-error: true
+        shell: pwsh
+        env:
+          CUM_DEV_INSTANCE: '1'
+        run: |
+          New-Item -ItemType Directory -Force smoke-data, smoke-claude | Out-Null
+          $env:CUM_APPDATA_DIR = (Resolve-Path smoke-data).Path
+          $env:CLAUDE_CONFIG_DIR = (Resolve-Path smoke-claude).Path
+          $p = Start-Process "dist\ClaudeUsageMonitor\ClaudeUsageMonitor.exe" -ArgumentList '--smoke-test', '30', 'smoke.json' -Wait -PassThru
+          $report = Get-Content smoke.json -Raw | ConvertFrom-Json
+          if ($p.ExitCode -ne 0 -or -not $report.ok) { Get-Content smoke.json -Raw; throw 'the frozen smoke test failed' }
 
       - name: Install Inno Setup
         if: steps.exists.outputs.skip == 'false'

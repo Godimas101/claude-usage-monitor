@@ -7,15 +7,21 @@ and that per-launch extraction races Windows Defender (intermittently "Failed to
 packages the whole folder), so there is no extraction race and startup is faster.
 
 What the bundle carries besides the code:
-  usage_monitor/webui           dashboard HTML/CSS/JS and the bundled OFL fonts, which the dashboard
-                                (/static/fonts) and the Pillow skins both read
+  usage_monitor/webui           dashboard HTML/CSS/JS, the theme stylesheets and scripts, and the bundled
+                                OFL fonts, which the dashboard (/static/fonts) and the Pillow skins both read
   usage_monitor/themes/*.json   the theme tokens
   usage_monitor/data/pricing.json
   VERSION, usage_monitor.ico
   pywebview                     collect_all('webview') brings its runtime JS and platform modules,
                                 as in the GDC Sound spec
 
-The same exe is the dashboard window: the monitor starts it with --dashboard --port N.
+Each data file lands at the same path relative to the bundle root as it has in the repository, because
+the app finds them through paths.resource_dir() (sys._MEIPASS, the _internal folder). The same exe is
+the dashboard window: the monitor starts it with --dashboard --port N.
+
+Not in the bundle, on purpose: tests/, docs/, design/, the parked v1 modules, and the dev server
+(usage_monitor/ui/devserver.py, a fake-data server for building the UI). tests/test_update_check.py
+evaluates this spec and fails when a resource the package reads is missing or something dev-only is in.
 
 Local:  pyinstaller --noconfirm ClaudeUsageMonitor.spec   (or run build.bat)
 CI:     .github/workflows/release.yml runs this on a VERSION bump that reaches main.
@@ -26,6 +32,9 @@ from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 PROJ = SPECPATH  # directory of this spec file (injected by PyInstaller)
 PKG = os.path.join(PROJ, 'usage_monitor')
+
+# Dev-only modules: nothing in the app imports them, and the hidden-import list below would pull them in.
+DEV_ONLY = ['usage_monitor.ui.devserver']
 
 wv_datas, wv_binaries, wv_hidden = collect_all('webview')
 
@@ -41,11 +50,14 @@ a = Analysis(
         (os.path.join(PROJ, 'usage_monitor.ico'), '.'),
     ] + wv_datas,
     # The ui package loads its modules by name (lazy exports, importlib), so list them all.
-    hiddenimports=wv_hidden + collect_submodules('usage_monitor'),
+    hiddenimports=wv_hidden + collect_submodules('usage_monitor', filter=lambda name: name not in DEV_ONLY),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['tkinter', 'pystray', 'pytest'],  # no Tk anywhere in v2
+    # No Tk anywhere in v2. numpy: Pillow imports it only when it is installed and the app never does, but
+    # a machine that has it would add ~26 MB (plus PyYAML and more that numpy drags in) to a local build
+    # that the clean CI environment does not carry.
+    excludes=['tkinter', 'pystray', 'pytest', 'numpy'] + DEV_ONLY,
     noarchive=False,
 )
 

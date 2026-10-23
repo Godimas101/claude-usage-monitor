@@ -31,11 +31,9 @@ import logging
 import os
 import re
 import sys
-import tempfile
 import threading
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 import webbrowser
 from collections.abc import Callable, Mapping
@@ -84,10 +82,6 @@ DASHBOARD_CLOSE_S = 3.0             # how long shutdown waits for the dashboard 
 SECOND_INSTANCE_WAIT_S = 3.0        # a second launch waits this long for the first one's window
 UI_CALL_TIMEOUT_S = 5.0
 GITHUB_PREFIX = "https://github.com/"
-# update_check starts its helper as `cmd /c <path>`. cmd splits that line at these characters (or reads
-# them as delimiters or variable syntax), so a helper in a folder with one never runs. Measured on
-# Windows 11: & ^ % fail always, @ fails in a path with a space, ( , ; = fail in a path without one.
-CMD_UNSAFE = frozenset("&|<>^()%@,;=")
 
 # Settings that change what the UI shows. Anything else (poll interval, dashboard bounds) is ignored here.
 THEME_KEYS = frozenset({"theme", "theme_id", "theme_variant", "theme_mode"})
@@ -235,31 +229,6 @@ def release_url(info: Mapping[str, Any] | None) -> str:
     if isinstance(url, str) and url.startswith(GITHUB_PREFIX):
         return url
     return f"{GITHUB_PREFIX}{version.REPO}/releases/latest"
-
-
-def installer_url_ok(url: Any) -> bool:
-    """Whether the installer link an update check found may be downloaded and run without asking.
-
-    The link came off the network (update_check takes it from the release JSON as it is), and the
-    silent update runs whatever it points at. Only an https download from github.com in the
-    repository owner's namespace passes; anything else is offered as the release page instead."""
-    if not isinstance(url, str):
-        return False
-    parts = urllib.parse.urlsplit(url)
-    owner = version.REPO.split("/", 1)[0].lower()
-    return (parts.scheme == "https" and parts.hostname == "github.com"
-            and parts.path.lower().startswith(f"/{owner}/") and "/releases/download/" in parts.path.lower())
-
-
-def installer_helper_path(asset_url: str) -> str:
-    """Where update_check puts the helper script of an update (the installer's path plus .run.cmd)."""
-    return os.path.join(tempfile.gettempdir(), os.path.basename(asset_url) or "update.exe") + ".run.cmd"
-
-
-def cmd_can_run(path: str) -> bool:
-    """False when ``path`` has a character that keeps `cmd /c <path>` from running it (see CMD_UNSAFE).
-    A Windows profile named Tom&Jerry made the update quit the monitor and install nothing."""
-    return not any(char in CMD_UNSAFE for char in path)
 
 
 def open_url(url: str) -> None:
@@ -735,26 +704,17 @@ class MonitorApp:
         info = self.updates.info if self.updates is not None else None
         if info is None:
             return {"started": False, "mode": "none"}
-        if update_check.can_self_update(info) and self._installer_is_safe(info["asset_url"]):
+        # can_self_update is the one gate: a frozen build, this project's own release download and a SHA-256 to check
+        # it against. What happens after that (the checks, the helper, whatever the temp folder is called) is
+        # update_check's business, and it opens the release page itself when anything is not right.
+        if update_check.can_self_update(info):
             update_check.apply_update(
-                info["asset_url"], on_error=self._update_failed, on_before_exit=self._prepare_exit,
+                info["asset_url"], digest=info.get("asset_digest"),
+                on_error=self._update_failed, on_before_exit=self._prepare_exit,
             )
             return {"started": True, "mode": "installer"}
         self._open_url(release_url(info))
         return {"started": True, "mode": "browser"}
-
-    @staticmethod
-    def _installer_is_safe(asset_url: str) -> bool:
-        """The silent update runs a downloaded installer and then quits the monitor, so it only goes
-        ahead for a link that is this project's own release download and when the helper script can
-        start. Otherwise the user gets the release page and the monitor keeps running."""
-        if not installer_url_ok(asset_url):
-            log.warning("the update's installer link is not a release download of this project; opening the release page")
-            return False
-        if not cmd_can_run(installer_helper_path(asset_url)):
-            log.warning("the temp folder has a character the update helper cannot start from; opening the release page")
-            return False
-        return True
 
     @staticmethod
     def _update_failed(exc: BaseException) -> None:

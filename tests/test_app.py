@@ -48,8 +48,6 @@ from usage_monitor.app import (
     UpdateTracker,
     blink_cycle,
     bug_report_url,
-    cmd_can_run,
-    installer_url_ok,
     is_dev_instance,
     menu_items,
     mutex_name,
@@ -1638,90 +1636,42 @@ def test_applying_an_update_in_the_installed_build_downloads_the_installer(setti
     monkeypatch.setattr(app_mod.update_check, "apply_update",
                         lambda url, **kw: calls.append((url, sorted(kw))))
     assert app._apply_update() == {"started": True, "mode": "installer"}
-    assert calls == [(INFO["asset_url"], ["on_before_exit", "on_error"])]
-
-
-OWNER = version.REPO.split("/")[0]
-
-
-@pytest.mark.parametrize("url, ok", [
-    (f"https://github.com/{version.REPO}/releases/download/v2.1.0/Setup.exe", True),
-    (f"https://github.com/{OWNER}/renamed-repo/releases/download/v2.1.0/Setup.exe", True),   # a renamed repository
-    (f"https://GITHUB.com/{OWNER.lower()}/x/releases/download/v1/S.exe", True),
-    (f"http://github.com/{version.REPO}/releases/download/v2.1.0/Setup.exe", False),          # not https
-    ("https://evil.example/Setup.exe", False),
-    (f"https://evil.example/{version.REPO}/releases/download/v2.1.0/Setup.exe", False),
-    (f"https://github.com.evil.example/{version.REPO}/releases/download/v1/S.exe", False),
-    ("https://github.com/someone-else/tool/releases/download/v1/Setup.exe", False),           # another owner
-    (f"https://github.com/{version.REPO}/archive/main.zip", False),                           # not a release download
-    (f"https://user:pw@evil.example/{OWNER}/x/releases/download/v1/S.exe", False),
-    ("file:///C:/Windows/System32/calc.exe", False),
-    ("", False), (None, False), (42, False),
-])
-def test_only_release_downloads_of_this_project_may_be_installed_silently(url, ok):
-    assert installer_url_ok(url) is ok
+    assert calls == [(INFO["asset_url"], ["digest", "on_before_exit", "on_error"])]
 
 
 def test_an_update_with_a_foreign_installer_link_is_offered_as_the_release_page(settings, monkeypatch):
-    """The link comes from the release JSON, and update_check ran whatever it named."""
-    hostile = dict(INFO, asset_url="https://evil.example/Setup.exe")
+    """The link comes from the release JSON. update_check.can_self_update, the one gate, refuses a link that is not
+    this project's own release download, so the user gets the release page and nothing is downloaded or run."""
+    hostile = dict(INFO, asset_url="https://evil.example/Setup.exe", asset_digest="sha256:" + "0" * 64)
     opened: list[str] = []
     app = MonitorApp(settings=settings, open_url_fn=opened.append)
     app.updates = UpdateTracker(settings, FakeChecker(hostile))
     app.updates.start_check()
-    monkeypatch.setattr(app_mod.update_check, "can_self_update", lambda info: True)
+    monkeypatch.setattr(app_mod.update_check, "is_frozen", lambda: True)      # the real can_self_update decides
     monkeypatch.setattr(app_mod.update_check, "apply_update",
                         lambda url, **kw: pytest.fail("a foreign link must never be downloaded and run"))
     assert app._apply_update() == {"started": True, "mode": "browser"}
     assert opened == [hostile["url"]]
 
 
-@pytest.mark.parametrize("folder, ok", [
-    (r"C:\Users\CHRISC~1\AppData\Local\Temp", True),
-    (r"C:\Users\Chris Carpenter\AppData\Local\Temp", True),
-    (r"C:\Users\Tom&Jerry\AppData\Local\Temp", False),
-    (r"C:\Users\Tom & Jerry\Temp", False),
-    (r"C:\Users\100%\Temp", False),
-    (r"C:\Users\a^b\Temp", False),
-    (r"C:\Users\Smith,John\Temp", False),
-    (r"C:\Users\a=b\Temp", False),
-    (r"C:\Users\(work)\Temp", False),
+@pytest.mark.parametrize("temp", [
+    r"C:\Users\JANEDO~1\AppData\Local\Temp", r"C:\Users\Jane Doe\AppData\Local\Temp",
+    r"C:\Users\Tom&Jerry\AppData\Local\Temp", r"C:\Users\Tom & Jerry\Temp", r"C:\Users\100%\Temp",
+    r"C:\Users\a^b\Temp", r"C:\Users\Smith,John\Temp", r"C:\Users\a=b\Temp", r"C:\Users\(work)\Temp",
 ])
-def test_cmd_can_run_a_helper_only_from_a_path_without_its_special_characters(folder, ok):
-    assert cmd_can_run(folder + r"\Setup.exe.run.cmd") is ok
-
-
-def test_an_update_whose_helper_cmd_cannot_start_keeps_the_monitor_running(settings, monkeypatch):
-    """A temp folder with & in it: cmd split the helper's path, the helper never ran, and the monitor had
-    already quit (os._exit once Popen returned). The user is sent to the release page instead."""
-    monkeypatch.setattr(tempfile, "gettempdir", lambda: r"C:\Users\Tom&Jerry\AppData\Local\Temp")
-    opened: list[str] = []
-    app = MonitorApp(settings=settings, open_url_fn=opened.append)
-    app.updates = UpdateTracker(settings, FakeChecker(INFO))
+def test_an_update_does_not_depend_on_what_the_temp_folder_is_called(settings, monkeypatch, temp):
+    """update_check runs a constant helper from a folder of its own with every path in the environment (its tests run it
+    under the real cmd.exe in folders like these), so the monitor no longer second-guesses the temp folder's name."""
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: temp)
+    asset = dict(INFO, asset_digest="sha256:" + "0" * 64)
+    app = MonitorApp(settings=settings, open_url_fn=lambda url: pytest.fail("the release page, not the installer"))
+    app.updates = UpdateTracker(settings, FakeChecker(asset))
     app.updates.start_check()
-    monkeypatch.setattr(app_mod.update_check, "can_self_update", lambda info: True)
-    monkeypatch.setattr(app_mod.update_check, "apply_update",
-                        lambda url, **kw: pytest.fail("the helper cannot start from this path"))
-    assert app._apply_update() == {"started": True, "mode": "browser"}
-    assert opened == [INFO["url"]]
-
-
-@UI
-@pytest.mark.parametrize("char", list("&^%@(),;=+-_.~#$'[]{}"))
-@pytest.mark.parametrize("space", [False, True])
-def test_cmd_can_run_never_says_yes_to_a_folder_cmd_cannot_start_from(tmp_path, char, space):
-    """The conservative direction, checked against the real cmd.exe the way update_check starts its helper:
-    a folder that breaks the helper must not pass. (The reverse need not hold.)"""
-    import subprocess
-
-    folder = tmp_path / (f"a{char}b" + (" c" if space else ""))
-    folder.mkdir()
-    marker = folder / "ran.txt"
-    helper = folder / "Setup.exe.run.cmd"
-    helper.write_text(f'@echo off\r\necho ok> "{marker}"\r\n', encoding="mbcs")
-    subprocess.run(["cmd", "/c", str(helper)], capture_output=True, timeout=30, check=False)
-    if not marker.exists():
-        assert cmd_can_run(str(helper)) is False, f"cmd cannot start a helper in {folder.name!r}"
+    calls: list[str] = []
+    monkeypatch.setattr(app_mod.update_check, "is_frozen", lambda: True)
+    monkeypatch.setattr(app_mod.update_check, "apply_update", lambda url, **kw: calls.append(url))
+    assert app._apply_update() == {"started": True, "mode": "installer"}
+    assert calls == [INFO["asset_url"]]
 
 
 def test_the_data_service_pauses_on_a_locked_desktop_unless_the_caller_says_otherwise(monkeypatch, settings):
