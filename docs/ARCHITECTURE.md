@@ -79,7 +79,8 @@ class Settings:
     def as_dict(self) -> dict                # persistable copy
 ```
 Keys starting with `_` are runtime-only and never persisted (v1 convention). Unknown keys
-are preserved. Thread-safe. v1 files load as-is (same path, same keys) and gain
+are preserved; the monitor itself keeps one, `notified_version` (the newest release it has put an update toast
+up for, see UI_ARCHITECTURE.md "Updates"), which the settings API does not expose. Thread-safe. v1 files load as-is (same path, same keys) and gain
 `settings_version: 2` plus new defaults: `billing_day` (None), `plan_price_override` (None),
 `ingest_interval_s` (60). v1 `poll_interval_ms` keeps working.
 Value rules: `ingest_interval_s` in [1, 86400], `poll_interval_ms` in [1000, 86400000];

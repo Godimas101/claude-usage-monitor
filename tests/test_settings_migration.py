@@ -88,7 +88,7 @@ def test_the_fixture_is_a_v1_file_and_nothing_more() -> None:
     assert data["theme"] in V1_THEMES
     # None of what v2 adds is in it yet.
     assert not {"settings_version", "theme_id", "theme_variant", "theme_mode", "billing_day",
-                "plan_price_override", "ingest_interval_s", "alerts_enabled"} & set(data)
+                "plan_price_override", "ingest_interval_s", "alerts_enabled", "notified_version"} & set(data)
 
 
 def test_the_v1_theme_names_are_the_ones_themes_knows() -> None:
@@ -229,3 +229,80 @@ def test_a_v1_file_without_a_theme_gets_the_default_amber(v1_file: Path, opened:
     assert settings.get("theme") == DEFAULTS["theme"] == "Default"
     assert themes.migrate_v1(settings) is True
     assert (settings.get("theme_id"), settings.get("theme_variant")) == ("nostromo", "amber")
+
+
+# ── The update choices a v1 file carries ──────────────────────────────────────
+#
+# v1.1.5 stored two of them: check_updates (the Auto-check switch) and skip_version (the release the user said no to).
+# v2 announces a new release with a tray toast, once per version, and keeps the version it told the user about in the
+# same file under notified_version. A key the file has never had is how that bookkeeping starts: Settings keeps unknown
+# keys exactly as written, so nothing else has to know it. These run the real UpdateTracker on a file v1 wrote.
+
+RELEASE = {"version": "2.0.1", "tag": "v2.0.1", "notes": "",
+           "url": "https://github.com/Godimas101/claude-usage-monitor/releases/tag/v2.0.1"}
+
+
+@pytest.fixture
+def tracker_for() -> Callable[..., Any]:
+    """UpdateTracker(settings) that has just found ``release`` (a check that answers at once)."""
+    app = pytest.importorskip("usage_monitor.app")
+
+    def make(settings: Settings, release: dict[str, Any] | None = RELEASE) -> Any:
+        tracker = app.UpdateTracker(settings, lambda repo, current, on_result, on_error=None: on_result(release))
+        tracker.start_check()
+        return tracker
+
+    return make
+
+
+def test_a_v1_user_who_never_chose_is_told_about_the_first_release(
+    v1_file: Path, opened: Callable[[Path], Settings], tracker_for: Callable[..., Any],
+) -> None:
+    assert fixture_data()["check_updates"] is True and fixture_data()["skip_version"] == ""
+    assert "notified_version" not in fixture_data()
+    tracker = tracker_for(opened(v1_file))
+    assert tracker.announcement() == RELEASE
+
+
+def test_a_v1_user_who_switched_the_update_check_off_is_never_told(
+    v1_file: Path, opened: Callable[[Path], Settings], tracker_for: Callable[..., Any],
+) -> None:
+    with_values(v1_file, check_updates=False)
+    tracker = tracker_for(opened(v1_file))
+    assert tracker.announcement() is None
+    assert tracker.info == RELEASE                          # whatever did find it stays known (the API shows it)
+
+
+def test_a_release_skipped_in_v1_stays_skipped_and_the_next_one_is_announced(
+    v1_file: Path, opened: Callable[[Path], Settings], tracker_for: Callable[..., Any],
+) -> None:
+    with_values(v1_file, skip_version="2.0.1")
+    settings = opened(v1_file)
+    skipped = tracker_for(settings)
+    assert skipped.announcement() is None and skipped.offered() is None
+    newer = tracker_for(settings, dict(RELEASE, version="2.0.2", tag="v2.0.2"))
+    assert newer.announcement()["version"] == "2.0.2"
+
+
+def test_being_told_is_remembered_in_the_file_and_the_v1_keys_stay_as_they_were(
+    v1_file: Path, opened: Callable[[Path], Settings], tracker_for: Callable[..., Any],
+) -> None:
+    settings = opened(v1_file)
+    tracker_for(settings).mark_announced()
+    settings.close()
+    on_disk = stored(v1_file)
+    assert on_disk["notified_version"] == "2.0.1"
+    for key, value in fixture_data().items():               # a rollback to v1 still finds everything it wrote
+        assert on_disk[key] == value, key
+    reopened = tracker_for(opened(v1_file))                 # the next launch finds the same release
+    assert reopened.announcement() is None and reopened.offered() == RELEASE
+    newer = tracker_for(opened(v1_file), dict(RELEASE, version="2.1.0", tag="v2.1.0"))
+    assert newer.announcement()["version"] == "2.1.0"
+
+
+def test_a_notified_version_nobody_can_read_is_the_same_as_none(
+    v1_file: Path, opened: Callable[[Path], Settings], tracker_for: Callable[..., Any],
+) -> None:
+    for garbage in (5, None, ["2.0.1"], {"a": 1}, "not a version"):
+        with_values(v1_file, notified_version=garbage)
+        assert tracker_for(opened(v1_file)).announcement() == RELEASE, repr(garbage)

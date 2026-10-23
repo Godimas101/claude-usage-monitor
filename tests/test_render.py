@@ -1110,6 +1110,27 @@ def test_dump_frames_rejects_unknown_states(tmp_path: Path):
         dump.dump_frames(tmp_path, themes=["nostromo"], states=["sideways"])
 
 
+def test_the_scoped_sample_states_are_the_not_live_states_with_a_third_row():
+    """What a widget shows on an account that has the Fable row while the sign-in is lost or the network is down."""
+    assert dump.SCOPED_STATE_NAMES == ("stale3", "offline3", "paused3", "rate_limited3")
+    assert dump.DUMP_STATE_NAMES == dump.STATE_NAMES + dump.SCOPED_STATE_NAMES
+    assert len(dump.STATE_NAMES) == 10, "the contact sheet and the existing sweeps keep their ten states"
+    for name in dump.SCOPED_STATE_NAMES:
+        plain, scoped = dump.sample_model(name[:-1]), dump.sample_model(name)
+        assert scoped.status == plain.status and scoped.stale == plain.stale
+        assert [row.key for row in scoped.rows[:2]] == [row.key for row in plain.rows] == ["session", "weekly"]
+        assert len(scoped.rows) == 3 and scoped.rows[2].key.startswith("scoped:")
+        assert scoped.rows[2].percent == 4.0
+
+
+def test_dump_frames_renders_the_scoped_states_too(tmp_path: Path):
+    report = dump.dump_frames(tmp_path, themes=["nostromo"], variants=["amber"], states=["offline3", "rate_limited3"],
+                              scales=[1.0])
+    variant_dir = tmp_path / "nostromo" / "amber"
+    assert report.files == 2 * (1 + len(dump.TASKBAR_HEIGHTS_AT_1X) + 1) + 2 * 4
+    assert (variant_dir / "floating_offline3_x1.png").is_file() and (variant_dir / "tray_rate_limited3_16.png").is_file()
+
+
 def test_unknown_theme_is_reported(tmp_path: Path):
     with pytest.raises(KeyError):
         dump.dump_frames(tmp_path, themes=["no-such-theme"])

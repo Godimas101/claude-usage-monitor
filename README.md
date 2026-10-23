@@ -32,12 +32,12 @@ A free Windows tray utility that keeps your **Claude Code plan usage** where you
 | 📈 | **Every limit that applies to you:** the 5-hour session, the 7-day week, and per-model weekly limits such as Fable, each with its reset time and a pace line (usage against time). |
 | 🔮 | **Forecasts:** when you would hit the session limit at this rate, where the week is heading, and what a day's budget is. |
 | 💸 | **API-equivalent cost at list prices**, and how many times over your plan has paid for itself. Never confused with a bill. |
-| 🧠 | **Nerds only:** cache hit rate, thinking share, context size, tool use, commits, pushes and pull requests, straight from your own transcripts. |
+| 🧠 | **Efficiency:** cache hit rate, thinking share, context size, tool use, commits, pushes and pull requests, straight from your own transcripts. |
 | 🗓️ | **History that lasts:** a year of use as a heatmap, streaks, an all-time token odometer and CSV or JSON export. It outlives Claude Code's transcript cleanup. |
 | 🔔 | **Alerts** as Windows notifications at the levels you choose (80, 90 and 100% by default), when a limit resets, and when usage credits start being used. Quiet hours included. |
-| 🎨 | **Three themes**, switched live: Nostromo, Night City and Gates. |
+| 🎨 | **Three themes**, switched live: Nostromo, Night City and Gates, each with motion of its own. |
 | 🔒 | **All local.** No account, no telemetry, no server of ours. The only network calls are listed [below](#-privacy). |
-| 😴 | **Polite:** it pauses while your screen is locked, hides the strip while a fullscreen app runs, and only redraws when something changes. |
+| 😴 | **Polite:** it pauses while your screen is locked, hides the strip while a fullscreen app runs, and only redraws when something changes. **Reduce motion** stops every animation, and the dashboard and the widgets' pointer response also follow Windows' own animation setting. |
 
 ## 🎨 Themes
 
@@ -45,7 +45,7 @@ Pick one in **Settings → Theme**. It changes everywhere at once (widgets, tool
 
 ### Nostromo (the default)
 
-Amber P3 phosphor on CRT black: segmented pip bars, chamfered panels, scanlines and glow, and a short typed boot log when the dashboard opens (a click skips it). It is the only theme whose widgets blink (the little "alive" mark). Eight phosphors: **Amber** (default), **Green**, **White**, **Red**, **Blue**, **Cyan**, **Orange** and **Purple**.
+Amber P3 phosphor on CRT black: segmented pip bars, chamfered panels, scanlines and glow, and a short typed boot log when the dashboard opens (a click skips it). Pages print themselves in: the numbers are typed out behind a block cursor and the pips light cell by cell. It is the only theme whose widgets blink (the little "alive" mark). Eight phosphors: **Amber** (default), **Green**, **White**, **Red**, **Blue**, **Cyan**, **Orange** and **Purple**.
 
 <p align="center">
   <img src="docs/images/theme-nostromo.png" width="880" alt="Nostromo: the floating widget, its hover tooltip, the tray icon in four states and the taskbar strip" />
@@ -61,7 +61,7 @@ Amber P3 phosphor on CRT black: segmented pip bars, chamfered panels, scanlines 
 <p align="center"><img src="docs/images/variants-nostromo.png" width="880" alt="The eight Nostromo phosphors" /></p>
 <p align="center"><img src="docs/images/dashboard-nostromo-limits.png" width="880" alt="Nostromo, Limits page" /></p>
 <p align="center"><img src="docs/images/dashboard-nostromo-cost.png" width="880" alt="Nostromo, Cost and value page" /></p>
-<p align="center"><img src="docs/images/dashboard-nostromo-nerds.png" width="880" alt="Nostromo, Nerds only page" /></p>
+<p align="center"><img src="docs/images/dashboard-nostromo-efficiency.png" width="880" alt="Nostromo, Efficiency page" /></p>
 <p align="center"><img src="docs/images/dashboard-nostromo-history.png" width="880" alt="Nostromo, History page" /></p>
 <p align="center"><img src="docs/images/dashboard-nostromo-settings.png" width="880" alt="Nostromo, Settings page" /></p>
 
@@ -69,7 +69,7 @@ Amber P3 phosphor on CRT black: segmented pip bars, chamfered panels, scanlines 
 
 ### Night City
 
-Chamfered frames, red line art and cyan RAM cells, and a one-shot RGB glitch on the dashboard's numbers when fresh data changes them. The tray icon is a RAM meter. Dark only. Four colourways: **Blackwall** (default), **Relic**, **Edgerun** (yellow plates) and **Mox** (pink).
+Chamfered frames, red line art and cyan RAM cells, numbers that decode and lock in as a page opens, a jack-in boot sequence (once per session, a click skips it) and a one-shot RGB glitch on the dashboard's numbers when fresh data changes them. The tray icon is a RAM meter. Dark only. Four colourways: **Blackwall** (default), **Relic**, **Edgerun** (yellow plates) and **Mox** (pink).
 
 <p align="center">
   <img src="docs/images/theme-night-city.png" width="880" alt="Night City: the floating widget, its hover tooltip, the RAM-meter tray icon in four states and the taskbar strip" />
@@ -85,7 +85,7 @@ Chamfered frames, red line art and cyan RAM cells, and a one-shot RGB glitch on 
 <p align="center"><img src="docs/images/variants-night-city.png" width="640" alt="The four Night City colourways" /></p>
 <p align="center"><img src="docs/images/dashboard-night-city-limits.png" width="880" alt="Night City, Limits page" /></p>
 <p align="center"><img src="docs/images/dashboard-night-city-cost.png" width="880" alt="Night City, Cost and value page" /></p>
-<p align="center"><img src="docs/images/dashboard-night-city-nerds.png" width="880" alt="Night City, Nerds only page" /></p>
+<p align="center"><img src="docs/images/dashboard-night-city-efficiency.png" width="880" alt="Night City, Efficiency page" /></p>
 <p align="center"><img src="docs/images/dashboard-night-city-history.png" width="880" alt="Night City, History page" /></p>
 <p align="center"><img src="docs/images/dashboard-night-city-settings.png" width="880" alt="Night City, Settings page" /></p>
 
@@ -93,7 +93,7 @@ Chamfered frames, red line art and cyan RAM cells, and a one-shot RGB glitch on 
 
 ### Gates
 
-Native Windows 11 Fluent surfaces: rounded cards, a thin time rail above every usage bar and one lamp for the link. It follows your **Windows accent colour** by default (or pick Blue, Teal, Purple, Rose, Orange or Green) and your **light or dark** mode, or you can fix either in Settings. It uses the fonts Windows already has. Its widgets never blink or glow, and the dashboard keeps to small transitions. A Windows accent too close to a status colour (red, yellow, green or grey) is kept for the window's chrome, and normal usage is drawn in Windows' default blue instead.
+Native Windows 11 Fluent surfaces: rounded cards, a thin time rail above every usage bar and one lamp for the link. It follows your **Windows accent colour** by default (or pick Blue, Teal, Purple, Rose, Orange or Green) and your **light or dark** mode, or you can fix either in Settings. It uses the fonts Windows already has. Its widgets never blink or glow. The dashboard opens on a Windows 11-style loading screen (a click skips it), and its pages fade and rise, its numbers roll up and its bars fill on Fluent's easing curve. A Windows accent too close to a status colour (red, yellow, green or grey) is kept for the window's chrome, and normal usage is drawn in Windows' default blue instead.
 
 <p align="center">
   <img src="docs/images/theme-gates.png" width="880" alt="Gates in dark mode: the floating widget, its hover tooltip, the ring tray icon in four states and the taskbar strip" />
@@ -111,7 +111,7 @@ Native Windows 11 Fluent surfaces: rounded cards, a thin time rail above every u
 <p align="center"><img src="docs/images/variants-gates.png" width="880" alt="Four of the seven Gates accents (system, teal, rose and green) in dark and light mode" /></p>
 <p align="center"><img src="docs/images/dashboard-gates-limits.png" width="880" alt="Gates, Limits page" /></p>
 <p align="center"><img src="docs/images/dashboard-gates-cost.png" width="880" alt="Gates, Cost and value page" /></p>
-<p align="center"><img src="docs/images/dashboard-gates-nerds.png" width="880" alt="Gates, Nerds only page" /></p>
+<p align="center"><img src="docs/images/dashboard-gates-efficiency.png" width="880" alt="Gates, Efficiency page" /></p>
 <p align="center"><img src="docs/images/dashboard-gates-history.png" width="880" alt="Gates, History page" /></p>
 <p align="center"><img src="docs/images/dashboard-gates-settings.png" width="880" alt="Gates, Settings page" /></p>
 
@@ -126,9 +126,9 @@ Native Windows 11 Fluent surfaces: rounded cards, a thin time rail above every u
 | **Floating widget** | Always on top, never steals focus and has no taskbar button. Drag it anywhere; it remembers its spot (the first time, it sits in the bottom-right corner above the tray). **Double-click** opens the dashboard, **right-click** opens the menu. Optional: transparent background, text effects, and **hide in fullscreen**. |
 | **Taskbar strip** | A compact `5H` and `7D` readout as tall as your taskbar, just left of the notification area. Click opens the dashboard, right-click opens the menu. Windows 11's taskbar cannot host real deskbands without extra tools, so the strip is a small topmost window kept in place and re-raised every half second, which looks like the real thing and needs nothing else installed. It needs a horizontal taskbar that does not auto-hide, and it steps aside while a fullscreen app is in front. |
 | **Tray icon** | Draws your session usage. **Click** opens the dashboard; **right-click** gives the menu: open the dashboard, show or hide each widget, refresh now, report a bug, update, exit. Launching the app a second time just opens the dashboard too. |
-| **Hover tooltip** | Rest the pointer on a widget for about 0.4 seconds to see the exact percentages, reset times and pace for every limit. |
+| **Hover tooltip** | Rest the pointer on a widget for about 0.4 seconds to see the exact percentages, reset times and pace for every limit. The widget answers the pointer too, in its theme's own way: Nostromo brightens, Night City glitches once, Gates lifts a little. **Reduce motion** and Windows' animation setting turn that off. |
 
-Each usage bar comes with a thin **time line**: how much of that window has already passed. A bar ahead of its line means you are using the window faster than an even pace. The pace verdict is **on pace** while usage is within 10 points of the clock, **ahead** when it leads by more than that, and **behind** (some themes say *under pace*) when it trails by more. Bars turn to *warning* at 75% and *critical* at 90%, unless the usage API reports its own severity. A scoped limit (such as Fable) gets its own row once it is in use, and **Scoped rows** in Settings can force it on or off. (Gates keeps its card one height in every state, so there the scoped row makes way for a one-line summary while the session or the week is at warning or above, or the link is not live.)
+Each usage bar comes with a thin **time line**: how much of that window has already passed. A bar ahead of its line means you are using the window faster than an even pace. The pace verdict is **on pace** while usage is within 10 points of the clock, **ahead** when it leads by more than that, and **behind** (some themes say *under pace*) when it trails by more. Bars turn to *warning* at 75% and *critical* at 90%, unless the usage API reports its own severity. A scoped limit (such as Fable) gets its own row once it is in use, and **Scoped rows** in Settings can force it on or off. (On Gates the floating widget grows by a row for each scoped limit it shows.) The strip and the tray icon mark every state apart: sign-in lost, offline, rate limited and paused each get a mark of their own in every theme.
 
 **Screen lock.** While your workstation is locked or a screensaver runs, the monitor stops asking the API (the status reads **PAUSED**), and a locked screen stops the animations too. When you come back it refreshes at once.
 
@@ -141,11 +141,11 @@ Open it from the tray icon, a widget click, or by starting the app again. It is 
 | **Overview** | The session, weekly and first scoped limit with reset times, pace and forecast; this cycle's API-equivalent cost and the plan multiple with a 30-day chart; cache and thinking; model mix; where the week went; burn rate in tokens per minute. |
 | **Limits** | Every limit window on its own card: where it is, a chart of the readings with the even-pace line and a forecast, time left, budget per day and the projected end. Also your usage credits (real money) and the weekly split by surface. |
 | **Cost & value** | How many times over your plan has paid for itself, month by month; cost for the session, today, 7 days, the month, your billing cycle and all time; breakdowns by model, by folder (the repository the work happened in) and by launch folder; main threads against subagents; Haiku share; fast mode; your priciest sessions this week. |
-| **Nerds only** | Cache hit rate and what caching saved, thinking share, context size (average, median, p95), compactions, built-in and MCP tool use and error rate, lines changed, files created, commits, pushes, pull requests, cost per PR, effort mix, exact token counts and data health. Hover a figure to see what it means. |
+| **Efficiency** | Cache hit rate and what caching saved, thinking share, context size (average, median, p95), compactions, built-in and MCP tool use and error rate, lines changed, files created, commits, pushes, pull requests, cost per PR, effort mix, exact token counts and data health. Hover a figure to see what it means. |
 | **History** | The all-time token odometer with some fun comparisons, a calendar of every day for a year, an hour-by-weekday heatmap, streaks and records, and **Export** of your daily totals as CSV or JSON. |
 | **Settings** | Theme, accent and mode; widgets and display; how often to fetch (1 to 60 minutes); billing day; plan price override; alerts; start with Windows; updates. |
 
-There is also an **About** page with the version, credits and links.
+There is also an **About** page with the version, credits and links. An older `#nerds` link or bookmark (the page's old name) still opens Efficiency. Every page draws all its cards at once, with placeholders in the theme's own style, and the numbers arrive into them; a page you have already seen shows its last numbers straight away while it refreshes.
 
 ## 📡 Data Sources
 
@@ -178,7 +178,7 @@ Everything stays on your PC. There is no account, no telemetry and no server of 
 | When | To | What |
 |---|---|---|
 | Every fetch (15 minutes by default, or when you press Refresh) | `api.anthropic.com` | The usage request, with your Claude Code sign-in token. The token goes nowhere else, and a redirect never gets to carry it. |
-| At start-up and on **Check for updates now** (switch it off in Settings → System) | `api.github.com` | An anonymous request for this repository's latest release. |
+| At start-up, every six hours after that, and on **Check for updates now** (switch it off in Settings → System) | `api.github.com` | An anonymous request for this repository's latest release. |
 | Only when you click **Install update** | `github.com` and GitHub's download servers | The download of the installer. |
 | Only when you open the **About** page | `raw.githubusercontent.com` | An anonymous request for the supporters list, cached for an hour. |
 
@@ -188,7 +188,7 @@ The **installer** (not the app) has one more optional download: Microsoft's smal
 
 **Install:** download the installer from the [latest release](https://github.com/Godimas101/claude-usage-monitor/releases/latest) and run it. The app goes to `%LOCALAPPDATA%\ClaudeUsageMonitor` and a Start menu entry is added. The **Start with Windows** box is ticked on a first install, and you can change it any time in Settings → System. If the monitor is running, the installer asks you to close it first. If the WebView2 runtime is missing, it offers to download Microsoft's small installer for it; say no and the dashboard opens in your browser instead.
 
-**Update:** the monitor looks for a newer release once, when it starts (switch that off in Settings → System). When there is one, the tray menu shows **Update to vX** and Settings → System offers **Install update** and **Skip this version**. Installing downloads the installer from this project's GitHub release, checks it against the SHA-256 checksum GitHub lists for that file, runs it silently and relaunches the app. If the link or the checksum is not right, or the release has none, nothing is run and the release page opens in your browser instead. The check shows that the file is the one GitHub lists for the release; it does not prove who published it, and the installer is not code-signed. You can also just run the newer installer over the old one. Your settings, history and Start with Windows choice are kept, and v1 users keep their settings too (the colour you picked in v1 becomes the matching Nostromo phosphor).
+**Update:** the monitor looks for a newer release when it starts and again every six hours while it runs (switch that off in Settings → System). A release it finds is announced once with a Windows notification (click it to open the dashboard) and then stays on offer in three places: **Update to vX** in the tray menu, a banner at the top of every dashboard page but Settings with **Update now**, **Release notes** and **Skip this version**, and **Install update** in Settings → System. A version you skip is never announced, nothing is announced while the check is off, and the notification waits for a moment you can see it: not while the PC is locked, a fullscreen app is in front or your quiet hours are on. Installing downloads the installer from this project's GitHub release, checks it against the SHA-256 checksum GitHub lists for that file, runs it silently and relaunches the app. If the link or the checksum is not right, or the release has none, nothing is run and the release page opens in your browser instead. The check shows that the file is the one GitHub lists for the release; it does not prove who published it, and the installer is not code-signed. You can also just run the newer installer over the old one. Your settings, history and Start with Windows choice are kept, and v1 users keep their settings too (the colour you picked in v1 becomes the matching Nostromo phosphor).
 
 **Uninstall:** Settings → Apps → Installed apps → Claude Usage Monitor → Uninstall. It asks whether to delete your settings, usage history and logs in `%APPDATA%\ClaudeUsageMonitor`. They stay unless you say yes (a silent uninstall never deletes them).
 

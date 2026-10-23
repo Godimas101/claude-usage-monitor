@@ -44,6 +44,8 @@ WINDOW_TITLE = "Claude Usage Monitor"
 TOKEN_ENV = "CUM_DASHBOARD_TOKEN"
 DEFAULT_SIZE = (1200, 780)
 MIN_SIZE = (720, 480)
+# What the window shows until the page has painted, when the active theme's own page colour is not known (Nostromo's black).
+DEFAULT_BACKGROUND = "#090909"
 
 # Exit codes of the child. 0 is a window that was shown and closed. The two fallbacks differ on
 # purpose: a missing web view is the machine's doing, a failing window call is ours (a test must
@@ -499,14 +501,32 @@ def _api_call(base: str, token: str, method: str, path: str, body: Any = None, t
         return json.loads(response.read(256 * 1024).decode("utf-8"))
 
 
-def _saved_bounds(base: str, token: str) -> dict[str, int] | None:
+def _read_state(base: str, token: str) -> dict[str, Any] | None:
+    """GET /api/state from the monitor: what the window needs before it opens (its saved bounds and the theme's page
+    colour). None when it cannot be read; the window then opens at the default size on the default background."""
     try:
         state = _api_call(base, token, "GET", "/api/state")
     except (OSError, ValueError):
-        log.warning("dashboard could not read its saved window size")
+        log.warning("dashboard could not read the monitor's state; opening at the default size")
         return None
-    bounds = (state.get("settings") or {}).get("dashboard_bounds")
+    return state if isinstance(state, dict) else None
+
+
+def _saved_bounds(state: Any) -> dict[str, int] | None:
+    settings = state.get("settings") if isinstance(state, dict) else None
+    bounds = settings.get("dashboard_bounds") if isinstance(settings, dict) else None
     return bounds if isinstance(bounds, dict) else None
+
+
+def _window_background(state: Any) -> str:
+    """The colour the window shows until the page has painted (pywebview's ``background_color``): the active theme's page
+    background, ``--bg`` of the state's ``theme.css_vars``, which the server also bakes into the first paint. A light Gates
+    window then opens light instead of black and jumping to light. DEFAULT_BACKGROUND when the state has no usable one
+    (pywebview takes a ``#rrggbb`` colour only)."""
+    theme = state.get("theme") if isinstance(state, dict) else None
+    css = theme.get("css_vars") if isinstance(theme, dict) else None
+    value = css.get("--bg") if isinstance(css, dict) else None
+    return value if isinstance(value, str) and _HEX_COLOUR.fullmatch(value) else DEFAULT_BACKGROUND
 
 
 def _save_bounds(base: str, token: str, bounds: dict[str, int]) -> None:
@@ -618,7 +638,8 @@ def dashboard_main(argv: list[str] | None = None) -> int:
         return EXIT_NO_ARGS
     base = f"http://127.0.0.1:{args.port}"
     url = base + "/"
-    saved = _saved_bounds(base, token)
+    state = _read_state(base, token)
+    saved = _saved_bounds(state)
 
     try:
         import webview  # noqa: PLC0415  (pywebview is optional at import time)
@@ -630,7 +651,7 @@ def dashboard_main(argv: list[str] | None = None) -> int:
     api = DashboardApi(token, base)
     try:
         window = webview.create_window(
-            WINDOW_TITLE, url, js_api=api, min_size=MIN_SIZE, background_color="#090909",
+            WINDOW_TITLE, url, js_api=api, min_size=MIN_SIZE, background_color=_window_background(state),
             **_geometry(saved),
         )
     except Exception:  # our own call failed (a bug or a pywebview change): still show the page, but say so

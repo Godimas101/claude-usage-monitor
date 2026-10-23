@@ -3,7 +3,9 @@
 # Shared across the SE tool suite. Pure stdlib, no external deps. Every network
 # path of the CHECK fails silent: offline, rate-limited, or a bad response just
 # means "no update" - never an error dialog, never a hang. The check runs on a
-# daemon thread so the UI never blocks on it.
+# daemon thread so the UI never blocks on it. The app runs it at start and again
+# every six hours (app.UPDATE_RECHECK_S): one small GET each time, so a failed
+# run costs nothing and is simply tried again later.
 #
 # Self-update works because the installers are per-user (PrivilegesRequired=
 # lowest, installing under %localappdata%): a new installer overwrites in place
@@ -91,6 +93,15 @@ def _ver_tuple(s):
     """'v1.2.0' / '1.2.0-beta.3' -> (1, 2, 0).  () if unparseable."""
     m = re.search(r"(\d+(?:\.\d+)*)", s or "")
     return tuple(int(p) for p in m.group(1).split(".")) if m else ()
+
+
+def is_newer(version, than) -> bool:
+    """True when version ``version`` is strictly newer than ``than`` ('2.1.0' over '2.0.9', '3.0' over '2.9.9').
+
+    The same comparison _check makes against the running version. Text that holds no number ('', 'nightly') is
+    older than every real version, and a value that is not text at all is read as empty (a settings file that
+    was edited by hand can hold anything)."""
+    return _ver_tuple(version if isinstance(version, str) else "") > _ver_tuple(than if isinstance(than, str) else "")
 
 
 def is_frozen() -> bool:
@@ -208,12 +219,18 @@ def _get_json(url, repo, timeout):
 
 # --- The check ---------------------------------------------------------------
 
-def check_async(repo, current_version, on_result, *, timeout=6):
+def check_async(repo, current_version, on_result, *, timeout=6, on_error=None):
     """Look up the latest GitHub release on a daemon thread.
 
     Calls on_result(info) exactly once: info is a dict when a strictly newer
     release exists, else None (also None on any error). on_result runs on the
     worker thread - marshal to your UI thread inside it.
+
+    A caller that must tell "nothing newer" from "could not look" passes
+    on_error: when the lookup fails (offline, DNS, rate limited, GitHub down,
+    a bad repo name) it is called with the exception, on the worker thread and
+    before on_result(None), which still follows. It is never called for a lookup
+    that got an answer, newer or not. An exception it raises is ignored.
 
     info: version, tag, url (release page), notes, and for the installer asset
     asset_url (None when there is no usable one), asset_name, asset_digest
@@ -222,14 +239,22 @@ def check_async(repo, current_version, on_result, *, timeout=6):
     def worker():
         try:
             result = _check(repo, current_version, timeout)
-        except Exception:
+        except Exception as exc:
+            # Silent for the user: no dialog, nothing in the log at its default level. The app looks again every six
+            # hours, so a lookup that fails (offline, rate limited, GitHub down) is simply tried again later.
+            log.debug("update check failed: %s", type(exc).__name__)
             result = None
+            if on_error is not None:
+                try:
+                    on_error(exc)
+                except Exception:
+                    pass
         try:
             on_result(result)
         except Exception:
             pass
 
-    threading.Thread(target=worker, daemon=True).start()
+    threading.Thread(target=worker, name="update-check", daemon=True).start()
 
 
 def _check(repo, current_version, timeout):

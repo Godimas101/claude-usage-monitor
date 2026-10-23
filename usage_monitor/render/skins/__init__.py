@@ -7,6 +7,21 @@ imported lazily, which keeps this package importable without Pillow drawing code
 Every skin method takes the same arguments: the model, the theme, the variant (a Theme and a
 Variant from usage_monitor.themes, or any objects with the same attributes), a scale or a size,
 and opts. Colours come only from the variant's tokens.
+
+Two more methods are optional. ui/widgets.py looks them up with getattr, so a skin (or a test double)
+without them still works and behaves as if it answered "nothing":
+
+    content_insets(surface, theme, model, scale) -> (left, top, right, bottom)
+        The transparent pixels between the edge of a frame and the visible card in it (a frame with a soft
+        shadow has them), at the frame's scale, for the surface "floating", "taskbar" or "tooltip". The widgets
+        place the card, not the padded frame: the default corner, the clamp to the screen and the tooltip's
+        gap all measure from it. model.NO_INSETS is the default.
+    hover_frames(frame, surface, scale, opts) -> model.HoverPlay | None
+        What the surface does when the pointer enters it, pre-rendered from the frame it is showing: a few
+        frames and the time each stays up, and whether the last one is held while the pointer stays. None is
+        no response. The widgets play it, and never under reduce_motion or Windows' animations-off switch.
+
+Statuses with no room for words (the strip, the tray icon) are drawn by lamp kind: see model.LAMP_KINDS.
 """
 from __future__ import annotations
 

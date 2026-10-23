@@ -12,6 +12,13 @@
  *   - reads the accent colours from /api/themes (the call app.js makes too) and flags html[data-g-swatches].
  * Nothing here stores or prints a token, a message or a file. app.js calls window.CUM_THEME_FX.gates.start() once this
  * file has loaded and again whenever the theme is applied; the script watches data-theme and stops when it is not gates.
+ *
+ * The motion layer (motion.js, gates.motion.css) is Windows 11 Fluent: enter(main, page) plays the page's entrance (the
+ * cards fade and rise 8 px, staggered; the figures roll up; the bars fill on the decelerate curve), cancel(main) finishes it,
+ * and arrive(card) plays the roll and the fill for a card whose data has just landed (until then a figure and a bar are the
+ * Fluent shimmer skeleton). The loading screen is Windows 11's: a full-window Mica surface with the app glyph, the name,
+ * the five dots that orbit and a line of status, once per browser session, a click or Esc skips it, never under reduced
+ * motion; the dashboard's entrance plays as it fades.
  */
 (function () {
   "use strict";
@@ -42,6 +49,7 @@
   var PHRASES = { "NONE": "None", "TOK / MIN": "Tokens / min" };
   var SVG_WORDS = { TODAY: "Today", NOW: "Now", LESS: "Less", MORE: "More", AVG: "Avg" };
 
+  var FX = window.CUM_FX || null;
   var active = false;
   var screen = null;
   var observer = null;
@@ -352,6 +360,135 @@
     });
   }
 
+  // ── the motion layer ────────────────────────────────────────────────────────────
+
+  /* Calm and traditional. Card i starts at 30 + 30 i ms; `at` is ms after the card starts. The figures roll up on the Fluent
+   * decelerate curve cubic-bezier(0.1, 0.9, 0.2, 1); a bar fills on the same curve (barMs, in motion.js). The figures are
+   * read after this file's own re-casing (defer: a microtask), so "13%" rolls as "13" with its small "%". */
+  var dir = FX ? FX.director({
+    id: THEME, c0: 30, step: 30, total: 940, landMs: 700, barMs: 520, ghost: true, defer: true,
+    card: [{ sel: ".nm-big:not(.is-text), .nm-stat-v:not(.is-text), .nm-mrow .v", at: 70, dur: 500 }],
+    fallback: { at: 70, dur: 500 },
+    make: function (owner, el, at, g, style) {
+      return FX.roller(owner, el, at, g.dur, style);
+    }
+  }) : null;
+
+  // ── the loading screen ──────────────────────────────────────────────────────────
+
+  var BOOT_HOLD_MS = 1350;       // the screen stays this long, then it leaves (333 ms): about 1.7 s in all
+  var BOOT_LEAVE_MS = 333;       // Fluent's long duration
+  var bootChecked = false;
+  var bootAbort = null;
+
+  function reducedMotion() {
+    if (ROOT.getAttribute("data-reduce-motion") === "1") {
+      return true;
+    }
+    return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  }
+
+  function buildBoot() {
+    var box = document.createElement("div");
+    box.className = "g-boot";
+    box.setAttribute("aria-hidden", "true");
+    box.hidden = true;
+    var inner = document.createElement("div");
+    inner.className = "g-b-in";
+    var brand = document.querySelector(".nm-brand svg");
+    if (brand) {
+      var glyph = brand.cloneNode(true);       // the dashboard's own glyph, so the two never differ
+      glyph.removeAttribute("width");
+      glyph.removeAttribute("height");
+      glyph.setAttribute("class", "g-b-glyph");
+      inner.appendChild(glyph);
+    }
+    var rest = document.createElement("div");
+    rest.innerHTML = '<div class="g-b-title">Claude Usage Monitor</div>' +
+      '<div class="g-ring"><i></i><i></i><i></i><i></i><i></i></div>' +
+      '<div class="g-b-status">Getting your usage ready</div>';
+    while (rest.firstChild) {
+      inner.appendChild(rest.firstChild);
+    }
+    box.appendChild(inner);
+    return box;
+  }
+
+  function playBoot() {
+    var ov = buildBoot();
+    screen.appendChild(ov);
+    var left = false;
+    var holdTimer = 0;
+    var hideTimer = 0;
+
+    function cleanup() {
+      ov.removeEventListener("click", leave);
+      document.removeEventListener("keydown", onKey);
+    }
+
+    function hide() {
+      window.clearTimeout(holdTimer);
+      window.clearTimeout(hideTimer);
+      cleanup();
+      if (ov.parentNode) {
+        ov.parentNode.removeChild(ov);
+      }
+      bootAbort = null;
+    }
+
+    function leave() {
+      if (left) {
+        return;
+      }
+      left = true;
+      window.clearTimeout(holdTimer);
+      cleanup();
+      FX.boot.mark(THEME);
+      ov.classList.add("is-out");
+      FX.boot.end();                           // the dashboard rises as the screen fades: a crossfade
+      hideTimer = window.setTimeout(hide, BOOT_LEAVE_MS + 40);
+    }
+
+    function onKey(event) {
+      if (event.key === "Escape" || event.key === "Enter" || event.key === " ") {
+        leave();
+      }
+    }
+
+    ov.hidden = false;
+    ov.classList.add("is-on");
+    ov.addEventListener("click", leave);
+    document.addEventListener("keydown", onKey);
+    FX.boot.begin();                           // the screen covers the page: the curtain goes, the entrance waits
+    holdTimer = window.setTimeout(leave, BOOT_HOLD_MS);
+    /* the theme changed or reduce motion was switched on while it plays: gone at once */
+    bootAbort = function () {
+      if (!left) {
+        left = true;
+        FX.boot.mark(THEME);
+        FX.boot.end();
+      }
+      hide();
+    };
+  }
+
+  function maybeBoot() {
+    if (bootChecked || !FX || !screen) {
+      return;
+    }
+    bootChecked = true;
+    if (reducedMotion()) {
+      FX.boot.mark(THEME);                     // no screen, flag set, the page at once
+      FX.boot.release();
+      return;
+    }
+    if (!FX.boot.due(THEME)) {
+      FX.boot.release();
+      return;
+    }
+    playBoot();
+  }
+
   // ── life cycle ──────────────────────────────────────────────────────────────────
 
   function start() {
@@ -369,6 +506,10 @@
     observer = new MutationObserver(onMutations);
     observer.observe(screen, { childList: true, subtree: true, characterData: true });
     loadSwatches();
+    if (FX) {
+      FX.watch(document.getElementById("main"));
+      maybeBoot();
+    }
   }
 
   function stop() {
@@ -376,6 +517,9 @@
       return;
     }
     active = false;
+    if (bootAbort) {
+      bootAbort();
+    }
     if (observer) {
       observer.disconnect();
       observer = null;
@@ -398,6 +542,19 @@
     }
   }).observe(ROOT, { attributes: true, attributeFilter: ["data-theme"] });
 
+  if (FX && FX.onReduced) {
+    FX.onReduced(function () {                 // reduce motion was switched on (the setting or the OS): the loading screen goes
+      if (bootAbort) {
+        bootAbort();
+      }
+    });
+  }
+
   window.CUM_THEME_FX = window.CUM_THEME_FX || {};
   window.CUM_THEME_FX.gates = { start: start };
+  if (dir) {
+    window.CUM_THEME_FX.gates.enter = dir.enter;
+    window.CUM_THEME_FX.gates.cancel = dir.cancel;
+    window.CUM_THEME_FX.gates.arrive = FX.noticeCard;
+  }
 })();

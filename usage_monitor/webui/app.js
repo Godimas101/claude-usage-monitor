@@ -1,8 +1,9 @@
 /* app.js: the dashboard client. Polls /api/state every 2 s while the window is visible (ETag, so an
- * unchanged state costs a 304), routes on the hash (#overview #limits #cost #nerds #history #settings
- * #about), and renders from the live MonitorState plus the statistics reports (/api/analytics/<name>,
- * /api/export). Settings apply at once through POST /api/settings.
- * Dependencies: charts.js (window.CUMCharts) and, for the Nostromo flavour, themes/nostromo.js.
+ * unchanged state costs a 304), routes on the hash (#overview #limits #cost #efficiency #history #settings
+ * #about; #nerds, the old name of Efficiency, still opens it), and renders from the live MonitorState plus the
+ * statistics reports (/api/analytics/<name>, /api/export). Settings apply at once through POST /api/settings.
+ * Dependencies: charts.js (window.CUMCharts). The theme's own script (themes/<id>.js, which registers
+ * window.CUM_THEME_FX[id]) and the motion layer (motion.js) are optional: without them the page is complete and still.
  * Nothing here stores a token, a message or a file body. The token comes from the page's meta tag.
  *
  * ── Markup contract for theme authors ─────────────────────────────────────────────────────────────
@@ -14,8 +15,8 @@
  * that fall back to those tokens (charts.js lists them); --chart-pips: 1 draws bars as pips.
  * Two tiny structural stylesheets (this file's and charts.js's, each inserted first in <head> so any theme rule
  * wins) make the parts work with no theme at all: hidden helper text (.nm-sr), the tooltip's position,
- * the odometer's digit strips, segmented bars (.nm-cells, .nm-ratio), the time-left bar (.nm-remain, hidden) and
- * the chart hosts. Everything
+ * the odometer's digit strips, segmented bars (.nm-cells, .nm-ratio), the time-left bar (.nm-remain, hidden), the
+ * chart hosts, and the invisible text of a value that has not arrived (see Pending). Everything
  * else, and all of the look, is the theme's. Text is natural case wherever a theme may want a different
  * one (use text-transform); the overview cards keep their approved upper case.
  *
@@ -28,6 +29,10 @@
  *             .span-7 .span-8 or .wide (all 12); below 1000 px everything is one column.
  *             .nm-colstack stacks two cards in one grid cell; .nm-toolbar (.nm-toolbar-k, .nm-toolbar-n)
  *             is a full-width row of controls.
+ * Update      .nm-update[role=status] > .nm-update-t (b: "Claude Usage Monitor vX.Y is available", span: what Update now
+ *             does) + .nm-actions (button.nm-btn[data-action=update-now | update-notes | update-skip]) + .nm-status.
+ *             The first banner of every page but Settings (which has the same buttons in its System card), present only while
+ *             /api/state reports a release that was not skipped.
  * Card        section.nm-card[.wide|.span-N][.is-warn|.is-crit|.is-real] > .nm-card-in > .nm-card-t
  *             (.nm-tag | h2.nm-ttl, and .nm-meta-t) + the body. .is-real marks the one card of real money.
  * Values      .nm-big (sizes .h .m .s), .nm-big-row, .nm-row2 (.is-base), .nm-facts, .nm-chip (.solid
@@ -49,8 +54,10 @@
  *             .d description), .nm-actions, .nm-status (.is-err), .nm-path (a file path, never changed case),
  *             .nm-err (inline validation, role=alert), .nm-levels, .nm-chips > .nm-tchip > b + button,
  *             .nm-addlevel, .nm-quiet, .nm-quiet-to, .nm-themes > .nm-theme (+ .nm-swatches), .nm-variants,
- *             .nm-mode-k, .nm-links, .nm-supp (a list of names), .nm-tier, .nm-authors.
- * States      .nm-loading, .nm-empty, .nm-error, .nm-pending, .nm-callout (.is-warn: a boxed note).
+ *             .nm-mode-k, .nm-links, .nm-supp (a list of names), .nm-tier, .nm-authors. A switched-off group
+ *             (.nm-set.is-off, Alerts) disables its controls (:disabled); its text is not dimmed.
+ * States      .nm-empty, .nm-error, .nm-pending, .nm-callout (.is-warn: a boxed note; with data-pending it keeps its room and shows
+ *             nothing, so a note that is there before and after its report does not move the card).
  * Overview    .nm-cost > .nm-cost-l (.nm-hero, .nm-plan, .nm-tiles > .nm-tile > small + .nm-big) + .nm-cost-r
  *             (.nm-chart-t, .nm-chart > the daily chart host .nm-daily). The figure in .nm-hero is
  *             .nm-big.h with style="--n:<characters>", its length, so a theme can size it to the column
@@ -63,8 +70,44 @@
  * Data hooks  data-seg / data-value (a segmented button), data-action (a button), data-key (a setting),
  *             data-quiet and data-needs-alerts (the alert form), data-fid (focus returns to this id after a
  *             redraw), data-tip (tooltip text), data-external (a link opened in the browser).
+ *
+ * ── Pending: a page is never empty ───────────────────────────────────────────────────────────────
+ * A page opens as its whole card layout in the first frame: every card, title, label, chart frame and bar track. What has
+ * not arrived yet (a report, or the first /api/state) is built from placeholder data of the right shape, so no card is
+ * missing and nothing moves when the numbers land. A card is filled in place: its element and frame stay, only its
+ * contents are replaced, and a card whose markup is unchanged is not touched at all.
+ *   Card      section.nm-card[data-card=<key>][data-state=pending | ready | error][data-needs=<report keys>]. pending: the
+ *             numbers are not in (aria-busy=true). error: the report failed; the card shows its title and one .nm-error line
+ *             in place of its contents, and the other cards are not affected. data-updating is on a card whose numbers are
+ *             on screen and are being fetched again, only once that has taken over 600 ms (a quiet cue, never a blank).
+ *   Marks     A figure (.nm-big .nm-stat-v .nm-stat-s .nm-mrow .v .nm-kv b .nm-facts spans .nm-pace spans .nm-story table
+ *             cells .nm-odo-facts b .nm-cmp-n .nm-toolbar-n), a bar (.nm-cells .nm-ratio) or a chart (.nm-chart-host .cum-spark
+ *             .cum-stack .nm-odo) whose value is not in carries data-pending (and aria-hidden). Its text is placeholder text
+ *             that only sizes the slot; the structural stylesheet makes it transparent and the theme draws what stands in its
+ *             place (a block, a cursor, noise). When the value is in: data-final=<its final text> on a figure and data-fill=<0
+ *             to 100> on a bar; and data-fresh on the ones that are new or changed in the last paint (a figure showing what
+ *             it showed before is not fresh, so a refresh of unchanged numbers replays nothing).
+ *   Revisits  The last good report of each page and window is kept in memory: a page opened again shows those numbers at
+ *             once and refreshes behind them, without a placeholder and without replaying the figures that did not change.
+ *
  * Motion      Everything that moves checks data-reduce-motion="1" on <html> (the reduce_motion setting) and
- *             prefers-reduced-motion. With either, nothing animates and the comparison does not rotate.
+ *             prefers-reduced-motion. With either, nothing animates, enter and arrive are never called (cancel still is:
+ *             it only finishes what was playing) and the comparison does not rotate. The hooks a theme script
+ *             (window.CUM_THEME_FX[id]) or the motion layer may implement:
+ *               enter(main, page)   the page just drawn into #main is due its entrance: a page was opened (a tab, a link,
+ *                                   back or forward), the dashboard started, or the theme changed. Not for a refresh of the
+ *                                   same page, a variant or colour change, or a card filled in place. It is called once the
+ *                                   theme's stylesheet and script are in and the window is shown, never waiting for reports.
+ *               cancel(main)        finish what is playing, at the final state. Called before another page or theme replaces
+ *                                   the page and when reduce_motion turns on; not when a card is filled in place.
+ *               arrive(card, info)  a card's numbers arrived or changed in place. info is { page, card, first, from, to,
+ *                                   fresh, entering, reduced }: first is true for the first numbers of a card, fresh counts
+ *                                   the figures and bars marked data-fresh, entering is true while an entrance plays.
+ *             Classes on #main: fx-run (the theme's entrance is playing; the theme sets and clears it), fx-quiet (the page just
+ *             changed under the pointer: hover effects wait until the pointer moves or the wheel turns; the page sets it and
+ *             clears it itself). fx-hold, which kept the page hidden until its reports arrived, is retired.
+ *             Events, for code that is not a theme script: cum:card-data on the card (bubbles; detail is the info above) and
+ *             cum:page-rendered on #main (detail { page, opened, reduced, updated: [card keys], added: [card keys] }).
  */
 (function () {
   "use strict";
@@ -80,12 +123,14 @@
     { key: "overview", label: "OVERVIEW", title: "OVERVIEW", sub: "Session telemetry for the current window. Pace is usage against elapsed time." },
     { key: "limits", label: "LIMITS", title: "LIMITS", sub: "Every limit window, its reset and where it is heading." },
     { key: "cost", label: "COST & VALUE", title: "COST & VALUE", sub: "API-equivalent at list prices. Not what your plan bills." },
-    { key: "nerds", label: "NERDS ONLY", title: "NERDS ONLY", sub: "Efficiency counters from your own transcripts. Hover or focus a figure to see what it means." },
+    { key: "efficiency", label: "EFFICIENCY", title: "EFFICIENCY", sub: "Efficiency counters from your own transcripts. Hover or focus a figure to see what it means." },
     { key: "history", label: "HISTORY", title: "HISTORY", sub: "A year of use, hour by hour, and the all-time odometer." },
     { key: "settings", label: "SETTINGS", title: "SETTINGS", sub: "Every change applies at once. Nothing needs a restart." },
     { key: "about", label: "ABOUT", title: "ABOUT", sub: "Claude Usage Monitor, the people behind it, and where to report problems." }
   ];
   var PAGE_KEYS = PAGES.map(function (p) { return p.key; });
+  // Old names of pages, so a saved link or a bookmark (#nerds, from before the page was called Efficiency) still opens it.
+  var PAGE_ALIASES = { nerds: "efficiency" };
   var STATUS = {
     live: { text: "UPLINK LIVE", ok: true },
     loading: { text: "ACQUIRING", ok: false },
@@ -121,6 +166,9 @@
     [60000, "1 MIN"], [300000, "5 MIN"], [600000, "10 MIN"], [900000, "15 MIN"], [1800000, "30 MIN"], [3600000, "60 MIN"]
   ];
   var BASIS = "API-equivalent at list prices";
+  // The Fast mode card's note. It is the same words before the report, with no fast-mode request and with some, so the card is
+  // as tall in all three and only its tone changes (a note that said something else per state wrapped to another line count).
+  var FAST_NOTE = "Fast mode on Pro and Max plans is billed to your usage credits, not to your plan&rsquo;s limits.";
   // Points of the clock within which a limit counts as on pace. The same number as windows.PACE_BAND_POINTS on the
   // Python side (the widgets and the pacing report use it), which tests/test_webui.py checks.
   var PACE_BAND = 10;
@@ -137,11 +185,23 @@
     ".nm-odo{display:flex;align-items:center;flex-wrap:nowrap}",
     ".nm-od-d{position:relative;display:block;flex:none;width:.6em;height:1.1em;overflow:hidden}",
     ".nm-od-d .strip{display:flex;flex-direction:column;transform:translateY(calc(var(--d,0) * -1.1em))}",
-    ".nm-od-d .strip i{display:block;flex:none;height:1.1em;line-height:1.1em;text-align:center;font-style:normal}"
+    ".nm-od-d .strip i{display:block;flex:none;height:1.1em;line-height:1.1em;text-align:center;font-style:normal}",
+    // A value that is not known yet keeps its room and shows nothing: the placeholder text under it is only there to size it.
+    // A theme draws what stands in its place (a block, a cursor, noise) with a more specific !important rule of its own.
+    "[data-pending],[data-pending] *{color:transparent!important;text-shadow:none!important}",
+    "[data-pending] .cum-t{fill:transparent!important}",
+    "[data-pending] .on,[data-pending] .part{box-shadow:none!important}",
+    // A boxed note (the Fast mode card's) that is there before its report and after it: before, it keeps its room and its text
+    // is transparent like any placeholder's, and its box is not drawn either.
+    ".nm-callout[data-pending]{border-color:transparent!important;background:transparent!important;box-shadow:none!important}",
+    // A placeholder may carry a typical number (it sizes the slot like the real one), so a pending bar never shows a fill.
+    "[data-pending] i.on,[data-pending] i.part,[data-pending] i.part::after{background:var(--track)!important}"
   ].join("\n");
   // How long a report is shown before it is fetched again, and how soon a failed one is retried.
   var STAT_TTL = { pacing: 20000, cost: 30000, efficiency: 60000, history: 120000, sessions: 60000 };
   var STAT_RETRY_MS = 5000;
+  // A report that is being refreshed behind numbers already on screen shows the "updating" cue only if it takes this long.
+  var UPDATING_DELAY_MS = 600;
   var COMPARE_MS = 8000;
 
   // One line each: what a figure means. Shown on hover or focus, and read by aria-describedby.
@@ -158,10 +218,10 @@
     "ctx-avg": "The average size of a request: everything Claude read, fresh and cached together.",
     "ctx-p50": "Half of your requests carried less context than this.",
     "ctx-p95": "Nineteen in twenty requests carried less than this. High values mean long sessions close to the context limit.",
-    "ctx-max": "The largest single request in this window.",
+    "ctx-max": "The largest single request in this window, by the API's own token count. Claude Code counts a compaction itself, so the two can differ.",
     "compactions": "Times Claude Code summarised the conversation to make room. Auto means it ran out of space; manual means you ran /compact.",
     "compactions-day": "Compactions per day you used Claude Code. Fewer usually means shorter, more focused sessions.",
-    "compact-pre": "The average size of the conversation just before it was compacted.",
+    "compact-pre": "The average conversation size just before a compaction, by Claude Code's own count. The API's request counts can differ.",
     "active-days": "Local days with at least one request in this window.",
     "tool-total": "Tool calls Claude made: reading and editing files, running commands, calling MCP servers.",
     "tool-errors": "Tool calls that came back with an error. Some are normal, like a failing test or a file that is not there.",
@@ -216,13 +276,18 @@
     stats: {},               // "<name>?<params>" -> a statistics report and how it is going
     charts: {},              // chart host id -> how to build it, for the page on screen
     nextCharts: null,
-    chartSeq: 0,
-    sig: "",                 // the markup on screen, to skip a redraw that would change nothing
+    sig: "",                 // the markup of a form page on screen, to skip a redraw that would change nothing
+    building: false,         // true while a page's markup is built: placeholders stand in where nothing has arrived
+    enterPending: true,      // an entrance is due: the first page, a page change or a theme change (see playEnterIfDue)
+    repaint: false,          // the next paint replaces every card (a theme change)
+    skipped: "",             // the version the user skipped in this window, so its banner goes at once
+    chartCard: "",           // the card whose markup is being built, and how many charts it has drawn so far
+    chartN: 0,
     exportStatus: { text: "", path: "", error: false },
     odoShown: null,
     cmpTimer: 0,
     tipApi: null,
-    ui: { costWindow: "cycle", folderMode: "folder", nerdsWindow: "cycle", calMetric: "cost", matrixMetric: "cost", cmp: 0 }
+    ui: { costWindow: "cycle", folderMode: "folder", efficiencyWindow: "cycle", calMetric: "cost", matrixMetric: "cost", cmp: 0 }
   };
 
   // ── Helpers ─────────────────────────────────────────────────────────────────────
@@ -493,6 +558,27 @@
     return res && res.data && res.data.error ? res.data.error : "HTTP " + (res ? res.status : "?");
   }
 
+  /* A status line written in capitals ("UPDATE FAILED: UPDATE APPLY FAILED"): the monitor's reason is lower case, and the Gates
+   * theme sets a line in sentence case only when all of it is capitals, so a reason left as it came would be shouted in
+   * Nostromo and Night City (which upper-case it in CSS) and left half and half in Gates. */
+  function failedText(prefix, res) {
+    return prefix + ": " + errorText(res).toUpperCase();
+  }
+
+  /* The status line after "Check for updates now". `checked` is false when the monitor could not look (offline, GitHub's rate
+   * limit, a slow answer): that is not "up to date". A monitor that sends no `checked` is taken to have looked. One sentence:
+   * the Gates theme capitalises only the first letter of a line. */
+  function checkUpdateText(res) {
+    if (!res.ok) {
+      return failedText("CHECK FAILED", res);
+    }
+    var result = res.data && res.data.result ? res.data.result : {};
+    if (result.available) {
+      return "AN UPDATE IS AVAILABLE.";
+    }
+    return result.checked === false ? "COULD NOT REACH GITHUB; TRY AGAIN LATER." : "YOU ARE UP TO DATE.";
+  }
+
   /* A short stable digest of a string: enough to tell whether a report changed. */
   function hashText(text) {
     var h = 5381;
@@ -518,9 +604,13 @@
         return;
       }
       var allowed = {
-        costWindow: WINDOW_ORDER, nerdsWindow: WINDOW_ORDER, folderMode: ["folder", "launch"],
+        costWindow: WINDOW_ORDER, efficiencyWindow: WINDOW_ORDER, folderMode: ["folder", "launch"],
         calMetric: ["cost", "tokens"], matrixMetric: ["cost", "requests"]
       };
+      // The Efficiency page was "Nerds only", and kept its window under that name: a choice saved then still holds.
+      if (saved.efficiencyWindow === undefined && saved.nerdsWindow !== undefined) {
+        saved.efficiencyWindow = saved.nerdsWindow;
+      }
       Object.keys(allowed).forEach(function (key) {
         if (allowed[key].indexOf(saved[key]) >= 0) {
           S.ui[key] = saved[key];
@@ -601,8 +691,21 @@
       return;
     }
     e.pending = true;
+    e.slow = false;
+    if (e.data) {
+      // The numbers on screen stay, and the cards that show them say so only if the refresh takes a while.
+      window.clearTimeout(e.slowTimer);
+      e.slowTimer = window.setTimeout(function () {
+        if (e.pending) {
+          e.slow = true;
+          syncUpdating($("#main"));
+        }
+      }, UPDATING_DELAY_MS);
+    }
     api("GET", e.url).then(function (res) {
       e.pending = false;
+      window.clearTimeout(e.slowTimer);
+      e.slow = false;
       if (res.ok && res.data) {
         var digest = hashText(JSON.stringify(res.data));
         e.data = res.data;
@@ -618,6 +721,8 @@
       statArrived();
     }, function () {
       e.pending = false;
+      window.clearTimeout(e.slowTimer);
+      e.slow = false;
       e.error = "the dashboard lost its link";
       e.status = 0;
       e.errAt = Date.now();
@@ -626,7 +731,7 @@
   }
 
   function statArrived() {
-    if (S.data && S.page !== "settings" && S.page !== "about") {
+    if (S.page !== "settings" && S.page !== "about") {
       renderPage();
     }
   }
@@ -640,8 +745,8 @@
         return [statEntry("pacing")];
       case "cost":
         return [statEntry("cost", { window: S.ui.costWindow })];
-      case "nerds":
-        return [statEntry("efficiency", { window: S.ui.nerdsWindow })];
+      case "efficiency":
+        return [statEntry("efficiency", { window: S.ui.efficiencyWindow })];
       case "history":
         return [statEntry("history")];
       default:
@@ -672,15 +777,63 @@
     return "Statistics could not be loaded (" + e.error + "). Trying again shortly.";
   }
 
-  /* The body of a card that waits for a report: the loading line, the problem, or the real thing. */
-  function whenLoaded(e, build) {
-    if (e.data) {
-      return build(e.data);
+  /* The one line a card shows in place of its numbers when its report failed (the whole sentence is in the banner). */
+  function statProblemShort(e) {
+    return e.status === 503 ? "Not ready yet. Trying again shortly." : e.status === 501 ? "Not available in this build." : "Could not be loaded. Trying again shortly.";
+  }
+
+  /* How a card that draws from these reports is doing: "ready" (every report is in, possibly an older one that is being
+   * refreshed), "pending" (waiting for the first answer) or "error" (a report failed and there is nothing to show). */
+  function entryState(entries) {
+    var pending = false;
+    var failed = false;
+    entries.forEach(function (e) {
+      if (!e.data) {
+        if (e.error) {
+          failed = true;
+        } else {
+          pending = true;
+        }
+      }
+    });
+    return failed ? "error" : pending ? "pending" : "ready";
+  }
+
+  /* The entry of the newest report of a kind that has arrived, whatever its parameters: the parts of a page that do not
+   * depend on the window chosen (the plan multiple, the months) keep showing it while the new window's report loads. */
+  function lastGoodEntry(name) {
+    var best = null;
+    Object.keys(S.stats).forEach(function (k) {
+      var e = S.stats[k];
+      if (e.name === name && e.data && (!best || e.at > best.at)) {
+        best = e;
+      }
+    });
+    return best;
+  }
+
+  /* Marks the cards whose report is being refreshed slowly (the cue is the card's frame; see the theme's CSS). */
+  function syncUpdating(main) {
+    if (!main) {
+      return;
     }
-    if (e.error) {
-      return '<p class="nm-error" role="status">' + esc(statProblem(e)) + "</p>";
+    var cards = main.querySelectorAll("[data-needs]");
+    for (var i = 0; i < cards.length; i++) {
+      var keys = String(cards[i].getAttribute("data-needs") || "").split(" ");
+      var busy = keys.some(function (k) {
+        var e = S.stats[k];
+        return !!(e && e.pending && e.data && e.slow);
+      });
+      if (busy) {
+        cards[i].setAttribute("data-updating", "");
+        cards[i].setAttribute("aria-busy", "true");
+      } else {
+        cards[i].removeAttribute("data-updating");
+        if (cards[i].getAttribute("data-state") !== "pending") {
+          cards[i].removeAttribute("aria-busy");
+        }
+      }
     }
-    return '<p class="nm-loading" role="status">Reading your usage history&hellip;</p>';
   }
 
   /* A banner when a report on screen is older than it should be because the refresh failed. */
@@ -692,15 +845,30 @@
     return '<div class="nm-msg" role="status"><b>STATISTICS OLD</b>' + esc("The latest refresh failed (" + bad[0].error + "). These figures are from " + fmtAge(Date.now() - bad[0].at).toLowerCase() + " ago.") + "</div>";
   }
 
+  /* A banner with the whole sentence when a report failed and there is no older one to show: each card it feeds says only
+   * that its numbers are not there. */
+  function problemBanner(entries) {
+    var bad = entries.filter(function (e) { return !e.data && e.error; });
+    if (!bad.length) {
+      return "";
+    }
+    return '<div class="nm-msg" role="status"><b>STATISTICS UNAVAILABLE</b>' + esc(statProblem(bad[0])) + "</div>";
+  }
+
   // ── State accessors ─────────────────────────────────────────────────────────────
 
   function st() {
     return S.data && S.data.state ? S.data.state : null;
   }
 
+  /* The limits and the surface split. While a page is being built and the monitor has sent no state at all, they are the
+   * placeholder shape (skelUsage), so the page opens as a full set of cards; a state without usage stays an empty card. */
   function usage() {
     var s = st();
-    return s && s.usage ? s.usage : null;
+    if (s && s.usage) {
+      return s.usage;
+    }
+    return S.building && !s ? skelUsage() : null;
   }
 
   function limits() {
@@ -915,7 +1083,8 @@
       '<div class="nm-row2"><div class="nm-big">' + esc(fmtPct(pct)) + '</div><div class="nm-facts">' + facts.join("") + "</div></div>" +
       remainHTML(p) +
       '<div class="nm-pace"><span>USAGE ' + esc(fmtPct(pct)) + " / TIME " + esc(p.elapsed === null ? "--" : fmtPct(p.elapsed * 100)) +
-      "</span><b>" + esc(diffText) + "</b>" + (opts.fc ? '<span class="fc">' + opts.fc + "</span>" : "") + "</div>" +
+      "</span><b>" + esc(diffText) + "</b>" +
+      (opts.fcPending ? '<span class="fc" data-pending="">FORECAST NEEDS MORE READINGS</span>' : opts.fc ? '<span class="fc">' + opts.fc + "</span>" : "") + "</div>" +
       '<div class="nm-cells" aria-hidden="true">' + cellsHTML(32, pct) + "</div>" +
       railHTML(p) +
       "</div></section>";
@@ -968,12 +1137,14 @@
   }
 
   /* A chart that is drawn after the page is in the DOM, at the width of the place it sits in.
-   * build(width) returns the SVG; key is whatever the picture depends on (it decides when to redraw). */
-  function chartHost(build, key, cls) {
-    var id = "c" + (++S.chartSeq);
+   * build(width) returns the SVG; key is whatever the picture depends on (it decides when to redraw). The id is the card's
+   * key and the chart's number in it, so the same card has the same markup on every render and is not replaced for nothing.
+   * pending marks a chart drawn from placeholder data (its frame and nothing else; see the placeholder rules above). */
+  function chartHost(build, key, cls, pending) {
+    var id = S.chartCard + ":" + (++S.chartN);
     var digest = hashText(JSON.stringify(key));
     S.nextCharts[id] = { build: build, digest: digest };
-    return '<div class="nm-chart-host' + (cls ? " " + cls : "") + '" data-chart="' + id + '" data-d="' + digest + '"></div>';
+    return '<div class="nm-chart-host' + (cls ? " " + cls : "") + '" data-chart="' + esc(id) + '" data-d="' + digest + '"' + (pending ? ' data-pending=""' : "") + "></div>";
   }
 
   function hydrateCharts(main) {
@@ -1030,15 +1201,16 @@
   /* The caption under the bar: what one cell is. */
   function ratioNote(ratio, planName) {
     var step = ratioScale(ratio);
-    return "1 cell = " + step + (step === 1 ? " month" : " months") + " of " + (planName || "plan") + " plan";
+    return "1 cell = " + step + (step === 1 ? " month" : " months") + " of " + (planName ? planName + " plan" : "the plan");
   }
 
-  function ratioCells(ratio, label) {
+  /* cells: a length for the row when the multiple is not known yet (an empty track of that many cells). */
+  function ratioCells(ratio, label, cells) {
     var step = ratioScale(ratio);
     var units = Math.max(num(ratio) || 0, 0) / step;
     var whole = Math.floor(units);
     var frac = units - whole;
-    var n = clamp(Math.ceil(units), 1, RATIO_CELLS_MAX);
+    var n = cells ? clamp(cells, 1, RATIO_CELLS_MAX) : clamp(Math.ceil(units), 1, RATIO_CELLS_MAX);
     var out = "";
     for (var k = 0; k < n; k++) {
       if (k < whole) {
@@ -1057,6 +1229,491 @@
   function mixRow(label, percent, valueText, title) {
     return '<div class="nm-mrow"><span class="k"' + (title ? ' title="' + esc(title) + '"' : "") + ">" + esc(label) + '</span><div class="nm-cells" aria-hidden="true">' +
       cellsHTML(20, percent) + '</div><span class="v">' + esc(valueText) + "</span></div>";
+  }
+
+  // ── Placeholders: the shape of what has not arrived yet ─────────────────────────
+
+  /* A page opens as a full set of cards. Where a report (or the monitor's state) has not arrived, the card is built from the
+   * data below, which has the shape of the real thing and nothing in it: every label, frame and track is there, every figure is
+   * zero. The card is then marked data-state="pending" and its figures, bars and charts data-pending (see markCard), so they are
+   * invisible until the real numbers replace them in place. The counts of rows are what a typical account has. */
+
+  function blankRows(n, make) {
+    var out = [];
+    for (var i = 0; i < n; i++) {
+      out.push(make(i));
+    }
+    return out;
+  }
+
+  /* Now, held still for a minute: a placeholder's markup must be the same on every render until the data replaces it. */
+  function stillNow() {
+    var now = Date.now();
+    return now - now % 60000;
+  }
+
+  /* The limits, the surface split and the credits as the monitor will send them. */
+  function skelUsage() {
+    var now = stillNow();
+    function limit(kind, label, seconds, scope) {
+      return {
+        kind: kind, label: label, percent: 0, severity: "normal", window_seconds: seconds,
+        resets_at: new Date(now + seconds * 500).toISOString(), scope_model: scope || null,
+        allowance_pct: scope ? 50 : null, used_pct_of_weekly: scope ? 0 : null
+      };
+    }
+    return {
+      skeleton: true,
+      limits: [limit("session", "SESSION", 18000), limit("weekly_all", "WEEKLY", 604800), limit("weekly_scoped", "SCOPED", 604800, "-")],
+      breakdown: blankRows(3, function () { return { key: "", name: "", percent: 0 }; }),
+      spend: null
+    };
+  }
+
+  function skelWindow() {
+    return {
+      start: null, end: null, requests: 0, tokens: { input: 0, output: 0, cache_read: 0, cache_write: 0, thinking: 0, total: 0 },
+      cost_usd: 0, nocache_cost_usd: 0, unpriced_requests: 0
+    };
+  }
+
+  function skelBreakdown(n) {
+    return blankRows(n, function () { return { model: "", project: "", folder: "", name: "", requests: 0, tokens: 0, cost_usd: 0, share: 0 }; });
+  }
+
+  /* The first of this month (offset 0) or of the next (1), as an ISO time: a placeholder billing cycle with the width of a real one. */
+  function monthEdge(offset) {
+    var d = new Date(stillNow());
+    d.setDate(1);
+    d.setHours(0, 0, 0, 0);
+    d.setMonth(d.getMonth() + offset);
+    return d.toISOString();
+  }
+
+  /* The cost report of any window. */
+  function skelCost() {
+    var windows = {};
+    WINDOW_ORDER.forEach(function (name) { windows[name] = skelWindow(); });
+    function thread() {
+      // A typical request count, not zero: the tile's "97% · 2,670 requests" wraps in a narrow tile, and "0% · 0 requests" did
+      // not, so the Main and subagents card grew a line when the report landed. The placeholder text is never shown.
+      return { requests: 88888, tokens: 0, cost_usd: 0 };
+    }
+    return {
+      skeleton: true, basis: BASIS, windows: windows,
+      plan: { name: "", subscription_type: "", rate_limit_tier: "", price_usd: 100, price_source: "detected" },
+      value: { cycle_start: monthEdge(0), cycle_end: monthEdge(1), cycle_cost_usd: 0, multiplier: 0, projected_cycle_cost_usd: 0 },
+      monthly: blankRows(13, function () { return { month: "", requests: 0, tokens: 0, cost_usd: 0, multiplier: null }; }),
+      breakdowns: {
+        window: "cycle", by_model: skelBreakdown(4), by_project: skelBreakdown(6), by_folder: skelBreakdown(8),
+        by_thread: { main: thread(), subagent: thread() }, haiku: { main: thread(), subagent: thread() }, fast: { requests: 0, cost_usd: 0 }
+      },
+      top_sessions_week: blankRows(5, function () {
+        return { title: "", project: "", project_name: "", cost_usd: 0, requests: 0, models: [], prs: 0, subagent_cost_usd: 0 };
+      }),
+      spend: null
+    };
+  }
+
+  function skelEfficiency() {
+    return {
+      skeleton: true, start: null, end: null, basis: BASIS,
+      cache: { hit_rate: 0, fresh_input_tokens: 1, read_tokens: 0, write_tokens: 0, write_5m_tokens: 0, write_1h_tokens: 0, cost_usd: 0, nocache_cost_usd: 0, saved_usd: 0 },
+      thinking: { thinking_tokens: 0, output_tokens: 0, share: 0 },
+      context: { requests: 0, avg: 347400, p50: 337600, p95: 626100, max: 636800 },      // typical sizes, so the tiles are as tall as real ones
+      compactions: { count: 0, auto: 0, manual: 0, per_active_day: null, avg_pre_tokens: null },
+      active_days: 0,
+      tools: {
+        total: 0, errors: 0, error_rate: 0,
+        builtin: blankRows(9, function () { return { name: "", count: 0 }; }),
+        mcp: blankRows(2, function () { return { server: "", count: 0, tools: 0 }; })
+      },
+      productivity: { lines_added: 0, lines_removed: 0, files_created: 0, commits: 0, pushes: 0, prs: 0, cost_per_pr_usd: null, cost_per_100_lines_usd: null },
+      effort: blankRows(4, function () { return { effort: "", requests: 0, cost_usd: 0 }; }),
+      api_errors: 0, web: { searches: 0, fetches: 0 }
+    };
+  }
+
+  /* n consecutive local days ending today, zero-filled. */
+  function skelDays(n) {
+    var out = [];
+    var d = new Date(stillNow());
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - (n - 1));
+    for (var i = 0; i < n; i++) {
+      out.push({ date: ymdOf(d), requests: 0, tokens: 0, output_tokens: 0, cost_usd: 0 });
+      d.setDate(d.getDate() + 1);
+    }
+    return out;
+  }
+
+  function skelHistory() {
+    var grid = function () { return blankRows(7, function () { return blankRows(24, function () { return 0; }); }); };
+    var days = skelDays(371);
+    return {
+      skeleton: true, tz: "", days: days, hour_weekday: { requests: grid(), cost_usd: grid() },
+      streaks: { current_days: 9, longest_days: 26, longest_start: "2026-05-20", longest_end: "2026-08-26" },   // two Wednesdays: the widest text a range has
+      busiest_day: { date: days[days.length - 1].date, cost_usd: 0, tokens: 0 }, first_use: new Date(stillNow()).toISOString(), active_days: 0,
+      odometer: { total_tokens: 0, output_tokens: 0, requests: 0, cost_usd: 0, comparisons: [] }
+    };
+  }
+
+  /* The pacing block of a limit, before the pacing report has said anything about it. */
+  function skelPacingBlock(limit) {
+    var seconds = windowSeconds(limit);
+    var reset = parseTime(limit.resets_at);
+    var now = stillNow();
+    return {
+      skeleton: true, percent: num(limit.percent) || 0, resets_at: limit.resets_at || null,
+      window_start: reset === null ? null : new Date(reset - seconds * 1000).toISOString(),
+      slope_pct_per_hour: 8, projected_limit_at: null, verdict: "UNKNOWN", points: [],
+      elapsed_pct: reset === null ? null : clamp((now - (reset - seconds * 1000)) / (seconds * 10), 0, 100),
+      pace_delta_pp: -55.7, daily_budget_pct: 33.3, even_daily_pct: 100 / 7, projected_end_pct: 33.3
+    };
+  }
+
+  // ── Parts of a page: cards that fill in place ───────────────────────────────────
+
+  /* A page is a list of parts: the heading, the banners and the cards. Each has a key; the next render of the page is laid
+   * over what is on screen part by part (paint), so a card whose markup has not changed is not touched, and a card whose
+   * numbers have just arrived keeps its place and its frame and only gets new contents. A card says how it is doing in
+   * data-state ("pending": its numbers have not arrived, "ready", "error": its report failed) and which reports it draws
+   * from in data-needs (the keys of S.stats). The markup contract at the top of this file lists what the theme and the
+   * motion layer can rely on. */
+
+  function part(key, html, state) {
+    return { key: key, html: html, state: state || "static", card: false, needs: [] };
+  }
+
+  /* A card (or anything that fills in like one): built under its key, tagged, and in place of its numbers shows the problem
+   * when its report failed. needs: the stat entries it draws from. */
+  function cardPart(key, state, needs, build) {
+    S.chartCard = key;
+    S.chartN = 0;
+    var html = build();
+    if (state === "error") {
+      var failed = needs.filter(function (e) { return !e.data && e.error; })[0];
+      html = errorSwap(html, failed ? statProblemShort(failed) : "Could not be loaded.");
+    }
+    var p = part(key, tagCard(html, key, state, needs), state);
+    p.card = true;
+    p.needs = needs;
+    return p;
+  }
+
+  function tagCard(html, key, state, needs) {
+    var attrs = ' data-card="' + esc(key) + '" data-state="' + state + '"' +
+      (needs.length ? ' data-needs="' + esc(needs.map(function (e) { return e.key; }).join(" ")) + '"' : "") +
+      (state === "pending" ? ' aria-busy="true"' : "");
+    return html.replace(/^<(\w+)([^>]*)>/, function (all, tag, rest) {
+      return "<" + tag + rest.replace(/\sdata-card="[^"]*"/, "") + attrs + ">";
+    });
+  }
+
+  /* The card as it is with the problem in the place of its contents: the same frame and title, one line. */
+  function errorSwap(html, message) {
+    var open = /^<section\b[^>]*>/.exec(html);
+    var head = /<div class="nm-card-t[^"]*">[\s\S]*?<\/div>/.exec(html);
+    if (!open || !head) {
+      return html;
+    }
+    return open[0] + '<div class="nm-card-in">' + head[0] + '<p class="nm-error" role="status">' + esc(message) + "</p></div></section>";
+  }
+
+  var FIGURES = ".nm-big, .nm-stat-v, .nm-stat-s, .nm-mrow .v, .nm-kv b, .nm-facts > span, .nm-pace > span, .nm-pace > b, .nm-pace > .fc, " +
+    ".nm-story, .nm-table td.r, .nm-table td.nm-trunc, .nm-odo-facts b, .nm-cmp-n, .nm-toolbar-n";
+  var BARS = ".nm-cells, .nm-ratio";
+  var CHARTS_SEL = ".nm-chart-host, .cum-spark, .cum-stack, .nm-odo";
+
+  function textOf(el) {
+    return String(el.textContent || "").replace(/\s+/g, " ").trim();
+  }
+
+  /* How full a bar of cells is, 0 to 100. */
+  function barFill(bar) {
+    var cells = bar.children;
+    var lit = 0;
+    for (var i = 0; i < cells.length; i++) {
+      var cls = cells[i].className;
+      if (cls === "on") {
+        lit += 1;
+      } else if (cls === "part") {
+        lit += (parseFloat(cells[i].style.getPropertyValue("--f")) || 0) / 100;
+      }
+    }
+    return cells.length ? Math.round(lit / cells.length * 1000) / 10 : 0;
+  }
+
+  /* Puts the marks on a card the theme and the motion layer read. A card that waits for its numbers has every figure, bar
+   * and chart in it marked data-pending (aria-hidden, since there is nothing to read yet); a card with its numbers has
+   * every figure marked with its final text (data-final) and every bar with its fill (data-fill, 0 to 100). */
+  function markCard(el) {
+    var pending = el.getAttribute("data-state") === "pending";
+    var figures = el.querySelectorAll(FIGURES);
+    var bars = el.querySelectorAll(BARS);
+    var charts = el.querySelectorAll(CHARTS_SEL);
+    var i;
+    for (i = 0; i < figures.length; i++) {
+      if (pending) {
+        figures[i].setAttribute("data-pending", "");
+      } else if (!figures[i].hasAttribute("data-pending")) {
+        figures[i].setAttribute("data-final", textOf(figures[i]));
+      }
+    }
+    for (i = 0; i < bars.length; i++) {
+      if (pending) {
+        bars[i].setAttribute("data-pending", "");
+      } else if (!bars[i].hasAttribute("data-pending")) {
+        bars[i].setAttribute("data-fill", String(barFill(bars[i])));
+      }
+    }
+    for (i = 0; i < charts.length; i++) {
+      if (pending) {
+        charts[i].setAttribute("data-pending", "");
+      }
+    }
+    var marked = el.querySelectorAll("[data-pending]");
+    for (i = 0; i < marked.length; i++) {
+      marked[i].setAttribute("aria-hidden", "true");
+    }
+  }
+
+  /* What a card shows now, to tell afterwards which of its figures and bars changed. */
+  function snapshotCard(el) {
+    var figures = el.querySelectorAll(FIGURES);
+    var bars = el.querySelectorAll(BARS);
+    var out = { figures: [], bars: [], pending: el.querySelectorAll("[data-pending]").length };
+    var i;
+    for (i = 0; i < figures.length; i++) {
+      out.figures.push(figures[i].hasAttribute("data-pending") ? null : textOf(figures[i]));
+    }
+    for (i = 0; i < bars.length; i++) {
+      out.bars.push(bars[i].hasAttribute("data-pending") ? null : bars[i].getAttribute("data-fill"));
+    }
+    return out;
+  }
+
+  /* Marks the figures and bars that differ from the snapshot data-fresh, and says how many there are. A figure or bar that
+   * was a placeholder is fresh; one that shows what it showed before is not, so it is not animated again. */
+  function markFresh(el, before) {
+    var figures = el.querySelectorAll(FIGURES);
+    var bars = el.querySelectorAll(BARS);
+    var fresh = 0;
+    var i;
+    for (i = 0; i < figures.length; i++) {
+      if (!figures[i].hasAttribute("data-pending") && before.figures[i] !== textOf(figures[i])) {
+        figures[i].setAttribute("data-fresh", "");
+        fresh++;
+      }
+    }
+    for (i = 0; i < bars.length; i++) {
+      if (!bars[i].hasAttribute("data-pending") && before.bars[i] !== bars[i].getAttribute("data-fill")) {
+        bars[i].setAttribute("data-fresh", "");
+        fresh++;
+      }
+    }
+    return fresh;
+  }
+
+  function parsePart(html) {
+    var box = document.createElement("template");
+    box.innerHTML = html;
+    return box.content.firstElementChild;
+  }
+
+  /* Makes the attributes of el those of fresh, except the ones other code owns: the inline style and the data-fx marks of the
+   * motion layer, the updating cue (syncUpdating) and any fx- class. */
+  function patchShell(el, fresh) {
+    var want = {};
+    var i;
+    for (i = 0; i < fresh.attributes.length; i++) {
+      want[fresh.attributes[i].name] = fresh.attributes[i].value;
+    }
+    var kept = String(el.className || "").split(/\s+/).filter(function (c) { return /^fx-/.test(c); });
+    want["class"] = (want["class"] ? want["class"] + " " : "") + kept.join(" ");
+    for (i = el.attributes.length - 1; i >= 0; i--) {
+      var name = el.attributes[i].name;
+      if (!(name in want) && !/^(style|data-fx|data-updating)/.test(name)) {
+        el.removeAttribute(name);
+      }
+    }
+    Object.keys(want).forEach(function (name) {
+      var value = String(want[name]).trim();
+      if (el.getAttribute(name) !== value) {
+        el.setAttribute(name, value);
+      }
+    });
+  }
+
+  function placeAfter(container, el, prev) {
+    var next = prev ? prev.nextSibling : container.firstChild;
+    if (next !== el) {
+      container.insertBefore(el, next);
+    }
+  }
+
+  /* Lays parts over the children of container: a part that is not there yet is added, one whose markup changed gets its
+   * contents replaced (its frame stays, with whatever the motion layer put on it), one that is the same is left alone, and a
+   * child that is no longer a part goes. ctx collects what changed, for the hooks. */
+  function reconcile(container, parts, ctx, force) {
+    var olds = {};
+    var i;
+    for (i = 0; i < container.children.length; i++) {
+      if (container.children[i].__key) {
+        olds[container.children[i].__key] = container.children[i];
+      }
+    }
+    var prev = null;
+    parts.forEach(function (p) {
+      var el = olds[p.key];
+      delete olds[p.key];
+      if (p.grid) {
+        if (!el) {
+          el = document.createElement("div");
+          el.__key = p.key;
+        }
+        if (el.className !== p.cls) {
+          el.className = p.cls;
+        }
+        placeAfter(container, el, prev);
+        reconcile(el, p.parts, ctx, force);
+      } else if (!el) {
+        el = parsePart(p.html);
+        el.__key = p.key;
+        el.__src = p.html;
+        placeAfter(container, el, prev);
+        if (p.card) {
+          markCard(el);
+          ctx.added.push({ el: el, key: p.key, state: p.state });
+        }
+      } else {
+        if (el.__src !== p.html || force) {
+          patchPart(el, p, ctx);
+        }
+        placeAfter(container, el, prev);
+      }
+      prev = el;
+    });
+    Object.keys(olds).forEach(function (k) {
+      container.removeChild(olds[k]);
+    });
+  }
+
+  function patchPart(el, p, ctx) {
+    var fresh = parsePart(p.html);
+    var from = el.getAttribute("data-state");
+    var before = p.card ? snapshotCard(el) : null;
+    if (S.tipApi && (el.matches(":hover") || el.contains(document.activeElement))) {
+      S.tipApi.hide();
+    }
+    patchShell(el, fresh);
+    replaceHtml(el, fresh.innerHTML);
+    el.__src = p.html;
+    if (!p.card) {
+      return;
+    }
+    markCard(el);
+    var freshCount = markFresh(el, before);
+    var left = el.querySelectorAll("[data-pending]").length;
+    if (freshCount || left !== before.pending || from !== p.state) {
+      ctx.updated.push({
+        el: el, key: p.key, from: from, to: p.state, fresh: freshCount,
+        first: before.pending > left || (from === "pending" && p.state !== "pending")
+      });
+    }
+  }
+
+  /* Draws a page model on #main. force replaces every part's contents whatever changed (a new theme). */
+  function paint(main, model, force) {
+    var ctx = { updated: [], added: [] };
+    var parts = model.top.filter(function (p) { return p.html; });
+    parts.push({ key: "grid", grid: true, cls: model.cls, parts: model.cards });
+    reconcile(main, parts, ctx, force);
+    return ctx;
+  }
+
+  function dispatch(target, name, detail) {
+    try {
+      target.dispatchEvent(new window.CustomEvent(name, { bubbles: true, detail: detail }));
+    } catch (e) {
+      /* an engine without CustomEvent: the theme's own hooks have already run */
+    }
+  }
+
+  function guarded(label, fn) {
+    try {
+      fn();
+    } catch (e) {
+      if (window.console && console.error) {
+        console.error(label + " failed", e);
+      }
+    }
+  }
+
+  /* Tells the theme and the motion layer what a paint did: for every card whose numbers arrived (or changed), the theme's
+   * arrive(card, info) and a cum:card-data event on the card; for the page, a cum:page-rendered event on #main. */
+  function announce(main, key, opened, ctx) {
+    var fx = themeFx();
+    var reduced = reduceMotion();
+    var entering = main.classList.contains("fx-run");
+    ctx.updated.forEach(function (u) {
+      var info = { page: key, card: u.key, first: u.first, from: u.from, to: u.to, fresh: u.fresh, entering: entering, reduced: reduced };
+      if (fx && typeof fx.arrive === "function" && !reduced) {
+        guarded("arrive", function () { fx.arrive(u.el, info); });
+      }
+      dispatch(u.el, "cum:card-data", info);
+    });
+    dispatch(main, "cum:page-rendered", {
+      page: key, opened: opened, reduced: reduced,
+      updated: ctx.updated.map(function (u) { return u.key; }), added: ctx.added.map(function (a) { return a.key; })
+    });
+  }
+
+  // ── The theme's motion hooks ────────────────────────────────────────────────────
+
+  function themeFx() {
+    var t = S.lastTheme;
+    return t && window.CUM_THEME_FX ? window.CUM_THEME_FX[t.id] : null;
+  }
+
+  /* The theme's own stylesheet AND script are in. Changing the link's href does not clear link.sheet (Chromium keeps the old
+   * sheet there until the new one is in), so the sheet's URL says whose CSS it is. loadThemeScript() leaves "loading" in
+   * S.loadedScripts[id] until the script has run. */
+  function themeReady() {
+    var t = S.lastTheme;
+    var link = document.getElementById("theme-css");
+    var sheet = link && link.sheet;
+    return !!(t && sheet && sheet.href && sheet.href.indexOf("/themes/" + encodeURIComponent(t.id) + ".css") >= 0 &&
+      S.loadedScripts[t.id] !== "loading");
+  }
+
+  /* The page is due an entrance: the first page, a page change, a theme change. */
+  function wantEnter() {
+    S.enterPending = true;
+  }
+
+  /* The entrance plays when it is due, the monitor has answered, the theme's files are in and the window is shown. It does not
+   * wait for the reports: a page is made of placeholders from the first frame, and each card's numbers arrive in place later
+   * (the theme's arrive hook). Every "not yet" returns with the flag still set, so the next render, the script's load or the
+   * window being shown asks again; every "never" clears it, so a stale flag cannot play an entrance out of the blue. */
+  function playEnterIfDue(main, key) {
+    if (!S.enterPending || !S.data || !themeReady() || document.visibilityState === "hidden") {
+      return;
+    }
+    S.enterPending = false;
+    var fx = themeFx();
+    if (!fx || typeof fx.enter !== "function" || reduceMotion()) {
+      return;
+    }
+    guarded("enter", function () { fx.enter(main, key); });
+  }
+
+  /* Finishes whatever the theme's motion is doing to the page. */
+  function cancelFx(main) {
+    var fx = themeFx();
+    if (main && fx && typeof fx.cancel === "function") {
+      guarded("cancel", function () { fx.cancel(main); });
+    }
   }
 
   // ── Overview ────────────────────────────────────────────────────────────────────
@@ -1091,7 +1748,7 @@
   function costNumbers() {
     var entry = statEntry("cost", { window: "cycle" });
     var d = entry.data;
-    var out = { loaded: !!d, entry: entry, cycle: null, today: null, week: null, saved: null, hit: null, thinking: null,
+    var out = { loaded: !!d, pending: false, entry: entry, cycle: null, today: null, week: null, saved: null, hit: null, thinking: null,
       multiplier: null, projected: null, planName: "", price: null, cycleStart: null, cycleEnd: null, models: [] };
     if (d) {
       var c = d.windows.cycle, tk = c.tokens || {};
@@ -1126,6 +1783,20 @@
     }
     out.today = today ? num(today.totals.cost_usd) : null;
     out.week = week ? num(week.totals.cost_usd) : null;
+    if (out.cycle === null) {
+      // Nothing to show yet (no report, and the monitor has no month to stand in): a placeholder of the right shape.
+      out.pending = true;
+      out.cycle = 0;
+      out.today = 0;
+      out.week = 0;
+      out.saved = 0;
+      out.hit = 0;
+      out.thinking = 0;
+      out.multiplier = 0;
+      out.price = out.price === null ? 100 : out.price;              // the plan the monitor knows, if it knows one
+      out.planName = out.planName || "PLAN";
+      out.models = blankRows(4, function () { return { id: "", name: "", share: 0 }; });
+    }
     return out;
   }
 
@@ -1142,9 +1813,13 @@
   function dailyChart(cycleStart) {
     var he = statEntry("history");
     var d = he.data;
-    if (!d) {
+    if (!d && he.error) {
       return '<div class="nm-card-t nm-chart-t"><span class="nm-ttl">DAILY &middot; LAST 30 DAYS</span><span class="nm-meta-t">&nbsp;</span></div>' +
-        '<div class="nm-chart"><p class="nm-pending">' + (he.error ? "Daily history is not available yet." : "Reading daily history&hellip;") + "</p></div>";
+        '<div class="nm-chart"><p class="nm-pending">Daily history is not available yet.</p></div>';
+    }
+    var waiting = !d;
+    if (waiting) {
+      d = skelHistory();
     }
     var days = d.days.slice(-30);
     var costs = days.map(function (x) { return num(x.cost_usd) || 0; });
@@ -1169,8 +1844,8 @@
         avg: { value: avg, label: "AVG " + avgText },
         label: "Daily API-equivalent cost, last 30 days, average " + fmtUsd(avg) + " a day"
       });
-    }, [he.digest, pipsOn, cycleStart], "nm-daily");
-    return '<div class="nm-card-t nm-chart-t"><span class="nm-ttl">DAILY &middot; LAST 30 DAYS</span><span class="nm-meta-t">' + esc(meta) + "</span></div>" +
+    }, [he.digest, pipsOn, cycleStart], "nm-daily", waiting);
+    return '<div class="nm-card-t nm-chart-t"><span class="nm-ttl">DAILY &middot; LAST 30 DAYS</span><span class="nm-meta-t"' + (waiting ? ' data-pending=""' : "") + ">" + esc(waiting ? "TOP $00.00" : meta) + "</span></div>" +
       '<div class="nm-chart">' + host + "</div>";
   }
 
@@ -1195,10 +1870,10 @@
       : esc(ratioNote(ratio, n.planName));
     var title = "API-equivalent cost, this cycle";
     var meta = (n.cycleStart ? rangeText(n.cycleStart, n.cycleEnd) + " &middot; " : "") + "AT LIST PRICES";
-    return '<section class="nm-card wide" id="cost" data-card="cost" aria-label="' + esc(title) + '"><div class="nm-card-in">' +
+    return '<section class="nm-card wide" id="cost" aria-label="' + esc(title) + '"><div class="nm-card-in">' +
       '<div class="nm-card-t"><h2 class="nm-ttl">' + esc(title) + '</h2><span class="nm-meta-t">' + meta + "</span></div>" +
       '<div class="nm-cost"><div class="nm-cost-l"><div class="nm-hero"><div class="nm-big h" style="--n:' + heroText.length + '">' + esc(heroText) + "</div>" + planBlock + "</div>" +
-      (ratio === null || n.price === null ? "" : ratioCells(ratio, fmtMult(ratio) + " months of the plan")) +
+      (ratio === null || n.price === null ? "" : ratioCells(ratio, fmtMult(ratio) + " months of the plan", n.pending ? 12 : 0)) +
       '<div class="nm-note">' + note + "</div>" +
       '<div class="nm-note nm-disc">' + BASIS + ", not amounts billed to your plan.</div>" +
       '<div class="nm-tiles"><div class="nm-tile"><small>Today</small><div class="nm-big m">' + esc(fmtUsdTile(n.today)) +
@@ -1210,7 +1885,7 @@
   function efficiencyCard(n) {
     var hit = n.hit === null ? null : n.hit * 100;
     var thinking = n.thinking === null ? null : n.thinking * 100;
-    return '<section class="nm-card" id="efficiency" data-card="efficiency" aria-label="Cache and thinking"><div class="nm-card-in">' +
+    return '<section class="nm-card" id="efficiency" aria-label="Cache and thinking"><div class="nm-card-in">' +
       '<div class="nm-card-t"><h2 class="nm-ttl">Cache &amp; thinking</h2><span class="nm-meta-t">' + (n.loaded ? "this cycle" : "this month") + "</span></div>" +
       '<div class="nm-kpi"><div class="nm-kl">Cache hit rate</div><div class="nm-big m">' + esc(hit === null ? "--" : hit.toFixed(1) + "%") +
       '</div><div class="nm-cells" aria-hidden="true">' + cellsHTML(20, hit || 0) + "</div></div>" +
@@ -1228,7 +1903,7 @@
           cellsHTML(20, r.share) + '</div><span class="v">' + esc(fmtPct(r.share)) + "</span></div>";
       }).join("")
       : '<p class="nm-empty">No model mix yet.</p>';
-    return '<section class="nm-card" id="models" data-card="models" aria-label="Model mix"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Model mix</h2><span class="nm-meta-t">share of cost, ' + (n.loaded ? "cycle" : "month") + "</span></div>" +
+    return '<section class="nm-card" id="models" aria-label="Model mix"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Model mix</h2><span class="nm-meta-t">share of cost, ' + (n.loaded ? "cycle" : "month") + "</span></div>" +
       '<div class="nm-mix">' + body + "</div></div></section>";
   }
 
@@ -1240,48 +1915,73 @@
           cellsHTML(20, r.percent) + '</div><span class="v">' + esc(fmtPct(r.percent)) + "</span></div>";
       }).join("")
       : '<p class="nm-empty">No surface split reported yet.</p>';
-    return '<section class="nm-card" data-card="surfaces" aria-label="Where the week went"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Where the week went</h2><span class="nm-meta-t">share, 7 days</span></div>' +
+    return '<section class="nm-card" aria-label="Where the week went"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Where the week went</h2><span class="nm-meta-t">share, 7 days</span></div>' +
       '<div class="nm-mix">' + body + "</div></div></section>";
   }
 
   function burnCard(s) {
     var burn = s && s.burn ? s.burn : null;
     var velocity = burn ? String(burn.velocity || "IDLE") : "IDLE";
+    // Until two samples are in (one every poll), the trace is its frame alone.
     var spark = S.samples.length > 1
       ? CHARTS.sparkline(S.samples, { width: 300, height: 58, label: "Burn rate, recent samples" })
-      : '<p class="nm-note">Sampling the burn rate&hellip;</p>';
-    return '<section class="nm-card" id="burn" data-card="burn" aria-label="Burn rate"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Burn rate</h2><span class="nm-chip">' + esc(velocity) + "</span></div>" +
+      : CHARTS.sparkline([], { width: 300, height: 58, label: "Burn rate, sampling" }).replace("<svg ", '<svg data-pending="" ');
+    return '<section class="nm-card" id="burn" aria-label="Burn rate"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Burn rate</h2><span class="nm-chip">' + esc(velocity) + "</span></div>" +
       '<div class="nm-row2 is-base"><div class="nm-big m">' + esc(burn ? fmtInt(burn.tokens_per_min) : "--") +
       '</div><div class="nm-facts"><span>TOK / MIN</span><span>' + esc(burn ? fmtUsd(burn.usd_per_hour) : "--") + " / HOUR</span></div></div>" +
       spark + "</div></section>";
   }
 
+  /* The page's heading, its banners and its cards. cls is the grid the cards sit in (nm-grid, or nm-pgrid for every
+   * page but the overview). o: {hazard, update, problem, stale} are the banners that may sit between the heading and the grid.
+   * The update banner is on every page (the toast says "Open the tray menu or the dashboard to update", and the dashboard may
+   * be on any page); it is empty while no release waits, so a page passes `update` only to replace it. */
+  function pageModel(key, cls, cards, o) {
+    o = o || {};
+    return {
+      key: key, cls: cls, cards: cards,
+      top: [part("hazard", o.hazard || ""), part("head", pageHead(key)), part("update", o.update !== undefined ? o.update : updateBanner()),
+        part("status", statusBanner()), part("problem", o.problem || ""), part("stale", o.stale || "")]
+    };
+  }
+
   function overviewPage() {
     var s = st();
     var u = usage();
-    var pd = statEntry("pacing").data;
+    var pe = statEntry("pacing");
+    var pd = pe.data;
+    var waiting = s ? "ready" : "pending";            // the monitor's own numbers: ready as soon as it has sent a state
+    var forecast = !pd && !pe.error;                  // the forecast line is a placeholder until the pacing report answers
     var session = limitOf("session");
     var weekly = limitOf("weekly_all");
     var scoped = scopedLimits();
     var cards = [];
-    cards.push(session ? limitCard(session, { meta: "5-hour window", fc: pd ? sessionForecast(pd.session) : "" }) : emptyLimitCard("SESSION", "5-hour window"));
-    cards.push(weekly ? limitCard(weekly, { meta: "7-day window", fc: pd ? weeklyForecast(pd.weekly) : "" }) : emptyLimitCard("WEEKLY", "7-day window"));
-    if (scoped.length) {
+    cards.push(cardPart("limit-session", waiting, [pe], function () {
+      return session ? limitCard(session, { meta: "5-hour window", fc: pd ? sessionForecast(pd.session) : "", fcPending: forecast }) : emptyLimitCard("SESSION", "5-hour window");
+    }));
+    cards.push(cardPart("limit-weekly", waiting, [pe], function () {
+      return weekly ? limitCard(weekly, { meta: "7-day window", fc: pd ? weeklyForecast(pd.weekly) : "", fcPending: forecast }) : emptyLimitCard("WEEKLY", "7-day window");
+    }));
+    cards.push(cardPart("limit-scoped", waiting, [pe], function () {
+      if (!scoped.length) {
+        return emptyLimitCard("SCOPED", "No scoped limit reported");
+      }
       var first = scoped[0];
-      cards.push(limitCard(first, { meta: "7-day window", share: num(first.allowance_pct), fc: pd ? weeklyForecast(matchScoped(pd.scoped, first, 0)) : "" }));
-    } else {
-      cards.push(emptyLimitCard("SCOPED", "No scoped limit reported"));
-    }
+      return limitCard(first, { meta: "7-day window", share: num(first.allowance_pct), fc: pd ? weeklyForecast(matchScoped(pd.scoped, first, 0)) : "", fcPending: forecast });
+    }));
     var n = costNumbers();
-    cards.push(costCard(n));
-    cards.push(efficiencyCard(n));
-    cards.push(modelMixCard(n));
-    cards.push(surfaceCard(u));
-    cards.push(burnCard(s));
-    var worst = worstSeverity(limits());
-    return hazardBand(worst) + '<div class="nm-head"><h1 class="nm-h1">OVERVIEW<span class="nm-cur" aria-hidden="true"></span></h1>' +
-      '<p class="nm-sub">Session telemetry for the current window. Pace is usage against elapsed time.</p></div>' +
-      statusBanner() + staleBanner(pageStats("overview")) + '<div class="nm-grid">' + cards.join("") + "</div>";
+    var he = statEntry("history");
+    // Nothing to show yet (n.pending): the cost report is on its way, or it failed and the monitor has no month of its own to
+    // stand in (a billing day is set). The three cards that draw from it say which, as they do on the Cost page.
+    var costState = n.pending ? entryState([n.entry]) : "ready";
+    cards.push(cardPart("cost", costState, [n.entry, he], function () { return costCard(n); }));
+    cards.push(cardPart("efficiency", costState, [n.entry], function () { return efficiencyCard(n); }));
+    cards.push(cardPart("models", costState, [n.entry], function () { return modelMixCard(n); }));
+    cards.push(cardPart("surfaces", waiting, [], function () { return surfaceCard(u); }));
+    cards.push(cardPart("burn", waiting, [], function () { return burnCard(s); }));
+    return pageModel("overview", "nm-grid", cards, {
+      hazard: hazardBand(worstSeverity(limits())), problem: n.pending ? problemBanner([n.entry]) : "", stale: staleBanner([n.entry, pe, he])
+    });
   }
 
   // ── Limits: pacing ──────────────────────────────────────────────────────────────
@@ -1289,9 +1989,10 @@
   var SESSION_VERDICT = { LIMITED: "LIMITED", AT_RISK: "AT RISK", SAFE: "SAFE", IDLE: "IDLE", UNKNOWN: "UNKNOWN" };
   var WEEKLY_VERDICT = { AHEAD: "AHEAD", ON_PACE: "ON PACE", BEHIND: "BEHIND", UNKNOWN: "UNKNOWN" };
 
+  /* Rows of a label and a value: [[label, value, pending]]. A row marked pending shows a placeholder where its value will be. */
   function kvGrid(pairs, cls) {
     return '<div class="nm-kv-grid' + (cls ? " " + cls : "") + '">' + pairs.map(function (row) {
-      return '<div class="nm-kv"><span>' + esc(row[0]) + "</span><b>" + esc(row[1]) + "</b></div>";
+      return '<div class="nm-kv"><span>' + esc(row[0]) + "</span><b" + (row[2] ? ' data-pending=""' : "") + ">" + esc(row[1]) + "</b></div>";
     }).join("") + "</div>";
   }
 
@@ -1367,8 +2068,28 @@
     return out;
   }
 
-  /* The readings in a window as a line with markers, the even-pace diagonal and the forecast. */
-  function pacingChart(blk, kind, nowMs, digest) {
+  /* The forecast of a weekly or scoped window, drawn from the average rate so far: from now to the moment it reaches 100 % (that
+   * moment is marked) or, if it stays under 100 %, to the reset. The line's value at the reset is the pacing report's
+   * projected_end_pct, the figure the cards print as "Projected end", so the line and the figure cannot disagree.
+   * Returns {points, reaches (ms, or null when it stays under), end} or null when there is nothing to draw: no window, the
+   * limit is already reached, or the report has no projection yet (it needs 5 % of the window). */
+  function averageRateForecast(blk, nowMs) {
+    var pct = num(blk.percent);
+    var end = num(blk.projected_end_pct);
+    var t1 = parseTime(blk.resets_at);
+    if (pct === null || end === null || t1 === null || nowMs >= t1 || pct >= 100) {
+      return null;
+    }
+    if (end >= 100) {
+      var reaches = nowMs + (100 - pct) / (end - pct) * (t1 - nowMs);
+      return { points: [[nowMs, pct], [reaches, 100]], reaches: reaches, end: end };
+    }
+    return { points: [[nowMs, pct], [t1, end]], reaches: null, end: end };
+  }
+
+  /* The readings in a window as a line with markers, the even-pace diagonal and the forecast. pending draws the frame alone
+   * (the axes, the clock and the diagonal), for a card whose pacing report has not answered. */
+  function pacingChart(blk, kind, nowMs, digest, pending) {
     var t0 = parseTime(blk.window_start), t1 = parseTime(blk.resets_at);
     if (t0 === null || t1 === null || t1 <= t0) {
       return "";
@@ -1386,17 +2107,26 @@
     if (kind !== "session") {
       series.push({ kind: "ideal", points: [[t0, 0], [t1, 100]] });
     }
-    var forecast = null;
-    if (blk.projected_limit_at && kind === "session" && pct !== null) {
-      forecast = [[nowMs, pct], [parseTime(blk.projected_limit_at), 100]];
-    } else if (kind === "session" && pct !== null && num(blk.slope_pct_per_hour) !== null && blk.verdict !== "LIMITED") {
-      var left = Math.max(0, (t1 - nowMs) / 3600000);
-      forecast = [[nowMs, pct], [t1, Math.min(100, pct + Math.max(0, blk.slope_pct_per_hour) * left)]];
-    } else if (kind !== "session" && pct !== null && num(blk.projected_end_pct) !== null) {
-      forecast = [[nowMs, pct], [t1, blk.projected_end_pct]];
+    var forecast = null;                 // {points, reaches}
+    if (!pending && kind === "session" && pct !== null) {
+      var limitAt = blk.projected_limit_at ? parseTime(blk.projected_limit_at) : null;
+      if (limitAt !== null) {
+        forecast = { points: [[nowMs, pct], [limitAt, 100]], reaches: limitAt };
+      } else if (num(blk.slope_pct_per_hour) !== null && blk.verdict !== "LIMITED") {
+        var left = Math.max(0, (t1 - nowMs) / 3600000);
+        forecast = { points: [[nowMs, pct], [t1, Math.min(100, pct + Math.max(0, blk.slope_pct_per_hour) * left)]], reaches: null };
+      }
+    } else if (!pending && kind !== "session") {
+      forecast = averageRateForecast(blk, nowMs);
     }
-    if (forecast && forecast[1][0] !== null) {
-      series.push({ kind: "forecast", points: forecast });
+    var forecastText = "";
+    if (forecast) {
+      var at = forecast.reaches === null ? "" : clockText(forecast.reaches);
+      forecastText = forecast.reaches === null ? "" : "Reaches 100% about " + at + " at this rate";
+      series.push({
+        kind: "forecast", points: forecast.points,
+        endLabel: forecast.reaches === null ? "" : "100% ~ " + at, endTip: forecastText
+      });
     }
     var every = Math.max(1, Math.ceil(pts.length / 24));
     var marks = [];
@@ -1407,16 +2137,17 @@
     });
     series.push({ kind: "actual", points: pts, marks: marks });
     var ticks = kind === "session" ? hourTicks(t0, t1) : dayTicks(t0, t1);
-    var label = (kind === "session" ? "Session" : "Weekly") + " usage readings, " + pts.length + " points";
+    var label = (kind === "session" ? "Session" : "Weekly") + " usage readings, " + pts.length + " points" + (forecastText ? ". " + forecastText : "");
     return chartHost(function (w) {
       return CHARTS.line({
         width: w, height: 176, xMin: t0, xMax: t1, yMin: 0, yMax: yMax, yTicks: yTicks, xTicks: ticks,
         marks: nowMs >= t0 && nowMs <= t1 ? [{ t: nowMs, label: "NOW" }] : [], series: series, label: label
       });
-    }, [digest, kind, nowMs - nowMs % 60000, t0, t1], "nm-line");
+    }, [digest, kind, nowMs - nowMs % 60000, t0, t1, !!pending], "nm-line", pending);
   }
 
-  function limitFacts(limit, blk, kind, p) {
+  /* The facts under a limit. pend marks the rows that come from the pacing report as placeholders. */
+  function limitFacts(limit, blk, kind, p, pend) {
     var span = windowSeconds(limit);
     var start = p.reset !== null ? p.reset - span * 1000 : null;
     var rows = [
@@ -1426,16 +2157,20 @@
       ["Window", span >= 86400 ? Math.round(span / 86400) + " days" : Math.round(span / 3600) + " hours"]
     ];
     if (kind === "session" && blk) {
-      rows.push(["Rate", num(blk.slope_pct_per_hour) === null ? "--" : signed(blk.slope_pct_per_hour) + " pts / hour"]);
+      rows.push(["Rate", num(blk.slope_pct_per_hour) === null ? "--" : signed(blk.slope_pct_per_hour) + " pts / hour", pend]);
       if (blk.projected_limit_at) {
         rows.push(["Limit reached", clockText(parseTime(blk.projected_limit_at))]);
       }
     }
     if (kind !== "session" && blk) {
-      rows.push(["Budget left", num(blk.daily_budget_pct) === null ? "--" : fmtPct(blk.daily_budget_pct, 1) + " / day"]);
-      rows.push(["Even pace", num(blk.even_daily_pct) === null ? "--" : fmtPct(blk.even_daily_pct, 1) + " / day"]);
-      rows.push(["Projected end", num(blk.projected_end_pct) === null ? "needs more time" : fmtPct(blk.projected_end_pct, 1)]);
-      rows.push(["Against the clock", num(blk.pace_delta_pp) === null ? "--" : signed(blk.pace_delta_pp) + " pts"]);
+      rows.push(["Budget left", num(blk.daily_budget_pct) === null ? "--" : fmtPct(blk.daily_budget_pct, 1) + " / day", pend]);
+      rows.push(["Even pace", num(blk.even_daily_pct) === null ? "--" : fmtPct(blk.even_daily_pct, 1) + " / day", pend]);
+      rows.push(["Projected end", num(blk.projected_end_pct) === null ? "needs more time" : fmtPct(blk.projected_end_pct, 1), pend]);
+      rows.push(["Against the clock", num(blk.pace_delta_pp) === null ? "--" : signed(blk.pace_delta_pp) + " pts", pend]);
+      var forecast = !pend && p.reset !== null ? averageRateForecast(blk, p.reset - p.remain) : null;
+      if (forecast && forecast.reaches !== null) {
+        rows.push(["Limit reached", clockText(forecast.reaches)]);
+      }
     }
     if (kind === "scoped") {
       rows.push(["Allowance", num(limit.allowance_pct) === null ? "--" : fmtPct(limit.allowance_pct) + " of weekly"]);
@@ -1454,31 +2189,43 @@
   function pacingCard(limit, blk, kind, entry, nowMs) {
     var p = paceOf(limit, nowMs);
     var pct = num(limit.percent) || 0;
-    var story = !blk && !entry.data
-      ? { chip: "", tone: "", text: entry.error ? "The forecast is not available right now." : "Reading the forecast\u2026" }
-      : kind === "session" ? sessionStory(blk) : weeklyStory(blk);
-    var elapsed = blk && num(blk.elapsed_pct) !== null ? blk.elapsed_pct : (p.elapsed === null ? null : p.elapsed * 100);
+    var waiting = !blk && !entry.data && !entry.error;       // the pacing report has not answered yet: its parts are placeholders
+    if (waiting) {
+      blk = skelPacingBlock(limit);
+    }
+    var story = waiting
+      ? { chip: "UNKNOWN", tone: "", text: kind === "session"
+        ? "At the current rate you stay under the limit until the window resets at 12:00 PM, and a little more."
+        : "You are 00.0 points under an even pace, so there is room to spare." }
+      : !blk && !entry.data
+        ? { chip: "", tone: "", text: "The forecast is not available right now." }
+        : kind === "session" ? sessionStory(blk) : weeklyStory(blk);
+    var elapsed = !waiting && blk && num(blk.elapsed_pct) !== null ? blk.elapsed_pct : (p.elapsed === null ? null : p.elapsed * 100);
     var tag = limit.label || (kind === "session" ? "SESSION" : "WEEKLY");
     var meta = limit.scope_model ? "scoped to " + limit.scope_model : kind === "session" ? "5-hour window" : "7-day window";
     var chart;
     if (blk) {
-      chart = pacingChart(blk, kind, nowMs, entry.digest + "|" + tag) || '<p class="nm-empty">This limit has no window to chart yet.</p>';
+      chart = pacingChart(blk, kind, nowMs, entry.digest + "|" + tag, waiting) || '<p class="nm-empty">This limit has no window to chart yet.</p>';
     } else if (entry.error && !entry.data) {
       chart = '<p class="nm-error" role="status">' + esc(statProblem(entry)) + "</p>";
-    } else if (entry.data) {
-      chart = '<p class="nm-empty">No pacing data for this limit yet.</p>';
     } else {
-      chart = '<p class="nm-loading" role="status">Reading usage history&hellip;</p>';
+      chart = '<p class="nm-empty">No pacing data for this limit yet.</p>';
     }
+    var hold = waiting ? ' data-pending=""' : "";
     var body = '<div class="nm-big-row"><div class="nm-big">' + esc(fmtPct(pct)) + '</div><div class="nm-verdict">' +
-      (story.chip ? '<span class="nm-chip solid' + story.tone + '">' + esc(story.chip) + "</span>" : "") + "</div></div>" +
-      '<p class="nm-story">' + esc(story.text) + "</p>" +
-      (elapsed === null ? "" : meterHTML(elapsed, pct)) + chart + limitFacts(limit, blk, kind, p);
+      (story.chip ? '<span class="nm-chip solid' + story.tone + '"' + hold + ">" + esc(story.chip) + "</span>" : "") + "</div></div>" +
+      '<p class="nm-story"' + hold + ">" + esc(story.text) + "</p>" +
+      (elapsed === null ? "" : meterHTML(elapsed, pct)) + chart + limitFacts(limit, blk, kind, p, waiting);
     return '<section class="nm-card span-6' + sevClass(limit) + '" data-limit="' + esc(limit.kind) + '" aria-label="' + esc(tag) + '"><div class="nm-card-in">' +
       '<div class="nm-card-t"><span class="nm-tag">' + esc(tag) + '</span><span class="nm-meta-t">' + esc(meta) + "</span></div>" + body + "</div></section>";
   }
 
-  function spendCardBody(spend) {
+  /* The credits card's body. pending is the placeholder, the shape of the common case (credits off). */
+  function spendCardBody(spend, pending) {
+    if (pending) {
+      return '<p class="nm-empty" data-pending="">Usage credits are off for this account.</p>' +
+        '<p class="nm-note nm-disc" data-pending="">When they are on, this is the one figure that is real money.</p>';
+    }
     if (spend && spend.enabled) {
       return '<div class="nm-big-row"><div class="nm-big m">' + esc(fmtMoney(spend.used, spend.currency)) + '</div><div class="nm-facts"><span>OF ' + esc(fmtMoney(spend.limit, spend.currency)) + "</span><span>" +
         esc(fmtPct(spend.percent)) + " USED</span></div></div>" +
@@ -1493,22 +2240,26 @@
     var pe = statEntry("pacing");
     var pd = pe.data;
     var u = usage();
+    var s = st();
     var nowMs = (pd && parseTime(pd.now)) || Date.now();
-    var cards = [];
+    var waiting = s ? "ready" : "pending";
     var session = limitOf("session"), weekly = limitOf("weekly_all"), scoped = scopedLimits();
+    var cards = [];
     if (session) {
-      cards.push(pacingCard(session, pd ? pd.session : null, "session", pe, nowMs));
+      cards.push(cardPart("limit-session", waiting, [pe], function () { return pacingCard(session, pd ? pd.session : null, "session", pe, nowMs); }));
     }
     if (weekly) {
-      cards.push(pacingCard(weekly, pd ? pd.weekly : null, "weekly", pe, nowMs));
+      cards.push(cardPart("limit-weekly", waiting, [pe], function () { return pacingCard(weekly, pd ? pd.weekly : null, "weekly", pe, nowMs); }));
     }
     scoped.forEach(function (limit, i) {
-      cards.push(pacingCard(limit, pd ? matchScoped(pd.scoped, limit, i) : null, "scoped", pe, nowMs));
+      cards.push(cardPart("limit-scoped-" + i, waiting, [pe], function () {
+        return pacingCard(limit, pd ? matchScoped(pd.scoped, limit, i) : null, "scoped", pe, nowMs);
+      }));
     });
     if (!cards.length) {
-      cards.push(emptyLimitCard("LIMITS", "No reading yet"));
+      cards.push(cardPart("limit-none", "ready", [], function () { return emptyLimitCard("LIMITS", "No reading yet"); }));
     }
-    var spendCard = card({ title: "Usage credits", meta: "real money", cls: "is-real", body: spendCardBody(u && u.spend) });
+    var spendCard = card({ title: "Usage credits", meta: "real money", cls: "is-real", body: spendCardBody(u && u.spend, !!(u && u.skeleton)) });
     var breakdown = u && u.breakdown ? u.breakdown : [];
     var colours = ["main", "alt", "dim"];
     var stack = breakdown.length
@@ -1525,12 +2276,12 @@
     });
     var odd = (cards.length % 2) === 1;
     if (odd) {
-      cards.push('<div class="nm-colstack span-6">' + spendCard + surfaceCard + "</div>");
+      cards.push(cardPart("credits-surfaces", waiting, [], function () { return '<div class="nm-colstack span-6">' + spendCard + surfaceCard + "</div>"; }));
     } else {
-      cards.push(spendCard.replace('class="nm-card is-real"', 'class="nm-card span-6 is-real"'));
-      cards.push(surfaceCard.replace('class="nm-card"', 'class="nm-card span-6"'));
+      cards.push(cardPart("credits", waiting, [], function () { return spendCard.replace('class="nm-card is-real"', 'class="nm-card span-6 is-real"'); }));
+      cards.push(cardPart("surfaces", waiting, [], function () { return surfaceCard.replace('class="nm-card"', 'class="nm-card span-6"'); }));
     }
-    return pageHead("limits") + statusBanner() + staleBanner([pe]) + '<div class="nm-pgrid">' + cards.join("") + "</div>";
+    return pageModel("limits", "nm-pgrid", cards, { stale: staleBanner([pe]) });
   }
 
   // ── Cost & value ────────────────────────────────────────────────────────────────
@@ -1565,7 +2316,7 @@
         '<p class="nm-note">Set the plan price in <a href="#settings">Settings</a> to see how many times over the plan pays for itself.</p>';
     } else {
       body = '<div class="nm-big-row"><div class="nm-big h">' + esc(fmtMult(mult)) + '</div><div class="nm-facts"><span>THIS CYCLE</span><span>YOUR PLAN</span></div></div>' +
-        (mult === null ? "" : ratioCells(mult, fmtMult(mult) + " months of the plan")) +
+        (mult === null ? "" : ratioCells(mult, fmtMult(mult) + " months of the plan", d.skeleton ? 12 : 0)) +
         '<p class="nm-note">' + esc(ratioNote(mult, plan.name)) + " (" + esc(fmtPlanPrice(price)) + " a month, " + esc(plan.price_source === "override" ? "your override" : "detected") + ")</p>" +
         kvGrid([
           ["Cycle so far", fmtUsd(v.cycle_cost_usd)],
@@ -1626,10 +2377,16 @@
     if (!list.length) {
       return '<p class="nm-empty">No sessions this week yet.</p>';
     }
+    var rows = list.slice(0, 5);
+    // The folder column is as wide as the longest folder name needs (a column of a fixed table takes its width in percent: a
+    // character is about 1.3 % of the 600 px a table has at its narrowest), up to 40 %, so a name is cut with an ellipsis only
+    // when the table really has no room; the session title takes what is left.
+    var longest = rows.reduce(function (n, r) { return Math.max(n, String(r.project_name || r.project || "").length); }, 0);
+    var folderPct = clamp(Math.ceil((longest + 2) * 1.3), 14, 40);
     return '<div class="nm-table-wrap"><table class="nm-table nm-fixed"><caption class="nm-sr">The five most expensive sessions this week</caption>' +
-      '<colgroup><col class="c-rank"><col class="c-title"><col class="c-folder"><col class="c-num"><col class="c-num"></colgroup>' +
+      '<colgroup><col class="c-rank"><col class="c-title"><col class="c-folder" style="width:' + folderPct + '%"><col class="c-num"><col class="c-num"></colgroup>' +
       '<thead><tr><th scope="col">#</th><th scope="col">Session</th><th scope="col">Folder</th><th scope="col" class="r">API-equiv.</th><th scope="col" class="r">Requests</th></tr></thead><tbody>' +
-      list.slice(0, 5).map(function (r, i) {
+      rows.map(function (r, i) {
         var title = r.title || "Untitled session";
         var tip = title + " · " + (r.models || []).join(", ") + (r.prs ? " · " + plural(r.prs, "pull request") : "") + " · subagents " + fmtUsd(r.subagent_cost_usd);
         return "<tr><td>" + (i + 1) + '</td><td class="lead nm-trunc" title="' + esc(tip) + '">' + esc(title) + '</td><td class="nm-trunc" title="' + esc(r.project || "") + '">' + esc(r.project_name || r.project || "") +
@@ -1637,86 +2394,111 @@
       }).join("") + "</tbody></table></div>";
   }
 
-  function costToolbar(pick, winCost) {
+  /* winCost null: the window's report is not in, and the note is a placeholder (hidden text of the length the real note has).
+   * failed: the report is not coming (it failed and there is no older one), so the note is settled text, not a placeholder
+   * that would wait for ever. */
+  function costToolbar(pick, winCost, failed) {
+    var gone = failed && winCost === null;
+    var waiting = winCost === null && !gone;
     return '<div class="nm-toolbar wide"><span class="nm-toolbar-k">Breakdowns for</span>' + seg("cost-window", "Window for the breakdowns", WINDOW_SEG, pick) +
-      '<span class="nm-toolbar-n">' + esc(WINDOW_PHRASE[pick] + (winCost === null ? "" : ", " + fmtUsd(winCost) + " " + BASIS.toLowerCase())) + "</span></div>";
+      '<span class="nm-toolbar-n"' + (waiting ? ' data-pending="" aria-hidden="true"' : "") + ">" +
+      esc(gone ? WINDOW_PHRASE[pick] + ", not loaded" : WINDOW_PHRASE[pick] + ", " + (waiting ? "$000.00" : fmtUsd(winCost)) + " " + BASIS.toLowerCase()) + "</span></div>";
   }
 
   function costPage() {
     var e = statEntry("cost", { window: S.ui.costWindow });
     var d = e.data;
-    var s = st();
-    var unpriced = s && s.unpriced_models && s.unpriced_models.length
-      ? card({ title: "Not priced yet", meta: "excluded from cost", cls: "wide", body: '<ul class="nm-supp">' + s.unpriced_models.map(function (id) { return "<li>" + esc(id) + "</li>"; }).join("") + "</ul>" })
-      : "";
-    var head = pageHead("cost") + statusBanner() + staleBanner([e]);
-    if (!d) {
-      return head + '<div class="nm-pgrid">' + costToolbar(S.ui.costWindow, null) +
-        card({ title: "Cost & value", meta: BASIS, cls: "wide", body: whenLoaded(e, function () { return ""; }) }) + unpriced + "</div>";
-    }
+    // The parts that do not depend on the window (the plan multiple, the months, the windows table, the top sessions) are
+    // drawn from the newest report of any window while this window's is on its way; the breakdowns wait for their own.
+    var src = d ? e : lastGoodEntry("cost");
+    var base = src ? src.data : skelCost();
+    var whole = src ? "ready" : entryState([e]);
+    var broken = d ? "ready" : entryState([e]);
+    var skel = !d;
+    var b = d ? d.breakdowns : skelCost().breakdowns;
     var pick = S.ui.costWindow;
-    var b = d.breakdowns;
+    var s = st();
+    var u = usage();
     var cards = [];
-    cards.push(valueCard(d));
-    cards.push(monthlyCard(d, e));
-    cards.push(card({
-      title: "Windows", meta: "requests, tokens and cost by window", cls: "wide",
-      body: '<div class="nm-table-wrap"><table class="nm-table"><caption class="nm-sr">Cost by time window, API-equivalent at list prices</caption><thead><tr><th scope="col">Window</th><th scope="col" class="r">Requests</th><th scope="col" class="r">Tokens</th>' +
-        '<th scope="col" class="r">Cache hit</th><th scope="col" class="r">Saved by cache</th><th scope="col" class="r">API-equiv.</th></tr></thead><tbody>' +
-        WINDOW_ORDER.map(function (name) { return windowRow(name, d.windows[name]); }).join("") + "</tbody></table></div>"
+    cards.push(cardPart("value", whole, [e], function () { return valueCard(base); }));
+    cards.push(cardPart("monthly", whole, [e], function () { return monthlyCard(base, src || e); }));
+    cards.push(cardPart("windows", whole, [e], function () {
+      return card({
+        title: "Windows", meta: "requests, tokens and cost by window", cls: "wide",
+        body: '<div class="nm-table-wrap"><table class="nm-table"><caption class="nm-sr">Cost by time window, API-equivalent at list prices</caption><thead><tr><th scope="col">Window</th><th scope="col" class="r">Requests</th><th scope="col" class="r">Tokens</th>' +
+          '<th scope="col" class="r">Cache hit</th><th scope="col" class="r">Saved by cache</th><th scope="col" class="r">API-equiv.</th></tr></thead><tbody>' +
+          WINDOW_ORDER.map(function (name) { return windowRow(name, base.windows[name]); }).join("") + "</tbody></table></div>"
+      });
     }));
-    var winCost = num(d.windows[pick] && d.windows[pick].cost_usd);
-    cards.push(costToolbar(pick, winCost));
-    cards.push(card({ title: "By model", meta: "share of cost", cls: "span-6", body: breakdownCard("By model", "", b.by_model, e, "model", "model") }));
+    var winCost = src ? num(base.windows[pick] && base.windows[pick].cost_usd) : null;
+    cards.push(part("toolbar", costToolbar(pick, winCost, whole === "error")));
+    cards.push(cardPart("by-model", broken, [e], function () {
+      return card({ title: "By model", meta: "share of cost", cls: "span-6", body: breakdownCard("By model", "", b.by_model, e, "model", "model") });
+    }));
     var launch = S.ui.folderMode === "launch";
-    cards.push(card({
-      title: launch ? "By launch folder" : "By folder", cls: "span-6",
-      metaHtml: seg("folder-mode", "Group by", [["folder", "FOLDER"], ["launch", "LAUNCH FOLDER"]], S.ui.folderMode),
-      body: breakdownCard(launch ? "By launch folder" : "By folder", "", launch ? b.by_project : b.by_folder, e, launch ? "launch" : "folder", launch ? "launch" : "folder",
-        '<p class="nm-note">' + (launch ? "Where Claude Code was started. One launch folder can hold work from many repositories." : "Where the work happened: the repository the files live in. Worktrees count toward their repository.") + "</p>")
+    cards.push(cardPart("by-folder", broken, [e], function () {
+      return card({
+        title: launch ? "By launch folder" : "By folder", cls: "span-6",
+        metaHtml: seg("folder-mode", "Group by", [["folder", "FOLDER"], ["launch", "LAUNCH FOLDER"]], S.ui.folderMode),
+        body: breakdownCard(launch ? "By launch folder" : "By folder", "", launch ? b.by_project : b.by_folder, e, launch ? "launch" : "folder", launch ? "launch" : "folder",
+          '<p class="nm-note">' + (launch ? "Where Claude Code was started. One launch folder can hold work from many repositories." : "Where the work happened: the repository the files live in. Worktrees count toward their repository.") + "</p>")
+      });
     }));
     var main = b.by_thread.main, sub = b.by_thread.subagent;
     var threadTotal = (num(main.cost_usd) || 0) + (num(sub.cost_usd) || 0);
     var share = function (v) { return threadTotal > 0 ? (num(v) || 0) / threadTotal * 100 : 0; };
-    cards.push(card({
-      title: "Main and subagents", meta: "cost split", cls: "span-4",
-      body: CHARTS.stackedBar([
-        { value: num(main.cost_usd) || 0, cls: "main", tip: "Main threads: " + fmtUsdExact(main.cost_usd) },
-        { value: num(sub.cost_usd) || 0, cls: "alt", tip: "Subagents: " + fmtUsdExact(sub.cost_usd) }
-      ], { width: 300, height: 14, label: "Cost split between main threads and subagents" }) +
-        '<div class="nm-stats">' +
-        statTile("thread-main", "Main threads", fmtUsd(main.cost_usd), { sub: fmtPct(share(main.cost_usd)) + " · " + plural(main.requests, "request") }) +
-        statTile("thread-sub", "Subagents", fmtUsd(sub.cost_usd), { sub: fmtPct(share(sub.cost_usd)) + " · " + plural(sub.requests, "request") }) + "</div>"
+    cards.push(cardPart("threads", broken, [e], function () {
+      return card({
+        title: "Main and subagents", meta: "cost split", cls: "span-4",
+        body: CHARTS.stackedBar([
+          { value: num(main.cost_usd) || 0, cls: "main", tip: "Main threads: " + fmtUsdExact(main.cost_usd) },
+          { value: num(sub.cost_usd) || 0, cls: "alt", tip: "Subagents: " + fmtUsdExact(sub.cost_usd) }
+        ], { width: 300, height: 14, label: "Cost split between main threads and subagents" }) +
+          '<div class="nm-stats">' +
+          statTile("thread-main", "Main threads", fmtUsd(main.cost_usd), { sub: fmtPct(share(main.cost_usd)) + " · " + plural(main.requests, "request") }) +
+          statTile("thread-sub", "Subagents", fmtUsd(sub.cost_usd), { sub: fmtPct(share(sub.cost_usd)) + " · " + plural(sub.requests, "request") }) + "</div>"
+      });
     }));
     var haikuCost = (num(b.haiku.main.cost_usd) || 0) + (num(b.haiku.subagent.cost_usd) || 0);
     var haikuReq = (num(b.haiku.main.requests) || 0) + (num(b.haiku.subagent.requests) || 0);
-    var haikuShare = winCost > 0 ? haikuCost / winCost * 100 : null;
-    cards.push(card({
-      title: "Haiku share", meta: "of cost", cls: "span-4",
-      body: '<div class="nm-stats">' + statTile("haiku-share", "Haiku share of cost", haikuShare === null ? "--" : fmtPct(haikuShare, 1), {
-        big: true, bar: haikuShare, sub: plural(haikuReq, "request"), cls: "is-wide"
-      }) + statTile("haiku-main", "Main threads", fmtUsd(b.haiku.main.cost_usd), { sub: plural(b.haiku.main.requests, "request") }) +
-        statTile("haiku-sub", "Subagents", fmtUsd(b.haiku.subagent.cost_usd), { sub: plural(b.haiku.subagent.requests, "request") }) + "</div>"
+    var chosenCost = d ? num(d.windows[pick] && d.windows[pick].cost_usd) : null;
+    var haikuShare = skel ? 0 : chosenCost > 0 ? haikuCost / chosenCost * 100 : null;
+    cards.push(cardPart("haiku", broken, [e], function () {
+      return card({
+        title: "Haiku share", meta: "of cost", cls: "span-4",
+        body: '<div class="nm-stats">' + statTile("haiku-share", "Haiku share of cost", haikuShare === null ? "--" : fmtPct(haikuShare, 1), {
+          big: true, bar: haikuShare, sub: plural(haikuReq, "request"), cls: "is-wide"
+        }) + statTile("haiku-main", "Main threads", fmtUsd(b.haiku.main.cost_usd), { sub: plural(b.haiku.main.requests, "request") }) +
+          statTile("haiku-sub", "Subagents", fmtUsd(b.haiku.subagent.cost_usd), { sub: plural(b.haiku.subagent.requests, "request") }) + "</div>"
+      });
     }));
     var fast = b.fast || { requests: 0, cost_usd: 0 };
-    cards.push(card({
-      title: "Fast mode", meta: "paid from usage credits", cls: "span-4" + (fast.requests > 0 ? " is-warn" : ""),
-      body: '<div class="nm-stats">' + statTile("fast-mode", "Fast-mode requests", fmtInt(fast.requests), { big: true, sub: fmtUsd(fast.cost_usd) + " API-equivalent" }) + "</div>" +
-        (fast.requests > 0
-          ? '<div class="nm-callout is-warn" role="note"><b>Heads up.</b> Fast mode on Pro and Max plans is billed to your usage credits, not to your plan&rsquo;s limits.</div>'
-          : '<p class="nm-note">No fast-mode requests in this window.</p>')
+    cards.push(cardPart("fast", broken, [e], function () {
+      return card({
+        title: "Fast mode", meta: "paid from usage credits", cls: "span-4" + (fast.requests > 0 ? " is-warn" : ""),
+        body: '<div class="nm-stats">' + statTile("fast-mode", "Fast-mode requests", fmtInt(fast.requests), { big: true, sub: fmtUsd(fast.cost_usd) + " API-equivalent", cls: "is-wide" }) + "</div>" +
+          '<div class="nm-callout' + (fast.requests > 0 ? " is-warn" : "") + '" role="note"' + (skel ? ' data-pending=""' : "") + "><b>Heads up.</b> " + FAST_NOTE + "</div>"
+      });
     }));
-    cards.push(card({ title: "Top sessions this week", meta: "by API-equivalent cost", cls: "span-8", body: sessionsTable(d.top_sessions_week || []) }));
-    var spend = d.spend || (usage() && usage().spend);
-    cards.push(card({
-      title: "Usage credits", meta: "real money", cls: "span-4 is-real",
-      body: spendCardBody(spend) + '<p class="nm-note nm-disc">Only this card is real money. Every other figure on this page is ' + BASIS + ".</p>"
+    cards.push(cardPart("sessions", whole, [e], function () {
+      return card({ title: "Top sessions this week", meta: "by API-equivalent cost", cls: "span-8", body: sessionsTable(base.top_sessions_week || []) });
     }));
-    cards.push(unpriced);
-    return head + '<div class="nm-pgrid">' + cards.join("") + "</div>";
+    var spend = (base.spend && !base.skeleton) ? base.spend : (u && u.spend);
+    cards.push(cardPart("credits", s ? "ready" : "pending", [], function () {
+      return card({
+        title: "Usage credits", meta: "real money", cls: "span-4 is-real",
+        body: spendCardBody(spend, !!(u && u.skeleton)) + '<p class="nm-note nm-disc">Only this card is real money. Every other figure on this page is ' + BASIS + ".</p>"
+      });
+    }));
+    if (s && s.unpriced_models && s.unpriced_models.length) {
+      cards.push(cardPart("unpriced", "ready", [], function () {
+        return card({ title: "Not priced yet", meta: "excluded from cost", cls: "wide", body: '<ul class="nm-supp">' + s.unpriced_models.map(function (id) { return "<li>" + esc(id) + "</li>"; }).join("") + "</ul>" });
+      }));
+    }
+    return pageModel("cost", "nm-pgrid", cards, { problem: problemBanner([e]), stale: staleBanner([e]) });
   }
 
-  // ── Nerds only (efficiency) ─────────────────────────────────────────────────────
+  // ── Efficiency ──────────────────────────────────────────────────────────────────
 
   /* A block of any content (a chart, a table) with one explanation, like a stat tile. */
   function statBlock(key, label, inner) {
@@ -1744,118 +2526,147 @@
     return rows;
   }
 
-  function nerdsCards(d, e) {
+  /* The Efficiency page's cards, one part each. state is how the report is doing; d is the report, or the placeholder shape. */
+  function efficiencyCards(d, e, state) {
     var c = d.cache, th = d.thinking, cx = d.context, cp = d.compactions, t = d.tools, pr = d.productivity, w = d.web;
     var cards = [];
     var prompt = (c.fresh_input_tokens || 0) + (c.read_tokens || 0) + (c.write_tokens || 0);
-    cards.push(card({
-      title: "Cache", meta: "prompt tokens from cache", cls: "span-4",
-      body: '<div class="nm-stats">' +
-        statTile("cache-hit", "Cache hit rate", fmtRate(c.hit_rate), { big: true, bar: pct100(c.hit_rate), cls: "is-wide" }) +
-        statTile("cache-saved", "Caching saved", fmtUsd(c.saved_usd), { big: true, sub: "list prices", cls: "is-wide" }) +
-        statTile("cache-read", "Cache reads", fmtCount(c.read_tokens), { sub: fmtInt(c.read_tokens) }) +
-        statTile("cache-fresh", "Fresh input", fmtCount(c.fresh_input_tokens), { sub: fmtInt(c.fresh_input_tokens) }) +
-        statTile("cache-write-5m", "Writes, 5 min", fmtCount(c.write_5m_tokens), { sub: fmtInt(c.write_5m_tokens) }) +
-        statTile("cache-write-1h", "Writes, 1 hour", fmtCount(c.write_1h_tokens), { sub: fmtInt(c.write_1h_tokens) }) + "</div>" +
-        (prompt > 0 ? CHARTS.stackedBar([
-          { value: c.read_tokens, cls: "main", tip: "Read from cache: " + fmtInt(c.read_tokens) },
-          { value: c.write_tokens, cls: "alt", tip: "Written to cache: " + fmtInt(c.write_tokens) },
-          { value: c.fresh_input_tokens, cls: "dim", tip: "Fresh input: " + fmtInt(c.fresh_input_tokens) }
-        ], { width: 300, height: 12, label: "Where prompt tokens came from: cache reads, cache writes, fresh input" }) +
-        '<p class="nm-note">Prompt tokens: cache reads, cache writes, fresh input</p>' : "")
-    }));
-    cards.push(card({
-      title: "Thinking", meta: "share of output", cls: "span-4",
-      body: '<div class="nm-stats">' +
-        statTile("thinking-share", "Thinking share", fmtRate(th.share), { big: true, bar: pct100(th.share), cls: "is-wide" }) +
-        statTile("thinking-tokens", "Thinking tokens", fmtCount(th.thinking_tokens), { sub: fmtInt(th.thinking_tokens) }) +
-        statTile("output-tokens", "Output tokens", fmtCount(th.output_tokens), { sub: fmtInt(th.output_tokens) }) + "</div>"
-    }));
-    cards.push(card({
-      title: "Compactions", meta: "conversation summaries", cls: "span-4",
-      body: '<div class="nm-stats">' +
-        statTile("compactions", "Compactions", fmtInt(cp.count), { big: true, sub: fmtInt(cp.auto) + " auto · " + fmtInt(cp.manual) + " manual", cls: "is-wide" }) +
-        statTile("compactions-day", "Per active day", num(cp.per_active_day) === null ? "--" : cp.per_active_day.toFixed(2)) +
-        statTile("active-days", "Active days", fmtInt(d.active_days)) +
-        statTile("compact-pre", "Size before compacting", cp.avg_pre_tokens === null ? "--" : fmtCount(cp.avg_pre_tokens), { sub: "tokens, average" }) + "</div>"
-    }));
+    function add(key, build) {
+      cards.push(cardPart(key, state, [e], build));
+    }
+    add("cache", function () {
+      return card({
+        title: "Cache", meta: "prompt tokens from cache", cls: "span-4",
+        body: '<div class="nm-stats">' +
+          statTile("cache-hit", "Cache hit rate", fmtRate(c.hit_rate), { big: true, bar: pct100(c.hit_rate), cls: "is-wide" }) +
+          statTile("cache-saved", "Caching saved", fmtUsd(c.saved_usd), { big: true, sub: "list prices", cls: "is-wide" }) +
+          statTile("cache-read", "Cache reads", fmtCount(c.read_tokens), { sub: fmtInt(c.read_tokens) }) +
+          statTile("cache-fresh", "Fresh input", fmtCount(c.fresh_input_tokens), { sub: fmtInt(c.fresh_input_tokens) }) +
+          statTile("cache-write-5m", "Writes, 5 min", fmtCount(c.write_5m_tokens), { sub: fmtInt(c.write_5m_tokens) }) +
+          statTile("cache-write-1h", "Writes, 1 hour", fmtCount(c.write_1h_tokens), { sub: fmtInt(c.write_1h_tokens) }) + "</div>" +
+          (prompt > 0 ? CHARTS.stackedBar([
+            { value: c.read_tokens, cls: "main", tip: "Read from cache: " + fmtInt(c.read_tokens) },
+            { value: c.write_tokens, cls: "alt", tip: "Written to cache: " + fmtInt(c.write_tokens) },
+            { value: c.fresh_input_tokens, cls: "dim", tip: "Fresh input: " + fmtInt(c.fresh_input_tokens) }
+          ], { width: 300, height: 12, label: "Where prompt tokens came from: cache reads, cache writes, fresh input" }) +
+          '<p class="nm-note">Prompt tokens: cache reads, cache writes, fresh input</p>' : "")
+      });
+    });
+    add("thinking", function () {
+      return card({
+        title: "Thinking", meta: "share of output", cls: "span-4",
+        body: '<div class="nm-stats">' +
+          statTile("thinking-share", "Thinking share", fmtRate(th.share), { big: true, bar: pct100(th.share), cls: "is-wide" }) +
+          statTile("thinking-tokens", "Thinking tokens", fmtCount(th.thinking_tokens), { sub: fmtInt(th.thinking_tokens) }) +
+          statTile("output-tokens", "Output tokens", fmtCount(th.output_tokens), { sub: fmtInt(th.output_tokens) }) + "</div>"
+      });
+    });
+    add("compactions", function () {
+      return card({
+        title: "Compactions", meta: "conversation summaries", cls: "span-4",
+        body: '<div class="nm-stats">' +
+          statTile("compactions", "Compactions", fmtInt(cp.count), { big: true, sub: fmtInt(cp.auto) + " auto · " + fmtInt(cp.manual) + " manual", cls: "is-wide" }) +
+          statTile("compactions-day", "Per active day", num(cp.per_active_day) === null ? "--" : cp.per_active_day.toFixed(2)) +
+          statTile("active-days", "Active days", fmtInt(d.active_days)) +
+          // Claude Code's own count when it compacted, not the API's per-request count under Context size: the two can differ.
+          statTile("compact-pre", "Size at compaction", cp.avg_pre_tokens === null ? "--" : fmtCount(cp.avg_pre_tokens), { sub: "tokens, average, Claude Code's own count" }) + "</div>"
+      });
+    });
     var cmax = num(cx.max) || 0;
     var ctxBar = function (v) { return cmax > 0 && num(v) !== null ? v / cmax * 100 : 0; };
-    cards.push(card({
-      title: "Context size", meta: "prompt tokens per request", cls: "span-6",
-      body: '<div class="nm-stats is-quad">' +
-        statTile("ctx-avg", "Average", cx.avg === null ? "--" : fmtCount(cx.avg), { big: true, bar: ctxBar(cx.avg) }) +
-        statTile("ctx-p50", "Median (p50)", cx.p50 === null ? "--" : fmtCount(cx.p50), { big: true, bar: ctxBar(cx.p50) }) +
-        statTile("ctx-p95", "p95", cx.p95 === null ? "--" : fmtCount(cx.p95), { big: true, bar: ctxBar(cx.p95) }) +
-        statTile("ctx-max", "Largest", cx.max === null ? "--" : fmtCount(cx.max), { big: true, bar: cx.max === null ? 0 : 100 }) + "</div>" +
-        '<p class="nm-note">' + esc(fmtInt(cx.requests)) + " requests measured</p>"
-    }));
-    cards.push(card({
-      title: "Tool health", meta: "calls and errors", cls: "span-6",
-      body: '<div class="nm-stats">' +
-        statTile("tool-total", "Tool calls", fmtInt(t.total), { big: true }) +
-        statTile("tool-errors", "Tool errors", fmtInt(t.errors), { big: true }) +
-        statTile("tool-rate", "Error rate", t.error_rate === null ? "--" : fmtRate(t.error_rate, 1), { big: true, bar: pct100(t.error_rate) }) + "</div>"
-    }));
+    add("context", function () {
+      return card({
+        title: "Context size", meta: "prompt tokens per request, API count", cls: "span-6",
+        body: '<div class="nm-stats is-quad">' +
+          statTile("ctx-avg", "Average", cx.avg === null ? "--" : fmtCount(cx.avg), { big: true, bar: ctxBar(cx.avg) }) +
+          statTile("ctx-p50", "Median (p50)", cx.p50 === null ? "--" : fmtCount(cx.p50), { big: true, bar: ctxBar(cx.p50) }) +
+          statTile("ctx-p95", "p95", cx.p95 === null ? "--" : fmtCount(cx.p95), { big: true, bar: ctxBar(cx.p95) }) +
+          statTile("ctx-max", "Largest request", cx.max === null ? "--" : fmtCount(cx.max), { big: true, bar: cx.max === null ? 0 : 100 }) + "</div>" +
+          '<p class="nm-note">' + esc(fmtInt(cx.requests)) + " requests measured, by the API&rsquo;s token counts. The size at compaction is Claude Code&rsquo;s own count, so the two can differ.</p>"
+      });
+    });
+    add("tools", function () {
+      return card({
+        title: "Tool health", meta: "calls and errors", cls: "span-6",
+        body: '<div class="nm-stats">' +
+          statTile("tool-total", "Tool calls", fmtInt(t.total), { big: true }) +
+          statTile("tool-errors", "Tool errors", fmtInt(t.errors), { big: true }) +
+          statTile("tool-rate", "Error rate", t.error_rate === null ? "--" : fmtRate(t.error_rate, 1), { big: true, bar: pct100(t.error_rate) }) + "</div>"
+      });
+    });
     var builtin = toolRows(t.builtin || [], "other built-in tools");
     var mcp = (t.mcp || []).map(function (m) {
       return { label: m.server, value: m.count, text: fmtInt(m.count), alt: true, tip: m.server + " (MCP server): " + plural(m.count, "call") + " across " + plural(m.tools, "tool") };
     });
-    cards.push(card({
-      title: "Tool mix: built-in", meta: "calls by tool", cls: "span-7",
-      body: builtin.length ? statBlock("tool-mix", "Calls by tool", chartHost(function (w) {
-        return CHARTS.hbars(builtin, { width: w, valueWidth: 70, label: "Built-in tool calls" });
-      }, [e.digest, "builtin"], "nm-hbars")) : '<p class="nm-empty">No tool calls in this window.</p>'
-    }));
-    cards.push(card({
-      title: "Tool mix: MCP", meta: "calls by server", cls: "span-5",
-      body: mcp.length ? chartHost(function (w) {
-        return CHARTS.hbars(mcp, { width: w, valueWidth: 70, label: "MCP server calls" });
-      }, [e.digest, "mcp"], "nm-hbars") + '<p class="nm-note">MCP tools are grouped by the server that provides them.</p>' : '<p class="nm-empty">No MCP servers were called.</p>'
-    }));
-    cards.push(card({
-      title: "Productivity", meta: "what the tokens produced", cls: "span-8",
-      body: '<div class="nm-stats is-quad">' +
-        statTile("lines-added", "Lines added", (pr.lines_added > 0 ? "+" : "") + fmtInt(pr.lines_added), { big: true }) +
-        statTile("lines-removed", "Lines removed", (pr.lines_removed > 0 ? "-" : "") + fmtInt(pr.lines_removed), { big: true }) +
-        statTile("files-created", "Files created", fmtInt(pr.files_created), { big: true }) +
-        statTile("commits", "Commits", fmtInt(pr.commits), { big: true }) +
-        statTile("pushes", "Pushes", fmtInt(pr.pushes), { big: true }) +
-        statTile("prs", "Pull requests", fmtInt(pr.prs), { big: true }) +
-        statTile("cost-pr", "Cost per PR", pr.cost_per_pr_usd === null ? "--" : fmtUsd(pr.cost_per_pr_usd), { big: true, sub: "API-equivalent" }) +
-        statTile("cost-100", "Per 100 changed lines", pr.cost_per_100_lines_usd === null ? "--" : fmtUsd(pr.cost_per_100_lines_usd), { big: true, sub: "API-equivalent" }) + "</div>"
-    }));
+    add("tool-mix", function () {
+      return card({
+        title: "Tool mix: built-in", meta: "calls by tool", cls: "span-7",
+        body: builtin.length ? statBlock("tool-mix", "Calls by tool", chartHost(function (width) {
+          return CHARTS.hbars(builtin, { width: width, valueWidth: 70, label: "Built-in tool calls" });
+        }, [e.digest, "builtin"], "nm-hbars")) : '<p class="nm-empty">No tool calls in this window.</p>'
+      });
+    });
+    add("mcp-mix", function () {
+      return card({
+        title: "Tool mix: MCP", meta: "calls by server", cls: "span-5",
+        body: mcp.length ? chartHost(function (width) {
+          return CHARTS.hbars(mcp, { width: width, valueWidth: 70, label: "MCP server calls" });
+        }, [e.digest, "mcp"], "nm-hbars") + '<p class="nm-note">MCP tools are grouped by the server that provides them.</p>' : '<p class="nm-empty">No MCP servers were called.</p>'
+      });
+    });
+    add("productivity", function () {
+      return card({
+        title: "Productivity", meta: "what the tokens produced", cls: "span-8",
+        body: '<div class="nm-stats is-quad">' +
+          statTile("lines-added", "Lines added", (pr.lines_added > 0 ? "+" : "") + fmtInt(pr.lines_added), { big: true }) +
+          statTile("lines-removed", "Lines removed", (pr.lines_removed > 0 ? "-" : "") + fmtInt(pr.lines_removed), { big: true }) +
+          statTile("files-created", "Files created", fmtInt(pr.files_created), { big: true }) +
+          statTile("commits", "Commits", fmtInt(pr.commits), { big: true }) +
+          statTile("pushes", "Pushes", fmtInt(pr.pushes), { big: true }) +
+          statTile("prs", "Pull requests", fmtInt(pr.prs), { big: true }) +
+          statTile("cost-pr", "Cost per PR", pr.cost_per_pr_usd === null ? "--" : fmtUsd(pr.cost_per_pr_usd), { big: true, sub: "API-equivalent" }) +
+          statTile("cost-100", "Per 100 changed lines", pr.cost_per_100_lines_usd === null ? "--" : fmtUsd(pr.cost_per_100_lines_usd), { big: true, sub: "API-equivalent" }) + "</div>"
+      });
+    });
     var effort = (d.effort || []).map(function (x) {
       return { label: x.effort, value: num(x.cost_usd) || 0, text: fmtUsd(x.cost_usd), tip: x.effort + ": " + fmtUsdExact(x.cost_usd) + " API-equivalent, " + plural(x.requests, "request") };
     });
-    cards.push(card({
-      title: "Effort mix", meta: "cost by effort level", cls: "span-4",
-      body: effort.length ? statBlock("effort-mix", "Cost by effort", chartHost(function (w) {
-        return CHARTS.hbars(effort, { width: w, valueWidth: 80, label: "Cost by effort level" });
-      }, [e.digest, "effort"], "nm-hbars")) : '<p class="nm-empty">No requests in this window.</p>'
-    }));
+    add("effort", function () {
+      return card({
+        title: "Effort mix", meta: "cost by effort level", cls: "span-4",
+        body: effort.length ? statBlock("effort-mix", "Cost by effort", chartHost(function (width) {
+          return CHARTS.hbars(effort, { width: width, valueWidth: 80, label: "Cost by effort level" });
+        }, [e.digest, "effort"], "nm-hbars")) : '<p class="nm-empty">No requests in this window.</p>'
+      });
+    });
     var tokenRows = [
       ["Fresh input", c.fresh_input_tokens], ["Output", th.output_tokens], ["Cache reads", c.read_tokens],
       ["Writes, 5 min", c.write_5m_tokens], ["Writes, 1 hour", c.write_1h_tokens],
       ["Thinking", th.thinking_tokens],
       ["Total", (c.fresh_input_tokens || 0) + (th.output_tokens || 0) + (c.read_tokens || 0) + (c.write_tokens || 0)]
     ];
-    cards.push(card({
-      title: "Exact token counts", meta: "this window", cls: "span-4",
-      body: '<div class="nm-table-wrap"><table class="nm-table nm-tokens"><caption class="nm-sr">Exact token counts for the chosen window</caption><tbody>' + tokenRows.map(function (row) {
-        return '<tr class="' + (row[0] === "Total" ? "is-today" : "") + '"><th scope="row" class="lead">' + esc(row[0]) + '</th><td class="r v">' + esc(fmtInt(row[1])) + "</td></tr>";
-      }).join("") + "</tbody></table></div>"
-    }));
-    cards.push(card({
-      title: "API errors and web", meta: "outside the tools", cls: "span-4",
-      body: '<div class="nm-stats">' +
-        statTile("api-errors", "API errors", fmtInt(d.api_errors), { big: true }) +
-        statTile("web-searches", "Web searches", fmtInt(w.searches), { big: true }) +
-        statTile("web-fetches", "Web fetches", fmtInt(w.fetches), { big: true }) + "</div>"
-    }));
+    add("tokens", function () {
+      return card({
+        title: "Exact token counts", meta: "this window", cls: "span-4",
+        body: '<div class="nm-table-wrap"><table class="nm-table nm-tokens"><caption class="nm-sr">Exact token counts for the chosen window</caption><tbody>' + tokenRows.map(function (row) {
+          return '<tr class="' + (row[0] === "Total" ? "is-today" : "") + '"><th scope="row" class="lead">' + esc(row[0]) + '</th><td class="r v">' + esc(fmtInt(row[1])) + "</td></tr>";
+        }).join("") + "</tbody></table></div>"
+      });
+    });
+    add("api-web", function () {
+      return card({
+        title: "API errors and web", meta: "outside the tools", cls: "span-4",
+        body: '<div class="nm-stats">' +
+          statTile("api-errors", "API errors", fmtInt(d.api_errors), { big: true }) +
+          statTile("web-searches", "Web searches", fmtInt(w.searches), { big: true }) +
+          statTile("web-fetches", "Web fetches", fmtInt(w.fetches), { big: true }) + "</div>"
+      });
+    });
     return cards;
   }
 
+  /* The pipeline card: how the monitor's own data is doing. The plan is named by its plan name ("Max 5x"), never by the
+   * internal tier id the usage API reports. */
   function pipelineCard(s) {
     var ingest = s && s.ingest ? s.ingest : null;
     var ingestText = ingest
@@ -1868,38 +2679,44 @@
       ["INGEST", ingestText],
       ["LAST INGEST", ingest && ingest.last_duration_s !== null && ingest.last_duration_s !== undefined ? num(ingest.last_duration_s).toFixed(2) + " S" : "--"],
       ["LAST ERROR", ingest && ingest.last_error ? ingest.last_error : "NONE"],
-      ["TIER", s && s.plan ? String(s.plan.rate_limit_tier || "--").replace(/_/g, " ").toUpperCase() : "--"],
+      ["PLAN", s && s.plan && s.plan.name ? String(s.plan.name).toUpperCase() : "--"],
       ["PRICE", effectivePlanPrice() !== null ? fmtPlanPrice(effectivePlanPrice()) + " / MO" : "UNKNOWN"]
     ];
-    var unpriced = s && s.unpriced_models && s.unpriced_models.length
-      ? s.unpriced_models.map(function (id) { return "<li>" + esc(id) + "</li>"; }).join("") : "<li>NONE</li>";
-    return card({
-      title: "Pipeline", meta: "data health", cls: "span-6",
-      body: kvGrid(kv)
-    }) + card({
-      title: "Not priced", meta: "models without a price row", cls: "span-6",
-      body: '<ul class="nm-supp">' + unpriced + "</ul>"
-    });
+    return card({ title: "Pipeline", meta: "data health", cls: "span-6", body: kvGrid(kv) });
   }
 
-  function nerdsPage() {
-    var e = statEntry("efficiency", { window: S.ui.nerdsWindow });
+  function notPricedCard(s) {
+    var unpriced = s && s.unpriced_models && s.unpriced_models.length
+      ? s.unpriced_models.map(function (id) { return "<li>" + esc(id) + "</li>"; }).join("") : "<li>NONE</li>";
+    return card({ title: "Not priced", meta: "models without a price row", cls: "span-6", body: '<ul class="nm-supp">' + unpriced + "</ul>" });
+  }
+
+  function efficiencyPage() {
+    var e = statEntry("efficiency", { window: S.ui.efficiencyWindow });
     var d = e.data;
     var s = st();
-    var pick = S.ui.nerdsWindow;
+    var pick = S.ui.efficiencyWindow;
+    var state = entryState([e]);
+    var base = d || skelEfficiency();
+    var gone = !d && state === "error";                // the report failed: the note says so, it is not a placeholder that waits for ever
     var note = d
       ? WINDOW_PHRASE[pick] + (d.start && d.end && pick !== "session" && pick !== "today" ? ", " + rangeText(d.start, d.end) : "") + ", " + plural(d.active_days, "active day")
-      : WINDOW_PHRASE[pick];
-    var toolbar = '<div class="nm-toolbar wide"><span class="nm-toolbar-k">Figures for</span>' + seg("nerds-window", "Window for the figures", WINDOW_SEG, pick) +
-      '<span class="nm-toolbar-n">' + esc(note) + "</span></div>";
-    var cards = d ? nerdsCards(d, e) : [card({ title: "Efficiency", meta: BASIS, cls: "wide", body: whenLoaded(e, function () { return ""; }) })];
-    return pageHead("nerds") + statusBanner() + staleBanner([e]) + '<div class="nm-pgrid">' + toolbar + cards.join("") + pipelineCard(s) + "</div>";
+      : gone ? WINDOW_PHRASE[pick] + ", not loaded"
+      : WINDOW_PHRASE[pick] + (pick !== "session" && pick !== "today" ? ", Oct 00 - Nov 00" : "") + ", 00 active days";      // hidden: it keeps the note's room
+    var toolbar = '<div class="nm-toolbar wide"><span class="nm-toolbar-k">Figures for</span>' + seg("efficiency-window", "Window for the figures", WINDOW_SEG, pick) +
+      '<span class="nm-toolbar-n"' + (d || gone ? "" : ' data-pending="" aria-hidden="true"') + ">" + esc(note) + "</span></div>";
+    var cards = [part("toolbar", toolbar)].concat(efficiencyCards(base, e, state));
+    var waiting = s ? "ready" : "pending";
+    cards.push(cardPart("pipeline", waiting, [], function () { return pipelineCard(s); }));
+    cards.push(cardPart("not-priced", waiting, [], function () { return notPricedCard(s); }));
+    return pageModel("efficiency", "nm-pgrid", cards, { problem: problemBanner([e]), stale: staleBanner([e]) });
   }
 
   // ── History ─────────────────────────────────────────────────────────────────────
 
-  function odometerHTML(total) {
-    var text = Math.round(Math.max(0, num(total) || 0)).toLocaleString("en-US");
+  /* placeholder: ten zeros, the width a typical total has, for a total that has not arrived. */
+  function odometerHTML(total, placeholder) {
+    var text = placeholder ? "0,000,000,000" : Math.round(Math.max(0, num(total) || 0)).toLocaleString("en-US");
     var strip = "0123456789".split("").map(function (n) { return "<i>" + n + "</i>"; }).join("");
     return '<div class="nm-odo" role="img" aria-label="' + esc(fmtInt(total) + " tokens, all time") + '">' + text.split("").map(function (ch) {
       return ch === "," ? '<span class="nm-od-sep" aria-hidden="true">,</span>'
@@ -1944,7 +2761,12 @@
       return;
     }
     var html;
-    if (!list.length) {
+    if (S.cmpList === null) {
+      // The same three parts a real comparison has (the text, and the picker dots, so the box keeps its height), none of them live yet.
+      html = '<div class="nm-cmp-body"><div class="nm-cmp-n" data-pending="" aria-hidden="true">000</div><div class="nm-cmp-u" data-pending="" aria-hidden="true">copies of War and Peace</div>' +
+        '<p class="nm-cmp-t" data-pending="" aria-hidden="true">Everything Claude has written back to you, thinking included, would fill this many copies.</p></div>' +
+        '<div class="nm-dots" aria-hidden="true"><button type="button" tabindex="-1" disabled></button><button type="button" tabindex="-1" disabled></button><button type="button" tabindex="-1" disabled></button></div>';
+    } else if (!list.length) {
       html = '<p class="nm-empty">Nothing to compare yet.</p>';
     } else {
       var i = S.ui.cmp % list.length;
@@ -1989,7 +2811,7 @@
 
   function playOdometer(main) {
     var total = S.odoTotal;
-    if (S.odoShown === total) {
+    if (total === null || S.odoShown === total) {
       return;
     }
     S.odoShown = total;
@@ -2016,74 +2838,83 @@
   function historyPage() {
     var e = statEntry("history");
     var d = e.data;
-    var head = pageHead("history") + statusBanner() + staleBanner([e]);
-    if (!d) {
-      S.cmpList = [];
-      return head + '<div class="nm-pgrid">' + card({ title: "History", meta: "local time", cls: "wide", body: whenLoaded(e, function () { return ""; }) }) + "</div>";
-    }
-    var od = d.odometer;
+    var state = entryState([e]);
+    var skel = !d;
+    var h = d || skelHistory();
+    var od = h.odometer;
     var cards = [];
-    S.odoTotal = num(od.total_tokens) || 0;
-    S.cmpList = comparisonList(od);
-    cards.push(card({
-      title: "All-time odometer", meta: "tokens, everything Claude has read and written", cls: "wide", id: "odometer",
-      body: '<div class="nm-odo-row"><div class="nm-odo-main">' + odometerHTML(od.total_tokens) +
-        '<div class="nm-odo-facts"><span><b>' + esc(fmtInt(od.requests)) + "</b> requests</span><span><b>" + esc(fmtCount(od.output_tokens)) + "</b> output tokens</span><span><b>" +
-        esc(fmtUsd(od.cost_usd)) + "</b> API-equivalent</span><span><b>" + esc(fmtInt(d.active_days)) + "</b> active days</span></div></div>" +
-        '<div class="nm-compare" id="compare" aria-live="off"></div></div>'
+    // The odometer rolls when the real total arrives, and the comparison box has nothing to say about a placeholder.
+    S.odoTotal = skel ? null : num(od.total_tokens) || 0;
+    S.cmpList = skel ? null : comparisonList(od);
+    cards.push(cardPart("odometer", state, [e], function () {
+      return card({
+        title: "All-time odometer", meta: "tokens, everything Claude has read and written", cls: "wide", id: "odometer",
+        body: '<div class="nm-odo-row"><div class="nm-odo-main">' + odometerHTML(od.total_tokens, skel) +
+          '<div class="nm-odo-facts"><span><b>' + esc(fmtInt(od.requests)) + "</b> requests</span><span><b>" + esc(fmtCount(od.output_tokens)) + "</b> output tokens</span><span><b>" +
+          esc(fmtUsd(od.cost_usd)) + "</b> API-equivalent</span><span><b>" + esc(fmtInt(h.active_days)) + "</b> active days</span></div></div>" +
+          '<div class="nm-compare" id="compare" aria-live="off"></div></div>'
+      });
     }));
     var metric = S.ui.calMetric;
-    var days = d.days.map(function (x) {
+    var days = h.days.map(function (x) {
       var has = (num(x.requests) || 0) > 0;
       return {
         date: x.date, value: metric === "cost" ? num(x.cost_usd) || 0 : num(x.tokens) || 0,
         tip: dayText(x.date, true) + ": " + (has ? fmtUsd(x.cost_usd) + " API-equivalent, " + fmtCount(x.tokens) + " tokens, " + plural(x.requests, "request") : "no activity")
       };
     });
-    cards.push(card({
-      title: "Every day", cls: "wide", metaHtml: seg("cal-metric", "Colour each day by", [["cost", "COST"], ["tokens", "TOKENS"]], metric),
-      body: chartHost(function (w) {
-        return CHARTS.calendar(days, { width: w, maxCell: 22, label: "Daily " + (metric === "cost" ? "cost" : "token") + " heatmap, " + days.length + " days", legend: ["LESS", "MORE"] });
-      }, [e.digest, metric, CHARTS.pips()], "nm-calendar") +
-        '<p class="nm-note">A stronger colour is more ' + (metric === "cost" ? "API-equivalent cost" : "tokens") + ". Today is outlined. Arrow keys move between days.</p>"
+    cards.push(cardPart("calendar", state, [e], function () {
+      return card({
+        title: "Every day", cls: "wide", metaHtml: seg("cal-metric", "Colour each day by", [["cost", "COST"], ["tokens", "TOKENS"]], metric),
+        body: chartHost(function (w) {
+          return CHARTS.calendar(days, { width: w, maxCell: 22, label: "Daily " + (metric === "cost" ? "cost" : "token") + " heatmap, " + days.length + " days", legend: ["LESS", "MORE"] });
+        }, [e.digest, metric, CHARTS.pips()], "nm-calendar") +
+          '<p class="nm-note">A stronger colour is more ' + (metric === "cost" ? "API-equivalent cost" : "tokens") + ". Today is outlined. Arrow keys move between days.</p>"
+      });
     }));
     var mm = S.ui.matrixMetric;
-    var grid = mm === "cost" ? d.hour_weekday.cost_usd : d.hour_weekday.requests;
+    var grid = mm === "cost" ? h.hour_weekday.cost_usd : h.hour_weekday.requests;
     var colLabels = [];
-    for (var h = 0; h < 24; h += 3) {
-      colLabels.push({ c: h, text: pad2(h) });
+    for (var hr = 0; hr < 24; hr += 3) {
+      colLabels.push({ c: hr, text: pad2(hr) });
     }
-    cards.push(card({
-      title: "When you work", cls: "span-8", metaHtml: seg("matrix-metric", "Colour each hour by", [["cost", "COST"], ["requests", "REQUESTS"]], mm),
-      body: chartHost(function (w) {
-        return CHARTS.matrix(grid, {
-          width: w, maxCell: 34, rowLabels: WEEKDAYS_MON, colLabels: colLabels, label: "Activity by weekday and hour of day, local time",
-          tip: function (r, c, v) {
-            return WEEKDAYS_MON[r] + " " + hourRange(c) + ": " + (num(v) > 0 ? (mm === "cost" ? fmtUsd(v) + " API-equivalent" : plural(v, "request")) : "no activity");
-          }
-        });
-      }, [e.digest, mm], "nm-matrix") + '<p class="nm-note">Local time, Monday first, over the last ' + esc(fmtInt(d.days.length)) + " days.</p>"
+    cards.push(cardPart("matrix", state, [e], function () {
+      return card({
+        title: "When you work", cls: "span-8", metaHtml: seg("matrix-metric", "Colour each hour by", [["cost", "COST"], ["requests", "REQUESTS"]], mm),
+        body: chartHost(function (w) {
+          return CHARTS.matrix(grid, {
+            width: w, maxCell: 34, rowLabels: WEEKDAYS_MON, colLabels: colLabels, label: "Activity by weekday and hour of day, local time",
+            tip: function (r, c, v) {
+              return WEEKDAYS_MON[r] + " " + hourRange(c) + ": " + (num(v) > 0 ? (mm === "cost" ? fmtUsd(v) + " API-equivalent" : plural(v, "request")) : "no activity");
+            }
+          });
+        }, [e.digest, mm], "nm-matrix") + '<p class="nm-note">Local time, Monday first, over the last ' + esc(fmtInt(h.days.length)) + " days.</p>"
+      });
     }));
-    var sk = d.streaks;
-    var first = parseTime(d.first_use);
+    var sk = h.streaks;
+    var first = parseTime(h.first_use);
     var sinceFirst = first === null ? null : Math.max(1, Math.round((Date.now() - first) / 86400000));
-    cards.push(card({
-      title: "Streaks and records", meta: "all time", cls: "span-4",
-      body: '<div class="nm-stats">' +
-        statTile("streak-current", "Current streak", plural(sk.current_days, "day"), { big: true }) +
-        statTile("streak-longest", "Longest streak", plural(sk.longest_days, "day"), { big: true, sub: sk.longest_start ? dayText(sk.longest_start) + " to " + dayText(sk.longest_end) : "" }) +
-        statTile("busiest-day", "Busiest day", d.busiest_day ? dayText(d.busiest_day.date, true) : "--", { text: true, cls: "is-wide", sub: d.busiest_day ? fmtUsd(d.busiest_day.cost_usd) + " · " + fmtCount(d.busiest_day.tokens) + " tokens" : "" }) +
-        statTile("first-use", "First use", first === null ? "--" : dateText(first), { text: true, cls: "is-wide", sub: sinceFirst === null ? "" : plural(sinceFirst, "day") + " ago" }) +
-        statTile("history-active", "Days used", fmtInt(d.active_days), { sub: sinceFirst ? fmtPct(Math.min(100, d.active_days / sinceFirst * 100)) + " of days since first use" : "" }) + "</div>"
+    cards.push(cardPart("streaks", state, [e], function () {
+      return card({
+        title: "Streaks and records", meta: "all time", cls: "span-4",
+        body: '<div class="nm-stats">' +
+          statTile("streak-current", "Current streak", plural(sk.current_days, "day"), { big: true }) +
+          statTile("streak-longest", "Longest streak", plural(sk.longest_days, "day"), { big: true, sub: sk.longest_start ? dayText(sk.longest_start) + " to " + dayText(sk.longest_end) : "" }) +
+          statTile("busiest-day", "Busiest day", h.busiest_day ? dayText(h.busiest_day.date, true) : "--", { text: true, cls: "is-wide", sub: h.busiest_day ? fmtUsd(h.busiest_day.cost_usd) + " · " + fmtCount(h.busiest_day.tokens) + " tokens" : "" }) +
+          statTile("first-use", "First use", first === null ? "--" : dateText(first), { text: true, cls: "is-wide", sub: sinceFirst === null ? "" : plural(sinceFirst, "day") + " ago" }) +
+          statTile("history-active", "Days used", fmtInt(h.active_days), { sub: sinceFirst ? fmtPct(Math.min(100, h.active_days / sinceFirst * 100)) + " of days since first use" : "" }) + "</div>"
+      });
     }));
-    cards.push(card({
-      title: "Export", meta: "daily totals", cls: "wide",
-      body: '<p class="nm-lede">One row for each day you used Claude Code: requests, tokens by kind, and cost (' + BASIS + '). Prompts, replies and code are never included.</p>' +
-        '<div class="nm-actions"><button class="nm-btn" type="button" data-action="export" data-format="csv" data-fid="export-csv">Export CSV</button>' +
-        '<button class="nm-btn" type="button" data-action="export" data-format="json" data-fid="export-json">Export JSON</button></div>' +
-        '<p class="nm-status' + (S.exportStatus.error ? " is-err" : "") + '" id="export-status" role="status" aria-live="polite">' + exportStatusHtml() + "</p>"
+    cards.push(cardPart("export", "ready", [], function () {
+      return card({
+        title: "Export", meta: "daily totals", cls: "wide",
+        body: '<p class="nm-lede">One row for each day you used Claude Code: requests, tokens by kind, and cost (' + BASIS + '). Prompts, replies and code are never included.</p>' +
+          '<div class="nm-actions"><button class="nm-btn" type="button" data-action="export" data-format="csv" data-fid="export-csv">Export CSV</button>' +
+          '<button class="nm-btn" type="button" data-action="export" data-format="json" data-fid="export-json">Export JSON</button></div>' +
+          '<p class="nm-status' + (S.exportStatus.error ? " is-err" : "") + '" id="export-status" role="status" aria-live="polite">' + exportStatusHtml() + "</p>"
+      });
     }));
-    return head + '<div class="nm-pgrid">' + cards.join("") + "</div>";
+    return pageModel("history", "nm-pgrid", cards, { problem: problemBanner([e]), stale: staleBanner([e]) });
   }
 
   /* Work to do after a page is in the DOM. */
@@ -2155,7 +2986,7 @@
         toggleRow("taskbar_text_fx", "Strip text effects", "Glow on the taskbar strip.") +
         toggleRow("hide_floating_in_fullscreen", "Hide in fullscreen", "Hide the floating widget while an app is fullscreen.") +
         selectRow("show_scoped_rows", "Scoped rows", "Show rows for scoped limits on the widget.", [["auto", "AUTO"], ["always", "ALWAYS"], ["never", "NEVER"]]) +
-        toggleRow("reduce_motion", "Reduce motion", "Stop the boot log, flicker, blinking and the rotating comparison.") +
+        toggleRow("reduce_motion", "Reduce motion", "Stop the boot sequences, page entrances, hover effects (here and on the desktop widgets), flicker, blinking and the rotating comparison.") +
         "</div></div></section>" +
         '<section class="nm-card" aria-label="Data and plan"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Data &amp; plan</h2><span class="nm-meta-t">how often, and what you pay</span></div><div class="nm-set">' +
         selectRow("poll_interval_ms", "Fetch usage every", "How often the usage API is asked. The minimum is one minute.", POLL_CHOICES) +
@@ -2183,16 +3014,23 @@
     main = main || $("#main");
     main.querySelectorAll("[data-key]").forEach(function (el) {
       var key = el.getAttribute("data-key");
-      if (!Object.prototype.hasOwnProperty.call(settings, key) || document.activeElement === el) {
+      if (!Object.prototype.hasOwnProperty.call(settings, key)) {
         return;
       }
       var value = settings[key];
+      var editing = document.activeElement === el;
       if (el.type === "checkbox") {
-        el.checked = !!value;
+        // A switch that has just been clicked keeps its own state until the monitor has answered (a state that is already on its
+        // way could still carry the old value), but its ON / OFF word always says what the switch shows.
+        if (!editing) {
+          el.checked = !!value;
+        }
         var lbl = main.querySelector('[data-lbl-for="' + key + '"]');
         if (lbl) {
-          lbl.textContent = value ? "ON" : "OFF";
+          lbl.textContent = el.checked ? "ON" : "OFF";
         }
+      } else if (editing) {
+        return;
       } else if (key === "billing_day" || key === "plan_price_override") {
         el.value = value === null || value === undefined ? "" : String(value);
       } else if (key === "poll_interval_ms") {
@@ -2258,6 +3096,28 @@
     });
   }
 
+  /* The colours a theme's card shows: one per accent, however many modes a theme has (Gates has each of its seven accents in
+   * a dark and a light variant, so reading its variants one by one showed the system accent twice). The mode is the one the
+   * page is in when it is the chosen theme, else the theme's first. */
+  function themeSwatches(theme, current) {
+    var mode = current && current.id === theme.id && current.mode ? current.mode : "";
+    var order = [];
+    var byAccent = {};
+    (theme.variants || []).forEach(function (v) {
+      var accent = v.accent || accentOf(v.id);
+      if (!byAccent[accent]) {
+        byAccent[accent] = [];
+        order.push(accent);
+      }
+      byAccent[accent].push(v);
+    });
+    return order.map(function (accent) {
+      var variants = byAccent[accent];
+      var chosen = variants.filter(function (v) { return mode && v.mode === mode; })[0] || variants[0];
+      return hex6(chosen.colors && (chosen.colors.accent || chosen.colors.text)) || "var(--border)";
+    });
+  }
+
   function syncThemePicker(main) {
     var cards = $("#set-themes", main);
     var accents = $("#set-accents", main);
@@ -2270,8 +3130,8 @@
     var list = S.themes || [];
     var cardsHtml = list.map(function (t) {
       var on = current && current.id === t.id;
-      var swatches = (t.variants || []).slice(0, 8).map(function (v) {
-        return '<i style="background:' + esc(hex6(v.colors && (v.colors.accent || v.colors.text)) || "var(--border)") + '"></i>';
+      var swatches = themeSwatches(t, current).map(function (colour) {
+        return '<i style="background:' + esc(colour) + '"></i>';
       }).join("");
       return '<button type="button" class="nm-theme" data-theme-id="' + esc(t.id) + '" aria-pressed="' + (on ? "true" : "false") + '"><b>' + esc(t.name) +
         "</b><small>" + esc(t.tagline || "") + '</small><span class="nm-swatches" aria-hidden="true">' + swatches + "</span></button>";
@@ -2330,6 +3190,57 @@
     }
   }
 
+  // ── The update banner ───────────────────────────────────────────────────────────
+
+  var PLAIN_VERSION = /^[0-9A-Za-z][0-9A-Za-z._+-]{0,39}$/;
+
+  /* The newer release the monitor has found, as {version, url, self}, or null: none found, or the user skipped exactly this
+   * version (in the monitor's settings, or in this window a moment ago). Read from /api/state.update, whose block is
+   * {available, version, url, can_self_update, skipped, info, skip_version}. */
+  function pendingUpdate() {
+    var u = S.data && S.data.update ? S.data.update : null;
+    if (!u || !u.available) {
+      return null;
+    }
+    var info = u.info || {};
+    var version = String(u.version || info.version || "");
+    if (!PLAIN_VERSION.test(version)) {
+      return null;
+    }
+    var skipped = u.skipped === true || (!!u.skip_version && u.skip_version === version) || S.skipped === version;
+    if (skipped) {
+      return null;
+    }
+    var url = String(u.url || info.url || "");
+    return { version: version, url: /^https:\/\/github\.com\//.test(url) ? url : "", self: u.can_self_update === true || info.can_self_update === true };
+  }
+
+  /* "Claude Usage Monitor vX.Y is available", with the three things to do about it. Nothing while no update is waiting. */
+  function updateBanner() {
+    var found = pendingUpdate();
+    if (!found) {
+      return "";
+    }
+    return '<div class="nm-update" role="status" aria-label="Update available"><div class="nm-update-t"><b>Claude Usage Monitor v' + esc(found.version) + " is available</b>" +
+      "<span>" + (found.self ? "Update now installs it and restarts the monitor." : "Update now opens the release page.") + "</span></div>" +
+      '<div class="nm-actions"><button class="nm-btn solid" type="button" data-action="update-now" data-fid="update-now">Update now</button>' +
+      (found.url ? '<button class="nm-btn" type="button" data-action="update-notes" data-fid="update-notes">Release notes</button>' : "") +
+      '<button class="nm-btn" type="button" data-action="update-skip" data-fid="update-skip">Skip this version</button></div>' +
+      '<p class="nm-status" role="status">' + esc(S.update.version === found.version ? S.update.text || "" : "") + "</p></div>";
+  }
+
+  /* The banner's three buttons. */
+  function updateAction(action) {
+    var found = pendingUpdate();
+    if (action === "update-now") {
+      installUpdate();
+    } else if (action === "update-skip") {
+      skipUpdate();
+    } else if (action === "update-notes" && found && found.url) {
+      openExternal(found.url);
+    }
+  }
+
   // ── About ───────────────────────────────────────────────────────────────────────
 
   /* The fonts the app bundles, by theme. All are under the SIL Open Font License 1.1, and each family's licence
@@ -2348,11 +3259,27 @@
       "The licence text of each bundled font sits beside it in the app&rsquo;s fonts folder.</p>";
   }
 
+  /* The About page is built once, not as parts, so its update banner is kept in step by hand: the slot's markup is replaced only
+   * when it changed (a banner rebuilt on every poll would drop the focus of whoever is tabbing through its buttons). display:
+   * contents keeps the slot out of the layout, so the banner is a child of the page like it is on every other page. */
+  function syncAboutBanner(main) {
+    var slot = $("#about-update", main);
+    if (!slot) {
+      return;
+    }
+    var html = updateBanner();
+    if (slot.getAttribute("data-sig") !== html) {
+      slot.setAttribute("data-sig", html);
+      replaceHtml(slot, html);
+    }
+  }
+
   function aboutPage(main) {
     if (S.formKey !== "about") {
       S.formKey = "about";
       S.sig = "";
       main.innerHTML = pageHead("about") +
+        '<div id="about-update" style="display:contents"></div>' +
         '<div class="nm-pgrid">' +
         card({
           title: "Claude Usage Monitor", metaHtml: '<span class="nm-meta-t" id="about-version"></span>',
@@ -2375,10 +3302,11 @@
             '<p class="nm-lede">Version 1 was built with Claude Sonnet 4.6.</p>'
         }) +
         card({ title: "Fonts", meta: "SIL Open Font License 1.1", body: fontsCardBody() }) +
-        '<section class="nm-card wide" aria-label="Supporters"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Supporters</h2><span class="nm-meta-t" id="about-supporters-meta">thank you</span></div>' +
+        '<section class="nm-card wide" aria-label="Supporters"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Supporters</h2><span class="nm-meta-t" id="about-supporters-meta">Thank You</span></div>' +
         '<div id="about-supporters"><p class="nm-empty">Loading the supporters list&hellip;</p></div></div></section>' +
         "</div>";
     }
+    syncAboutBanner(main);
     var v = $("#about-version", main);
     if (v) {
       v.textContent = S.data && S.data.version ? "VERSION " + S.data.version + (S.data.dev ? " · DEV" : "") : "VERSION --";
@@ -2419,7 +3347,7 @@
     }
     var meta = $("#about-supporters-meta", main);
     if (meta) {
-      meta.textContent = S.supporters.error ? "list unavailable" : "thank you";
+      meta.textContent = S.supporters.error ? "List unavailable" : "Thank You";
     }
   }
 
@@ -2634,40 +3562,84 @@
       removeLevel(parseInt(target.getAttribute("data-level"), 10));
     } else if (action === "refresh") {
       api("POST", "/api/refresh").then(function (res) {
-        setStatus(res.ok ? "REFRESH REQUESTED" : "REFRESH FAILED: " + errorText(res), !res.ok);
+        setStatus(res.ok ? "REFRESH REQUESTED" : failedText("REFRESH FAILED", res), !res.ok);
         poll(true);
+      }, function () {
+        setStatus("REFRESH FAILED: THE DASHBOARD LOST ITS LINK", true);
       });
     } else if (action === "check-update") {
       S.update = { text: "CHECKING\u2026" };
       api("POST", "/api/update/check").then(function (res) {
-        S.update = { text: res.ok ? (res.data && res.data.result && res.data.result.available ? "AN UPDATE IS AVAILABLE." : "YOU ARE UP TO DATE.") : "CHECK FAILED: " + errorText(res) };
+        S.update = { text: checkUpdateText(res) };
         api("GET", "/api/state").then(function (r) { if (r.ok) { S.data = r.data; S.etag = r.etag; } syncSettings($("#main")); });
+      }, function () {
+        S.update = { text: "CHECK FAILED: THE DASHBOARD LOST ITS LINK" };
+        syncSettings($("#main"));
       });
     } else if (action === "install-update") {
-      S.update = { text: "INSTALLING\u2026" };
-      api("POST", "/api/update/apply").then(function (res) {
-        /* The monitor says what it did. "browser": it opened the release page (a source run, or a release it will not install
-         * silently). "installer": it started the checked silent update, and only restarts if the download passes the check.
-         * One sentence per text: the Gates theme writes sentence case and capitalises only the first letter of a string. */
-        var mode = res.ok && res.data && res.data.result ? res.data.result.mode : "";
-        var text;
-        if (!res.ok) {
-          text = "UPDATE FAILED: " + errorText(res);
-        } else if (mode === "browser") {
-          text = "OPENED THE RELEASE PAGE IN YOUR BROWSER.";
-        } else if (mode === "installer") {
-          text = "DOWNLOADING AND CHECKING THE UPDATE; IF IT CHECKS OUT, THE MONITOR CLOSES AND RESTARTS BY ITSELF.";
-        } else {
-          text = "NO UPDATE WAS STARTED.";
-        }
-        S.update = { text: text };
-        syncSettings($("#main"));
-      });
+      installUpdate();
     } else if (action === "skip-update") {
-      api("POST", "/api/update/skip").then(function (res) {
-        S.update = { text: res.ok ? "THIS VERSION WILL BE SKIPPED." : "COULD NOT SKIP: " + errorText(res) };
-        syncSettings($("#main"));
-      });
+      skipUpdate();
+    }
+  }
+
+  /* Update now. The monitor says what it did. "browser": it opened the release page (a source run, or a release it will not
+   * install silently). "installer": it started the checked silent update, and only restarts if the download passes the check.
+   * One sentence per text: the Gates theme writes sentence case and capitalises only the first letter of a string. */
+  function installUpdate() {
+    var found = pendingUpdate();
+    var forVersion = found ? found.version : "";                // the banner shows this status only while it is about that release
+    S.update = { text: "INSTALLING\u2026", version: forVersion };
+    refreshUpdateViews();
+    api("POST", "/api/update/apply").then(function (res) {
+      var mode = res.ok && res.data && res.data.result ? res.data.result.mode : "";
+      var text;
+      if (!res.ok) {
+        text = failedText("UPDATE FAILED", res);
+      } else if (mode === "browser") {
+        text = "OPENED THE RELEASE PAGE IN YOUR BROWSER.";
+      } else if (mode === "installer") {
+        text = "DOWNLOADING AND CHECKING THE UPDATE; IF IT CHECKS OUT, THE MONITOR CLOSES AND RESTARTS BY ITSELF.";
+      } else {
+        text = "NO UPDATE WAS STARTED.";
+      }
+      S.update = { text: text, version: forVersion };
+      refreshUpdateViews();
+    }, function () {
+      S.update = { text: "UPDATE FAILED: THE DASHBOARD LOST ITS LINK", version: forVersion };
+      refreshUpdateViews();
+    });
+  }
+
+  /* Skip this version: the banner goes at once, and comes back only for a newer one. */
+  function skipUpdate() {
+    var found = pendingUpdate();
+    var forVersion = found ? found.version : "";
+    if (found) {
+      S.skipped = found.version;
+    }
+    S.update = { text: "THIS VERSION WILL BE SKIPPED.", version: forVersion };
+    refreshUpdateViews();
+    api("POST", "/api/update/skip").then(function (res) {
+      if (!res.ok) {
+        S.skipped = "";
+        S.update = { text: failedText("COULD NOT SKIP", res), version: forVersion };
+      }
+      refreshUpdateViews();
+      poll(true);
+    }, function () {
+      S.skipped = "";
+      S.update = { text: "COULD NOT SKIP: THE DASHBOARD LOST ITS LINK", version: forVersion };
+      refreshUpdateViews();
+    });
+  }
+
+  /* The update banner (on every page but Settings) and the Settings buttons say what S.update and the state now say. */
+  function refreshUpdateViews() {
+    if (S.page === "settings") {
+      syncSettings($("#main"));
+    } else {
+      renderPage();
     }
   }
 
@@ -2774,6 +3746,7 @@
   /* A theme's stylesheet decides --chart-pips and every size, so what was drawn before it loaded is drawn again. */
   function redrawAfterStyles() {
     S.sig = "";
+    S.repaint = true;
     if (S.data) {
       renderPage();
     }
@@ -2814,6 +3787,9 @@
     script.onload = function () {
       S.loadedScripts[id] = "ready";
       startThemeFx(id);
+      if (S.enterPending && S.data) {
+        renderPage();                                  // an entrance that was waiting for this script
+      }
     };
     script.onerror = function () {
       S.loadedScripts[id] = "none";
@@ -2830,6 +3806,15 @@
       return;
     }
     S.themeKey = key;
+    if (S.lastTheme && S.lastTheme.id !== theme.id) {
+      // another theme takes the page over: the old one's motion ends, every card is laid again and an entrance is due
+      var host = document.getElementById("main");
+      if (host) {
+        cancelFx(host);
+      }
+      wantEnter();
+      S.repaint = true;
+    }
     S.lastTheme = theme;
     var root = document.documentElement;
     S.appliedVars.forEach(function (name) { root.style.removeProperty(name); });
@@ -2849,6 +3834,7 @@
 
   function currentPage() {
     var key = (window.location.hash || "").replace(/^#/, "");
+    key = PAGE_ALIASES[key] || key;
     return PAGE_KEYS.indexOf(key) >= 0 ? key : "overview";
   }
 
@@ -2993,6 +3979,24 @@
     }
   }
 
+  var PAGE_MODELS = { overview: overviewPage, limits: limitsPage, cost: costPage, efficiency: efficiencyPage, history: historyPage };
+
+  /* The parts of a page, built from what has arrived and from placeholders for what has not (S.building lets the state
+   * accessors stand in for a monitor that has not answered). The charts the parts ask for are kept in S.charts. */
+  function buildModel(key) {
+    S.nextCharts = {};
+    S.building = true;
+    try {
+      return (PAGE_MODELS[key] || overviewPage)();
+    } finally {
+      S.building = false;
+      S.charts = S.nextCharts;
+    }
+  }
+
+  /* Draws the page the address names. It opens at once as a full set of cards: a card whose numbers have not arrived is a
+   * placeholder (see "Placeholders"), and each card fills in place when its report lands. Opening a page (or the first
+   * render, or a new theme) makes an entrance due (playEnterIfDue); a card that fills in later calls the theme's arrive. */
   function renderPage() {
     var key = currentPage();
     var main = document.getElementById("main");
@@ -3000,20 +4004,22 @@
       return;
     }
     markNav(key);
-    if (key !== S.page) {
+    var opened = key !== S.page;
+    if (opened) {
+      cancelFx(main);
       S.page = key;
       S.formKey = null;
       S.sig = "";
+      main.innerHTML = "";
       main.scrollTop = 0;
       if (S.tipApi) {
         S.tipApi.hide();
       }
-    }
-    if (!S.data) {
-      main.innerHTML = S.linkOk === false
-        ? '<p class="nm-empty">No link to the monitor. Retrying every two seconds.</p>'
-        : '<p class="nm-empty">Waiting for the first usage reading.</p>';
-      return;
+      wantEnter();
+      var alias = "#" + key;
+      if (window.location.hash && window.location.hash !== alias && PAGE_ALIASES[window.location.hash.slice(1)] === key && window.history && window.history.replaceState) {
+        window.history.replaceState(null, "", alias);          // an old link (#nerds) is the page's own address from here on
+      }
     }
     ensureStats();
     if (key === "settings" || key === "about") {
@@ -3023,27 +4029,24 @@
         aboutPage(main);
       }
       afterRender(key, main);
+      playEnterIfDue(main, key);
       return;
     }
     S.formKey = null;
-    S.chartSeq = 0;
-    S.nextCharts = {};
     if (CHARTS) {
       CHARTS.refresh();
     }
-    var renderers = { overview: overviewPage, limits: limitsPage, cost: costPage, nerds: nerdsPage, history: historyPage };
-    var html = (renderers[key] || overviewPage)();
-    S.charts = S.nextCharts;
-    var sig = key + "\u0001" + html;
-    if (sig !== S.sig) {
-      S.sig = sig;
-      replaceHtml(main, html);
-      if (S.tipApi) {
-        S.tipApi.hide();
-      }
+    var model = buildModel(key);
+    var report = paint(main, model, S.repaint);
+    S.repaint = false;
+    if (report.updated.length || report.added.length || opened) {
+      main.classList.add("fx-quiet");                            // a card that was just replaced under a resting pointer must not play its hover
     }
     hydrateCharts(main);
+    syncUpdating(main);
     afterRender(key, main);
+    announce(main, key, opened, report);
+    playEnterIfDue(main, key);
   }
 
   function render() {
@@ -3089,7 +4092,11 @@
       }
     }
     S.settings = S.data.settings || {};
+    var wasReduced = document.documentElement.getAttribute("data-reduce-motion") === "1";
     document.documentElement.setAttribute("data-reduce-motion", S.settings.reduce_motion ? "1" : "0");
+    if (S.settings.reduce_motion && !wasReduced) {
+      cancelFx(document.getElementById("main"));       // the setting just came on: whatever moves ends in its final state
+    }
     applyTheme(S.data.theme);
     ensureThemes();
     render();
@@ -3169,7 +4176,7 @@
   // ── Start-up ────────────────────────────────────────────────────────────────────
 
   function onSegment(name, value) {
-    var map = { "cost-window": "costWindow", "folder-mode": "folderMode", "nerds-window": "nerdsWindow", "cal-metric": "calMetric", "matrix-metric": "matrixMetric" };
+    var map = { "cost-window": "costWindow", "folder-mode": "folderMode", "efficiency-window": "efficiencyWindow", "cal-metric": "calMetric", "matrix-metric": "matrixMetric" };
     if (!map[name]) {
       return;
     }
@@ -3203,6 +4210,9 @@
     });
     document.addEventListener("visibilitychange", function () {
       if (document.visibilityState === "visible") {
+        if (S.enterPending && S.data) {
+          renderPage();                                // a window that was hidden when the page opened: its entrance plays now
+        }
         poll();
         ensureStats();
       }
@@ -3235,6 +4245,11 @@
           settingsChange(event);
         }
       });
+      // A card that is replaced under a resting pointer meets a pointer that is "over" it without having moved: the theme's hover
+      // effects wait (main.fx-quiet) for the first movement or scroll after a render.
+      var wake = function () { main.classList.remove("fx-quiet"); };
+      main.addEventListener("pointermove", wake, { passive: true });
+      main.addEventListener("wheel", wake, { passive: true });
       main.addEventListener("keydown", function (event) {
         if (event.key === "Enter" && event.target && event.target.id === "alert-add" && S.formKey === "settings") {
           event.preventDefault();
@@ -3266,6 +4281,11 @@
           exportData(exporter.getAttribute("data-format"));
           return;
         }
+        var banner = closest(".nm-update button[data-action]");
+        if (banner) {
+          updateAction(banner.getAttribute("data-action"));
+          return;
+        }
         if (S.formKey === "settings") {
           settingsClick(event);
         }
@@ -3284,6 +4304,7 @@
       }
     }
     window.setInterval(tick, 1000);
+    renderPage();                                      // the page opens at once as placeholders; the first state fills it in
     poll();
   }
 
@@ -3297,7 +4318,13 @@
       costNumbers: costNumbers, modelMixCard: modelMixCard, spendCardBody: spendCardBody, sessionsTable: sessionsTable,
       renderHealth: renderHealth, weeklyStory: weeklyStory, effectivePlanPrice: effectivePlanPrice,
       planFromState: planFromState, pipelineCard: pipelineCard, topModels: topModels, railHTML: railHTML,
-      limitCard: limitCard, remainHTML: remainHTML
+      limitCard: limitCard, remainHTML: remainHTML, buildModel: buildModel, statEntry: statEntry, entryState: entryState,
+      averageRateForecast: averageRateForecast, pacingChart: pacingChart, limitFacts: limitFacts, pendingUpdate: pendingUpdate,
+      updateBanner: updateBanner, themeSwatches: themeSwatches, currentPage: currentPage, skelCost: skelCost,
+      skelEfficiency: skelEfficiency, skelHistory: skelHistory, errorSwap: errorSwap, tagCard: tagCard, cardPart: cardPart,
+      playEnterIfDue: playEnterIfDue, wantEnter: wantEnter, loadPrefs: loadPrefs, PAGE_KEYS: PAGE_KEYS, clockText: clockText,
+      errorText: errorText, failedText: failedText, checkUpdateText: checkUpdateText, settingsClick: settingsClick,
+      updateAction: updateAction, installUpdate: installUpdate, skipUpdate: skipUpdate, aboutPage: aboutPage
     };
     return;
   }

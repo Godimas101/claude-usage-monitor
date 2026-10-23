@@ -10,8 +10,9 @@ unless CUM_UI_TESTS=1, like every test that starts a process.
 The scripts themselves run under node, in tests/webui_checks.js: charts.js and app.js are loaded into a vm
 context with a small fake DOM and window.__CUM_TEST__ set, so app.js hands back its helpers (the test hook at its
 end) and the tests below assert on what they return: escaping, the percent formats, the pace band, the model mix,
-the currency of real money, the plan multiple, the health rows, the plan price. A syntax error, a lost x100 or an
-unescaped title fails there. Those tests start node, so they need CUM_UI_TESTS=1 like every test that starts a
+the currency of real money, the plan multiple, the health rows, the plan price, the card layout of every page before
+any number has arrived, the update banner, the forecast line. A syntax error, a lost x100 or an unescaped title fails
+there. Those tests start node, so they need CUM_UI_TESTS=1 like every test that starts a
 process; .github/workflows/tests.yml sets it for this file (and a test below checks that it does).
 
 What these cannot show is how the page looks and behaves; that is checked by loading it in a browser
@@ -41,8 +42,10 @@ CHECKS_JS = Path(__file__).resolve().parent / "webui_checks.js"
 WORKFLOW = paths.resource_dir() / ".github" / "workflows" / "tests.yml"
 UI_TESTS = os.environ.get("CUM_UI_TESTS") == "1"
 ui_only = pytest.mark.skipif(not UI_TESTS, reason="needs CUM_UI_TESTS=1 (starts a child process)")
+# A child process of a test must not open a console window on the desktop of whoever runs the tests.
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
-PAGES = ["overview", "limits", "cost", "nerds", "history", "settings", "about"]
+PAGES = ["overview", "limits", "cost", "efficiency", "history", "settings", "about"]
 ALERT_KEYS = ["alerts_enabled", "alert_thresholds", "alert_on_threshold", "alert_on_reset",
               "alert_on_credits", "alert_quiet_hours"]
 
@@ -70,7 +73,7 @@ def strip_comments(text: str) -> str:
 
 
 def function_body(source: str, name: str) -> str:
-    """The text of ``function name(...) { ... }``, found by counting braces outside string literals."""
+    """The text of ``function name(...) { ... }``, found by counting braces outside string literals and comments."""
     start = source.index(f"function {name}(")
     depth, i, quote = 0, source.index("{", start), ""
     begin = i
@@ -81,6 +84,10 @@ def function_body(source: str, name: str) -> str:
                 i += 1
             elif ch == quote:
                 quote = ""
+        elif source.startswith("//", i):                  # a comment may hold an apostrophe or a brace
+            i = source.index("\n", i)
+        elif source.startswith("/*", i):
+            i = source.index("*/", i) + 1
         elif ch in "\"'":
             quote = ch
         elif ch == "{":
@@ -258,7 +265,9 @@ def test_no_inline_handlers_or_dynamic_code(name: str) -> None:
 
 def test_index_html_is_the_shell_the_server_and_the_scripts_expect() -> None:
     assert INDEX.count('<meta name="monitor-token" content="">') == 1     # the server fills this in
-    assert re.findall(r'<script src="([^"]+)"', INDEX) == ["/static/charts.js", "/static/app.js"]
+    scripts = re.findall(r'<script src="([^"]+)"', INDEX)
+    assert scripts[-2:] == ["/static/charts.js", "/static/app.js"]          # app.js last: it starts the page
+    assert set(scripts[:-2]) <= {"/static/motion.js"}                       # and only the motion layer before them
     assert not re.search(r"<script(?![^>]*\bsrc=)", INDEX), "an inline script (the CSP forbids it)"
     for needle in ('id="theme-css"', 'id="main"', 'id="menu"', 'id="variants"', 'id="refresh"', 'id="boot"'):
         assert needle in INDEX, needle
@@ -299,7 +308,7 @@ def test_storage_is_only_for_preferences_and_always_guarded() -> None:
             assert "try {" in source[max(0, m.start() - 260):m.start()], "storage used outside a try block"
     assert APP_CODE.count("localStorage.") == 2                  # one read, one write: the viewer's choices
     allowed = re.search(r"var allowed = \{(.*?)\};", APP_CODE, re.S).group(1)
-    assert set(re.findall(r"(\w+):", allowed)) == {"costWindow", "nerdsWindow", "folderMode", "calMetric", "matrixMetric"}
+    assert set(re.findall(r"(\w+):", allowed)) == {"costWindow", "efficiencyWindow", "folderMode", "calMetric", "matrixMetric"}
 
 
 # ── Charts ────────────────────────────────────────────────────────────────────────
@@ -421,10 +430,12 @@ def test_nostromo_fits_the_overview_in_the_default_window() -> None:
     """The default window is about 741 px tall inside its frame; the limit cards need 201 px normally and 187 px
     with the short-window rhythm, and the overview's floors must be what its content needs."""
     base = re.search(r"\.nm-grid \{ flex: 1 1 auto; min-height: (\d+)px;.*?grid-template-rows: minmax\((\d+)px,", CSS, re.S)
-    assert base and (int(base.group(1)), int(base.group(2))) == (643, 201)
+    assert base and (int(base.group(1)), int(base.group(2))) == (657, 201)      # (the last row's floor is 154: the burn card's trace)
+    assert "minmax(154px, 146fr)" in CSS.split("short windows")[0]               # it ran over the card's figures at 140
     short = re.search(r"@media \(min-width: 1001px\) and \(max-height: (\d+)px\) \{(.*?)\n\}", CSS, re.S)
-    assert short and int(short.group(1)) < 800 and "min-height: 630px" in short.group(2)
-    assert "minmax(188px, 196fr)" in short.group(2) and ".nm-sub { max-width: 680px; }" in short.group(2)
+    assert short and int(short.group(1)) < 800 and "min-height: 634px" in short.group(2)
+    assert "minmax(188px, 196fr)" in short.group(2) and "minmax(144px, 146fr)" in short.group(2)
+    assert ".nm-sub { max-width: 680px; }" in short.group(2)
 
 
 def test_nostromo_keeps_a_long_card_note_inside_the_card() -> None:
@@ -588,14 +599,14 @@ def node_binary() -> str:
 @pytest.mark.parametrize("name", list(ALL_SCRIPTS))
 def test_scripts_parse(name: str) -> None:
     run = subprocess.run([node_binary(), "--check", str(WEBUI / name)], capture_output=True, text=True, timeout=60,
-                         check=False)
+                         check=False, creationflags=NO_WINDOW)
     assert run.returncode == 0, run.stderr[-400:]
 
 
 @ui_only
 def test_chart_text_and_marks_stay_inside_their_chart() -> None:
     run = subprocess.run([node_binary(), "-e", CHART_BOUNDS_JS, str(WEBUI / "charts.js")], capture_output=True,
-                         text=True, timeout=60, check=False)
+                         text=True, timeout=60, check=False, creationflags=NO_WINDOW)
     assert run.returncode == 0, run.stderr[-400:]
     assert json.loads(run.stdout) == []
 
@@ -623,7 +634,7 @@ class Markup(HTMLParser):
 def checks() -> dict[str, Any]:
     """What tests/webui_checks.js found out by running charts.js and app.js (one node run for the module)."""
     run = subprocess.run([node_binary(), str(CHECKS_JS), str(WEBUI)], capture_output=True, text=True, timeout=60,
-                         check=False, encoding="utf-8")
+                         check=False, encoding="utf-8", creationflags=NO_WINDOW)
     assert run.returncode == 0, run.stderr[-800:]
     return json.loads(run.stdout)
 
@@ -645,6 +656,17 @@ def test_esc_leaves_no_markup_in_session_titles_folder_names_and_chart_labels(ch
     assert svg.find("img") == [] and svg.find("b") == []
     assert any(a.get("aria-label") == HOSTILE for a in svg.find("g"))                    # charts.js escapes its own labels
     assert "Untitled session" in Markup(checks["sessionsTableUntitled"]).text
+
+
+@ui_only
+def test_a_heat_map_says_how_many_columns_it_has_and_says_it_right(checks: dict[str, Any]) -> None:
+    """The motion layer wipes a heat map on a column at a time and reads that count from one attribute (data-cols) on the
+    svg, so it never walks the ~540 cells of a year. The count has to be the columns the cells really sit in."""
+    found = checks["heatCols"]
+    assert found["calendar"]["said"] == found["calendar"]["drawn"] == 54          # 371 days from a Friday: 54 week columns
+    assert found["matrix"]["said"] == found["matrix"]["drawn"] == 24              # one column an hour
+    assert found["empty"] is None                                                 # an empty calendar draws nothing to wipe
+    assert found["other"] == [None, None]                                         # no other chart carries one
 
 
 FOLDERS = ["se-infolcd-apex-advanced", "se-infolcd-apex-update", "se-infolcd-apex-server", "SpaceEngineersModSDK",
@@ -814,6 +836,412 @@ def test_the_time_left_in_a_window_is_a_bar_the_themes_may_draw(checks: dict[str
     assert "RESETS <b>" in card and "IN " in card                                     # the other themes read the facts
 
 
+# ── The Efficiency page, under its old name too ───────────────────────────────────
+
+def test_the_efficiency_page_is_called_efficiency_wherever_a_user_reads_it() -> None:
+    assert 'key: "efficiency", label: "EFFICIENCY", title: "EFFICIENCY"' in APP_CODE
+    assert '<a href="#efficiency" data-page="efficiency"><i>04</i>EFFICIENCY</a>' in INDEX
+    visible = strip_comments(APP + INDEX + "".join(THEME_CSS.values()))
+    assert "nerds only" not in visible.lower() and "NERDS ONLY" not in visible
+    assert 'PAGE_ALIASES = { nerds: "efficiency" }' in APP_CODE            # an old link or bookmark still opens it
+    assert 'data-page="efficiency"' in THEME_CSS["gates"] and 'data-page="nerds"' not in THEME_CSS["gates"]
+
+
+@ui_only
+def test_an_old_nerds_link_and_a_choice_saved_under_the_old_name_still_work(checks: dict[str, Any]) -> None:
+    assert checks["pageKeys"] == PAGES
+    assert checks["alias"] == "efficiency" and checks["aliasNew"] == "efficiency"
+    assert checks["aliasUnknown"] == "overview"
+    assert checks["legacyPrefs"] == ["week", "month"]               # the window saved as nerdsWindow, and the cost window
+    assert checks["newPrefsWin"] == "today"                         # the new name wins when both are saved
+
+
+@ui_only
+def test_the_two_compaction_and_context_figures_say_they_are_different_counters(checks: dict[str, Any]) -> None:
+    compactions, context = checks["counters"]
+    assert "Size at compaction" in compactions and "Claude Code&#39;s own count" in compactions
+    assert "Largest request" in context and "prompt tokens per request, API count" in context
+    assert "so the two can differ" in context
+    why = why_table()
+    assert "own token count" in why["ctx-max"] and "compaction" in why["ctx-max"]
+    assert "own count" in why["compact-pre"] and "API" in why["compact-pre"]
+
+
+@ui_only
+def test_the_plan_is_named_by_its_plan_name_never_by_the_internal_tier(checks: dict[str, Any]) -> None:
+    pipeline = checks["pipeline"]
+    assert "<span>PLAN</span><b>MAX 5X</b>" in pipeline
+    assert "DEFAULT" not in pipeline.upper() and "TIER" not in pipeline.upper()
+
+
+def test_the_supporters_label_is_thank_you_and_a_theme_that_wants_capitals_writes_them_in_css() -> None:
+    assert '<span class="nm-meta-t" id="about-supporters-meta">Thank You</span>' in APP_CODE
+    assert 'S.supporters.error ? "List unavailable" : "Thank You"' in APP_CODE
+    assert "thank you" not in APP_CODE and "THANK YOU" not in APP_CODE
+
+
+# ── A page is never empty ─────────────────────────────────────────────────────────
+
+CARDS = {
+    "overview": ["limit-session", "limit-weekly", "limit-scoped", "cost", "efficiency", "models", "surfaces", "burn"],
+    "limits": ["limit-session", "limit-weekly", "limit-scoped-0", "credits-surfaces"],
+    "cost": ["value", "monthly", "windows", "by-model", "by-folder", "threads", "haiku", "fast", "sessions", "credits"],
+    "efficiency": ["cache", "thinking", "compactions", "context", "tools", "tool-mix", "mcp-mix", "productivity", "effort",
+                   "tokens", "api-web", "pipeline", "not-priced"],
+    "history": ["odometer", "calendar", "matrix", "streaks", "export"],
+}
+
+
+@ui_only
+def test_a_page_opens_as_its_whole_card_layout_before_any_number_has_arrived(checks: dict[str, Any]) -> None:
+    """The tab was empty (a line of text) until its reports came; now every card, title and track is there at once."""
+    for page, keys in CARDS.items():
+        model = checks["empty"][page]
+        assert [c["key"] for c in model["cards"]] == keys, page
+        assert model["top"][:3] == ["hazard", "head", "update"]            # the update banner sits under the heading
+        for card in model["cards"]:
+            html = card["html"]
+            assert f'data-card="{card["key"]}"' in html and f'data-state="{card["state"]}"' in html, (page, card["key"])
+            assert re.search(r'class="nm-(?:ttl|tag)"', html), (page, card["key"])           # its title is there
+            if card["state"] == "pending":
+                assert 'aria-busy="true"' in html, (page, card["key"])
+        waiting = [c["state"] for c in model["cards"] if c["key"] != "export"]
+        assert set(waiting) == {"pending"}, page                                              # export has nothing to wait for
+
+
+@ui_only
+def test_the_placeholder_layout_has_the_cards_of_the_real_one(checks: dict[str, Any]) -> None:
+    """A card that appears or goes when the numbers land would move everything under it."""
+    def keys(states: list[str]) -> list[str]:
+        return [s.split(":")[0] for s in states]
+
+    assert keys(checks["arrived"]["efficiency"]) == CARDS["efficiency"]
+    assert keys(checks["arrived"]["history"]) == CARDS["history"]
+    assert keys(checks["lastKnown"]) == CARDS["cost"]
+    for page in ("overview", "limits"):
+        assert keys(checks["stateOnly"][page]) == CARDS[page]
+
+
+@ui_only
+def test_every_card_is_marked_by_how_its_numbers_are_doing(checks: dict[str, Any]) -> None:
+    only = checks["stateOnly"]
+    assert only["overview"][:3] == ["limit-session:ready", "limit-weekly:ready", "limit-scoped:ready"]   # these come with the state
+    assert "cost:pending" in only["overview"] and "efficiency:pending" in only["overview"]                # these need the cost report
+    assert only["history"][-1] == "export:ready" and only["history"][0] == "odometer:pending"
+    assert all(s.endswith(":ready") for s in checks["arrived"]["history"])
+    assert [s for s in checks["arrived"]["efficiency"] if not s.endswith(":ready")] == ["pipeline:pending", "not-priced:pending"]
+
+
+@ui_only
+def test_a_window_that_has_not_come_yet_shows_the_last_windows_numbers_where_they_do_not_depend_on_it(checks: dict[str, Any]) -> None:
+    states = dict(s.split(":") for s in checks["lastKnown"])
+    assert {k for k, v in states.items() if v == "ready"} == {"value", "monthly", "windows", "sessions"}
+    assert {k for k, v in states.items() if v == "pending"} == {"by-model", "by-folder", "threads", "haiku", "fast", "credits"}
+
+
+@ui_only
+def test_a_failed_report_replaces_the_placeholder_inside_its_own_cards_only(checks: dict[str, Any]) -> None:
+    for page, failing in (("efficiency", CARDS["efficiency"][:-2]), ("cost", CARDS["cost"][:-1])):
+        model = checks["failed"][page]
+        assert [c["key"] for c in model["cards"]] == CARDS[page], page             # no card goes
+        for card in model["cards"]:
+            if card["key"] in failing:
+                assert card["state"] == "error", (page, card["key"])
+                assert 'class="nm-error"' in card["html"] and 'class="nm-ttl"' in card["html"]      # its title and one line
+                assert "nm-stat-v" not in card["html"] and "nm-cells" not in card["html"]            # and no figures
+            else:
+                assert card["state"] != "error", (page, card["key"])               # a card that does not use the report stands
+    assert "Not ready yet" in checks["failed"]["efficiency"]["cards"][0]["html"]       # a 503, the database is still being built
+    assert "Could not be loaded" in checks["failed"]["cost"]["cards"][0]["html"]        # anything else
+
+
+@ui_only
+def test_the_toolbar_note_is_a_placeholder_only_while_its_report_is_on_its_way(checks: dict[str, Any]) -> None:
+    """A placeholder outside a card has no error swap: left pending after a failed report it would shimmer or flicker for ever."""
+    toolbar = checks["toolbar"]
+    for name in ("costWaiting", "efficiencyWaiting"):
+        assert 'class="nm-toolbar-n" data-pending="" aria-hidden="true"' in toolbar[name], name
+    for name in ("costFailed", "efficiencyFailed"):
+        assert 'class="nm-toolbar-n"' in toolbar[name] and "data-pending" not in toolbar[name], name
+        assert "not loaded" in toolbar[name], name
+
+
+def test_the_page_keeps_the_last_good_report_of_each_page_in_memory_and_says_when_it_refreshes() -> None:
+    code = strip_comments(APP_CODE)
+    assert "function lastGoodEntry(" in code and "function syncUpdating(" in code and "UPDATING_DELAY_MS" in code
+    assert 'setAttribute("data-updating", "")' in code
+    for name in ("data-pending", "data-final", "data-fill", "data-fresh", "data-state", "data-needs"):
+        assert name in code, name
+    assert "[data-pending],[data-pending] *{color:transparent!important" in code          # a placeholder's text only sizes the slot
+
+
+@pytest.mark.parametrize("theme_id", THEME_IDS)
+def test_every_theme_draws_its_placeholders_and_the_updating_cue(theme_id: str) -> None:
+    css = strip_comments(THEME_CSS[theme_id])
+    assert "[data-pending]" in css and "[data-updating]" in css, theme_id
+    assert re.search(r"\.nm-stat-v[^{]*\{[^}]*background", css), theme_id             # a figure that is not in yet is a block
+
+
+# ── The hook contract for the motion layer ────────────────────────────────────────
+
+def test_the_header_documents_the_hooks_the_motion_layer_may_implement() -> None:
+    for needle in ("enter(main, page)", "cancel(main)", "arrive(card, info)", "cum:card-data", "cum:page-rendered",
+                   "fx-run", "fx-quiet", "data-pending", "data-final", "data-fill", "data-fresh", "data-state=pending | ready | error",
+                   "data-updating", "window.CUM_THEME_FX[id]", "fx-hold, which kept the page hidden"):
+        assert needle in APP_DOC, needle
+    assert "Pending: a page is never empty" in APP_DOC
+
+
+def test_the_page_calls_the_hooks_and_does_not_wait_for_the_reports() -> None:
+    code = strip_comments(APP_CODE)
+    for name in ("themeFx", "themeReady", "wantEnter", "playEnterIfDue", "cancelFx", "announce"):
+        assert f"function {name}(" in code, name
+    assert 'fx.enter(main, key)' in code and 'fx.arrive(u.el, info)' in code and 'fx.cancel(main)' in code
+    assert '"cum:card-data"' in code and '"cum:page-rendered"' in code
+    assert 'classList.add("fx-hold")' not in code and "pageReady" not in code          # the entrance is not held back by the reports
+    assert 'classList.add("fx-quiet")' in code and 'classList.remove("fx-quiet")' in code
+    body = function_body(APP_CODE, "playEnterIfDue")
+    assert "themeReady()" in body and 'document.visibilityState === "hidden"' in body and "reduceMotion()" in body
+    assert "reduceMotion()" in function_body(APP_CODE, "announce")                      # nothing is called under reduced motion
+
+
+# ── The update banner ─────────────────────────────────────────────────────────────
+
+@ui_only
+def test_the_update_banner_is_there_only_while_an_unskipped_release_is_waiting(checks: dict[str, Any]) -> None:
+    banner = checks["banner"]
+    for hidden in ("none", "noBlock", "skipped", "skippedByVersion", "hostileVersion", "skippedHere"):
+        value = banner[hidden]
+        assert (value["html"] if isinstance(value, dict) else value) == "", hidden
+    available = banner["available"]
+    page = Markup(available["html"])
+    assert "Claude Usage Monitor v2.1.0 is available" in "".join(page.text)
+    assert [(a["data-action"], a.get("type")) for a in page.find("button")] == [
+        ("update-now", "button"), ("update-notes", "button"), ("update-skip", "button")]
+    assert [a for a in page.find("div") if a.get("class") == "nm-update"][0]["role"] == "status"
+    assert available["found"] == {"version": "2.1.0", "url": "https://github.com/Godimas101/claude-usage-monitor/releases/tag/v2.1.0", "self": True}
+    assert "Update now installs it" in "".join(page.text)
+    assert "Update now opens the release page" in "".join(Markup(banner["browser"]["html"]).text)
+    assert banner["newerThanSkipped"]["found"]["version"] == "2.2.0"                   # a newer release than the skipped one comes back
+    assert banner["fromInfo"]["found"]["version"] == "3.0"                              # the block's info carries it too
+    assert banner["foreignUrl"]["found"]["url"] == ""                                   # only a github.com link is ever opened
+    assert [a["data-action"] for a in Markup(banner["foreignUrl"]["html"]).find("button")] == ["update-now", "update-skip"]
+
+
+@ui_only
+def test_the_update_banner_status_is_shown_only_for_the_release_it_is_about(checks: dict[str, Any]) -> None:
+    assert "SKIPPED" not in checks["banner"]["staleStatus"]
+
+
+def test_the_update_banner_uses_the_update_routes_and_sits_first_on_every_page() -> None:
+    code = strip_comments(APP_CODE)
+    for route in ("/api/update/apply", "/api/update/skip", "/api/update/check"):
+        assert f'"{route}"' in code, route
+    page_model = function_body(APP_CODE, "pageModel")
+    assert page_model.index("hazard") < page_model.index("update") < page_model.index("problem")
+    assert "updateBanner()" in page_model                  # every page the page model draws has it, unless a page passes its own
+    for page in ("overviewPage", "limitsPage", "costPage", "efficiencyPage", "historyPage"):
+        assert "pageModel(" in function_body(APP_CODE, page), page
+    # the buttons work from any page that shows the banner
+    assert 'closest(".nm-update button[data-action]")' in code
+
+
+@ui_only
+@pytest.mark.parametrize("page", ["overview", "limits", "cost", "efficiency", "history"])
+def test_the_update_banner_is_on_every_page_not_only_the_overview(checks: dict[str, Any], page: str) -> None:
+    """The toast says "open the tray menu or the dashboard to update" and a click on it only brings the dashboard forward, so
+    the dashboard has to offer the update on whichever page it is on."""
+    shown = checks["bannerPages"][page]
+    banner = Markup(shown["shown"])
+    assert "Claude Usage Monitor v2.1.0 is available" in "".join(banner.text)
+    assert [a["data-action"] for a in banner.find("button")] == ["update-now", "update-notes", "update-skip"]
+    assert shown["none"] == "" and shown["skipped"] == ""                  # and nothing while no release waits, or after a skip
+
+
+@ui_only
+def test_the_about_page_keeps_its_update_banner_in_step_by_hand(checks: dict[str, Any]) -> None:
+    about = checks["bannerAbout"]
+    assert about["shown"]["hasSlot"] and about["none"]["hasSlot"]
+    assert "Claude Usage Monitor v2.1.0 is available" in "".join(Markup(about["shown"]["html"]).text)
+    assert about["none"]["html"] == ""
+    assert about["shown"]["again"] and about["none"]["again"]              # an unchanged banner is not rebuilt (it would drop focus)
+    assert about["shown"]["sig"] == about["shown"]["html"]
+    assert 'id="about-update" style="display:contents"' in function_body(APP_CODE, "aboutPage")
+
+
+@ui_only
+def test_the_overview_says_so_when_the_cost_report_failed_and_nothing_stands_in(checks: dict[str, Any]) -> None:
+    """With a billing day set (the month is not the cycle) or no month in the state, the cost report is the only source of the
+    Overview's cost, efficiency and model-mix cards. When it failed they stayed placeholders for ever, with nothing saying why,
+    while the Cost and Efficiency pages showed the failure."""
+    cost = checks["overviewCost"]
+    for name in ("failedBilling", "failedNoMonth", "failed501"):
+        shown = cost[name]
+        assert shown["states"] == ["cost:error", "efficiency:error", "models:error"], name
+        assert shown["errorLines"] == 3 and shown["stillPending"] is False, name      # one line each, and no placeholder left
+        assert "STATISTICS UNAVAILABLE" in shown["problem"], name
+    assert "not available in this build" in cost["failed501"]["problem"]              # the same sentence the other pages give
+    assert "HTTP 500" in cost["failedBilling"]["problem"]
+    # a report that is only on its way is still a placeholder, and the monitor's own month still stands in when there is one
+    assert cost["waiting"]["states"] == ["cost:pending", "efficiency:pending", "models:pending"] and cost["waiting"]["problem"] == ""
+    assert cost["fallback"]["states"] == ["cost:ready", "efficiency:ready", "models:ready"] and cost["fallback"]["problem"] == ""
+
+
+@ui_only
+def test_the_fast_mode_card_says_the_same_thing_before_its_report_and_after(checks: dict[str, Any]) -> None:
+    """Only the tone changes with the data: the same sentence, in the same box, so the card is as tall in all three states
+    (it grew from one line to a boxed note when the report landed, and the cards below it dropped by 21 to 59 px)."""
+    fast = checks["fast"]
+    assert [fast[k]["state"] for k in ("pending", "none", "some")] == ["pending", "ready", "ready"]
+
+    def callout(card: dict[str, Any]) -> re.Match[str]:
+        found = re.search(r'<div class="nm-callout( is-warn)?" role="note"( data-pending="")?>(.*?)</div>', card["html"], re.S)
+        assert found, card["html"]
+        return found
+
+    pending, none, some = callout(fast["pending"]), callout(fast["none"]), callout(fast["some"])
+    assert pending.group(3) == none.group(3) == some.group(3)                          # the very same words
+    assert "billed to your usage credits" in pending.group(3)
+    assert (pending.group(2), none.group(2), some.group(2)) == (' data-pending=""', None, None)      # a placeholder only before the report
+    assert (pending.group(1), none.group(1), some.group(1)) == (None, None, " is-warn")              # the warning tone only with requests
+    frame = [re.match(r'<section class="([^"]*)"', fast[k]["html"]).group(1) for k in ("pending", "none", "some")]
+    assert ["is-warn" in classes.split() for classes in frame] == [False, False, True]               # and so is the card's own frame
+    for key in ("pending", "none", "some"):
+        assert '<div class="nm-stat is-wide"' in fast[key]["html"]                    # the tile has the card's width, so its sub line never wraps by itself
+        assert "No fast-mode requests in this window" not in fast[key]["html"]        # that sentence changed the line count
+
+
+@ui_only
+def test_the_placeholder_threads_have_a_request_count_as_long_as_a_real_one(checks: dict[str, Any]) -> None:
+    """"97% · 2,670 requests" wraps in a narrow tile and "0% · 0 requests" did not, so the Main and subagents card grew a line
+    when its report landed. The placeholder text is never shown (it is transparent); it only sizes the tile."""
+    html = checks["threadsPending"]["html"]
+    sub = re.findall(r'<div class="nm-stat-s">([^<]*)</div>', html)
+    assert len(sub) == 2 and all(len(text) >= len("97% · 2,670 requests") for text in sub), sub
+
+
+@ui_only
+def test_a_status_line_in_capitals_is_in_capitals_all_the_way(checks: dict[str, Any]) -> None:
+    """The Gates theme sets a line in sentence case only when all of it is capitals (gates.js isCaps). The monitor's reason is lower
+    case ("update apply failed"), so each failure path raises it, or Gates shows a shouting prefix over a lower-case tail."""
+    lines = checks["failureLines"]
+    assert lines["reason"] == {
+        "refresh": "REFRESH FAILED: UPDATE APPLY FAILED", "check": "CHECK FAILED: UPDATE APPLY FAILED",
+        "install": "UPDATE FAILED: UPDATE APPLY FAILED", "skip": "COULD NOT SKIP: UPDATE APPLY FAILED"}
+    assert lines["status"]["install"] == "UPDATE FAILED: HTTP 502"                     # no reason from the monitor: its status
+    assert set(lines) == {"reason", "status", "lost"}
+    assert checks["failureLinesCaps"] is True
+    for group in lines.values():
+        for text in group.values():
+            assert re.search(r"[A-Z]", text) and not re.search(r"[a-z]", text), text
+
+
+@ui_only
+def test_check_for_updates_does_not_say_up_to_date_when_it_could_not_look(checks: dict[str, Any]) -> None:
+    said = checks["checkText"]
+    assert said["notChecked"] == "COULD NOT REACH GITHUB; TRY AGAIN LATER."            # one sentence: Gates capitalises only the first letter
+    assert said["upToDate"] == said["oldMonitor"] == said["noResult"] == "YOU ARE UP TO DATE."
+    assert said["found"] == said["foundBefore"] == "AN UPDATE IS AVAILABLE."          # a release an earlier check found is still on offer
+    for text in said.values():
+        assert re.search(r"[A-Z]", text) and not re.search(r"[a-z]", text), text
+
+
+def test_every_failure_status_line_goes_through_failed_text() -> None:
+    """The static half of the check above: no line is built as an upper-case prefix plus the monitor's own reason."""
+    code = strip_comments(APP_CODE)
+    assert not re.search(r'"[A-Z][A-Z ]*: " \+ errorText\(', code)
+    assert function_body(APP_CODE, "failedText").count("toUpperCase()") == 1
+    for prefix in ("REFRESH FAILED", "CHECK FAILED", "UPDATE FAILED", "COULD NOT SKIP"):
+        assert f'failedText("{prefix}", res)' in code, prefix
+
+
+# ── The theme picker ──────────────────────────────────────────────────────────────
+
+@ui_only
+def test_the_theme_picker_shows_one_swatch_per_accent(checks: dict[str, Any]) -> None:
+    swatches = checks["swatches"]
+    for key in ("gatesDark", "gatesLight", "gatesOther"):
+        assert len(swatches[key]) == 7 == len(set(swatches[key])), key               # Gates has seven accents, not fourteen swatches
+    assert len(swatches["nostromo"]) == 8 and len(swatches["nightCity"]) == 4
+    assert swatches["gatesDark"] != swatches["gatesLight"]                           # the mode of the page picks the colours shown
+
+
+# ── Gates: the live accent ────────────────────────────────────────────────────────
+
+def test_gates_fixed_accents_fill_usage_and_the_glow_follows_the_live_accent() -> None:
+    css = THEME_CSS["gates"]
+    # the literal defaults stay (tests/test_themes.py reads them); a variant on the page makes the fill the accent unless the
+    # server sent a fill of its own, which it does for the system accent
+    assert re.search(r"--accent-fill: #60cdff; --accent-soft: #60cdff24; --accent-tint: #60cdff14;", css)
+    assert ":root[data-variant] { --accent-fill: var(--accent); }" in css
+    assert "--g-wash: color-mix(in srgb, var(--accent) 8%, transparent);" in css
+    screen = re.search(r"\.nm-screen \{[^}]*\}", css, re.S).group(0)
+    assert "var(--g-wash)" in screen and "--accent-tint" not in screen and "--accent-fill" not in screen
+    assert re.search(r"\.nm-theme\[aria-pressed=\"true\"\] \{[^}]*var\(--g-wash\)", css)
+    assert re.search(r"\.nm-variants \.nm-btn\[aria-pressed=\"true\"\] \{[^}]*var\(--g-soft\)", css)
+
+
+def test_the_gates_loading_screen_corner_glow_is_the_live_accent_like_the_rest_of_its_chrome() -> None:
+    """The boot's top-left wash read --accent-tint, which comes from the fill colour. A system accent too near a status colour
+    (a red Windows accent) keeps its glyph, centre glow and the dashboard's own wash but gets Gates' default blue as its fill, so
+    the loading screen showed a blue corner under a red glyph, then the corner turned red as the dashboard faded in."""
+    boot = re.search(r'html\[data-theme="gates"\] \.g-boot \{[^}]*\}', read("themes/gates.motion.css"), re.S).group(0)
+    assert "var(--g-wash)" in boot
+    assert "--accent-tint" not in boot and "--accent-fill" not in boot
+
+
+# ── Switched-off settings and the time fields ─────────────────────────────────────
+
+@pytest.mark.parametrize("theme_id", THEME_IDS)
+def test_a_switched_off_group_dims_its_controls_and_never_its_words(theme_id: str) -> None:
+    css = strip_comments(THEME_CSS[theme_id])
+    assert not re.search(r"\.nm-set\.is-off[^{]*\{[^}]*opacity", css), theme_id        # the rows kept 55 %: too faint to read
+    assert re.search(r"\.nm-input:disabled[^{]*\{[^}]*opacity", css), theme_id           # the controls dim themselves
+    assert re.search(r"\.nm-toggle input:disabled[^{]*\{[^}]*opacity", css), theme_id
+
+
+@pytest.mark.parametrize("theme_id", THEME_IDS)
+def test_the_quiet_hours_fields_are_as_wide_as_the_time_the_locale_writes_in_them(theme_id: str) -> None:
+    """A fixed 112 px (Nostromo) cut the AM / PM off in a 12-hour locale; the field now takes the width its content needs."""
+    rule = re.search(r"\.nm-input\.is-time \{([^}]*)\}", strip_comments(THEME_CSS[theme_id])).group(1)
+    assert "width: auto" in rule, theme_id
+    assert int(re.search(r"min-width: (\d+)px", rule).group(1)) >= 140, theme_id
+
+
+# ── Top sessions ──────────────────────────────────────────────────────────────────
+
+@ui_only
+def test_the_folder_column_is_as_wide_as_the_longest_folder_name_needs(checks: dict[str, Any]) -> None:
+    column = {k: int(v) for k, v in checks["folderColumn"].items()}
+    assert column["short"] == 14 and column["short"] < column["usual"] < column["long"] == 40      # a share of the table, 14 to 40 %
+    assert "style=\"width:' + folderPct + '%\"" in function_body(APP_CODE, "sessionsTable")
+
+
+# ── The forecast of a weekly or scoped limit ──────────────────────────────────────
+
+@ui_only
+def test_the_forecast_runs_from_now_at_the_average_rate_to_the_reset_or_to_100_percent(checks: dict[str, Any]) -> None:
+    forecast = checks["forecast"]
+    below = forecast["below"]
+    assert below["reaches"] is None and below["end"] == 40
+    assert below["points"][0][1] == 10 and below["points"][1] == [forecast["reset"], 40]       # to the reset, at the report's own figure
+    crossing = forecast["crossing"]
+    assert crossing["reaches"] == pytest.approx(forecast["expectCross"])
+    assert crossing["points"][1] == [crossing["reaches"], 100] and crossing["points"][0][0] < crossing["reaches"] < forecast["reset"]
+    assert forecast["exact"]["reaches"] == forecast["reset"]                                  # 100 % exactly at the reset
+    assert forecast["reached"] is None and forecast["noProjection"] is None and forecast["over"] is None
+
+
+@ui_only
+def test_the_forecast_line_marks_when_it_crosses_100_percent_and_agrees_with_the_card(checks: dict[str, Any]) -> None:
+    card = checks["forecastCard"]
+    assert card["crossingForecastDrawn"] and card["stayingForecastDrawn"]
+    assert card["crossingLabel"] and card["crossingLabel"] == card["crossingClock"]            # "100% ~ <the moment>" on the chart
+    assert card["crossingTip"] == f"Reaches 100% about {card['crossingLabel']} at this rate"
+    assert card["crossingFacts"] == ["120.4%", card["crossingLabel"]]                         # Projected end, Limit reached
+    assert card["stayingLabel"] is False and card["stayingFacts"] == ["40.0%", False]         # no crossing, no marker, no fact
+
+
 # ── CI ────────────────────────────────────────────────────────────────────────────
 
 def test_ci_runs_the_script_tests_with_node() -> None:
@@ -821,6 +1249,7 @@ def test_ci_runs_the_script_tests_with_node() -> None:
     app.js passed CI. The workflow runs this file once more with CUM_UI_TESTS=1."""
     text = WORKFLOW.read_text(encoding="utf-8")
     assert "CUM_UI_TESTS" in text and "tests/test_webui.py" in text and "setup-node" in text
+    assert "tests/test_motion.py" in text                                          # motion.js is run under node there too
 
 
 def test_the_test_hook_is_inert_unless_a_test_sets_it() -> None:

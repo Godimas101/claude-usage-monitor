@@ -10,21 +10,31 @@ That is the CSS painting order, with halos kept under the marks they belong to.
 """
 from __future__ import annotations
 
+import functools
 import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 from usage_monitor import themes as theme_registry
+from usage_monitor.themes import colour as colour_math
 from usage_monitor.data.models import ApiStatus
 from usage_monitor.render import engine
 from usage_monitor.render.engine import Canvas, Color, Layer, TRANSPARENT, parse_color, with_alpha
 from usage_monitor.render.model import (
+    LAMP_LIMITED,
+    LAMP_OFFLINE,
+    LAMP_PAUSED,
+    NO_INSETS,
     SEVERITY_CRITICAL,
     SEVERITY_WARNING,
+    SURFACE_FLOATING,
+    SURFACE_TASKBAR,
+    HoverPlay,
+    Insets,
     Row,
     WidgetModel,
     pace_delta,
@@ -82,6 +92,27 @@ STRIP_GROUPS = (
     (144.0, 166.0, 256.0, "7D"),
 )
 STRIP_DIVIDER_X = 134
+
+# The strip has no room for a status word, so the mark beside "5H" tells the states apart: the blinking dot while
+# live, the pause bars, a hollow ring for last known (stale, no login, loading), and a pixel glyph each for no
+# connection and a throttled API. One logical px per "#", centred on the 6 px mark (the glyphs may be a little
+# wider than the dot: there are 8 px between the plate's edge and the "5H").
+STRIP_GLYPHS: dict[str, tuple[str, ...]] = {
+    LAMP_OFFLINE: (                 # a cross: NO CARRIER
+        "#......#",
+        ".#....#.",
+        "..#..#..",
+        "...##...",
+        "...##...",
+        "..#..#..",
+        ".#....#.",
+        "#......#",
+    ),
+    LAMP_LIMITED: (                 # three dots: THROTTLED, waiting to try again
+        "##.##.##",
+        "##.##.##",
+    ),
+}
 
 # Font keys used by the drawing code. Each maps to a theme role and weight, and to the bundled
 # Nostromo file that is used when the theme cannot supply one.
@@ -394,13 +425,27 @@ def _paint_frame(cv: Canvas, pal: Palette, outer: list, body: list, height: floa
     cv.gradient_fill(body, pal.plate, pal.crt, stop=0.4, y_top=1, y_bottom=height - 1)
 
 
+def _pixel_glyph(plan: _Plan, cv: Canvas, rows: tuple[str, ...], cx: float, cy: float, colour: Color) -> None:
+    """A bitmap glyph, one logical px per "#", centred on (cx, cy) and snapped to whole logical px: one layer."""
+    width = max(len(row) for row in rows)
+    left, top = round(cx - width / 2), round(cy - len(rows) / 2)
+    rects = [(left + i, top + j, left + i + 1, top + j + 1)
+             for j, row in enumerate(rows) for i, mark in enumerate(row) if mark == "#"]
+    plan.stamp(cv.rects_layer(rects), colour)
+
+
 def _alive_mark(plan: _Plan, cv: Canvas, pal: Palette, model: WidgetModel, opts: RenderOptions,
-                x: float, y: float, size: float = 6.0) -> None:
-    """The status mark: a blinking dot when live, a hollow ring when stale, a pause glyph when paused."""
-    if model.status is ApiStatus.PAUSED:
+                x: float, y: float, size: float = 6.0, glyphs: bool = False) -> None:
+    """The status mark: a blinking dot when live, a hollow ring when stale, a pause glyph when paused. With
+    ``glyphs`` (the strip, which has no room for a word) no connection and a throttled API get a glyph of their own."""
+    if model.lamp == LAMP_PAUSED:
         bar = size / 3
         plan.stamp(cv.rect_layer(x, y, x + bar, y + size), pal.label)
         plan.stamp(cv.rect_layer(x + 2 * bar, y, x + 3 * bar, y + size), pal.label)
+        return
+    glyph = STRIP_GLYPHS.get(model.lamp) if glyphs else None
+    if glyph is not None:
+        _pixel_glyph(plan, cv, glyph, x + size / 2, y + size / 2, pal.stale)
         return
     if model.stale:
         plan.stamp(cv.ellipse_layer(x, y, x + size, y + size, ring=1.0), pal.stale)
@@ -654,7 +699,41 @@ class NostromoSkin:
             lit = pal.stale
         else:
             lit = _lit_color(pal, row.severity if row is not None else "normal")
-        return _render_tray(size, percent, stale, lit, pal, theme)
+        return _render_tray(size, percent, stale, lit, pal, theme, model.lamp)
+
+    def content_insets(self, surface: str, theme: Any, model: WidgetModel, scale: float) -> Insets:
+        """No transparent margin: every Nostromo frame is its visible surface (the chamfers cut corners, not the box)."""
+        return NO_INSETS
+
+    def hover_frames(self, frame: Image.Image, surface: str, scale: float,
+                     opts: RenderOptions | Mapping[str, Any] | None = None) -> HoverPlay | None:
+        """The pointer response of the floating widget and the strip: the phosphor is driven harder while the pointer
+        is over it, one frame that holds until it leaves (see the motion spec, desktop widget hover)."""
+        if surface not in (SURFACE_FLOATING, SURFACE_TASKBAR):
+            return None
+        return HoverPlay(frames=(_brighten(frame, scale),), delays_ms=(0,), hold=True)
+
+
+# ── Hover ─────────────────────────────────────────────────────────────────────
+
+HOVER_GAIN = 1.22               # the phosphor is 22 % brighter ...
+HOVER_BLOOM = 0.30              # ... and a blurred copy of it adds a faint bloom at 30 %
+HOVER_BLOOM_SIGMA = 2.0         # logical px
+_HOVER_LUT = [min(255, int(v * HOVER_GAIN + 0.5)) for v in range(256)]
+_BLOOM_LUT = [int(v * HOVER_BLOOM + 0.5) for v in range(256)]
+
+
+def _brighten(frame: Image.Image, scale: float) -> Image.Image:
+    """``frame`` with its colour channels gained and a faint bloom added. Alpha is untouched, so the chamfered corners
+    and the window's shape stay as they were. The bloom is blurred at half size: the same picture for a quarter of
+    the work, which keeps the one-off cost of the first hover to a few milliseconds."""
+    red, green, blue, alpha = frame.convert("RGBA").split()
+    lit = Image.merge("RGB", (red.point(_HOVER_LUT), green.point(_HOVER_LUT), blue.point(_HOVER_LUT)))
+    sigma = max(0.5, HOVER_BLOOM_SIGMA * scale / 2)
+    bloom = lit.reduce(2).filter(ImageFilter.GaussianBlur(sigma)).resize(frame.size, Image.Resampling.BILINEAR)
+    bloom = bloom.point(_BLOOM_LUT * 3)
+    r, g, b = ImageChops.add(lit, bloom).split()
+    return Image.merge("RGBA", (r, g, b, alpha))
 
 
 # ── Tooltip rows ──────────────────────────────────────────────────────────────
@@ -725,7 +804,7 @@ def _render_strip(model: WidgetModel, pal: Palette, scale: float, opts: RenderOp
         cv.scanlines(1, STRIP_H - 1, SCAN_STRENGTH, clip=body)
 
     plan = _Plan(opts.text_fx)
-    _alive_mark(plan, cv, pal, model, opts, STRIP_DOT_X, STRIP_DOT_Y, 6.0)
+    _alive_mark(plan, cv, pal, model, opts, STRIP_DOT_X, STRIP_DOT_Y, 6.0, glyphs=True)
     semi = cv.font(FONT_SEMI, STRIP_LABEL_SIZE)
     vt = cv.font(FONT_VT, STRIP_VALUE_SIZE)
     label_baseline = cv.baseline_in_box(STRIP_LABEL_TOP, 12, semi)
@@ -778,8 +857,75 @@ def _tray_geometry(size: int) -> tuple[float, float, float]:
     return 9.5 + 4.5 * t, 3.5 + 0.5 * t, 4.0 + t
 
 
-def _render_tray(size: int, percent: float | None, stale: bool, lit: Color, pal: Palette, theme: Any) -> Image.Image:
-    """One pixel per cell, no anti-aliasing: pixel centres decide ink. Each icon has its own plate."""
+def _bars(width: int, gap: int, height: int) -> tuple[str, ...]:
+    """Two bars ``width`` px wide, ``gap`` px apart and ``height`` px tall: the pause glyph."""
+    return (("#" * width + "." * gap + "#" * width),) * height
+
+
+def _cross(size: int, thickness: int = 1) -> tuple[str, ...]:
+    """A ``size`` x ``size`` X whose diagonals are ``thickness`` px thick (an even size keeps it symmetric)."""
+    return tuple(
+        "".join("#" if abs(x - y) < thickness or abs(x - (size - 1 - y)) < thickness else "." for x in range(size))
+        for y in range(size)
+    )
+
+
+def _dots(width: int, height: int, gap: int) -> tuple[str, ...]:
+    """Three dots, ``width`` x ``height`` px each and ``gap`` px apart: an ellipsis."""
+    row = ("#" * width + "." * gap) * 2 + "#" * width
+    return (row,) * height
+
+
+# The tray icon's centre glyphs, one px per "#", centred in the ring's hole. They replace the centre block (the number
+# at 32 px) in the states that need a mark of their own: the pause bars while the numbers are live but not updating,
+# a cross for no connection and three dots for a throttled API. A stale icon stays an empty dashed ring, so each of
+# the three differs from it, and from each other, down to 16 px. Keyed by the icon size they are drawn at; a size
+# between two keys uses the smaller one.
+TRAY_GLYPHS: dict[int, dict[str, tuple[str, ...]]] = {
+    16: {LAMP_PAUSED: _bars(1, 2, 4), LAMP_OFFLINE: _cross(4), LAMP_LIMITED: _dots(1, 2, 1)},
+    20: {LAMP_PAUSED: _bars(2, 2, 6), LAMP_OFFLINE: _cross(6), LAMP_LIMITED: _dots(2, 2, 1)},
+    24: {LAMP_PAUSED: _bars(3, 2, 8), LAMP_OFFLINE: _cross(8, 2), LAMP_LIMITED: _dots(2, 2, 2)},
+    32: {LAMP_PAUSED: _bars(4, 4, 12), LAMP_OFFLINE: _cross(12, 2), LAMP_LIMITED: _dots(3, 3, 3)},
+}
+TRAY_ARC_CONTRAST = 3.2         # least contrast of a lit arc against the empty track (WCAG asks 3:1 of a graphic)
+
+
+def _tray_glyph(kind: str, size: int) -> tuple[str, ...] | None:
+    key = max((k for k in TRAY_GLYPHS if k <= size), default=min(TRAY_GLYPHS))
+    return TRAY_GLYPHS[key].get(kind)
+
+
+def _over(base: Color, wash: Color) -> Color:
+    """``wash`` laid over the opaque ``base``: an opaque colour."""
+    a = wash[3] / 255
+    return (round(base[0] + (wash[0] - base[0]) * a), round(base[1] + (wash[1] - base[1]) * a),
+            round(base[2] + (wash[2] - base[2]) * a), 255)
+
+
+@functools.lru_cache(maxsize=64)
+def _tray_track(pal: Palette) -> Color:
+    """The empty part of the ring as an opaque colour: the variant's translucent tray_track laid over the plate, so
+    the ring looks the same on a dark and on a light taskbar (a translucent pixel lets the taskbar through, which
+    washed the track out to pale amber on a light one), and dimmed, never brightened, until the weakest lit colour
+    reads against it at TRAY_ARC_CONTRAST."""
+    lit = [pal.main, pal.bright, pal.hot]
+    alpha = pal.tray_track[3]
+    while True:
+        track = _over(pal.crt, with_alpha(pal.tray_track, alpha))
+        if alpha <= 0 or min(_contrast(colour, track) for colour in lit) >= TRAY_ARC_CONTRAST:
+            return track
+        alpha -= 2
+
+
+def _contrast(a: Color, b: Color) -> float:
+    return colour_math.contrast_ratio(colour_math.to_hex(a[:3]), colour_math.to_hex(b[:3]))
+
+
+def _render_tray(size: int, percent: float | None, stale: bool, lit: Color, pal: Palette, theme: Any,
+                 kind: str = "live") -> Image.Image:
+    """One pixel per cell, no anti-aliasing: pixel centres decide ink. Each icon has its own opaque plate, and
+    everything on it is opaque too, so the icon reads the same on any taskbar. ``kind`` is the lamp kind (see
+    model.LAMP_KINDS): paused, offline and limited draw a glyph in the centre."""
     radius, thickness, chamfer = _tray_geometry(size)
     img = Image.new("RGBA", (size, size), TRANSPARENT)
     px = img.load()
@@ -788,7 +934,11 @@ def _render_tray(size: int, percent: float | None, stale: bool, lit: Color, pal:
     centre_n = 2 if size <= 16 else 4
     centre_lo = size // 2 - centre_n // 2
     centre_hi = centre_lo + centre_n - 1
-    has_centre = size < 28
+    glyph = _tray_glyph(kind, size)
+    small = size < 28                                       # a small icon has a centre block, a large one the number
+    has_centre = small and glyph is None
+    track = _tray_track(pal)
+    dash = track if glyph is not None else lit              # behind a glyph the dashes drop to the track, so it stands out
     inner_r = radius - thickness / 2
     for y in range(size):
         cy = y + 0.5
@@ -809,11 +959,17 @@ def _render_tray(size: int, percent: float | None, stale: bool, lit: Color, pal:
             elif radius - thickness <= r <= radius:
                 if stale:
                     arc = angle * inner_r
-                    colour = lit if math.floor(arc / 2) % 2 == 0 else pal.crt
+                    colour = dash if math.floor(arc / 2) % 2 == 0 else pal.crt
                 else:
-                    colour = lit if fraction > 0 and angle <= fraction * 2 * math.pi else pal.tray_track
+                    colour = lit if fraction > 0 and angle <= fraction * 2 * math.pi else track
             px[x, y] = colour
-    if not has_centre:
+    if glyph is not None:
+        left, top = (size - max(len(row) for row in glyph)) // 2, (size - len(glyph)) // 2
+        for j, row in enumerate(glyph):
+            for i, mark in enumerate(row):
+                if mark == "#":
+                    px[left + i, top + j] = lit
+    elif not small:
         _tray_text(img, size, "--" if stale or percent is None else str(round(percent)),
                    lit if stale else pal.hot, _faces(theme)[FONT_VT])
     return img

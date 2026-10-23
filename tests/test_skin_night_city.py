@@ -166,7 +166,8 @@ def test_palette_tokens_come_from_the_variant(variant_id):
     assert pal.danger == engine.parse_color(colors["alert"])
     assert pal.track == engine.parse_color(colors["track"])
     assert pal.glow == engine.parse_color(colors["glow"])
-    assert pal.stale == pal.ink3 == engine.parse_color(colors["stale"])
+    assert pal.stale == engine.parse_color(colors["stale"])
+    assert pal.ink3 == engine.parse_color(tokens.get("ink-3", colors["stale"]))      # the tertiary text, not the stale tone
     assert pal.bar == engine.parse_color(tokens["bar"])
     assert pal.line == engine.parse_color(tokens["line"])
     assert pal.ink == engine.parse_color(tokens["ink"])

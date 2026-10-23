@@ -523,7 +523,8 @@ h1, h2, h3, p, figure, dl, dd { margin: 0; }
 .nm-select:focus-visible, .nm-input:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--nc-sel); }
 .nm-input[aria-invalid="true"], .nm-select[aria-invalid="true"] { box-shadow: inset 0 0 0 2px var(--nc-danger); }
 .nm-input:disabled, .nm-select:disabled { opacity: .45; cursor: default; }
-.nm-input.is-time { width: 132px; padding: 0 8px; font-size: 14px; letter-spacing: 0; text-align: center; color-scheme: dark; }
+/* as wide as the time the locale writes into it needs ("10:00 PM", "10:00 p.m.", "22:00"), never narrower than 150 px */
+.nm-input.is-time { width: auto; min-width: 150px; padding: 0 6px 0 8px; font-size: 14px; letter-spacing: 0; text-align: center; color-scheme: dark; }
 .nm-status { min-height: 14px; font: 400 11px/1.4 var(--f-data); letter-spacing: .08em; color: var(--nc-ink-2); text-transform: uppercase; }
 .nm-status.is-err { color: var(--nc-danger); }
 .nm-themes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
@@ -583,11 +584,10 @@ h1, h2, h3, p, figure, dl, dd { margin: 0; }
 .nm-toolbar-k { font: 700 12px/1 var(--f-label); letter-spacing: .16em; text-transform: uppercase; color: var(--nc-fg-hi); }
 .nm-toolbar-n { margin-left: auto; font: 400 11px/1.4 var(--f-data); letter-spacing: .06em; text-transform: uppercase; color: var(--nc-ink-2); }
 .nm-card-t .nm-seg button { height: 22px; padding: 0 8px; }
-.nm-callout { padding: 9px 12px; background: var(--nc-bg-1); box-shadow: inset 0 0 0 1px var(--nc-hair); font: 500 13px/1.45 var(--f-label); color: var(--nc-fg); }
+/* The calm and the warning note are the same box (so a card is as tall with or without fast-mode requests): the warning adds only its bar. */
+.nm-callout { padding: 9px 12px 9px 16px; background: var(--nc-bg-1); box-shadow: inset 0 0 0 1px var(--nc-hair); font: 500 13px/1.45 var(--f-label); color: var(--nc-fg); }
 .nm-callout b { color: var(--nc-fg-hi); font-weight: 700; margin-right: 4px; }
-.nm-callout.is-warn { box-shadow: inset 0 0 0 1px var(--nc-hair), inset 4px 0 0 var(--nc-warn); padding-left: 16px; }
-.nm-loading { font: 400 11px/1.5 var(--f-data); letter-spacing: .12em; text-transform: uppercase; color: var(--nc-ink-2); }
-.nm-loading::after { content: ""; display: inline-block; width: 6px; height: 9px; margin-left: 8px; vertical-align: -1px; background: var(--nc-sel); animation: nc-pulse 2.4s ease-in-out infinite; }
+.nm-callout.is-warn { box-shadow: inset 0 0 0 1px var(--nc-hair), inset 4px 0 0 var(--nc-warn); }
 .nm-empty { font: 500 14px/1.5 var(--f-label); letter-spacing: .04em; color: var(--nc-ink-2); }
 .nm-error { padding: 8px 12px; background: var(--nc-bg-1); box-shadow: inset 0 0 0 1px var(--nc-hair), inset 3px 0 0 var(--nc-danger); font: 500 13px/1.45 var(--f-label); color: var(--nc-fg-hi); }
 .nm-err { padding: 5px 10px; background: var(--nc-bg-1); box-shadow: inset 0 0 0 1px var(--nc-hair), inset 3px 0 0 var(--nc-danger); font: 600 12px/1.4 var(--f-label); letter-spacing: .04em; color: var(--nc-fg-hi); }
@@ -631,7 +631,7 @@ h1, h2, h3, p, figure, dl, dd { margin: 0; }
 .nm-addlevel .nm-input { width: 90px; }
 .nm-quiet { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .nm-quiet-to { font: 700 11px/1 var(--f-label); letter-spacing: .14em; text-transform: uppercase; color: var(--nc-ink-2); }
-.nm-set.is-off > .nm-row-set:not(:first-child) { opacity: .55; }
+/* A group that is switched off (Alerts) dims its controls, which are disabled (above); its titles and descriptions keep their colour. */
 .nm-colstack { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .nm-colstack > .nm-card { flex: 1 1 auto; grid-column: auto; }
 .nm-tokens { table-layout: fixed; }
@@ -640,6 +640,32 @@ h1, h2, h3, p, figure, dl, dd { margin: 0; }
 .nm-path { text-transform: none; letter-spacing: .02em; color: var(--nc-fg-hi); overflow-wrap: anywhere; }
 .nm-why { white-space: normal; }
 .nm-stack-wrap { margin: 4px 0 12px; }
+
+/* ── placeholders: a card whose numbers have not arrived keeps its shape; its figures are dark blocks until they land ── */
+[data-pending]:is(.nm-big, .nm-stat-v, .nm-stat-s, .nm-kv b, .nm-facts > span, .nm-pace > span, .nm-pace > .fc, .nm-story,
+  .nm-cmp-n, .nm-cmp-u, .nm-cmp-t, .nm-note, .nm-empty, .nm-meta-t, .nm-odo-facts b, .nm-toolbar-n) {
+  background: color-mix(in srgb, var(--nc-track) 70%, transparent); width: fit-content; max-width: 100%; }
+.nm-mrow .v[data-pending] { background: color-mix(in srgb, var(--nc-track) 70%, transparent); justify-self: end; }
+.nm-facts > [data-pending] { margin-left: auto; }
+.nm-table td[data-pending] { background: linear-gradient(color-mix(in srgb, var(--nc-track) 70%, transparent), color-mix(in srgb, var(--nc-track) 70%, transparent)) left center / 70% 10px no-repeat; }
+.nm-table td.r[data-pending] { background-position: right center; background-size: 55% 10px; }
+.nm-odo[data-pending] { opacity: .55; }
+/* The invisible text colour of a placeholder must not take the cut of a bar with it: the segments are a mask of currentcolor. */
+[data-pending] .cum-hbars .cum-track, [data-pending] .cum-hbars .cum-mark, [data-pending] .cum-hbars .cum-mark-2 { color: var(--nc-ink) !important; }
+/* the numbers on screen are being refreshed and it is taking a while: the card's frame goes to the full line colour */
+.nm-card[data-updating]:not(.is-warn):not(.is-crit):not(.is-real) { --fr: var(--nc-line); }
+
+/* the update banner: a chamfered plate with a signal tag, across the top of the Overview */
+.nm-update {
+  position: relative; flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 8px 14px 8px 12px; background: var(--nc-bg-1);
+  box-shadow: inset 0 0 0 1px var(--nc-line-a), inset 0 -2px 0 var(--nc-signal); clip-path: polygon(10px 0, 100% 0, 100% 100%, 0 100%, 0 10px);
+}
+.nm-update::before { content: "UPDATE"; flex: none; transform: skewX(-12deg); padding: 4px 9px 3px; background: var(--nc-signal); color: var(--nc-ink); font: 700 12px/1 var(--f-label); letter-spacing: .14em; }
+.nm-update-t { display: flex; flex-direction: column; gap: 1px; flex: 1 1 300px; min-width: 0; font: 500 13px/1.35 var(--f-label); color: var(--nc-ink-2); }
+.nm-update-t b { font: 700 14px/1.3 var(--f-label); letter-spacing: .08em; text-transform: uppercase; color: var(--nc-fg-hi); }
+.nm-update .nm-actions { justify-content: flex-end; }
+.nm-update .nm-status { flex: 1 0 100%; min-height: 0; }
+.nm-update .nm-status:empty { display: none; }
 
 /* ── charts (charts.js sets the colours through the --chart-* variables on .nm-screen) ──────────────── */
 .cum-spark, .cum-stack, .cum-ring, .cum-heat { display: block; }

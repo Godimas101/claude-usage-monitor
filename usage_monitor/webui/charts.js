@@ -212,7 +212,8 @@
   function open(cls, w, h, label, o) {
     o = o || {};
     return '<svg class="cum-chart ' + cls + '" viewBox="0 0 ' + f1(w) + " " + f1(h) + '" preserveAspectRatio="' + (o.par || "xMinYMin meet") +
-      '" role="' + (o.role || "img") + '" aria-label="' + esc(label || "chart") + '"' + (o.nav ? ' data-nav="' + o.nav + '"' : "") + ">";
+      '" role="' + (o.role || "img") + '" aria-label="' + esc(label || "chart") + '"' + (o.nav ? ' data-nav="' + o.nav + '"' : "") +
+      (o.cols ? ' data-cols="' + o.cols + '"' : "") + ">";
   }
 
   /* Attributes that make a drawn element a tooltip and keyboard stop (a roving tabindex: one Tab stop per chart). */
@@ -283,7 +284,9 @@
 
   /* opts: width, height, label, xMin, xMax, yMin, yMax,
    *   yTicks [{v, label, limit}], xTicks [{t, label}], marks [{t, label}],
-   *   series [{kind: "actual" | "forecast" | "ideal", points: [[t, v], ...], tips: [..] or marks: [{i, tip}], markers}]
+   *   series [{kind: "actual" | "forecast" | "ideal", points: [[t, v], ...], tips: [..] or marks: [{i, tip}], markers,
+   *            endLabel, endTip (a forecast only: text above its last point, which is where it reaches the limit, and the
+   *            tooltip that point takes)}]
    * t is any number (ms); v is in the y domain. Points outside the domain are clamped to its edge. */
   function line(opts) {
     opts = opts || {};
@@ -301,7 +304,7 @@
     function X(t) { return left + clamp((num(t) - x0) / (x1 - x0), 0, 1) * pw; }
     function Y(v) { return top + ph - clamp((num(v) - y0) / (y1 - y0), 0, 1) * ph; }
     var series = opts.series || [];
-    var hasItems = series.some(function (s) { return (s.tips && s.tips.length) || (s.marks && s.marks.length); });
+    var hasItems = series.some(function (s) { return (s.tips && s.tips.length) || (s.marks && s.marks.length) || s.endTip; });
     var out = open("cum-linechart", w, h, opts.label || "line chart", { role: hasItems ? "group" : "img", nav: hasItems ? "list" : "" });
     (opts.yTicks || []).forEach(function (t) {
       var y = Y(t.v);
@@ -356,7 +359,18 @@
       if (s.kind === "forecast") {
         var last = pts[pts.length - 1];
         if (last) {
-          out += '<circle class="cum-dot is-hollow" cx="' + f1(X(last[0])) + '" cy="' + f1(Y(last[1])) + '" r="3.4"/>';
+          var ex = X(last[0]), ey = Y(last[1]);
+          out += '<circle cx="' + f1(ex) + '" cy="' + f1(ey) + '" r="3.4"' +
+            (s.endTip ? item("cum-dot is-hollow", s.endTip, counter, false) : ' class="cum-dot is-hollow"') + "/>";
+          if (s.endTip) {
+            counter++;
+          }
+          if (s.endLabel) {
+            /* above the plot, centred on the point and kept inside the chart, so it never lies on the line it names */
+            var tw = textWidth(s.endLabel, "cum-linechart", true);
+            var tx = clamp(ex, tw / 2, w - tw / 2);
+            out += '<text class="cum-t is-strong is-mid" x="' + f1(tx) + '" y="' + f1(Math.max(10, ey - 6)) + '">' + esc(s.endLabel) + "</text>";
+          }
         }
         return;
       }
@@ -603,7 +617,7 @@
     var legendH = 26;
     var height = top + 7 * pitch - gap + legendH;
     var lv = levels(days.map(function (d) { return num(d.value, 0); }));
-    var out = open("cum-calendar", width, height, opts.label || "calendar heatmap", { role: "group", nav: "grid" });
+    var out = open("cum-calendar", width, height, opts.label || "calendar heatmap", { role: "group", nav: "grid", cols: cols });
     var marks = [];
     days.forEach(function (d, i) {
       var dt = parseYmd(d.date);
@@ -660,7 +674,7 @@
     var flat = [];
     grid.forEach(function (row) { row.forEach(function (v) { flat.push(num(v, 0)); }); });
     var lv = levels(flat);
-    var out = open("cum-matrix", width, height, opts.label || "matrix heatmap", { role: "group", nav: "grid" });
+    var out = open("cum-matrix", width, height, opts.label || "matrix heatmap", { role: "group", nav: "grid", cols: cols });
     (opts.colLabels || []).forEach(function (l) {
       out += '<text class="cum-t is-mid" x="' + f1(gutter + l.c * (cw + gap) + cw / 2) + '" y="12">' + esc(l.text) + "</text>";
     });

@@ -45,6 +45,10 @@
   --g-focus: var(--text-bright);
   --g-accent: var(--accent);
   --g-fill-accent: var(--accent-fill, var(--accent));
+  /* chrome tints are the live accent's own (the glow behind the window, a chosen card), whatever the fill colour is */
+  --g-wash: color-mix(in srgb, var(--accent) 8%, transparent);
+  --g-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+  --g-skel: color-mix(in srgb, var(--text) 9%, transparent);
   --g-on-accent: light-dark(var(--surface), var(--bg));
   --g-shadow: transparent;
   --g-shadow-lift: transparent;
@@ -61,6 +65,10 @@
    --accent-fill colours what normal usage looks like: bars, chart marks, the plan multiple and the tints behind them. It
    is the accent, unless that is too close to a severity colour (a red, orange, green or grey Windows accent would draw a
    normal bar in the colour of a critical, warning, ok or stale one), when it is the Gates default accent instead. */
+/* A fixed accent (Blue, Teal, Purple, Rose, Orange, Green) fills normal usage with itself. The values in the first block are
+   only what shows before /api/state has answered; once the page has a variant, this rule says the fill is the accent, unless
+   the server sent a fill of its own, which it does for the system accent (inline, so it wins over this). */
+:root[data-variant] { --accent-fill: var(--accent); }
 @supports (color: oklch(from red l c h)) {
   :root {
     /* shadows are the window colour taken down to black, so they need no colour of their own */
@@ -94,7 +102,7 @@ h1, h2, h3, p, figure, dl, dd { margin: 0; }
 /* ── window: Mica base with the accent wash, no CRT overlays ───────────────────────────────────────────── */
 .nm-screen {
   position: fixed; inset: 0; overflow: hidden;
-  background: radial-gradient(80% 50% at 0% 0%, var(--accent-tint), transparent 70%), var(--bg);
+  background: radial-gradient(80% 50% at 0% 0%, var(--g-wash), transparent 70%), var(--bg);
   --g-fill: var(--g-fill-accent);
   --chart-mark: var(--g-fill-accent);
   --chart-mark-2: var(--accent-alt);
@@ -145,7 +153,7 @@ html[data-g-icons] .nm-menu a.on::before { color: var(--g-accent); }
 .nm-menu a[data-page="overview"] { --g-ico: "\E80F"; }
 .nm-menu a[data-page="limits"] { --g-ico: "\E916"; }
 .nm-menu a[data-page="cost"] { --g-ico: "\E8C7"; }
-.nm-menu a[data-page="nerds"] { --g-ico: "\E945"; }
+.nm-menu a[data-page="efficiency"] { --g-ico: "\E945"; }
 .nm-menu a[data-page="history"] { --g-ico: "\E81C"; }
 .nm-menu a[data-page="settings"] { --g-ico: "\E713"; }
 .nm-menu a[data-page="about"] { --g-ico: "\E946"; }
@@ -418,13 +426,9 @@ html[data-g-icons] .nm-card-t:not(.nm-chart-t) > .nm-ttl::before, html[data-g-ic
 .nm-callout b { color: var(--text-bright); font-weight: 600; margin-right: 4px; }
 .nm-callout.is-warn { background: color-mix(in srgb, var(--warn) 12%, var(--surface)); border-color: color-mix(in srgb, var(--warn) 40%, var(--border)); }
 .nm-empty { font: 400 14px/20px var(--g-font); color: var(--text-dim); }
-.nm-loading { font: 400 13px/20px var(--g-font); color: var(--text-dim); }
-.nm-loading::before { content: ""; display: inline-block; width: 14px; height: 14px; margin-right: 8px; vertical-align: -2px; border-radius: 50%;
-  border: 2px solid var(--track); border-top-color: var(--g-accent); animation: g-spin .9s linear infinite; }
 .nm-error { padding: 8px 12px; border: 1px solid color-mix(in srgb, var(--alert) 40%, var(--border)); border-radius: 4px; background: color-mix(in srgb, var(--alert) 10%, var(--surface)); font: 400 13px/20px var(--g-font); color: var(--text); }
 .nm-err { padding: 6px 10px; border-radius: 4px; background: color-mix(in srgb, var(--alert) 12%, var(--surface)); border: 1px solid color-mix(in srgb, var(--alert) 40%, var(--border)); font: 400 12px/16px var(--g-font); color: var(--text); }
 .nm-card.is-real { --g-text-3: var(--text-dim); background: color-mix(in srgb, var(--warn) 7%, var(--surface)); border-color: color-mix(in srgb, var(--warn) 38%, var(--border)); }
-@keyframes g-spin { to { transform: rotate(360deg); } }
 @keyframes g-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
 /* ── controls ───────────────────────────────────────────────────────────────────────────────────────────── */
@@ -456,7 +460,8 @@ html[data-g-icons] .nm-refresh::before { content: "\E72C"; font: 400 12px/1 var(
 .nm-select { padding-right: 6px; cursor: pointer; }
 .nm-select option { background: var(--surface-alt); color: var(--text); }
 .nm-input { width: 120px; min-width: 0; text-align: left; font-variant-numeric: tabular-nums; }
-.nm-input.is-time { width: 136px; padding: 0 8px; text-align: center; }
+/* as wide as the time the locale writes into it needs ("10:00 PM", "10:00 p.m.", "22:00"), never narrower than 150 px */
+.nm-input.is-time { width: auto; min-width: 150px; padding: 0 6px 0 8px; text-align: center; }
 .nm-select:hover, .nm-input:hover { background: color-mix(in srgb, var(--surface-alt) 94%, var(--text)); }
 /* the ring stays (an accent can be too dark to show the focus on its own); the accent edge is the Fluent touch */
 .nm-select:focus-visible, .nm-input:focus-visible { border-bottom-color: var(--g-accent); box-shadow: inset 0 -1px 0 var(--g-accent); }
@@ -489,7 +494,7 @@ html[data-g-icons] .nm-refresh::before { content: "\E72C"; font: 400 12px/1 var(
 .nm-row-set .t { font: 400 14px/20px var(--g-font); letter-spacing: 0; text-transform: none; color: var(--text); }
 .nm-row-set .d { display: block; margin-top: 2px; font: 400 12px/16px var(--g-font); letter-spacing: 0; color: var(--g-text-3); }
 .nm-row-set.is-stack { grid-template-columns: minmax(0, 1fr); gap: 10px; }
-.nm-set.is-off > .nm-row-set:not(:first-child) { opacity: .55; }
+/* A group that is switched off (Alerts) dims its controls, which are disabled (above); its titles and descriptions keep their colour. */
 .nm-set > .nm-err { margin: 4px 0 8px; }
 .nm-levels { display: flex; flex-direction: column; gap: 10px; }
 .nm-chips { display: flex; flex-wrap: wrap; gap: 8px; min-height: 32px; align-items: center; }
@@ -508,13 +513,13 @@ html[data-g-icons] .nm-refresh::before { content: "\E72C"; font: 400 12px/1 var(
 .nm-theme { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; text-align: left; cursor: pointer; border: 1px solid var(--border); border-radius: 8px;
   background: var(--surface-alt); color: var(--text); transition: background-color .1s, border-color .1s; }
 .nm-theme:hover { background: color-mix(in srgb, var(--surface-alt) 94%, var(--text)); }
-.nm-theme[aria-pressed="true"] { border-color: var(--g-accent); box-shadow: inset 0 0 0 1px var(--g-accent); background: linear-gradient(var(--accent-tint), var(--accent-tint)), var(--surface-alt); }
+.nm-theme[aria-pressed="true"] { border-color: var(--g-accent); box-shadow: inset 0 0 0 1px var(--g-accent); background: linear-gradient(var(--g-wash), var(--g-wash)), var(--surface-alt); }
 .nm-theme b { font: 600 14px/20px var(--g-font); letter-spacing: 0; text-transform: none; color: var(--text-bright); }
 .nm-theme small { font: 400 12px/16px var(--g-font); color: var(--text-dim); }
 .nm-swatches { display: flex; gap: 4px; margin-top: auto; }
 .nm-swatches i { display: block; flex: 1 1 0; max-width: 28px; height: 12px; border-radius: 3px; border: 1px solid var(--border); }
 .nm-variants { display: flex; flex-wrap: wrap; gap: 8px; }
-.nm-variants .nm-btn[aria-pressed="true"] { border-color: var(--g-accent); box-shadow: inset 0 0 0 1px var(--g-accent); background: var(--accent-soft); font-weight: 600; }
+.nm-variants .nm-btn[aria-pressed="true"] { border-color: var(--g-accent); box-shadow: inset 0 0 0 1px var(--g-accent); background: var(--g-soft); font-weight: 600; }
 html[data-g-swatches] .nm-variants .nm-btn { flex-direction: column; gap: 6px; width: 86px; height: auto; padding: 0; border: 0; background: none; box-shadow: none; font: 400 12px/16px var(--g-font); color: var(--text-dim); text-transform: none; }
 html[data-g-swatches] .nm-variants .nm-btn::before { content: ""; display: grid; place-items: center; width: 52px; height: 40px; border-radius: 4px; background: var(--g-swatch, var(--track)); border: 1px solid var(--border); font: 400 14px/1 var(--g-icons); color: var(--g-on-accent); }
 @supports (color: color(from red srgb-linear r g b)) {
@@ -588,6 +593,30 @@ html[data-g-swatches] .nm-variants .nm-btn[aria-pressed="true"]::before { box-sh
 .nm-dots button:hover { opacity: .85; }
 .nm-dots button[aria-pressed="true"] { opacity: 1; background: var(--g-accent); }
 
+/* ── placeholders: a card whose numbers have not arrived keeps its shape; its figures are blocks until they land ───────── */
+.nm-card [data-pending]:is(.nm-big, .nm-stat-v, .nm-stat-s, .nm-kv b, .nm-facts > span, .nm-pace > span, .nm-pace > b, .nm-pace > .fc, .nm-story, .nm-cmp-n, .nm-cmp-u, .nm-cmp-t, .nm-note, .nm-empty, .nm-meta-t, .nm-chip, .nm-odo-facts b, .nm-toolbar-n) {
+  background: var(--g-skel); border-radius: 4px; width: fit-content; max-width: 100%; }
+.nm-card [data-pending].nm-mrow .v, .nm-card .nm-mrow .v[data-pending] { background: var(--g-skel); border-radius: 4px; justify-self: end; }
+.nm-card .nm-facts > [data-pending] { margin-left: auto; }
+.nm-card [data-pending].nm-chip { height: 20px; }
+.nm-card td[data-pending] { background: linear-gradient(var(--g-skel), var(--g-skel)) left center / 70% 12px no-repeat; }
+.nm-card td.r[data-pending] { background-position: right center; background-size: 55% 12px; }
+.nm-card .nm-table tr.is-today td[data-pending] { background: linear-gradient(var(--g-skel), var(--g-skel)) left center / 70% 12px no-repeat, var(--accent-tint); }
+.nm-card .nm-table tr.is-today td.r[data-pending] { background-position: right center, 0 0; background-size: 55% 12px, auto; }
+.nm-card .nm-odo[data-pending] { opacity: .6; }
+.nm-card[data-pending], .nm-card [data-pending].nm-chart-host { min-height: 0; }
+/* the numbers on screen are being refreshed and it is taking a while: the card's frame takes the accent */
+.nm-card[data-updating] { border-color: color-mix(in srgb, var(--g-accent) 55%, var(--border)); }
+
+/* the update banner: an information bar, as Windows 11 draws one */
+.nm-update { flex: none; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 16px; padding: 10px 12px 10px 16px;
+  border: 1px solid var(--border); border-left: 3px solid var(--g-accent); border-radius: 4px; background: color-mix(in srgb, var(--g-accent) 9%, var(--surface)); }
+.nm-update-t { display: flex; flex-direction: column; min-width: 0; font: 400 13px/20px var(--g-font); color: var(--text-dim); }
+.nm-update-t b { font: 600 14px/20px var(--g-font); color: var(--text-bright); }
+.nm-update .nm-actions { justify-content: flex-end; }
+.nm-update .nm-status { grid-column: 1 / -1; min-height: 0; }
+.nm-update .nm-status:empty { display: none; }
+
 /* ── short and narrow windows ───────────────────────────────────────────────────────────────────────────── */
 @media (max-height: 769px), (min-width: 1001px) and (max-width: 1100px) {
   .nm-main { gap: 10px; padding-top: 14px; padding-bottom: 12px; }
@@ -632,6 +661,10 @@ html[data-g-swatches] .nm-variants .nm-btn[aria-pressed="true"]::before { box-sh
 @media (max-width: 760px) {
   .nm-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .nm-grid > .nm-card.wide, .nm-grid > [data-limit="weekly_scoped"], .nm-grid > #efficiency, .nm-grid > #burn { grid-column: 1 / -1; }
+}
+@media (max-width: 760px) {
+  .nm-update { grid-template-columns: minmax(0, 1fr); }
+  .nm-update .nm-actions { justify-content: flex-start; }
 }
 @media (max-width: 640px) {
   .nm-grid { grid-template-columns: minmax(0, 1fr); }

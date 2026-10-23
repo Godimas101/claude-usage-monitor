@@ -17,11 +17,17 @@ Usage alerts: every state the UI thread picks up goes through data.alerts.AlertE
 alert it returns is shown as a tray toast. The engine is told when a fullscreen app has the
 foreground, and holds the toast back then.
 
+Update notices: the release check runs at start and every UPDATE_RECHECK_S (six hours) after, on its
+own worker thread, and fails silent. A release it finds is announced with one tray toast per version
+(never one the user skipped, never with check_updates off, held back while nobody would see it), then
+stays on offer in the tray menu and as /api/state's ``update`` block, which the dashboard shows as a
+banner. See UpdateTracker and MonitorApp._announce_update.
+
 Shutdown order: close the dashboard, stop the data service, stop the API server, remove the tray
 icon, destroy the windows, flush settings.
 
 Also here: SmokeTest, the --smoke-test run (see main.py), and the small pure helpers the tests cover
-(mutex_name, tray_tooltip, menu_items, blink_cycle, tick_delay_ms, UpdateTracker).
+(mutex_name, tray_tooltip, menu_items, blink_cycle, tick_delay_ms, in_quiet_hours, UpdateTracker).
 """
 from __future__ import annotations
 
@@ -53,14 +59,14 @@ from usage_monitor.log import get_logger, setup_logging
 from usage_monitor.render.model import WidgetModel, build_model
 from usage_monitor.render.skins import RenderOptions, get_skin
 from usage_monitor.settings import DEFAULTS as SETTINGS_DEFAULTS
-from usage_monitor.settings import Settings
+from usage_monitor.settings import Settings, parse_clock
 from usage_monitor.ui import platform as plat
 from usage_monitor.ui import startup, win32
 from usage_monitor.ui.dashboard import DashboardLauncher
 from usage_monitor.ui.dashboard import find_window_of as dashboard_window_of
 from usage_monitor.ui.host import UIHost, signal_running_instance
 from usage_monitor.ui.menu import SEPARATOR, MenuItem, show_menu
-from usage_monitor.ui.server import DEV_ENV, SETTING_SPECS, ApiServer, open_statistics_store
+from usage_monitor.ui.server import DEV_ENV, SETTING_SPECS, ApiServer, open_statistics_store, plain_version
 from usage_monitor.ui.tray import TrayIcon
 from usage_monitor.ui.widgets import (
     FloatingWidget,
@@ -82,6 +88,9 @@ DASHBOARD_CLOSE_S = 3.0             # how long shutdown waits for the dashboard 
 SECOND_INSTANCE_WAIT_S = 3.0        # a second launch waits this long for the first one's window
 UI_CALL_TIMEOUT_S = 5.0
 GITHUB_PREFIX = "https://github.com/"
+UPDATE_RECHECK_S = 6 * 60 * 60      # the monitor looks for a newer release again this often while it runs
+NOTIFIED_KEY = "notified_version"   # setting: the newest release the monitor has already put a toast up for
+UPDATE_TOAST_BODY = "Open the tray menu or the dashboard to update"
 
 # Settings that change what the UI shows. Anything else (poll interval, dashboard bounds) is ignored here.
 THEME_KEYS = frozenset({"theme", "theme_id", "theme_variant", "theme_mode"})
@@ -242,6 +251,24 @@ def open_url(url: str) -> None:
     threading.Thread(target=work, name="open-url", daemon=True).start()
 
 
+def update_toast_title(version_text: str) -> str:
+    """The toast for a newly found release: "Claude Usage Monitor v2.1.0 is available" (its body is UPDATE_TOAST_BODY)."""
+    return f"Claude Usage Monitor v{version_text} is available"
+
+
+def in_quiet_hours(quiet: Any, now: datetime) -> bool:
+    """Whether local time at ``now`` is inside the user's quiet hours, {"start": "HH:MM", "end": "HH:MM"} (may wrap
+    midnight). Anything else, or equal times, is no quiet hours. The alert engine reads the same setting the same way."""
+    if not isinstance(quiet, Mapping):
+        return False
+    start, end = parse_clock(quiet.get("start")), parse_clock(quiet.get("end"))
+    if start is None or end is None or start == end:
+        return False
+    local = now.astimezone()
+    minute = local.hour * 60 + local.minute
+    return start <= minute < end if start < end else (minute >= start or minute < end)
+
+
 # ── Animation and clock (pure helpers and a timer-driven blinker) ─────────────
 
 def blink_cycle(theme: Any) -> tuple[int, int] | None:
@@ -348,12 +375,17 @@ def service_pricing(service: Any) -> Any:
 # ── Updates ───────────────────────────────────────────────────────────────────
 
 class UpdateTracker:
-    """The newest release the update check found, shared by the UI thread and the API threads."""
+    """The newest release the update check found, shared by the UI thread and the API threads.
+
+    Besides what was found it keeps the two choices that decide whether anyone is told: ``skip_version`` (the user
+    said no to that release) and ``notified_version`` (the newest release a toast was already put up for), so a
+    release is announced once, never after a skip, and never while the update check is switched off."""
 
     def __init__(self, settings: Any, check: Callable[..., Any] | None = None) -> None:
         self._settings = settings
         self._check = check if check is not None else update_check.check_async
         self._lock = threading.Lock()
+        self._mark_lock = threading.Lock()      # the UI thread (a toast) and an API thread (a check by hand) both mark
         self._info: dict[str, Any] | None = None
         self.checked = False
 
@@ -370,9 +402,47 @@ class UpdateTracker:
             return None
         return info
 
-    def start_check(self, on_done: Callable[[dict[str, Any] | None], None] | None = None) -> None:
+    def api_info(self) -> dict[str, Any] | None:
+        """The found update as the dashboard gets it (``update.info`` of /api/state): what the check returned, plus
+        ``url`` (its release page, always a github.com link) and ``can_self_update`` (whether Update now installs it
+        in place or only opens that page)."""
+        info = self.info
+        if info is None:
+            return None
+        return dict(info, url=release_url(info), can_self_update=bool(update_check.can_self_update(info)))
+
+    def announcement(self) -> dict[str, Any] | None:
+        """The release to put a toast up for now, or None: one that was found, that the user did not skip, that is
+        newer than the last one a toast was put up for, and only while the update check is on. Its version is a plain
+        one (plain_version), so it can go into a toast as it is."""
+        info = self.offered()
+        version = plain_version(info.get("version")) if info else None
+        if info is None or version is None or not setting(self._settings, "check_updates"):
+            return None
+        if not update_check.is_newer(version, self._settings.get(NOTIFIED_KEY, "")):
+            return None
+        return info
+
+    def mark_announced(self, info: Mapping[str, Any] | None = None) -> None:
+        """Remember that the user was told about ``info``'s release (the newest one found when omitted), for good: it
+        is saved with the settings, so a restart does not announce it again."""
+        info = info if info is not None else self.info
+        version = plain_version(info.get("version")) if info else None
+        if version is None:
+            return
+        with self._mark_lock:
+            if update_check.is_newer(version, self._settings.get(NOTIFIED_KEY, "")):
+                self._settings.set(NOTIFIED_KEY, version)   # only ever raised: the newest release told about
+
+    def start_check(self, on_done: Callable[[dict[str, Any] | None], None] | None = None,
+                    on_error: Callable[[BaseException], None] | None = None) -> None:
         """Look for a newer release on a worker thread. A check that finds nothing (or fails)
-        keeps what an earlier check found."""
+        keeps what an earlier check found.
+
+        ``on_done(info)`` is called when the lookup is over: ``info`` is the release found, or None for "nothing newer"
+        and for a lookup that failed alike. ``on_error(exc)``, when given, is called first for a lookup that failed
+        (offline, rate limited, GitHub down), so a caller can tell the two Nones apart. The checker is called as
+        ``check(repo, version, on_result, on_error=...)``, like ``update_check.check_async``."""
         self.checked = True
 
         def done(info: dict[str, Any] | None) -> None:
@@ -382,15 +452,21 @@ class UpdateTracker:
             if on_done is not None:
                 on_done(info)
 
-        self._check(version.REPO, version.APP_VERSION, done)
+        self._check(version.REPO, version.APP_VERSION, done, on_error=on_error)
 
     def check_now(self, timeout: float = 8.0) -> dict[str, Any]:
-        """Run a check and wait for it (an API thread calls this). Returns {"available", "version"}."""
+        """Run a check and wait for it (an API thread calls this). Returns {"available", "version", "checked"}.
+
+        ``checked`` says whether the lookup got an answer: False when it failed (offline, rate limited, GitHub down) or
+        was still running when the wait ended, so "nothing newer" is only claimed for a lookup that was made.
+        ``available`` and ``version`` still describe a release an earlier check found."""
         finished = threading.Event()
-        self.start_check(lambda _info: finished.set())
-        finished.wait(timeout)
+        errors: list[BaseException] = []
+        self.start_check(lambda _info: finished.set(), errors.append)
+        answered = finished.wait(timeout)
         info = self.info
-        return {"available": info is not None, "version": info.get("version") if info else None}
+        return {"available": info is not None, "version": info.get("version") if info else None,
+                "checked": answered and not errors}
 
     def skip(self) -> dict[str, Any]:
         """Stop offering the version that was found."""
@@ -474,6 +550,7 @@ class MonitorApp:
         self._resolved: tuple[Any, Any] | None = None
         self._tray_key: Any = None
         self._tick_timer: int | None = None
+        self._update_timer: int | None = None       # the six-hourly update re-check (UPDATE_RECHECK_S)
         self._alerts: AlertEngine | None = None     # built with the settings, in _build
         self._failures: dict[str, int] = {}
         self._torn_down = False
@@ -534,8 +611,8 @@ class MonitorApp:
             settings,
             refresh_cb=self.service.refresh_now,
             update_cb={
-                "info": lambda: self.updates.info,
-                "check": lambda: self.updates.check_now(),
+                "info": lambda: self.updates.api_info(),
+                "check": self._check_updates_for_api,
                 "apply": self._apply_update,
                 "skip": lambda: self.updates.skip(),
             },
@@ -568,6 +645,7 @@ class MonitorApp:
         self._refresh()
         if setting(settings, "check_updates"):
             self._start_update_check()
+        self._arm_update_recheck()
         self.service.start()
         host.post(self.started.set)
         if self._smoke is not None:
@@ -589,6 +667,7 @@ class MonitorApp:
         self._torn_down = True
         steps: list[tuple[str, Callable[[], None]]] = [
             ("animation", self._stop_timers),
+            ("update re-check", self._stop_update_recheck),
             ("dashboard", self._close_dashboard),
             ("data service", self._stop_service),
             ("api server", lambda: self.server and self.server.stop()),
@@ -615,6 +694,11 @@ class MonitorApp:
         if self.blinker is not None:
             self.blinker.stop()
         self._cancel_tick()
+
+    def _stop_update_recheck(self) -> None:
+        if self._update_timer is not None and self.host is not None:
+            self.host.kill_timer(self._update_timer)
+        self._update_timer = None
 
     def _stop_service(self) -> None:
         if self.service is not None:
@@ -649,7 +733,7 @@ class MonitorApp:
         return menu_items(
             floating_on=bool(setting(self.settings, "show_floating")),
             taskbar_on=bool(setting(self.settings, "show_taskbar")),
-            update_version=str(offered.get("version")) if offered else None,
+            update_version=plain_version(offered.get("version")) if offered else None,
             open_dashboard=self.open_dashboard,
             toggle_floating=lambda: self._toggle("show_floating"),
             toggle_taskbar=lambda: self._toggle("show_taskbar"),
@@ -693,10 +777,78 @@ class MonitorApp:
             show_menu(self.host, self.menu_items(), x, y)
 
     # ── Updates ──
+    #
+    # Everyone has to notice a new release, so three things tell the user, none of them a nag: a tray toast the
+    # first time a release is found (UpdateTracker.announcement), the "Update to vX" menu item and the dashboard's
+    # banner for as long as the release is on offer. The check runs at start and again every UPDATE_RECHECK_S while
+    # the monitor runs; a check that fails is ignored and tried again at the next one.
 
     def _start_update_check(self) -> None:
-        if self.updates is not None:
-            self.updates.start_check()
+        if self.updates is None:
+            return
+        try:
+            self.updates.start_check(self._on_update_result)
+        except Exception:  # not even a thread to run it on: the next check (or the next launch) tries again
+            log.debug("could not start the update check", exc_info=True)
+
+    def _on_update_result(self, info: dict[str, Any] | None) -> None:
+        """The answer of a check, on its worker thread: a release that was found goes to the UI thread to be
+        announced. Nothing found (or a failed check) is not worth a word."""
+        host = self.host
+        if info is not None and host is not None and not self._torn_down:
+            host.post(self._announce_update)
+
+    def _check_updates_for_api(self) -> dict[str, Any]:
+        """The dashboard's "Check for updates now" (API thread): waits for the answer. A release it finds is on the
+        user's screen already, so it is counted as told about and no toast follows later."""
+        result = self.updates.check_now()
+        if result.get("available"):
+            self.updates.mark_announced()
+        return result
+
+    def _arm_update_recheck(self) -> None:
+        if self.host is not None and self._update_timer is None:
+            self._update_timer = self.host.set_timer(UPDATE_RECHECK_S * 1000, self._on_update_timer)
+
+    def _on_update_timer(self) -> None:
+        """Every UPDATE_RECHECK_S, on the UI thread: look again, unless the update check was switched off since."""
+        if not self._torn_down and setting(self.settings, "check_updates"):
+            self._start_update_check()
+
+    def _announce_update(self) -> None:
+        """Put a toast up for a newly found release, once per version. UI thread.
+
+        Called whenever the answer could have changed: a check found a release, a state arrived, the session was
+        unlocked. UpdateTracker.announcement() says whether there is a release the user has not been told about
+        (found, not skipped, update check on, newer than the last toast). A toast that nobody would see is held
+        back and the release stays untold, so the next call tries again: a locked session or screensaver, a
+        fullscreen app in front, the user's quiet hours. Clicking the toast opens the dashboard (the same click
+        handler as the alert toasts). The usage-alert switches (alerts_enabled and the alert_on_* kinds) are about
+        limits and do not apply: only check_updates and the quiet hours do."""
+        tracker, tray = self.updates, self.tray
+        if tracker is None or tray is None or self._torn_down:
+            return
+        info = tracker.announcement()
+        if info is None or self._toast_held_back():
+            return
+        try:
+            shown = tray.notify(update_toast_title(info["version"]), UPDATE_TOAST_BODY)   # a plain version: see announcement()
+        except Exception:  # a bug, not the shell's refusal: do not hit it again at every state
+            log.exception("could not show the update notice")
+            shown = True
+        if shown is not False:      # False: the shell had no icon to attach it to (Explorer restarting); try again later
+            tracker.mark_announced(info)
+
+    def _toast_held_back(self) -> bool:
+        """Whether a toast would go unseen right now. UI thread."""
+        if self.host is not None and self.host.locked:
+            return True
+        try:
+            if self._plat.should_pause():       # a locked session or a running screensaver
+                return True
+        except Exception:
+            log.debug("could not tell whether the session is locked", exc_info=True)
+        return self._fullscreen() or in_quiet_hours(self.settings.get("alert_quiet_hours"), self._clock())
 
     def _apply_update(self) -> dict[str, Any]:
         """Install the update that was found: silently when this is the installed build, else open
@@ -751,6 +903,7 @@ class MonitorApp:
         self._state = state
         self._refresh()
         self._raise_alerts(state)
+        self._announce_update()
 
     def _on_setting(self, key: str, _value: Any) -> None:
         """Settings listener, on whichever thread changed the setting."""
@@ -788,6 +941,7 @@ class MonitorApp:
         self._resolved = None
         self.refresh_now()
         self._refresh()
+        self._announce_update()     # a release found while the session was locked is announced to whoever is back
 
     def _on_display(self) -> None:
         """The display layout or the taskbar changed: place the widgets again."""
@@ -1019,6 +1173,7 @@ class MonitorApp:
             "frames": self.stats.snapshot(),
             "blink": {"running": bool(self.blinker and self.blinker.running),
                       "toggles": self.blinker.toggles if self.blinker else 0},
+            "update_recheck": self._update_timer is not None,
             "gdi_objects": win32.GetGuiResources(win32.GetCurrentProcess(), win32.GR_GDIOBJECTS),
             "user_objects": win32.GetGuiResources(win32.GetCurrentProcess(), win32.GR_USEROBJECTS),
             "ui_thread_cpu_s": round(time.thread_time(), 3),
@@ -1076,6 +1231,8 @@ class SmokeTest:
     DASHBOARD_OPEN_S = 5.0
     DASHBOARD_CLOSE_WAIT_S = 6.0
     DATABASE_WAIT_S = 20.0
+    # The keys of /api/state's ``update`` block that the dashboard's banner and Settings page read.
+    UPDATE_KEYS = ("available", "version", "url", "can_self_update", "skipped", "info", "skip_version")
     # The routes the analytics step reads and the top-level keys each JSON answer must have.
     ANALYTICS_ROUTES: tuple[tuple[str, tuple[str, ...]], ...] = (
         ("/api/analytics/cost", ("windows", "plan", "value", "monthly", "breakdowns")),
@@ -1253,6 +1410,9 @@ class SmokeTest:
         for key in ("state", "settings", "theme", "version", "update", "dev"):
             if key not in payload:
                 raise RuntimeError(f"/api/state has no {key!r}")
+        missing = [key for key in self.UPDATE_KEYS if key not in (payload["update"] or {})]
+        if missing:
+            raise RuntimeError(f"/api/state update has no {', '.join(missing)}")
         self.report["server_port"] = app.server.port
         self.report["api_status"] = self._state_summary(payload)["status"]
         self.report["version"] = payload["version"]
@@ -1275,6 +1435,8 @@ class SmokeTest:
             raise RuntimeError("the floating widget is not visible")
         if before["tray"]["added"] is not True:
             raise RuntimeError("the tray icon was not added")
+        if before["update_recheck"] is not True:
+            raise RuntimeError("the six-hourly update check is not armed")
         self.report["windows"] = before
         return {"tooltip_shown": shown, "frames_before": before["frames"], "frames_after": after["frames"]}
 
@@ -1464,10 +1626,12 @@ __all__ = [
     "UpdateTracker",
     "analytics_store",
     "blink_cycle",
+    "in_quiet_hours",
     "menu_items",
     "mutex_name",
     "run_smoke_test",
     "service_pricing",
     "tick_delay_ms",
     "tray_tooltip",
+    "update_toast_title",
 ]

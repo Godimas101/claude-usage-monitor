@@ -479,7 +479,7 @@ def make_server(scenario: str, port: int, settings_dir: Path | None = None, *, d
     history = None if db is not None else SyntheticHistory(scenario, now=now)
 
     def update_check() -> dict[str, Any]:
-        return {"available": False, "current": _app_version()}
+        return {"available": False, "version": None, "checked": True, "current": _app_version()}
 
     def state() -> MonitorState:
         current = fake_state(scenario, now())

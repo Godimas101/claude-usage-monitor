@@ -22,6 +22,7 @@ import tempfile
 import threading
 import time
 import types
+import urllib.error
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1552,15 +1553,22 @@ def test_a_failing_toggle_callback_still_keeps_the_blinker_going():
 # ── Updates ───────────────────────────────────────────────────────────────────
 
 class FakeChecker:
-    def __init__(self, result: dict[str, Any] | None, *, synchronous: bool = True) -> None:
-        self.result, self.synchronous, self.calls, self.pending = result, synchronous, [], []
+    """Stands in for update_check.check_async. ``error``: a lookup that fails, as check_async reports it: on_error(error)
+    first, then on_result(None). ``synchronous=False``: nothing is answered until a test calls ``pending[0]``."""
 
-    def __call__(self, repo: str, current: str, on_result: Any) -> None:
+    def __init__(self, result: dict[str, Any] | None, *, synchronous: bool = True, error: BaseException | None = None) -> None:
+        self.result, self.synchronous, self.error, self.calls, self.pending = result, synchronous, error, [], []
+
+    def __call__(self, repo: str, current: str, on_result: Any, on_error: Any = None) -> None:
         self.calls.append((repo, current))
-        if self.synchronous:
-            on_result(self.result)
-        else:
+        if not self.synchronous:
             self.pending.append(on_result)
+        elif self.error is not None:
+            if on_error is not None:
+                on_error(self.error)
+            on_result(None)
+        else:
+            on_result(self.result)
 
 
 INFO = {"version": "2.1.0", "tag": "v2.1.0", "url": f"https://github.com/{version.REPO}/releases/tag/v2.1.0",
@@ -1606,14 +1614,62 @@ def test_skipping_with_nothing_to_skip_does_nothing(settings):
 
 def test_the_api_check_waits_for_the_answer(settings):
     updates = UpdateTracker(settings, FakeChecker(INFO))
-    assert updates.check_now() == {"available": True, "version": "2.1.0"}
-    assert UpdateTracker(settings, FakeChecker(None)).check_now() == {"available": False, "version": None}
+    assert updates.check_now() == {"available": True, "version": "2.1.0", "checked": True}
+    assert UpdateTracker(settings, FakeChecker(None)).check_now() == {"available": False, "version": None, "checked": True}
 
 
 def test_the_api_check_gives_up_waiting_for_a_slow_check(settings):
     started = time.monotonic()
     result = UpdateTracker(settings, FakeChecker(INFO, synchronous=False)).check_now(timeout=0.05)
-    assert result == {"available": False, "version": None} and time.monotonic() - started < 2
+    assert result == {"available": False, "version": None, "checked": False} and time.monotonic() - started < 2
+
+
+@pytest.mark.parametrize("failure", [urllib.error.URLError("offline"), TimeoutError(), OSError("rate limited (HTTP 403)"), ValueError("bad answer")])
+def test_the_api_check_says_when_the_lookup_failed(settings, failure):
+    """Offline, DNS, GitHub's rate limit and a 5xx all reach the tracker as one failed lookup. It is not an answer of
+    "nothing newer", and the dashboard must not say "you are up to date" for it."""
+    updates = UpdateTracker(settings, FakeChecker(None, error=failure))
+    assert updates.check_now() == {"available": False, "version": None, "checked": False}
+    assert updates.info is None
+
+
+def test_a_failed_lookup_keeps_what_an_earlier_check_found_and_still_says_it_failed(settings):
+    checker = FakeChecker(INFO)
+    updates = UpdateTracker(settings, checker)
+    updates.start_check()
+    checker.result, checker.error = None, urllib.error.URLError("offline")          # offline the second time
+    assert updates.check_now() == {"available": True, "version": "2.1.0", "checked": False}
+    assert updates.info == INFO
+
+
+def test_each_check_has_its_own_verdict(settings):
+    """A failure of one check says nothing about the next: the verdict is that of the lookup just made."""
+    checker = FakeChecker(None, error=OSError("offline"))
+    updates = UpdateTracker(settings, checker)
+    assert updates.check_now()["checked"] is False
+    checker.error = None
+    assert updates.check_now() == {"available": False, "version": None, "checked": True}
+    checker.error = OSError("offline again")
+    assert updates.check_now()["checked"] is False
+
+
+def test_start_check_hands_the_failure_to_the_caller_before_the_done_callback(settings):
+    updates = UpdateTracker(settings, FakeChecker(None, error=OSError("offline")))
+    order: list[Any] = []
+    updates.start_check(lambda info: order.append(("done", info)), lambda exc: order.append(("error", type(exc).__name__)))
+    assert order == [("error", "OSError"), ("done", None)]
+    order.clear()
+    UpdateTracker(settings, FakeChecker(None)).start_check(lambda info: order.append(("done", info)), lambda exc: order.append("error"))
+    assert order == [("done", None)], "a lookup that got an answer is never an error"
+
+
+def test_a_late_answer_after_the_wait_still_counts_for_the_next_look(settings):
+    """The wait ended, so the dashboard was told "could not check"; the lookup finishing later still records its find."""
+    checker = FakeChecker(INFO, synchronous=False)
+    updates = UpdateTracker(settings, checker)
+    assert updates.check_now(timeout=0.05)["checked"] is False
+    checker.pending[0](INFO)
+    assert updates.info == INFO
 
 
 def test_applying_an_update_opens_the_release_page_when_not_frozen(settings, monkeypatch):
@@ -1672,6 +1728,178 @@ def test_an_update_does_not_depend_on_what_the_temp_folder_is_called(settings, m
     monkeypatch.setattr(app_mod.update_check, "apply_update", lambda url, **kw: calls.append(url))
     assert app._apply_update() == {"started": True, "mode": "installer"}
     assert calls == [INFO["asset_url"]]
+
+
+def found(number: str = "2.1.0", **extra: Any) -> dict[str, Any]:
+    """What the update check reports for release ``number``."""
+    page = f"https://github.com/{version.REPO}/releases/tag/v{number}"
+    return {**INFO, "version": number, "tag": f"v{number}", "url": page,
+            "asset_url": f"https://github.com/{version.REPO}/releases/download/v{number}/Setup.exe", **extra}
+
+
+def test_the_update_as_the_dashboard_gets_it_adds_the_release_page_and_whether_it_installs_in_place(settings, monkeypatch):
+    updates = UpdateTracker(settings, FakeChecker(INFO))
+    assert updates.api_info() is None
+    updates.start_check()
+    monkeypatch.setattr(app_mod.update_check, "can_self_update", lambda info: False)
+    shown = updates.api_info()
+    assert shown == dict(INFO, url=INFO["url"], can_self_update=False)
+    monkeypatch.setattr(app_mod.update_check, "can_self_update", lambda info: True)
+    assert updates.api_info()["can_self_update"] is True
+    assert updates.info == INFO and "can_self_update" not in updates.info          # the tracker's own copy is untouched
+
+
+def test_update_now_installs_in_place_only_where_the_real_gate_says_so(settings, monkeypatch):
+    """can_self_update (update_check) is the one gate: the installed build, this project's own installer, a SHA-256."""
+    def installs(info: dict[str, Any], frozen: bool) -> bool:
+        monkeypatch.setattr(app_mod.update_check, "is_frozen", lambda: frozen)
+        updates = UpdateTracker(settings, FakeChecker(info))
+        updates.start_check()
+        return updates.api_info()["can_self_update"]
+
+    digest = "sha256:" + "a" * 64
+    assert installs(found(asset_digest=digest), frozen=True) is True
+    assert installs(found(asset_digest=digest), frozen=False) is False                       # from source: the release page
+    assert installs(found(), frozen=True) is False                                           # no checksum: never silently
+    assert installs(found(asset_digest=digest, asset_url="https://evil.example/Setup.exe"), frozen=True) is False
+    assert installs(found(asset_digest=digest, asset_url=None), frozen=True) is False
+
+
+@pytest.mark.parametrize("bad", [{"url": "https://evil.example/x"}, {"url": "javascript:alert(1)"}, {"url": None},
+                                 {"url": ""}, {"url": 5}, {}])
+def test_the_release_page_the_dashboard_gets_is_always_a_github_page(settings, bad):
+    without_url = {key: value for key, value in INFO.items() if key != "url"}
+    updates = UpdateTracker(settings, FakeChecker({**without_url, **bad}))
+    updates.start_check()
+    assert updates.api_info()["url"] == f"https://github.com/{version.REPO}/releases/latest"
+
+
+def test_nothing_found_is_nothing_to_announce(settings):
+    updates = UpdateTracker(settings, FakeChecker(None))
+    updates.start_check()
+    assert updates.announcement() is None
+
+
+def test_a_found_release_is_announced_once_and_then_never_again(settings):
+    updates = UpdateTracker(settings, FakeChecker(INFO))
+    updates.start_check()
+    assert updates.announcement() == INFO
+    assert updates.announcement() == INFO                                           # asking does not use it up
+    updates.mark_announced(INFO)
+    assert updates.announcement() is None
+    assert settings.get("notified_version") == "2.1.0"
+    updates.start_check()                                                           # found again by a later check
+    assert updates.announcement() is None
+
+
+def test_a_newer_release_is_announced_again_and_an_older_one_never(settings):
+    checker = FakeChecker(found("2.1.0"))
+    updates = UpdateTracker(settings, checker)
+    updates.start_check()
+    updates.mark_announced()
+    checker.result = found("2.2.0")
+    updates.start_check()
+    assert updates.announcement()["version"] == "2.2.0"
+    updates.mark_announced()
+    checker.result = found("2.1.5")                                                 # 2.2.0 was pulled: an older release is the latest again
+    updates.start_check()
+    assert updates.info["version"] == "2.1.5"
+    assert updates.announcement() is None                                           # 2.2.0 was already told about: 2.1.5 is not news
+    updates.mark_announced()
+    assert settings.get("notified_version") == "2.2.0", "the mark is only ever raised"
+
+
+def test_a_skipped_release_is_not_announced_and_the_next_one_is(settings):
+    updates = UpdateTracker(settings, FakeChecker(found("2.1.0")))
+    updates.start_check()
+    assert updates.skip() == {"skipped": "2.1.0"}
+    assert updates.announcement() is None and updates.info is not None               # still known, never announced
+    updates._check = FakeChecker(found("2.2.0"))
+    updates.start_check()
+    assert updates.announcement()["version"] == "2.2.0"
+
+
+def test_nothing_is_announced_while_the_update_check_is_off(settings):
+    updates = UpdateTracker(settings, FakeChecker(INFO))
+    updates.start_check()
+    settings.set("check_updates", False)
+    assert updates.announcement() is None
+    settings.set("check_updates", True)
+    assert updates.announcement() == INFO
+
+
+@pytest.mark.parametrize("number", ["2.1.0<b>", "2.1.0 beta", "x" * 41, "", None, 5])
+def test_a_version_that_is_not_plain_is_never_put_in_a_toast(settings, number):
+    updates = UpdateTracker(settings, FakeChecker(dict(INFO, version=number)))
+    updates.start_check()
+    assert updates.announcement() is None
+    updates.mark_announced()
+    assert settings.get("notified_version") is None
+
+
+@pytest.mark.parametrize("stored", [5, None, ["2.1.0"], "", "nightly", "garbage"])
+def test_a_notified_version_that_is_not_a_version_announces_the_release(settings, stored):
+    """The settings file keeps unknown keys exactly as written, so a hand edit can put anything there."""
+    settings.set("notified_version", stored)
+    updates = UpdateTracker(settings, FakeChecker(INFO))
+    updates.start_check()
+    assert updates.announcement() == INFO
+    updates.mark_announced()
+    assert settings.get("notified_version") == "2.1.0"
+
+
+def test_the_toast_title_names_the_version():
+    assert app_mod.update_toast_title("2.1.0") == "Claude Usage Monitor v2.1.0 is available"
+    assert app_mod.UPDATE_TOAST_BODY == "Open the tray menu or the dashboard to update"
+    assert len(app_mod.update_toast_title("3.10.12-rc.1")) < 64                      # the toast title limit (tray.TITLE_LIMIT)
+
+
+def test_marking_from_many_threads_leaves_the_newest_version(settings, monkeypatch):
+    """The UI thread (a toast) and an API thread (a check by hand) both mark; whatever the order, the mark only rises.
+    Reading the mark is slowed down so that the threads really do overlap: without the tracker's lock around the
+    read-compare-write, the last writer (the lowest version here) would win."""
+    updates = UpdateTracker(settings, FakeChecker(None))
+    real_get = settings.get
+
+    def slow_get(key, default=None):
+        value = real_get(key, default)
+        if key == "notified_version":
+            time.sleep(0.003)
+        return value
+
+    monkeypatch.setattr(settings, "get", slow_get)
+    numbers = [f"2.{n}.0" for n in range(1, 40)]
+    threads = [threading.Thread(target=updates.mark_announced, args=({"version": number},)) for number in reversed(numbers)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(10)
+    assert real_get("notified_version") == "2.39.0"
+
+
+def local_time(hour: int, minute: int = 0) -> datetime:
+    return datetime(2026, 10, 21, hour, minute).astimezone()
+
+
+@pytest.mark.parametrize("quiet, hour, minute, expected", [
+    ({"start": "22:00", "end": "07:00"}, 23, 0, True), ({"start": "22:00", "end": "07:00"}, 3, 30, True),
+    ({"start": "22:00", "end": "07:00"}, 22, 0, True), ({"start": "22:00", "end": "07:00"}, 7, 0, False),
+    ({"start": "22:00", "end": "07:00"}, 12, 0, False), ({"start": "22:00", "end": "07:00"}, 21, 59, False),
+    ({"start": "09:00", "end": "17:00"}, 9, 0, True), ({"start": "09:00", "end": "17:00"}, 16, 59, True),
+    ({"start": "09:00", "end": "17:00"}, 17, 0, False), ({"start": "09:00", "end": "17:00"}, 8, 59, False),
+    ({"start": "08:00", "end": "08:00"}, 8, 0, False),                          # equal times: no quiet hours at all
+    (None, 3, 0, False), ("22:00-07:00", 3, 0, False), ({"start": "22:00"}, 23, 0, False),
+    ({"start": "25:00", "end": "07:00"}, 3, 0, False), ({"start": 22, "end": 7}, 3, 0, False), ([], 3, 0, False),
+])
+def test_quiet_hours_are_read_the_way_the_alert_engine_reads_them(quiet, hour, minute, expected):
+    assert app_mod.in_quiet_hours(quiet, local_time(hour, minute)) is expected
+
+
+def test_quiet_hours_use_local_time_not_utc():
+    quiet = {"start": "10:00", "end": "11:00"}
+    inside = datetime(2026, 10, 21, 10, 30).astimezone()                           # 10:30 on this PC's clock
+    assert app_mod.in_quiet_hours(quiet, inside) is True
+    assert app_mod.in_quiet_hours(quiet, inside.astimezone(timezone.utc)) is True   # the same instant, written in UTC
 
 
 def test_the_data_service_pauses_on_a_locked_desktop_unless_the_caller_says_otherwise(monkeypatch, settings):
@@ -2075,6 +2303,13 @@ def test_the_update_item_appears_in_the_menu_when_an_update_is_found_and_not_whe
     assert "Update to v2.1.0" not in [i.label for i in app.menu_items()]
 
 
+@pytest.mark.parametrize("number", ["2.1.0&Exit", "2.1.0\n", "x" * 41, "", None])
+def test_a_version_that_is_not_plain_gets_no_menu_item(wired, number):
+    """The version comes off the network; the menu label is built from it, so it has to be a plain version."""
+    wired.app.updates._info = dict(INFO, version=number)
+    assert not any(item.label.startswith("Update") for item in wired.app.menu_items())
+
+
 def test_a_second_launch_message_opens_the_dashboard(wired):
     wired.host.emit("open_dashboard")
     assert wired.app.launcher.opened == 1
@@ -2135,7 +2370,8 @@ def test_locking_the_session_stops_the_animation_and_the_clock_and_unlocking_red
     host.locked = True
     host.emit("session", True)
     assert not app.blinker.running and app._tick_timer is None
-    assert host.timer_ms() == [500], "only the taskbar strip's own keep-alive timer is left"
+    assert host.timer_ms() == [500, app_mod.UPDATE_RECHECK_S * 1000], \
+        "left: the taskbar strip's keep-alive and the six-hourly update re-check (a locked PC still hears about a release)"
     rendered = app.stats.snapshot()["rendered"]["floating"]
     host.locked = False
     host.emit("session", False)
@@ -2413,6 +2649,323 @@ def test_turning_the_update_check_on_later_runs_it_once(monkeypatch, settings):
     assert len(checker.calls) == 1
 
 
+# ── Update notices on the wired app ───────────────────────────────────────────
+#
+# A release has to be noticed: a tray toast once per version, the menu item and the dashboard banner for as long as it
+# is on offer, a new check every six hours. build_app's FakeChecker answers at once (synchronous) unless a test says not.
+
+TOAST = ("Claude Usage Monitor v2.1.0 is available", "Open the tray menu or the dashboard to update")
+
+
+def publish_state(built: Wired) -> None:
+    built.service.publish(sample_state("normal3", NOW))
+    built.host.run_posted()
+
+
+def toast_titles(built: Wired) -> list[str]:
+    return [title for title, _body in built.tray.notices]
+
+
+def test_a_release_found_at_start_is_announced_by_one_toast_that_opens_the_dashboard(monkeypatch, settings):
+    built = build_app(monkeypatch, settings, update_check_fn=FakeChecker(INFO))
+    assert built.tray.notices == [TOAST]
+    assert settings.get("notified_version") == "2.1.0"
+    built.tray.on_notify_click()
+    assert built.app.launcher.opened == 1
+
+
+def test_the_update_toast_does_not_depend_on_the_usage_alert_switches(monkeypatch, settings):
+    """alerts_enabled and the alert_on_* kinds are about limits; a release is not one."""
+    settings.update({"alerts_enabled": False, "alert_on_threshold": False, "alert_on_reset": False,
+                     "alert_on_credits": False})
+    built = build_app(monkeypatch, settings, update_check_fn=FakeChecker(INFO))
+    assert built.tray.notices == [TOAST]
+
+
+def test_no_release_found_is_no_toast(monkeypatch, settings):
+    built = build_app(monkeypatch, settings, update_check_fn=FakeChecker(None))
+    publish_state(built)
+    assert built.tray.notices == [] and settings.get("notified_version") is None
+
+
+def test_the_toast_is_not_repeated_by_later_states_or_by_a_restart(monkeypatch, settings):
+    checker = FakeChecker(INFO)
+    first = build_app(monkeypatch, settings, update_check_fn=checker)
+    for _ in range(3):
+        publish_state(first)
+    assert first.tray.notices == [TOAST]
+    first.app._teardown()
+    second = build_app(monkeypatch, settings, update_check_fn=checker)       # the next launch finds the same release
+    publish_state(second)
+    assert second.tray.notices == [] and second.app.updates.info == INFO
+    assert "Update to v2.1.0" in [item.label for item in second.app.menu_items()], "told once, on offer for good"
+
+
+def test_a_newer_release_is_announced_when_a_later_check_finds_it(monkeypatch, settings):
+    checker = FakeChecker(INFO)
+    built = build_app(monkeypatch, settings, update_check_fn=checker)
+    checker.result = found("2.2.0")
+    built.host.fire(built.app._update_timer)
+    built.host.run_posted()
+    assert toast_titles(built) == ["Claude Usage Monitor v2.1.0 is available", "Claude Usage Monitor v2.2.0 is available"]
+    assert settings.get("notified_version") == "2.2.0"
+
+
+def test_a_release_the_user_skipped_is_never_announced_and_the_next_one_is(monkeypatch, settings):
+    settings.set("skip_version", "2.1.0")
+    checker = FakeChecker(INFO)
+    built = build_app(monkeypatch, settings, update_check_fn=checker)
+    publish_state(built)
+    assert built.tray.notices == [] and settings.get("notified_version") is None
+    assert built.app.updates.info == INFO                                    # known: the dashboard says it is skipped
+    checker.result = found("2.2.0")
+    built.host.fire(built.app._update_timer)
+    built.host.run_posted()
+    assert toast_titles(built) == ["Claude Usage Monitor v2.2.0 is available"]
+
+
+def test_a_release_skipped_while_its_toast_waits_is_not_announced_after_all(monkeypatch, settings):
+    built = build_app(monkeypatch, settings, update_check_fn=FakeChecker(INFO))   # announced at start ...
+    first = len(built.tray.notices)
+    assert first == 1
+    built.app.updates._info = found("2.2.0")                                  # ... and a newer one is found
+    built.plat.fullscreen = True                                              # while a game is in front
+    publish_state(built)
+    assert len(built.tray.notices) == 1
+    built.app.updates.skip()                                                  # the user skips 2.2.0 from the dashboard
+    built.plat.fullscreen = False
+    publish_state(built)
+    assert len(built.tray.notices) == 1, "a skipped release is not announced when the game closes"
+
+
+def test_nothing_is_announced_while_the_update_check_is_off(monkeypatch, settings):
+    built = build_app(monkeypatch, settings, update_check_fn=FakeChecker(None))
+    built.plat.fullscreen = True
+    built.app.updates._info = dict(INFO)                                       # found, but the toast has to wait
+    publish_state(built)
+    settings.set("check_updates", False)                                       # and then the user switches the check off
+    built.host.run_posted()
+    built.plat.fullscreen = False
+    publish_state(built)
+    assert built.tray.notices == []
+    settings.set("check_updates", True)
+    publish_state(built)
+    assert built.tray.notices == [TOAST], "switched on again, the release is announced once"
+
+
+def test_the_update_check_repeats_every_six_hours_while_the_monitor_runs(monkeypatch, settings):
+    checker = FakeChecker(None)
+    built = build_app(monkeypatch, settings, update_check_fn=checker)
+    assert len(checker.calls) == 1                                             # at start
+    milliseconds, _fn, repeat = built.host.timers[built.app._update_timer]
+    assert milliseconds == 6 * 60 * 60 * 1000 == app_mod.UPDATE_RECHECK_S * 1000 and repeat is True
+    for expected in (2, 3, 4):
+        built.host.fire(built.app._update_timer)
+        assert len(checker.calls) == expected
+    assert set(checker.calls) == {(version.REPO, version.APP_VERSION)}
+
+
+def test_a_failed_recheck_is_silent_and_keeps_what_was_known(monkeypatch, settings, caplog):
+    checker = FakeChecker(INFO)
+    built = build_app(monkeypatch, settings, update_check_fn=checker)
+    checker.result = None                                                      # offline, rate limited, GitHub down
+    with caplog.at_level(logging.DEBUG, logger="usage_monitor"):
+        built.host.fire(built.app._update_timer)
+        built.host.run_posted()
+    assert built.app.updates.info == INFO and built.tray.notices == [TOAST]
+    assert [record for record in caplog.records if record.levelno >= logging.WARNING] == []
+    assert any(item.label == "Update to v2.1.0" for item in built.app.menu_items()), "still on offer"
+
+
+def test_a_recheck_that_cannot_even_start_is_swallowed(monkeypatch, settings, caplog):
+    def no_thread(repo, current, on_result):
+        raise RuntimeError("can't start new thread")
+
+    built = build_app(monkeypatch, settings, update_check_fn=FakeChecker(None))
+    built.app.updates._check = no_thread
+    with caplog.at_level(logging.DEBUG, logger="usage_monitor"):
+        built.host.fire(built.app._update_timer)                                # raises nothing into the timer
+    assert [record for record in caplog.records if record.levelno >= logging.WARNING] == []
+    assert any("could not start the update check" in record.getMessage() for record in caplog.records)
+
+
+def test_the_recheck_waits_while_the_update_check_is_off_and_works_once_it_is_on(monkeypatch, settings):
+    settings.set("check_updates", False)
+    checker = FakeChecker(None)
+    built = build_app(monkeypatch, settings, update_check_fn=checker)
+    assert checker.calls == [] and built.app._update_timer is not None         # the timer is cheap; the gate is its callback
+    built.host.fire(built.app._update_timer)
+    assert checker.calls == []
+    settings.set("check_updates", True)
+    built.host.run_posted()                                                    # the first check, as when it was switched on
+    assert len(checker.calls) == 1
+    built.host.fire(built.app._update_timer)
+    assert len(checker.calls) == 2
+    settings.set("check_updates", False)
+    built.host.run_posted()
+    built.host.fire(built.app._update_timer)
+    assert len(checker.calls) == 2, "switched off again: no more checks"
+
+
+def test_shutdown_stops_the_recheck_and_drops_a_late_answer(monkeypatch, settings):
+    built = build_app(monkeypatch, settings, update_check_fn=FakeChecker(None))
+    timer = built.app._update_timer
+    assert timer in built.host.timers
+    built.app._teardown()
+    assert timer not in built.host.timers and built.app._update_timer is None
+    built.app._on_update_result(INFO)                                          # a check that was still running finishes
+    assert built.host.posted == [] and built.tray.notices == []
+
+
+def test_the_answer_of_a_check_is_handed_to_the_ui_thread_not_acted_on_where_it_arrives(monkeypatch, settings):
+    checker = FakeChecker(INFO, synchronous=False)
+    built = build_app(monkeypatch, settings, update_check_fn=checker)
+    assert len(checker.pending) == 1 and built.tray.notices == []
+    answered = threading.Event()
+
+    def check_thread():
+        checker.pending[0](INFO)                                               # what update_check.check_async does
+        answered.set()
+
+    threading.Thread(target=check_thread, name="update-check").start()
+    assert answered.wait(5)
+    assert built.tray.notices == [] and len(built.host.posted) == 1            # nothing was drawn off the UI thread
+    built.host.run_posted()
+    assert built.tray.notices == [TOAST]
+
+
+def hold_back(built: Wired, reason: str, on: bool, monkeypatch, settings) -> None:
+    """Make (or end) a moment when a toast would go unseen."""
+    if reason == "locked":
+        built.host.locked = on
+    elif reason == "screensaver":
+        monkeypatch.setattr(built.plat, "should_pause", lambda: on)
+    elif reason == "fullscreen":
+        built.plat.fullscreen = on
+    else:
+        settings.set("alert_quiet_hours", {"start": "00:00", "end": "23:59"} if on else None)
+
+
+@pytest.mark.parametrize("reason", ["locked", "screensaver", "fullscreen", "quiet hours"])
+def test_a_toast_nobody_would_see_waits_until_somebody_could(monkeypatch, settings, reason):
+    built = build_app(monkeypatch, settings, update_check_fn=FakeChecker(None))
+    hold_back(built, reason, True, monkeypatch, settings)
+    built.app.updates._info = dict(INFO)
+    built.app._on_update_result(INFO)                                          # a check found it at the wrong moment
+    built.host.run_posted()
+    assert built.tray.notices == [] and settings.get("notified_version") is None, "held back, and not used up"
+    publish_state(built)
+    assert built.tray.notices == [], "still held back at the next state"
+    hold_back(built, reason, False, monkeypatch, settings)
+    publish_state(built)
+    assert built.tray.notices == [TOAST], "announced as soon as it could be seen"
+    publish_state(built)
+    assert built.tray.notices == [TOAST]
+
+
+def test_a_release_found_while_the_session_was_locked_is_announced_at_unlock(monkeypatch, settings):
+    built = build_app(monkeypatch, settings, update_check_fn=FakeChecker(None))
+    built.host.locked = True
+    built.host.emit("session", True)
+    built.host.fire(built.app._update_timer)                                   # the re-check still runs while locked ...
+    built.app.updates._info = dict(INFO)
+    built.app._on_update_result(INFO)
+    built.host.run_posted()
+    assert built.tray.notices == []                                            # ... but the toast waits for somebody
+    built.host.locked = False
+    built.host.emit("session", False)                                          # no state needed: the unlock itself is the cue
+    assert built.tray.notices == [TOAST]
+
+
+def test_a_failure_to_tell_whether_a_toast_would_be_seen_does_not_cost_it(monkeypatch, settings):
+    built = build_app(monkeypatch, settings, update_check_fn=FakeChecker(None))
+
+    def broken() -> bool:
+        raise OSError("no session information")
+
+    monkeypatch.setattr(built.plat, "should_pause", broken)
+    built.app.updates._info = dict(INFO)
+    built.app._announce_update()
+    assert built.tray.notices == [TOAST]
+
+
+def test_a_toast_that_raises_is_logged_once_and_not_tried_at_every_state(monkeypatch, settings, caplog):
+    built = build_app(monkeypatch, settings, update_check_fn=FakeChecker(None))
+
+    def refuse(title, body):
+        raise OSError("the shell refused the balloon")
+
+    built.tray.notify = refuse
+    built.app.updates._info = dict(INFO)
+    with caplog.at_level(logging.ERROR, logger="usage_monitor.app"):
+        built.app._announce_update()
+        publish_state(built)
+        publish_state(built)
+    assert sum("could not show the update notice" in record.getMessage() for record in caplog.records) == 1
+    assert built.app.stats.snapshot()["failed"] == 0                           # and the redraw was not touched
+
+
+def test_a_toast_the_shell_could_not_attach_is_tried_again_at_the_next_state(monkeypatch, settings):
+    built = build_app(monkeypatch, settings, update_check_fn=FakeChecker(None))
+    answers = iter([False, True])                                              # Explorer is restarting, then it is back
+    tried: list[str] = []
+
+    def notify(title, body):
+        tried.append(title)
+        return next(answers)
+
+    built.tray.notify = notify
+    built.app.updates._info = dict(INFO)
+    built.app._announce_update()
+    assert settings.get("notified_version") is None
+    publish_state(built)
+    assert len(tried) == 2 and settings.get("notified_version") == "2.1.0"
+    publish_state(built)
+    assert len(tried) == 2
+
+
+def test_checking_by_hand_counts_as_being_told(monkeypatch, settings):
+    checker = FakeChecker(None)
+    built = build_app(monkeypatch, settings, update_check_fn=checker)
+    assert built.app._check_updates_for_api() == {"available": False, "version": None, "checked": True}
+    assert settings.get("notified_version") is None
+    checker.result = INFO                                                      # the user presses "Check for updates now"
+    assert built.app._check_updates_for_api() == {"available": True, "version": "2.1.0", "checked": True}
+    assert settings.get("notified_version") == "2.1.0"
+    built.host.fire(built.app._update_timer)                                   # the automatic check finds the same release
+    built.host.run_posted()
+    assert built.tray.notices == [], "they just saw it in the dashboard: no toast on top"
+    assert any(item.label == "Update to v2.1.0" for item in built.app.menu_items())
+
+
+def test_the_servers_update_info_is_the_trackers_with_the_page_and_the_install_mode(wired, monkeypatch):
+    info = wired.app.server.kwargs["update_cb"]["info"]
+    assert info() is None
+    wired.app.updates._info = dict(INFO)
+    monkeypatch.setattr(app_mod.update_check, "can_self_update", lambda i: True)
+    assert info() == dict(INFO, url=INFO["url"], can_self_update=True)
+    assert wired.app.server.kwargs["update_cb"]["check"] == wired.app._check_updates_for_api
+
+
+def test_the_real_server_serves_the_update_block_the_banner_reads(wired, tmp_path, monkeypatch):
+    """The app's own callbacks behind the real ApiServer: /api/state's update block for a found release."""
+    from usage_monitor.ui.server import ApiServer
+
+    wired.app.updates._info = dict(INFO)
+    monkeypatch.setattr(app_mod.update_check, "can_self_update", lambda i: False)
+    server = ApiServer(lambda: None, wired.settings, refresh_cb=None, update_cb=wired.app.server.kwargs["update_cb"],
+                       version="t", dev=True)
+    server.start()
+    try:
+        smoke = SmokeTest(45, tmp_path / "r.json")
+        smoke._app = types.SimpleNamespace(server=server)
+        block = smoke._get_json("/api/state")["update"]
+    finally:
+        server.stop()
+    assert block == {"available": True, "version": "2.1.0", "url": INFO["url"], "can_self_update": False,
+                     "skipped": False, "info": dict(INFO, can_self_update=False), "skip_version": ""}
+
+
 def test_shutdown_runs_in_the_documented_order_and_only_once(wired, monkeypatch):
     app, events = wired.app, wired.events
     events.log.clear()
@@ -2521,6 +3074,7 @@ def test_describe_summarises_the_live_ui(wired):
     assert info["theme"] == ["nostromo", "amber"]
     assert info["floating"]["visible"] and info["taskbar"]["visible"]
     assert info["tray"] == {"added": True, "icon_px": 16}
+    assert info["update_recheck"] is True                                    # the six-hourly update check is armed
     assert info["frames"]["rendered"]["floating"] >= 1 and info["frames"]["failed"] == 0
     json.dumps(info)                                                         # the report must be serialisable
     assert info["gdi_objects"] >= 0 and info["user_objects"] >= 0
@@ -2648,6 +3202,42 @@ def test_the_smoke_analytics_step_fails_naming_each_route_that_does_not_answer(m
     assert str(caught.value).count("answered 501") == 7 and "/api/analytics/cost" in str(caught.value)
 
 
+def test_the_smoke_api_step_checks_the_update_block_the_dashboard_reads(tmp_path):
+    from usage_monitor.ui.server import ApiServer
+
+    settings = Settings(tmp_path / "s.json", save_delay_s=0.0)
+    server = ApiServer(lambda: None, settings, refresh_cb=lambda: None, update_cb={"info": lambda: None},
+                       version="t", dev=True)
+    server.start()
+    smoke = SmokeTest(45, tmp_path / "r.json")
+    smoke._app = types.SimpleNamespace(server=server)
+    try:
+        result = smoke._step_api()
+        assert result["state"]["update_available"] is False
+        assert set(server._update_view()) == set(SmokeTest.UPDATE_KEYS), "the smoke check and the server agree on the block"
+        server._update_view = lambda: {"available": False, "info": None}              # a build that lost keys of the block
+        with pytest.raises(RuntimeError, match="update has no version, url, can_self_update, skipped, skip_version"):
+            smoke._step_api()
+    finally:
+        server.stop()
+        settings.close()
+
+
+def test_the_smoke_windows_step_wants_the_update_recheck_armed(tmp_path):
+    def stub(recheck: bool) -> types.SimpleNamespace:
+        info = {"floating": {"visible": True}, "taskbar": None, "tray": {"added": True}, "frames": {}, "update_recheck": recheck}
+        widget = types.SimpleNamespace(show_tooltip=lambda: None, hide_tooltip=lambda: None)
+        return types.SimpleNamespace(call_on_ui=lambda fn: fn(), describe=lambda: info, floating=widget, taskbar=None,
+                                     tooltip=types.SimpleNamespace(visible=True))
+
+    smoke = SmokeTest(45, tmp_path / "r.json")
+    smoke._app = stub(True)
+    assert smoke._step_windows()["tooltip_shown"] is True
+    smoke._app = stub(False)
+    with pytest.raises(RuntimeError, match="six-hourly update check is not armed"):
+        smoke._step_windows()
+
+
 def test_the_smoke_shape_check_names_what_is_missing():
     check = SmokeTest._shape_problem
     assert check("/r", b'{"a": 1, "b": 2}', ("a", "b")) is None
@@ -2713,7 +3303,7 @@ class AppRunner:
         self.events = Events()
         self.service = service or FakeService(self.events, sample_state("normal3", datetime.now(timezone.utc)))
         self.app = MonitorApp(
-            settings=settings, service_factory=lambda s: self.service, update_check_fn=lambda repo, cur, cb: cb(None),
+            settings=settings, service_factory=lambda s: self.service, update_check_fn=lambda repo, cur, cb, on_error=None: cb(None),
             platform_api=OffscreenPlatform(), mutex=mutex or f"Local\\CUM-test-{uuid.uuid4().hex}",
             animate_when_locked=True,
         )
@@ -2757,6 +3347,7 @@ def test_the_app_runs_draws_follows_settings_and_shuts_down_cleanly(tmp_path):
         assert wait_for(lambda: app.stats.snapshot()["rendered"].get("floating", 0) >= 2)
         info = app.call_on_ui(app.describe)
         assert info["floating"]["visible"] and info["taskbar"]["visible"] and info["tray"]["added"]
+        assert info["update_recheck"] is True       # the re-check timer is armed on the real host
         assert info["floating"]["rect"][0] < -20000 and info["taskbar"]["rect"][0] < -20000       # parked off-screen
         assert info["theme"] == ["nostromo", "blue"]
         floating_hwnd = app.floating.window.hwnd

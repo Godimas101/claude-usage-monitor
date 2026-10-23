@@ -1,0 +1,187 @@
+/* Gates motion: Windows 11 Fluent. Calm, traditional: fade, slide, decelerate, a gentle spring on hover.
+   Entrance (about 0.8 s): card i starts at 30 + 30 i ms. Every delay is  var(--fx-c0, 30ms) + var(--fx-i, 0) * 30ms + the
+   rule's own offset, so a bar, rail or chart whose data arrives later (.fx-land: --fx-c0 and --fx-i are 0) plays the same
+   fill from its own start.
+   Fluent motion: durations 167 / 250 / 333 ms; decelerate (things arriving) = cubic-bezier(0.1, 0.9, 0.2, 1); accelerate
+   (things leaving) = cubic-bezier(0.7, 0, 1, 0.5); standard = cubic-bezier(0.8, 0, 0.2, 1). The spring is a damped spring
+   (damping ratio 0.38, 2.3 Hz, about 27 % overshoot, settled in 420 ms) written as a CSS linear() easing; browsers
+   without linear() get the bezier. Colour only from the tokens (--g-accent, --surface, --bg, --text ...). */
+
+html[data-theme="gates"] {
+  --gx-out: cubic-bezier(0.1, 0.9, 0.2, 1);
+  --gx-in: cubic-bezier(0.7, 0, 1, 0.5);
+  --gx-std: cubic-bezier(0.8, 0, 0.2, 1);
+  --gx-spring: cubic-bezier(.2, 1.4, .4, 1);
+  --gx-spring-s: cubic-bezier(.2, 1.3, .4, 1);
+  --g-skel: color-mix(in srgb, var(--text) 9%, transparent);
+  --g-skel-hi: color-mix(in srgb, var(--text) 17%, transparent);
+}
+@supports (transition-timing-function: linear(0, 1)) {
+  html[data-theme="gates"] {
+    --gx-spring: linear(0, 0.03 4%, 0.111 8%, 0.229 12%, 0.371 17%, 0.525 21%, 0.679 25%, 0.825 29%, 0.955 33%, 1.066 38%, 1.153 42%, 1.216 46%, 1.256 50%, 1.273 54%, 1.272 58%, 1.256 62%, 1.227 67%, 1.19 71%, 1.149 75%, 1.106 79%, 1.065 83%, 1.027 88%, 0.994 92%, 0.967 96%, 1);
+    --gx-spring-s: linear(0, 0.055 6%, 0.192 12%, 0.373 19%, 0.565 25%, 0.745 31%, 0.898 38%, 1.016 44%, 1.097 50%, 1.144 56%, 1.162 62%, 1.158 69%, 1.139 75%, 1.11 81%, 1.079 88%, 1.049 94%, 1);
+  }
+}
+
+/* ── entrance ─────────────────────────────────────────────────────────────────────────────────────── */
+html[data-theme="gates"] .fx-run :is(.nm-head, .nm-toolbar) { animation: gx-rise 320ms var(--gx-out) backwards; }
+html[data-theme="gates"] .fx-run .nm-card { animation: gx-rise 340ms var(--gx-out) calc(var(--fx-c0, 30ms) + var(--fx-i, 0) * 30ms) backwards; }
+@keyframes gx-rise { from { opacity: 0; transform: translateY(8px); } }
+
+/* bars fill on the decelerate curve. A bar is a run of cells; each lit cell is revealed left to right at the moment the
+   curve reaches it (script sets --gk-d, the start in ms, and --gk-l, the time it takes), so the whole bar reads as one
+   smooth fill. */
+html[data-theme="gates"] :is(.fx-run .nm-cells, .nm-cells.fx-land, .fx-run .nm-ratio, .nm-ratio.fx-land) i:is(.on, .part) {
+  animation: gx-wipe calc(var(--gk-l, 40) * 1ms) linear calc(var(--fx-c0, 30ms) + var(--fx-i, 0) * 30ms + 90ms + var(--gk-d, 0) * 1ms) backwards;
+}
+@keyframes gx-wipe { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+html[data-theme="gates"] :is(.fx-run .nm-rail, .nm-rail.fx-land) { animation: gx-t 520ms var(--gx-out) calc(var(--fx-c0, 30ms) + var(--fx-i, 0) * 30ms + 90ms) backwards; }
+@keyframes gx-t { from { --t: 0%; } }
+
+/* tables: the first rows fade up one after the other */
+html[data-theme="gates"] .fx-run .nm-table tbody tr { animation: gx-row 200ms var(--gx-out) calc(var(--fx-c0, 30ms) + var(--fx-i, 0) * 30ms + 120ms + var(--fx-r, 0) * 22ms) backwards; }
+@keyframes gx-row { from { opacity: 0; transform: translateY(4px); } }
+
+/* charts: columns rise from the baseline, 8 ms apart; a line is wiped on and its dots pop in; the rest fades in */
+html[data-theme="gates"] :is(.fx-run, .fx-land) .cum-columns :is(.cum-mark, .cum-hot) {
+  transform-box: fill-box; transform-origin: 50% 100%;
+  animation: gx-col 380ms var(--gx-out) calc(var(--fx-c0, 30ms) + var(--fx-i, 0) * 30ms + 90ms + var(--fx-c, 0) * 8ms) backwards;
+}
+@keyframes gx-col { from { transform: scaleY(0); } }
+html[data-theme="gates"] :is(.fx-run, .fx-land) .cum-line { animation: gx-draw 420ms var(--gx-out) calc(var(--fx-c0, 30ms) + var(--fx-i, 0) * 30ms + 90ms) backwards; }
+@keyframes gx-draw { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+html[data-theme="gates"] :is(.fx-run, .fx-land) .cum-dot { transform-box: fill-box; transform-origin: 50% 50%; animation: gx-pop 180ms var(--gx-out) calc(var(--fx-c0, 30ms) + var(--fx-i, 0) * 30ms + 90ms + var(--fx-d, 0) * 420ms / var(--fx-dn, 1)) backwards; }
+@keyframes gx-pop { from { opacity: 0; transform: scale(.2); } }
+html[data-theme="gates"] :is(.fx-run, .fx-land) :is(.cum-grid, .cum-now, .cum-t, .cum-ideal, .cum-fore) { animation: gx-fade 320ms var(--gx-out) calc(var(--fx-c0, 30ms) + var(--fx-i, 0) * 30ms + 90ms) backwards; }
+@keyframes gx-fade { from { opacity: 0; } }
+html[data-theme="gates"] :is(.fx-run, .fx-land) .cum-seg { transform-box: fill-box; transform-origin: 0 50%; animation: gx-seg 440ms var(--gx-out) calc(var(--fx-c0, 30ms) + var(--fx-i, 0) * 30ms + 90ms) backwards; }
+@keyframes gx-seg { from { transform: scaleX(0); } }
+html[data-theme="gates"] :is(.fx-run, .fx-land) .cum-hbars .cum-row { animation: gx-fade 320ms var(--gx-out) calc(var(--fx-c0, 30ms) + var(--fx-i, 0) * 30ms + 90ms + var(--fx-r, 0) * 40ms) backwards; }
+/* the heat maps come in as one unit: wiped on from the left (4 ms a column, at most 400 ms, and 220 ms to settle) while they fade
+   up, on the decelerate curve. One animation for the whole map, not one per cell */
+html[data-theme="gates"] :is(.fx-run, .fx-land) :is(.cum-calendar, .cum-matrix) { animation: gx-reveal calc(min(var(--fx-cn, 1) * 4ms, 400ms) + 220ms) var(--gx-out) calc(var(--fx-c0, 30ms) + var(--fx-i, 0) * 30ms + 90ms) backwards; }
+@keyframes gx-reveal { from { opacity: 0; clip-path: inset(0 100% 0 0); } to { opacity: 1; clip-path: inset(0 0 0 0); } }
+
+/* the small % lands after the figure: it comes back (a transition, so reduce motion removes it) when the ghost text goes */
+html[data-theme="gates"] .nm-big small { transition: opacity 180ms var(--gx-out); }
+html[data-theme="gates"] .nm-big[data-fx] small { transition: none; }
+/* the plan multiple is a pill with a 6 px dot in front of it (10 px padding + 6 px dot + 6 px gap): its ghost text starts
+   after the dot, where the real text does */
+html[data-theme="gates"] .nm-plan .nm-big.m[data-fx]::after { padding-left: 22px; }
+
+/* ── placeholders: the Fluent skeleton. A figure's slot is a soft block with a light sweep across it, a bar's track carries
+   the same sweep, a chart is one larger block. The sweep is the one thing that loops, only while the data is pending.
+   (A static block under reduced motion.) ── */
+html[data-theme="gates"] [data-fx-pend="num"] { color: transparent; text-shadow: none; }
+html[data-theme="gates"] [data-fx-pend="num"] small { opacity: 0; }
+html[data-theme="gates"] [data-fx-pend="num"]::before {
+  content: ""; position: absolute; left: 0; top: .16em; bottom: .16em; width: 2.6em; max-width: 100%; border-radius: 4px;
+  background: linear-gradient(90deg, var(--g-skel) 0%, var(--g-skel-hi) 45%, var(--g-skel) 90%) 0 0 / 300% 100%;
+  animation: gx-shimmer 1.6s linear infinite;
+}
+html[data-theme="gates"] .nm-mrow .v[data-fx-pend="num"]::before { left: auto; right: 0; width: 2.4em; }
+/* the plan multiple is a pill with a dot in front: the pill itself is the skeleton */
+html[data-theme="gates"] .nm-plan .nm-big.m[data-fx-pend="num"] {
+  background: linear-gradient(90deg, var(--g-skel) 0%, var(--g-skel-hi) 45%, var(--g-skel) 90%) 0 0 / 300% 100%;
+  animation: gx-shimmer 1.6s linear infinite;
+}
+html[data-theme="gates"] .nm-plan .nm-big.m[data-fx-pend="num"]::before { display: none; }
+@keyframes gx-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+/* a line of words (a caption, a table cell): one soft block the size of the text it will be */
+html[data-theme="gates"] [data-fx-pend="text"]::before {
+  content: ""; position: absolute; inset: .2em 0; border-radius: 3px;
+  background: linear-gradient(90deg, var(--g-skel) 0%, var(--g-skel-hi) 45%, var(--g-skel) 90%) 0 0 / 300% 100%;
+  animation: gx-shimmer 1.6s linear infinite;
+}
+html[data-theme="gates"] :is(.nm-cells, .nm-ratio)[data-fx-pend="bar"] { overflow: hidden; border-radius: 3px; }
+html[data-theme="gates"] .nm-ratio[data-fx-pend="bar"] { border-radius: 4px; }
+html[data-theme="gates"] :is(.nm-cells, .nm-ratio)[data-fx-pend="bar"]::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--g-skel-hi), transparent);
+  transform: translateX(-100%); animation: gx-sweep 1.6s var(--gx-std) infinite;
+}
+@keyframes gx-sweep { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+html[data-theme="gates"] .nm-cells[data-fx-pend="bar"]:empty, html[data-theme="gates"] .nm-ratio[data-fx-pend="bar"]:empty { background: var(--track); }
+html[data-theme="gates"] .nm-chart-host[data-fx-pend="chart"] { min-height: 60px; }
+html[data-theme="gates"] .nm-chart-host[data-fx-pend="chart"]::before {
+  content: ""; position: absolute; inset: 6px 0; border-radius: 6px;
+  background: linear-gradient(90deg, var(--g-skel) 0%, var(--g-skel-hi) 45%, var(--g-skel) 90%) 0 0 / 300% 100%;
+  animation: gx-shimmer 1.6s linear infinite;
+}
+html[data-theme="gates"] svg.cum-spark[data-fx-pend="chart"] { opacity: .45; }
+
+/* ── hover: a 2 px lift on a soft shadow with a gentle spring settle; press scales down a touch. Only where a pointer can hover. ── */
+html[data-theme="gates"] :is(.nm-card, .nm-stat) {
+  transition: transform 220ms var(--gx-out), box-shadow 220ms var(--gx-out), border-color 160ms var(--gx-out);
+}
+html[data-theme="gates"] .nm-menu a { transition: background-color 100ms, transform 240ms var(--gx-out); }
+html[data-theme="gates"] :is(.nm-btn, .nm-refresh) { transition: background-color 100ms, border-color 100ms, transform 200ms var(--gx-out); }
+html[data-theme="gates"] .nm-sw button { transition: transform 200ms var(--gx-out), box-shadow 160ms var(--gx-out), background-color 100ms; }
+@media (hover: hover) {
+  html[data-theme="gates"] .nm-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px var(--g-shadow-lift), 0 1px 2px var(--g-shadow);
+    border-color: color-mix(in srgb, var(--text) 16%, var(--border));
+    transition-duration: 420ms, 260ms, 160ms;
+    transition-timing-function: var(--gx-spring), var(--gx-out), var(--gx-out);
+  }
+  html[data-theme="gates"] .nm-stat:hover { transform: translateY(-1px); transition-duration: 320ms, 220ms, 160ms; transition-timing-function: var(--gx-spring-s), var(--gx-out), var(--gx-out); }
+  /* main.fx-quiet (the page was just redrawn and the pointer has not moved) takes the motion away, never the look: a card the
+     pointer rests on stays lifted through a data refresh, and one lifted by a resting pointer after a redraw simply is. */
+  html[data-theme="gates"] .nm-main.fx-quiet :is(.nm-card, .nm-stat) { transition-duration: 0s; }
+  html[data-theme="gates"] .nm-menu a:hover { transform: translateX(2px); transition-duration: 100ms, 380ms; transition-timing-function: linear, var(--gx-spring-s); }
+  html[data-theme="gates"] .nm-sw button:hover { transform: scale(1.12); transition-duration: 320ms, 160ms, 100ms; transition-timing-function: var(--gx-spring-s), var(--gx-out), linear; }
+}
+/* press: a touch smaller, quickly; it springs back when released */
+html[data-theme="gates"] .nm-card:active { transform: translateY(-1px) scale(.992); transition-duration: 90ms; transition-timing-function: var(--gx-out); }
+html[data-theme="gates"] .nm-menu a:active { transform: scale(.985); transition-duration: 90ms; transition-timing-function: var(--gx-out); }
+html[data-theme="gates"] :is(.nm-btn, .nm-refresh):active { transform: scale(.97); transition-duration: 90ms; }
+html[data-theme="gates"] .nm-sw button:active { transform: scale(.94); transition-duration: 90ms; transition-timing-function: var(--gx-out); }
+
+/* ── the loading screen: Windows 11 style. A full-window Fluent surface (Mica: the window colour with a faint accent
+   wash), the app glyph, the name, five dots that orbit, and one line of status; then it crosses into the dashboard,
+   whose cards rise as it fades. (gates.js builds it, plays it once per session and never under reduced motion.) ── */
+html[data-theme="gates"] .g-boot {
+  position: absolute; inset: 0; z-index: 90; display: none; cursor: default; overflow: hidden;
+  background:
+    radial-gradient(60% 46% at 50% 36%, color-mix(in srgb, var(--g-accent) 13%, transparent), transparent 72%),
+    radial-gradient(80% 50% at 0% 0%, var(--g-wash), transparent 70%),
+    linear-gradient(180deg, var(--bg), color-mix(in srgb, var(--bg) 90%, var(--surface)));
+}
+html[data-theme="gates"] .g-boot.is-on { display: grid; place-items: center; }
+html[data-theme="gates"] .g-boot.is-out { animation: gb-out 333ms var(--gx-in) forwards; pointer-events: none; }
+@keyframes gb-out { to { opacity: 0; } }
+html[data-theme="gates"] .g-b-in { display: flex; flex-direction: column; align-items: center; gap: 0; margin-top: -4vh; text-align: center; }
+html[data-theme="gates"] .g-boot.is-out .g-b-in { animation: gb-leave 167ms var(--gx-in) forwards; }
+@keyframes gb-leave { to { opacity: 0; transform: scale(.98); } }
+html[data-theme="gates"] .g-b-glyph { width: 64px; height: 64px; fill: none; stroke: var(--g-accent); stroke-width: .8; stroke-linecap: round; }
+html[data-theme="gates"] .g-boot.is-on .g-b-glyph { animation: gb-rise 333ms var(--gx-out) 40ms backwards; }
+html[data-theme="gates"] .g-b-title { margin-top: 18px; font: 600 22px/30px var(--g-display); color: var(--text-bright); }
+html[data-theme="gates"] .g-boot.is-on .g-b-title { animation: gb-rise 333ms var(--gx-out) 140ms backwards; }
+html[data-theme="gates"] .g-ring { position: relative; width: 36px; height: 36px; margin-top: 44px; }
+html[data-theme="gates"] .g-boot.is-on .g-ring { animation: gb-fade 167ms linear 280ms backwards; }
+html[data-theme="gates"] .g-ring i { position: absolute; inset: 0; opacity: 0; transform: rotate(225deg); animation: gb-orbit 2.6s infinite; }
+html[data-theme="gates"] .g-ring i::after { content: ""; position: absolute; left: 50%; top: 0; width: 5px; height: 5px; margin-left: -2.5px; border-radius: 50%; background: var(--text-bright); }
+html[data-theme="gates"] .g-ring i:nth-child(2) { animation-delay: 115ms; }
+html[data-theme="gates"] .g-ring i:nth-child(3) { animation-delay: 230ms; }
+html[data-theme="gates"] .g-ring i:nth-child(4) { animation-delay: 345ms; }
+html[data-theme="gates"] .g-ring i:nth-child(5) { animation-delay: 460ms; }
+/* the ring's own easing: the dots start together, the leader runs ahead, then they bunch up again and leave */
+@keyframes gb-orbit {
+  0%   { transform: rotate(225deg); opacity: 1; animation-timing-function: cubic-bezier(0, 0, .2, 1); }
+  7%   { transform: rotate(345deg); animation-timing-function: linear; }
+  30%  { transform: rotate(455deg); animation-timing-function: cubic-bezier(.4, 0, .6, 1); }
+  39%  { transform: rotate(690deg); animation-timing-function: linear; }
+  70%  { transform: rotate(815deg); opacity: 1; animation-timing-function: cubic-bezier(0, 0, .2, 1); }
+  75%  { transform: rotate(945deg); animation-timing-function: cubic-bezier(0, 0, .2, 1); }
+  76%, 100% { transform: rotate(945deg); opacity: 0; }
+}
+html[data-theme="gates"] .g-b-status { margin-top: 20px; font: 400 13px/20px var(--g-font); color: var(--text-dim); }
+html[data-theme="gates"] .g-boot.is-on .g-b-status { animation: gb-fade 250ms var(--gx-out) 560ms backwards; }
+@keyframes gb-rise { from { opacity: 0; transform: translateY(8px); } }
+@keyframes gb-fade { from { opacity: 0; } }
+@media (max-height: 420px) {
+  html[data-theme="gates"] .g-b-glyph { width: 40px; height: 40px; }
+  html[data-theme="gates"] .g-ring { margin-top: 24px; }
+  html[data-theme="gates"] .g-b-title { margin-top: 10px; }
+}

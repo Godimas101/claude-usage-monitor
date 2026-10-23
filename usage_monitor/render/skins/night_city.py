@@ -37,9 +37,18 @@ from usage_monitor.log import get_logger
 from usage_monitor.render import engine
 from usage_monitor.render.engine import Canvas, Color, Layer, Point, TRANSPARENT, parse_color, with_alpha
 from usage_monitor.render.model import (
+    LAMP_LIMITED,
+    LAMP_LIVE,
+    LAMP_OFFLINE,
+    LAMP_PAUSED,
+    NO_INSETS,
     SEVERITY_CRITICAL,
     SEVERITY_NORMAL,
     SEVERITY_WARNING,
+    SURFACE_FLOATING,
+    SURFACE_TASKBAR,
+    HoverPlay,
+    Insets,
     Row,
     WidgetModel,
     pace_delta,
@@ -201,8 +210,10 @@ class Palette:
     Names follow the mock's CSS tokens. From the variant colours: bg, panel (surface), fg (text), fg_hi
     (text_bright), ink2 (text_dim), line_a (border), accent, ok, warn, danger (alert), track, glow and stale.
     From the variant's extras (variant_tokens and token_extras): line, signal, ink, hz_a, hz_b, glow_accent,
-    glow_danger, scan, ring, bar, sel. ink3 is the stale tone. plate is True once the Edgerun plate overrides
-    are applied: a yellow panel with ink text.
+    glow_danger, scan, ring, bar, sel, and ink3 (the ink-3 token, the tertiary text; a variant without one gets
+    its stale colour). stale is the tone every live colour drops to while the numbers are not live: a variant
+    picks it to stay clear of its live colours, and ink3 follows it only in that state. plate is True once the
+    Edgerun plate overrides are applied: a yellow panel with ink text.
     """
     bg: Color
     panel: Color
@@ -255,7 +266,7 @@ class Palette:
         hz_a, hz_b = token("hz-a", danger), token("hz-b", ink)
         palette = cls(
             bg=role("bg"), panel=role("surface"), track=role("track"), fg=role("text"),
-            fg_hi=role("text_bright"), ink2=role("text_dim"), ink3=role("stale"),
+            fg_hi=role("text_bright"), ink2=role("text_dim"), ink3=token("ink-3", role("stale")),
             line=token("line", with_alpha(line_a, 255)), line_a=line_a, accent=accent, ok=role("ok"),
             warn=role("warn"), danger=danger, signal=token("signal", accent), ink=ink, hz_a=hz_a, hz_b=hz_b,
             glow=role("glow"), glow_accent=token("glow-accent", with_alpha(accent, 0x80)),
@@ -291,7 +302,7 @@ class Palette:
         if self.plate:
             return replace(self, ok=self.stale, glow=clear, glow_accent=clear, glow_danger=clear)
         tone = self.stale
-        return replace(self, fg=tone, fg_hi=tone, ink2=tone, accent=tone, bar=tone, ok=tone,
+        return replace(self, fg=tone, fg_hi=tone, ink2=tone, ink3=tone, accent=tone, bar=tone, ok=tone,
                        glow=clear, glow_accent=clear, glow_danger=clear)
 
 
@@ -1079,9 +1090,56 @@ def _octagon_span(y: int, size: int, chamfer: int, inset: int) -> tuple[int, int
     return (first, last) if last > first else None
 
 
-def _render_tray(size: int, percent: float | None, lit: Color, pal: Palette) -> Image.Image:
+# What the cells cannot say. The plain meter shows the level and the colour of the status; two states need a mark of
+# their own (a stale icon keeps the plain meter in the stale colour, so each of them differs from it and from each other):
+#   paused   the cells are cut in two columns that keep their level, which reads as the pause sign
+#   offline  a cross in the stale colour on the plate: NO SIGNAL
+#   limited  an hourglass in the stale colour on the plate: the API makes the monitor wait
+# The marks are bitmaps, one px per "#", centred on the plate: bold enough to hold together at 16 px.
+_PAUSE_GAP = 2
+
+
+def _tray_pause_row(cell_w: int) -> str | None:
+    """One cell cut in two bars with a gap between them, or None when the cell is too narrow to cut."""
+    bar = (cell_w - _PAUSE_GAP) // 2
+    if bar < 1:
+        return None
+    return "#" * bar + "." * (cell_w - 2 * bar) + "#" * bar
+
+
+def _tray_cross(size: int) -> tuple[str, ...]:
+    """An X filling a ``size`` square, its diagonals thick enough for the size (a quarter of it, at least 2 px)."""
+    thickness = max(2, size // 4)
+    return tuple(
+        "".join("#" if abs(x - y) < thickness or abs(x - (size - 1 - y)) < thickness else "." for x in range(size))
+        for y in range(size)
+    )
+
+
+def _tray_hourglass(size: int) -> tuple[str, ...]:
+    """An hourglass filling a ``size`` square: a bar at the top and bottom, narrowing by a pixel a side per row."""
+    rows = []
+    for y in range(size):
+        width = size - 2 * min(y, size - 1 - y)
+        rows.append("." * ((size - width) // 2) + "#" * width + "." * (size - width - (size - width) // 2))
+    return tuple(rows)
+
+
+def _tray_mark(kind: str, size: int) -> tuple[str, ...] | None:
+    """The bitmap that stands in for the cells in the offline and limited states, or None."""
+    side = size // 2
+    if kind == LAMP_OFFLINE:
+        return _tray_cross(side)
+    if kind == LAMP_LIMITED:
+        return _tray_hourglass(side)
+    return None
+
+
+def _render_tray(size: int, percent: float | None, lit: Color, pal: Palette, kind: str = LAMP_LIVE) -> Image.Image:
     """The line-coloured octagon, the bg octagon inside it, then five cells filling from the bottom. Lit cells
-    = round(pct / 20). One pixel per cell edge and no anti-aliasing, so it stays sharp at 16 px."""
+    = round(pct / 20). One pixel per cell edge and no anti-aliasing, so it stays sharp at 16 px. ``kind`` is the lamp
+    kind of the status (model.LAMP_KINDS): paused cuts the cells in two columns, and offline and limited draw a cross
+    and an hourglass in place of the cells (see _tray_mark)."""
     cell_w, cell_h, gap, chamfer = _tray_geometry(size)
     img = Image.new("RGBA", (size, size), TRANSPARENT)
     px = img.load()
@@ -1091,17 +1149,27 @@ def _render_tray(size: int, percent: float | None, lit: Color, pal: Palette) -> 
             if span is not None:
                 for x in range(span[0], span[1]):
                     px[x, y] = colour
+    mark = _tray_mark(kind, size)
+    if mark is not None:
+        left, top = (size - len(mark[0])) // 2, (size - len(mark)) // 2
+        for j, row in enumerate(mark):
+            for i, ink in enumerate(row):
+                if ink == "#":
+                    px[left + i, top + j] = lit
+        return img
     fraction = 0.0 if percent is None else max(0.0, min(100.0, percent)) / 100.0
     count = int(math.floor(fraction * TRAY_CELLS + 0.5))
     total = TRAY_CELLS * cell_h + (TRAY_CELLS - 1) * gap
     x0 = (size - cell_w) // 2
     y0 = (size - total) // 2
+    split = _tray_pause_row(cell_w) if kind == LAMP_PAUSED else None
     for index in range(TRAY_CELLS):
         top = y0 + (TRAY_CELLS - 1 - index) * (cell_h + gap)
         colour = lit if index < count else pal.ring
         for y in range(top, top + cell_h):
             for x in range(x0, x0 + cell_w):
-                px[x, y] = colour
+                if split is None or split[x - x0] == "#":
+                    px[x, y] = colour
     return img
 
 
@@ -1170,7 +1238,56 @@ class NightCitySkin:
             lit = pal.warn
         else:
             lit = pal.bar
-        return _render_tray(size, percent, lit, pal)
+        return _render_tray(size, percent, lit, pal, model.lamp)
+
+    def content_insets(self, surface: str, theme: Any, model: WidgetModel, scale: float) -> Insets:
+        """No transparent margin: every Night City frame is its visible surface (the chamfers cut corners, not the box)."""
+        return NO_INSETS
+
+    def hover_frames(self, frame: Image.Image, surface: str, scale: float,
+                     opts: RenderOptions | Mapping[str, Any] | None = None) -> HoverPlay | None:
+        """The pointer response of the floating widget and the strip: a one-shot glitch of three 60 ms frames (an RGB
+        split with a torn band, then less of both, then a hairline split), after which the normal frame returns."""
+        if surface not in (SURFACE_FLOATING, SURFACE_TASKBAR):
+            return None
+        frames = tuple(_glitch(frame, scale, split, band, shift) for split, band, shift in HOVER_GLITCH)
+        return HoverPlay(frames=frames, delays_ms=(HOVER_FRAME_MS,) * len(frames), hold=False)
+
+
+# ── Hover ─────────────────────────────────────────────────────────────────────
+
+HOVER_FRAME_MS = 60
+# Per frame: the red channel moves by +split logical px and green and blue by -split; a band between the two heights
+# (shares of the frame's height) moves by ``shift`` px. Values are logical px at 100 %, the motion spec's 5, 4 and 2 px
+# and 7 and 5 px at 150 %.
+HOVER_GLITCH: tuple[tuple[float, tuple[float, float] | None, float], ...] = (
+    (3.3, (0.38, 0.46), 4.7),
+    (-2.7, (0.62, 0.69), -3.3),
+    (1.3, None, 0.0),
+)
+
+
+def _shifted(channel: Image.Image, dx: int) -> Image.Image:
+    """``channel`` moved ``dx`` px sideways, with black where it left a gap (nothing wraps round)."""
+    if dx == 0:
+        return channel
+    moved = Image.new("L", channel.size, 0)
+    moved.paste(channel, (dx, 0))
+    return moved
+
+
+def _glitch(frame: Image.Image, scale: float, split: float, band: tuple[float, float] | None, shift: float) -> Image.Image:
+    """One glitch frame: the red channel and the green and blue ones pulled apart, and a band torn sideways. The
+    alpha channel is not split, so the plate and its frame keep their shape while their colours fringe."""
+    red, green, blue, alpha = frame.convert("RGBA").split()
+    dx = round(split * scale)
+    out = Image.merge("RGBA", (_shifted(red, dx), _shifted(green, -dx), _shifted(blue, -dx), alpha))
+    if band is not None and round(shift * scale) != 0:
+        top, bottom = round(frame.height * band[0]), round(frame.height * band[1])
+        torn = Image.new("RGBA", (frame.width, bottom - top), TRANSPARENT)
+        torn.paste(out.crop((0, top, frame.width, bottom)), (round(shift * scale), 0))
+        out.paste(torn, (0, top))
+    return out
 
 
 __all__ = ["NightCitySkin", "Palette", "Look", "RenderOptions", "animation_phase", "pulse_alpha"]

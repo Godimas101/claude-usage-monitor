@@ -9,7 +9,9 @@ unattended. What it will run, and how it starts the helper that runs it, is what
     the release page, and the app exits only once the helper is running;
   * the helper: a constant ASCII batch file that holds no path, started so that no character in the user's
     temp folder (& ^ % ( ) , ; = @ !, spaces, accents) can break it. The real cmd.exe tests start processes,
-    so they need CUM_UI_TESTS=1 like the other process tests.
+    so they need CUM_UI_TESTS=1 like the other process tests. None of them may open a console window on the
+    desktop: the app the helper relaunches is a windowed stand-in (StandInApp), every console program a test starts
+    carries CREATE_NO_WINDOW, and the last section checks all the test files for a call that forgets it.
 
 The last two sections check that installer.iss and ClaudeUsageMonitor.spec say what the app and the updater
 rely on: the single-instance mutex, the Run entry, the file names, the bundled resources.
@@ -48,6 +50,10 @@ import version
 UI = pytest.mark.skipif(
     os.environ.get("CUM_UI_TESTS") != "1", reason="starts processes: set CUM_UI_TESTS=1",
 )
+# Every console program a test starts (ping, cmd, ISCC, PowerShell, python) gets this flag. A program that is started
+# by a process without a console of its own (pytest run from an editor, a task runner, an agent) otherwise opens a
+# terminal window on the desktop, one per process. test_no_test_starts_a_console_program_without_the_flag keeps it so.
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 ROOT = Path(__file__).resolve().parent.parent
 REPO = version.REPO
@@ -169,6 +175,19 @@ def test_version_tuples(text: str | None, numbers: tuple[int, ...]) -> None:
     assert uc._ver_tuple(text) == numbers
 
 
+@pytest.mark.parametrize(("candidate", "than", "expected"), [
+    ("2.1.0", "2.0.9", True), ("2.0.9", "2.1.0", False), ("2.1.0", "2.1.0", False),      # strictly newer
+    ("v3.0", "2.9.9", True), ("2.10.0", "2.9.0", True), ("2.9.0", "2.10.0", False),      # numbers, not text
+    ("3.0.0-rc.1", "2.9.9", True), ("1.1.5", "2.0.0", False),
+    ("2.1.0", "", True), ("2.1.0", "nightly", True), ("", "2.1.0", False), ("nightly", "2.1.0", False),
+    ("2.1.0", None, True), (None, "2.1.0", False), (None, None, False), ("", "", False),
+    ("2.1.0", 5, True), (5, "2.1.0", False), (["2.1.0"], "2.0.0", False),                  # a hand-edited settings file
+])
+def test_is_newer_compares_version_numbers(candidate: Any, than: Any, expected: bool) -> None:
+    """What decides whether a release is news: the same comparison _check makes, safe for any stored value."""
+    assert uc.is_newer(candidate, than) is expected
+
+
 # ── The check ─────────────────────────────────────────────────────────────────
 
 def test_a_newer_release_reports_the_installer_and_its_digest(net: FakeNet) -> None:
@@ -270,6 +289,76 @@ def test_check_async_fails_silent(net: FakeNet, failure: Exception) -> None:
     done = threading.Event()
     uc.check_async(REPO, "1.1.5", lambda info: (got.append(info), done.set()))
     assert done.wait(5) and got == [None]
+
+
+@pytest.mark.parametrize("failure", [urllib.error.URLError("offline"), TimeoutError(), ValueError("x"),
+                                     urllib.error.HTTPError(API_LATEST, 403, "rate limited", {}, None),
+                                     urllib.error.HTTPError(API_LATEST, 503, "unavailable", {}, None)])
+def test_check_async_tells_a_caller_who_asks_that_the_lookup_failed(net: FakeNet, failure: Exception) -> None:
+    """None means "nothing newer" and also "could not look". A caller that has to tell them apart (the dashboard's
+    "Check for updates now" must not say "up to date" for a lookup that failed) passes on_error: it gets the exception
+    first, then on_result(None) as ever."""
+    net.add_error(API_LATEST, failure)
+    events: list[tuple[str, Any]] = []
+    done = threading.Event()
+    uc.check_async(REPO, "1.1.5", lambda info: (events.append(("result", info)), done.set()),
+                   on_error=lambda exc: events.append(("error", exc)))
+    assert done.wait(5)
+    assert events == [("error", failure), ("result", None)]
+
+
+def test_check_async_with_a_bad_repo_name_is_a_failed_lookup_too() -> None:
+    events: list[tuple[str, Any]] = []
+    done = threading.Event()
+    uc.check_async("not a repo; rm -rf", "1.1.5", lambda info: (events.append(("result", info)), done.set()),
+                   on_error=lambda exc: events.append(("error", type(exc).__name__)))
+    assert done.wait(5) and events == [("error", "ValueError"), ("result", None)]
+
+
+@pytest.mark.parametrize("tag", ["v2.0.0", "v1.1.5", "v1.0"])
+def test_check_async_does_not_call_on_error_for_a_lookup_that_got_an_answer(net: FakeNet, tag: str) -> None:
+    """Newer, the same or older: GitHub answered, so the lookup is not a failure."""
+    net.add_json(API_LATEST, release_json(tag=tag))
+    events: list[str] = []
+    done = threading.Event()
+    uc.check_async(REPO, "1.1.5", lambda info: (events.append("result"), done.set()), on_error=lambda exc: events.append("error"))
+    assert done.wait(5)
+    time.sleep(0.05)
+    assert events == ["result"]
+
+
+def test_check_async_survives_an_on_error_that_raises(net: FakeNet) -> None:
+    net.add_error(API_LATEST, urllib.error.URLError("offline"))
+    got: list[Any] = []
+    done = threading.Event()
+
+    def boom(_exc: Exception) -> None:
+        raise RuntimeError("callback bug")
+
+    uc.check_async(REPO, "1.1.5", lambda info: (got.append(info), done.set()), on_error=boom)
+    assert done.wait(5) and got == [None]
+
+
+def test_a_failed_check_is_a_debug_line_and_nothing_louder(net: FakeNet, caplog: pytest.LogCaptureFixture) -> None:
+    """The app checks every six hours, so a failed lookup is not worth a warning: monitor.log (INFO and up) stays
+    quiet, and a developer who turns debug on can still see why no update was found. The line names the kind of
+    failure, never the address or the answer."""
+    net.add_error(API_LATEST, urllib.error.URLError("offline"))
+    done = threading.Event()
+    with caplog.at_level("DEBUG", logger="usage_monitor.update_check"):
+        uc.check_async(REPO, "1.1.5", lambda info: done.set())
+        assert done.wait(5)
+    records = [r for r in caplog.records if r.name == "usage_monitor.update_check"]
+    assert [r.levelname for r in records] == ["DEBUG"]
+    assert "URLError" in records[0].getMessage() and "github" not in records[0].getMessage()
+
+
+def test_the_check_runs_on_a_thread_of_its_own_named_for_it(net: FakeNet) -> None:
+    net.add_json(API_LATEST, release_json())
+    names: list[str] = []
+    done = threading.Event()
+    uc.check_async(REPO, "1.1.5", lambda info: (names.append(threading.current_thread().name), done.set()))
+    assert done.wait(5) and names == ["update-check"]
 
 
 def test_check_async_survives_a_callback_that_raises(net: FakeNet) -> None:
@@ -959,6 +1048,60 @@ def test_the_helper_is_started_hidden_with_its_own_process_group(monkeypatch: py
 
 
 # ── The real helper under the real cmd.exe (CUM_UI_TESTS=1) ───────────────────
+#
+# No test in this section may open a console window. Three things start console programs: the stand-in "monitor"
+# (ping.exe, started by the test: NO_WINDOW), the helper's own cmd.exe (started by update_check with CREATE_NO_WINDOW,
+# so ping.exe, find.exe and the stand-in installer share its hidden console), and the app the helper relaunches. The
+# real app is a windowed exe; a stand-in for it has to be one too, see StandInApp.
+
+class StandInApp:
+    """The program the helper relaunches, standing in for the monitor's windowed exe. It cannot open a console.
+
+    It is pythonw.exe (GUI subsystem: whatever starts it, no console window) run through `start`, exactly as the
+    helper starts the real app. It has no script. The sitecustomize.py that Python finds through PYTHONPATH writes
+    ``marker`` as the interpreter starts, and Python then exits at once (no stdin). The exe is reached through a
+    junction in a folder whose name holds spaces and cmd metacharacters, so the quoted `start "" "%CUM_UPDATE_EXE%"`
+    runs on a hard path, the way a user's profile folder makes it one.
+
+    The first stand-in was a .cmd file. `start` runs a .cmd with cmd /K, which opens a console window that never
+    closes: one left on the desktop of whoever ran the tests, every run, per relaunch.
+
+    ``exe`` is what CUM_UPDATE_EXE should be, ``env`` the variables the helper must inherit for the marker to be
+    written, ``gone()`` removes the junction (never what it points at) and is safe to call again."""
+
+    def __init__(self, root: Path, marker: Path) -> None:
+        base = Path(getattr(sys, "_base_executable", sys.executable)).resolve().parent
+        if not (base / "pythonw.exe").is_file():
+            pytest.skip("no pythonw.exe beside this Python to stand in for the windowed app")
+        hook = root / "hook"
+        hook.mkdir(parents=True)
+        (hook / "sitecustomize.py").write_text(f"open({str(marker)!r}, 'w').write('started')\n", encoding="utf-8")
+        self._junction: Path | None = None
+        folder = root / "Tom&Jerry (x) 100%"
+        folder.mkdir()
+        try:
+            import _winapi
+            _winapi.CreateJunction(str(base), str(folder / "py"))
+            self._junction = folder / "py"
+        except (ImportError, AttributeError, OSError):
+            pass            # no junction here: the exe is reached by its own path
+        self.exe = str((self._junction or base) / "pythonw.exe")
+        self.env = {"PYTHONPATH": str(hook)}
+
+    def gone(self) -> None:
+        junction, self._junction = self._junction, None
+        if junction is not None:
+            os.rmdir(junction)      # only the link: the Python installation it points at stays
+
+
+def wait_for(condition: Callable[[], bool], timeout: float = 15.0, interval: float = 0.1) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if condition():
+            return True
+        time.sleep(interval)
+    return bool(condition())
+
 
 @UI
 def test_the_real_helper_waits_for_the_monitor_installs_relaunches_and_cleans_up(
@@ -967,10 +1110,12 @@ def test_the_real_helper_waits_for_the_monitor_installs_relaunches_and_cleans_up
     """Seven helpers at once, each in a temp folder with other characters, each against a stand-in monitor
     (a process that lives ~5 s) and a stand-in installer (ping.exe, which exits 1 on the unknown switches).
     The helper must not run the installer before the monitor is gone, must run it through the folder name,
-    must relaunch the app only when its exe exists, and must remove its own folder."""
+    must relaunch the app when its exe exists (a windowed stand-in, StandInApp), and must remove its own folder
+    whether or not it could."""
     system32 = Path(os.environ["SystemRoot"]) / "System32"
     ping = str(system32 / "ping.exe")
     cases: list[dict[str, Any]] = []
+    app: StandInApp | None = None
     try:
         for index, folder in enumerate(NASTY_FOLDERS):
             temp = tmp_path / folder
@@ -978,16 +1123,20 @@ def test_the_real_helper_waits_for_the_monitor_installs_relaunches_and_cleans_up
             work.mkdir(parents=True)
             shutil.copy(ping, work / "Setup.exe")
             relaunched = tmp_path / f"relaunched{index}.txt"
+            extra_env: dict[str, str] = {}
             if index == 0:
-                app = tmp_path / "fakeapp.cmd"
-                app.write_bytes(f'@echo off\r\necho started> "{relaunched}"\r\n'.encode("ascii"))
-                exe = str(app)
+                app = StandInApp(tmp_path / "standin", relaunched)
+                exe, extra_env = app.exe, app.env
             else:
-                exe = str(tmp_path / "no such app.exe")        # missing: nothing may be started
-            monitor = subprocess.Popen([ping, "-n", "6", "127.0.0.1"], stdout=subprocess.DEVNULL)
+                exe = str(tmp_path / "no such app.exe")        # missing: the helper must finish all the same
+            monitor = subprocess.Popen([ping, "-n", "6", "127.0.0.1"], stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL, creationflags=NO_WINDOW)
             monkeypatch.setattr(tempfile, "gettempdir", lambda t=temp: str(t))
             monkeypatch.setenv("TEMP", str(temp))
-            helper = uc._spawn_installer(str(work / "Setup.exe"), exe=exe, pid=monitor.pid)
+            with monkeypatch.context() as scoped:        # the helper copies the environment as it starts
+                for name, value in extra_env.items():
+                    scoped.setenv(name, value)
+                helper = uc._spawn_installer(str(work / "Setup.exe"), exe=exe, pid=monitor.pid)
             cases.append({"temp": temp, "work": work, "monitor": monitor, "helper": helper,
                           "relaunched": relaunched, "log": temp / "ClaudeUsageMonitor-update.log", "installer_ran_after_monitor": None})
 
@@ -1000,7 +1149,6 @@ def test_the_real_helper_waits_for_the_monitor_installs_relaunches_and_cleans_up
             if all(not case["work"].exists() for case in cases) and all(c["helper"].poll() is not None for c in cases):
                 break
             time.sleep(0.25)
-        time.sleep(1.5)  # the relaunched stand-in writes its marker a moment after cmd starts it
 
         for case in cases:
             label = case["temp"].name
@@ -1009,13 +1157,16 @@ def test_the_real_helper_waits_for_the_monitor_installs_relaunches_and_cleans_up
             assert "update helper started" in log_text, label
             assert "installer exit code 1" in log_text, f"{label}: the installer was not run through the path\n{log_text}"
             assert case["installer_ran_after_monitor"] is True, f"{label}: the installer ran while the monitor was alive"
-        assert cases[0]["relaunched"].read_text().strip() == "started"
-        assert not any(c["relaunched"].exists() for c in cases[1:])
+        # The relaunched program starts a moment after cmd runs `start` (the interpreter has to come up).
+        assert wait_for(cases[0]["relaunched"].exists), "the helper did not start the app again"
+        assert cases[0]["relaunched"].read_text() == "started"
     finally:
         for case in cases:
             for proc in (case["monitor"], case["helper"]):
                 if proc.poll() is None:
                     proc.kill()
+        if app is not None:
+            app.gone()
 
 
 @UI
@@ -1035,26 +1186,30 @@ def test_the_real_restart_helper_waits_for_the_monitor_starts_the_app_and_cleans
 ) -> None:
     """The restart helper under the real cmd.exe, in a temp folder full of metacharacters: it must not run the
     installer next to it (ping.exe stands in; it would log an exit code), must start the app only once the monitor
-    (a ping that lives ~4 s) is gone, must add to the log of the helper that stopped, and must remove its folder."""
+    (a ping that lives ~4 s) is gone, must add to the log of the helper that stopped, and must remove its folder.
+    The app it starts is a windowed stand-in (StandInApp), never a program that opens a console."""
     ping = Path(os.environ["SystemRoot"]) / "System32" / "ping.exe"
     temp = tmp_path / "Tom&Jerry (x) 100%"
     work = temp / "cum-update-abc123"
     work.mkdir(parents=True)
     shutil.copy(ping, work / "Setup.exe")
     marker = tmp_path / "restarted.txt"
-    app = tmp_path / "fakeapp.cmd"
-    app.write_bytes(f'@echo off\r\necho started> "{marker}"\r\n'.encode("ascii"))
+    app = StandInApp(tmp_path / "standin", marker)
     log = temp / "ClaudeUsageMonitor-update.log"
     log.write_text("update helper started\r\n", encoding="ascii")            # what the helper that stopped had written
-    monitor = subprocess.Popen([str(ping), "-n", "5", "127.0.0.1"], stdout=subprocess.DEVNULL)
+    monitor = subprocess.Popen([str(ping), "-n", "5", "127.0.0.1"], stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, creationflags=NO_WINDOW)
     monkeypatch.setattr(tempfile, "gettempdir", lambda: str(temp))
     monkeypatch.setenv("TEMP", str(temp))
-    helper = uc._spawn_installer(str(work / "Setup.exe"), exe=str(app), pid=monitor.pid, install=False)
+    with monkeypatch.context() as scoped:            # the helper copies the environment as it starts
+        for name, value in app.env.items():
+            scoped.setenv(name, value)
+        helper = uc._spawn_installer(str(work / "Setup.exe"), exe=app.exe, pid=monitor.pid, install=False)
     try:
         deadline = time.monotonic() + 90
         while time.monotonic() < deadline and not (marker.exists() and not work.exists()):
             time.sleep(0.25)
-        assert marker.exists() and marker.read_text().strip() == "started"
+        assert marker.exists() and marker.read_text() == "started"
         assert monitor.poll() is not None, "the app was started while the monitor was still alive"
         assert not work.exists(), "the restart helper left its folder behind"
         text = log.read_text(errors="replace")
@@ -1064,6 +1219,7 @@ def test_the_real_restart_helper_waits_for_the_monitor_starts_the_app_and_cleans
         for proc in (monitor, helper):
             if proc.poll() is None:
                 proc.kill()
+        app.gone()
 
 
 @UI
@@ -1078,7 +1234,8 @@ def test_a_real_helper_in_a_unc_folder_with_metacharacters_runs(monkeypatch: pyt
     shutil.copy(ping, work / "Setup.exe")
     monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
     monkeypatch.setenv("TEMP", str(tmp_path))
-    monitor = subprocess.Popen([str(ping), "-n", "3", "127.0.0.1"], stdout=subprocess.DEVNULL)
+    monitor = subprocess.Popen([str(ping), "-n", "3", "127.0.0.1"], stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, creationflags=NO_WINDOW)
     helper = uc._spawn_installer(str(work / "Setup.exe"), exe=str(tmp_path / "none.exe"), pid=monitor.pid)
     try:
         log = tmp_path / "ClaudeUsageMonitor-update.log"
@@ -1390,7 +1547,7 @@ def compile_iss(script: Path, out: Path, dist: Path, version: str) -> subprocess
     assert iscc is not None
     out.mkdir(parents=True, exist_ok=True)
     return subprocess.run([str(iscc), "/Q", f"/DAppVer={version}", f"/DDistDir={dist}", f"/O{out}", str(script)],
-                          capture_output=True, text=True, timeout=300, cwd=str(out.parent))
+                          capture_output=True, text=True, timeout=300, cwd=str(out.parent), creationflags=NO_WINDOW)
 
 
 @UI
@@ -1412,7 +1569,8 @@ def test_the_signature_check_passes_microsoft_corporation_and_nothing_else(tmp_p
 
     def check(path: Path) -> int:
         done = subprocess.run([str(powershell), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-                               "-Command", webview2_signature_script(str(path))], capture_output=True, timeout=180)
+                               "-Command", webview2_signature_script(str(path))], capture_output=True, timeout=180,
+                              creationflags=NO_WINDOW)
         return done.returncode
 
     unsigned = tmp_path / "unsigned.exe"
@@ -1503,7 +1661,8 @@ class Sandbox:
     def run(self, setup: Path, switches: list[str], label: str) -> int:
         """Run a sandbox Setup with the command line v1.1.5's helper builds (one string, so /MERGETASKS="!startup" keeps its quotes)."""
         log = self.logs / (re.sub(r"\W+", "_", label) + ".log")
-        done = subprocess.run(f'"{setup}" {" ".join(switches)} /LOG="{log}"', stdin=subprocess.DEVNULL, capture_output=True, timeout=240)
+        done = subprocess.run(f'"{setup}" {" ".join(switches)} /LOG="{log}"', stdin=subprocess.DEVNULL, capture_output=True, timeout=240,
+                              creationflags=NO_WINDOW)
         return done.returncode
 
     def run_value(self) -> str | None:
@@ -1553,7 +1712,7 @@ class Sandbox:
         uninstaller = self.app / "unins000.exe"
         if uninstaller.is_file():
             subprocess.run(f'"{uninstaller}" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART', stdin=subprocess.DEVNULL,
-                           capture_output=True, timeout=240)
+                           capture_output=True, timeout=240, creationflags=NO_WINDOW)
             deadline = time.monotonic() + 90
             while self.display_version() is not None and time.monotonic() < deadline:
                 time.sleep(0.3)
@@ -1660,8 +1819,11 @@ def test_the_install_update_button_reports_what_the_monitor_actually_did() -> No
     from usage_monitor import app as app_mod
 
     script = (ROOT / "usage_monitor" / "webui" / "app.js").read_text(encoding="utf-8")
-    start = script.index('action === "install-update"')
-    handler = script[start:script.index('action === "skip-update"', start)]
+    # The code that answers the apply call: from the request to wherever the skip code starts. (The Settings button and
+    # the Overview banner's Update now both end up there.)
+    start = script.index('api("POST", "/api/update/apply")')
+    handler = script[start:min(i for i in (script.find(marker, start) for marker in (
+        "function skipUpdate", 'action === "skip-update"', '"/api/update/skip"')) if i > 0)]
     answered = set(re.findall(r'"mode": "(\w+)"', inspect.getsource(app_mod.MonitorApp._apply_update)))
     assert answered == {"none", "installer", "browser"}
     for mode in ("browser", "installer"):
@@ -1673,6 +1835,24 @@ def test_the_install_update_button_reports_what_the_monitor_actually_did() -> No
     # second sentence would come out as "... the update. if it checks out ...".
     texts = re.findall(r'text = "([^"]+)";', handler)
     assert len(texts) == 3 and all(". " not in text for text in texts), texts
+
+
+def test_the_dashboard_reads_only_what_the_server_sends_about_an_update() -> None:
+    """The Overview banner reads /api/state's ``update`` block in pendingUpdate(). A key the page reads and the server
+    never sends would be a banner that never shows, or an Update now that always says it opens the release page."""
+    from usage_monitor.app import SmokeTest
+
+    script = (ROOT / "usage_monitor" / "webui" / "app.js").read_text(encoding="utf-8")
+    assert "function pendingUpdate" in script, "the banner's reader moved: point this test at the new one"
+    start = script.index("function pendingUpdate")
+    body = script[start:script.index("function updateBanner", start)]
+    block_keys = set(re.findall(r"\bu\.([a-z_]+)", body))
+    info_keys = set(re.findall(r"\binfo\.([a-z_]+)", body))
+    assert {"available", "version"} <= block_keys, block_keys
+    assert block_keys <= set(SmokeTest.UPDATE_KEYS), f"the page reads {block_keys - set(SmokeTest.UPDATE_KEYS)}, the server sends none of it"
+    # And inside ``info`` (the check's own answer, plus the two keys the app adds), only keys that exist.
+    assert info_keys <= {"version", "tag", "url", "notes", "asset_url", "asset_name", "asset_digest", "asset_size",
+                         "can_self_update"}, info_keys
 
 
 # ── ClaudeUsageMonitor.spec: what the bundle must hold ────────────────────────
@@ -1847,3 +2027,225 @@ def test_releasing_md_describes_the_updater_and_the_release_workflow_as_they_are
     for line in ("ping 127.0.0.1 -n 4 >nul", "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART", "ping 127.0.0.1 -n 8 >nul"):
         assert line in releasing, line
     assert "/MERGETASKS" not in releasing.split("ping 127.0.0.1 -n 4 >nul")[1].split("ping 127.0.0.1 -n 8 >nul")[0]
+
+
+# ── No test opens a console window ────────────────────────────────────────────
+#
+# A console program started by a process that has no console of its own gets a new terminal window (on this PC's
+# Windows Terminal, a window per process). pytest has no console when an editor, a task runner or an agent runs it,
+# so every test that starts ping, cmd, git, node or python has to say CREATE_NO_WINDOW. Two things keep it that way:
+#   * tests/console_guard.py, installed for the whole run by tests/conftest.py: every subprocess.Popen refuses to start
+#     without the flag, whoever calls it (a test, a helper, the app code a test runs). run, call, check_output, os.popen and
+#     asyncio's subprocesses all go through Popen.
+#   * the scan below, which reads every file under tests/ for the starts the wrapper cannot see (os.system, os.startfile,
+#     multiprocessing, ShellExecute, os.spawn*) and for a missing flag it can name before a test ever runs. It follows
+#     `import subprocess as sp` and `from subprocess import run as go`.
+# The scan's own cases and the guard's are tested after it.
+
+PROCESS_CALLS = {("subprocess", name) for name in ("run", "Popen", "call", "check_call", "check_output")} | {
+    ("asyncio", "create_subprocess_exec"), ("asyncio", "create_subprocess_shell")}        # these take creationflags=
+# Starts with no flag to pass (cmd.exe, a spawned interpreter): always an offender.
+SHELL_CALLS = {("os", "system"), ("os", "popen"), ("os", "startfile"), ("subprocess", "getoutput"),
+               ("subprocess", "getstatusoutput"), ("multiprocessing", "Process"), ("multiprocessing", "Pool"),
+               ("concurrent.futures", "ProcessPoolExecutor")}
+SHELL_FUNCTIONS = {"ShellExecuteW", "ShellExecuteExW", "ShellExecuteA", "WinExec", "CreateProcessW", "CreateProcessA"}
+SPAWNERS = ("spawn", "exec")                                                              # os.spawnv, os.execv, ...
+
+
+def _imports(tree: ast.AST) -> tuple[dict[str, str], dict[str, str]]:
+    """(modules, objects): the local name of every ``import x [as y]`` -> the module, and of every ``from m import n [as k]``
+    -> "m.n"."""
+    modules: dict[str, str] = {}
+    objects: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.asname:
+                    modules[alias.asname] = alias.name
+                else:
+                    modules[alias.name.split(".")[0]] = alias.name.split(".")[0]
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            for alias in node.names:
+                objects[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+    return modules, objects
+
+
+def _called(func: ast.expr, modules: dict[str, str], objects: dict[str, str]) -> tuple[str, str] | None:
+    """What a call really calls, as (module path, name), with the imports of the file resolved: ``sp.run`` is
+    ("subprocess", "run") after ``import subprocess as sp``, ``go`` is too after ``from subprocess import run as go``."""
+    chain: list[str] = []
+    node = func
+    while isinstance(node, ast.Attribute):
+        chain.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return None
+    root = modules.get(node.id) or objects.get(node.id)
+    if root is None:
+        return None                                   # a local name (self.run, process.start): not an import
+    full = ".".join([root, *reversed(chain)])
+    module, _, name = full.rpartition(".")
+    return module, name
+
+
+def process_calls_without_the_flag(path: Path) -> list[str]:
+    """``file:line`` of every call in ``path`` that starts a program and does not pass creationflags=...NO_WINDOW."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    modules, objects = _imports(tree)
+    sites: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        target = _called(node.func, modules, objects)
+        if target is None:
+            continue
+        module, name = target
+        if target in SHELL_CALLS or name in SHELL_FUNCTIONS or (module == "os" and name.startswith(SPAWNERS)):
+            sites.append(f"{path.name}:{node.lineno}")
+        elif target in PROCESS_CALLS:
+            flags = [keyword.value for keyword in node.keywords if keyword.arg == "creationflags"]
+            if not flags or "NO_WINDOW" not in ast.unparse(flags[0]):
+                sites.append(f"{path.name}:{node.lineno}")
+    return sites
+
+
+def test_no_test_starts_a_console_program_without_the_flag() -> None:
+    """Every file under tests/, not only test_*.py: a conftest.py or a helper module starts processes too."""
+    files = sorted(path for path in (ROOT / "tests").rglob("*.py") if "__pycache__" not in path.parts)
+    assert {"conftest.py", "console_guard.py", "test_update_check.py"} <= {path.name for path in files}
+    offenders = [site for path in files for site in process_calls_without_the_flag(path)]
+    assert offenders == [], "these calls would open a console window; add creationflags=NO_WINDOW: " + ", ".join(offenders)
+
+
+@pytest.mark.parametrize(("source", "clean"), [
+    ("subprocess.run(['x'], creationflags=NO_WINDOW)", True),
+    ("subprocess.Popen(['x'], stdout=1, creationflags=subprocess.CREATE_NO_WINDOW | 0x200)", True),
+    ("subprocess.check_output(['x'], creationflags=_NO_WINDOW)", True),
+    ("subprocess.run(['x'])", False),
+    ("subprocess.Popen(['x'], stdout=subprocess.PIPE)", False),
+    ("subprocess.call(['x'], creationflags=0)", False),                     # a flag that is not the one
+    ("subprocess.check_call(['x'], **options)", False),                      # a flag nobody can see
+    ("os.system('x')", False),
+    ("os.popen('x')", False),
+    ("os.startfile('x')", False),
+    ("subprocess.getoutput('x')", False),                                    # runs through cmd.exe, no flag to pass
+    ("monkeypatch.setattr(subprocess, 'Popen', fake)", True),                # naming Popen is not starting one
+    ("process = subprocess.CompletedProcess([], 0)", True),
+    # a start the name-pattern scan used to miss: imports renamed, or from-imports
+    ("import subprocess as sp\nsp.run(['x'])", False),
+    ("import subprocess as sp\nsp.run(['x'], creationflags=sp.CREATE_NO_WINDOW)", True),
+    ("from subprocess import run\nrun(['x'])", False),
+    ("from subprocess import run as go\ngo(['x'])", False),
+    ("from subprocess import run as go\ngo(['x'], creationflags=NO_WINDOW)", True),
+    ("from subprocess import Popen, PIPE\nPopen(['x'], stdout=PIPE)", False),
+    ("from subprocess import Popen\nPopen(['x'], creationflags=NO_WINDOW)", True),
+    ("import os as operating_system\noperating_system.system('x')", False),
+    ("from os import system\nsystem('x')", False),
+    ("from os import popen as shell\nshell('x')", False),
+    ("import asyncio\nasyncio.create_subprocess_exec('x')", False),
+    ("import asyncio\nasyncio.create_subprocess_exec('x', creationflags=NO_WINDOW)", True),
+    ("import asyncio as aio\naio.create_subprocess_shell('x')", False),
+    ("import multiprocessing\nmultiprocessing.Process(target=f)", False),
+    ("import multiprocessing as mp\nmp.Pool(2)", False),
+    ("from concurrent.futures import ProcessPoolExecutor\nProcessPoolExecutor(2)", False),
+    ("import os\nos.spawnv(os.P_NOWAIT, 'x', ['x'])", False),
+    ("import os\nos.execv('x', ['x'])", False),
+    ("import ctypes\nctypes.windll.shell32.ShellExecuteW(None, 'open', 'x', None, None, 1)", False),
+    ("from ctypes import windll\nwindll.shell32.ShellExecuteW(None, 'open', 'x', None, None, 1)", False),
+    ("from usage_monitor.ui import win32\nwin32.ShellExecuteW(None, 'open', 'x', None, None, 1)", False),
+    # the names of another object are not the standard library's
+    ("process.run(['x'])\nself.system('x')\nmy_os.popen('x')", True),
+    ("import tempfile\ntempfile.mkdtemp()\nimport shutil\nshutil.which('x')", True),
+])
+def test_the_console_window_check_notices_a_call_without_the_flag(tmp_path: Path, source: str, clean: bool) -> None:
+    sample = tmp_path / "test_sample.py"
+    sample.write_text(f"import os, subprocess\n{source}\n", encoding="utf-8")
+    assert (process_calls_without_the_flag(sample) == []) is clean
+
+
+def test_the_scan_reads_a_helper_module_and_a_conftest_like_any_test(tmp_path: Path) -> None:
+    (tmp_path / "conftest.py").write_text("import subprocess as sp\n\ndef pytest_configure():\n    sp.run(['git', 'status'])\n",
+                                          encoding="utf-8")
+    assert process_calls_without_the_flag(tmp_path / "conftest.py") == ["conftest.py:4"]
+
+
+# The run-time half. console_guard is installed for the whole run (tests/conftest.py); these show what it does without
+# starting a process: a start without the flag is refused before anything is created, a start with it reaches Popen.
+
+
+def start(name: str, *args: Any, **kwargs: Any) -> Any:
+    """``subprocess.<name>(...)`` through getattr. The scan above cannot see a call made this way, which is what the run-time guard
+    is for: the starts in this section are refused (nothing is created) or handed to a recorder, never to a real Popen."""
+    return getattr(subprocess, name)(*args, **kwargs)
+
+
+def test_the_run_time_guard_is_installed_for_the_whole_run() -> None:
+    import console_guard
+    assert console_guard._installed and subprocess.Popen.__init__ is console_guard._guarded_init
+
+
+@pytest.mark.parametrize(("name", "args", "kwargs"), [
+    ("Popen", (["git", "status"],), {}),
+    ("run", (["git", "status"],), {}),
+    ("run", (["git", "status"],), {"creationflags": 0}),
+    ("run", (["git", "status"],), {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}),     # a flag, not the one
+    ("check_output", ("echo x",), {"shell": True}),
+    ("call", (["git", "status"],), {}),
+])
+def test_a_start_without_the_flag_is_refused_before_the_process_exists(name: str, args: tuple[Any, ...],
+                                                                       kwargs: dict[str, Any]) -> None:
+    import console_guard
+    with console_guard.refusals() as refused:
+        with pytest.raises(AssertionError, match="console window"):
+            start(name, *args, **kwargs)
+    assert len(refused) == 1 and "without creationflags=CREATE_NO_WINDOW" in refused[0]
+    assert "test_update_check.py:" in refused[0]                            # it names the test line, not the subprocess module
+
+
+def test_a_start_with_the_flag_reaches_popen(monkeypatch: pytest.MonkeyPatch) -> None:
+    import console_guard
+    reached: list[dict[str, Any]] = []
+    monkeypatch.setattr(console_guard, "_original_init", lambda self, *args, **kwargs: reached.append(kwargs))
+    start("Popen", ["git", "status"], creationflags=NO_WINDOW)
+    start("Popen", ["git", "status"], creationflags=NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP)
+    assert [call["creationflags"] for call in reached] == [NO_WINDOW, NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP]
+
+
+def test_the_flag_counts_when_it_is_passed_by_position(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Popen's 14th parameter: (args, bufsize, executable, stdin, stdout, stderr, preexec_fn, close_fds, shell, cwd, env,
+    universal_newlines, startupinfo, creationflags)."""
+    import console_guard
+    reached: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(console_guard, "_original_init", lambda self, *args, **kwargs: reached.append(args))
+    start("Popen", ["git"], -1, None, None, None, None, None, True, False, None, None, None, None, NO_WINDOW)
+    assert len(reached) == 1
+    with console_guard.refusals() as refused:
+        with pytest.raises(AssertionError):
+            start("Popen", ["git"], -1, None, None, None, None, None, True, False, None, None, None, None, 0)
+    assert len(refused) == 1
+
+
+def test_a_refusal_that_the_code_under_test_swallows_still_fails_the_test() -> None:
+    """The launcher in the app treats any error as "could not start". The refusal is recorded either way, and conftest.py calls
+    fail_if_refused_since() after every test, so a start that was swallowed still fails the test that made it."""
+    import console_guard
+    mark = len(console_guard.violations)
+    try:
+        try:
+            start("Popen", ["git", "status"])
+        except Exception:
+            pass                                                              # what a broad except in the app does
+        with pytest.raises(pytest.fail.Exception, match="CREATE_NO_WINDOW"):
+            console_guard.fail_if_refused_since(mark)
+        console_guard.fail_if_refused_since(len(console_guard.violations))   # nothing refused since: nothing to fail
+    finally:
+        del console_guard.violations[mark:]                                    # this test refused on purpose
+
+
+def test_the_guard_leaves_an_argument_error_to_popen() -> None:
+    """Popen reports a bad call itself (TypeError); the guard does not turn it into a refusal."""
+    import console_guard
+    with console_guard.refusals() as refused:
+        with pytest.raises(TypeError):
+            start("Popen", ["git"], no_such_option=1)
+    assert refused == []

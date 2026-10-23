@@ -79,6 +79,16 @@ def margin(scale: float) -> int:
     return round(gates.MARGIN * scale)
 
 
+def card_height(m) -> int:
+    """The card's height: 128 px with its two rows and the footer, and 27 px more for every scoped row the model carries."""
+    return 128 + 27 * len([row for row in m.rows[2:] if row.percent is not None])
+
+
+def frame_size(m, scale: float = 1.0) -> tuple[int, int]:
+    """The floating frame: the card and a 24 px margin on every side."""
+    return round((288 + 48) * scale), round((card_height(m) + 48) * scale)
+
+
 def at(image: Image.Image, x: float, y: float, scale: float = 1.0) -> tuple[int, int, int, int]:
     """The pixel at card coordinates (x, y) of a floating or tooltip frame."""
     return image.getpixel((margin(scale) + round(x * scale), margin(scale) + round(y * scale)))
@@ -148,10 +158,11 @@ def test_every_variant_renders_every_state():
     """All 14 variants x all 10 states, floating at 1x: the right size, real alpha, clear corners."""
     for v in theme().variants:
         for name in STATES:
-            image = skin().render_floating(dump.sample_model(name), theme(), v, 1.0, None)
+            m = dump.sample_model(name)
+            image = skin().render_floating(m, theme(), v, 1.0, None)
             assert image.mode == "RGBA"
-            assert image.size == (336, 176), (v.id, name)
-            assert image.getpixel((0, 0))[3] == 0 and image.getpixel((335, 175))[3] == 0
+            assert image.size == frame_size(m), (v.id, name)
+            assert image.getpixel((0, 0))[3] == 0 and image.getpixel((image.width - 1, image.height - 1))[3] == 0
             assert image.getchannel("A").getextrema()[1] == 255, (v.id, name)
 
 
@@ -159,20 +170,26 @@ def test_every_variant_renders_every_state():
 def test_floating_renders_every_state_at_every_scale(variant_id):
     for name in STATES:
         for scale in SCALES:
-            image = skin().render_floating(dump.sample_model(name), theme(), variant(variant_id), scale, None)
-            assert image.size == (round(336 * scale), round(176 * scale)), (name, scale)
+            m = dump.sample_model(name)
+            image = skin().render_floating(m, theme(), variant(variant_id), scale, None)
+            assert image.size == frame_size(m, scale), (name, scale)
             assert image.getpixel((0, 0))[3] == 0
 
 
-def test_floating_size_matches_the_rendered_size_and_never_changes_with_the_state():
+def test_floating_size_matches_the_rendered_size_and_follows_the_rows_and_never_the_state():
+    """The card is 128 px tall with the session and weekly rows, and one row (27 px) taller for each scoped row: what
+    the model carries decides, not the status."""
     for scale in (1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5):
-        sizes = set()
+        heights: dict[int, set[int]] = {}
         for name in STATES:
             m = dump.sample_model(name)
             image = skin().render_floating(m, theme(), variant("system-dark"), scale, None)
             assert skin().floating_size(theme(), m, scale) == image.size
-            sizes.add(image.size)
-        assert len(sizes) == 1                     # the card is 128 px tall in every state
+            heights.setdefault(len(m.rows), set()).add(image.height)
+        assert set(heights) == {2, 3}
+        assert all(len(found) == 1 for found in heights.values()), scale          # the state changes nothing
+        two, three = (next(iter(heights[count])) for count in (2, 3))
+        assert three - two == pytest.approx(27 * scale, abs=1.5), scale
 
 
 def test_the_card_sits_in_the_frame_margin():
@@ -400,12 +417,12 @@ def test_the_card_fill_comes_from_the_widget_bg_token():
 
 
 def test_the_border_and_the_shadow_come_from_tokens():
-    plain = skin().render_floating(dump.sample_model("normal3"), theme(), variant("system-dark"), 1.0, None)
-    loud = skin().render_floating(dump.sample_model("normal3"), modes_theme("dark", widget_border="#ff0000ff"),
-                                  variant("system-dark"), 1.0, None)
+    m = dump.sample_model("normal2")                                  # the 128 px card: its bottom edge is at 24 + 128
+    plain = skin().render_floating(m, theme(), variant("system-dark"), 1.0, None)
+    loud = skin().render_floating(m, modes_theme("dark", widget_border="#ff0000ff"), variant("system-dark"), 1.0, None)
     assert near(at(loud, 144, 0), (255, 0, 0), 4) and not near(at(plain, 144, 0), (255, 0, 0), 60)
     no_shadow = modes_theme("dark", shadow_main="#00000000", shadow_tight="#00000000")
-    bare = skin().render_floating(dump.sample_model("normal3"), no_shadow, variant("system-dark"), 1.0, None)
+    bare = skin().render_floating(m, no_shadow, variant("system-dark"), 1.0, None)
     assert bare.getpixel((168, 24 + 128 + 6))[3] == 0 < plain.getpixel((168, 24 + 128 + 6))[3]
 
 
@@ -460,7 +477,7 @@ def test_the_lamp_shows_the_state():
     v = variant("system-dark")
     ok, stale, accent = (colour(v.colors[name]) for name in ("ok", "stale", "accent"))
     for name, centre_colour, ring_colour in (
-        ("normal3", ok, ok), ("stale", stale, stale), ("rate_limited", stale, stale),
+        ("normal3", ok, ok), ("stale", stale, stale), ("no_credentials", stale, stale),
         ("offline", None, stale), ("paused", None, accent), ("loading", None, stale),
     ):
         m = dump.sample_model(name)
@@ -472,6 +489,13 @@ def test_the_lamp_shows_the_state():
             assert not near(at(image, cx, cy), ring_colour, 30), name              # hollow: the pill shows through
         scale_box = tuple(margin(1.0) + round(v) for v in (cx - 5, cy - 5, cx + 5, cy + 5))
         assert find_colour(image, scale_box, ring_colour, 25), name               # the lamp's own colour is there
+    # a throttled feed is a ring with its left half filled: neither the filled lamp of a lost sign-in nor the empty one
+    m = dump.sample_model("rate_limited")
+    cx, cy = lamp_centre(m)
+    image = skin().render_floating(m, theme(), v, 2.0, None)
+    assert near(at(image, cx - 2, cy, 2.0), stale, 3)                              # the left half is filled
+    assert not near(at(image, cx + 2, cy, 2.0), stale, 30)                         # the right half is the pill again
+    assert find_colour(image, tuple(margin(2.0) + round(c * 2) for c in (cx + 3, cy - 1, cx + 5, cy + 1)), stale, 25)   # its ring
 
 
 def test_title_and_labels_use_the_text_tokens():
@@ -540,7 +564,7 @@ def test_a_bare_variant_still_renders():
     pal = Palette.for_variant(bare_theme, bare)
     assert pal.mode == "dark" and pal.card[3] == 0xF2 and pal.usage_warn == colour(bare.colors["warn"])
     image = skin().render_floating(dump.sample_model("warning"), bare_theme, bare, 1.0, None)
-    assert image.size == (336, 176)
+    assert image.size == frame_size(dump.sample_model("warning"))
     assert skin().render_taskbar(dump.sample_model("warning"), bare_theme, bare, 48, 1.0, None).height == 48
     assert skin().render_tray_icon(dump.sample_model("warning"), bare_theme, bare, 16).size == (16, 16)
 
@@ -650,22 +674,48 @@ def test_tray_icon_is_deterministic():
 
 # ── Rows, header and footer ───────────────────────────────────────────────────
 
-def test_the_third_slot_holds_the_fable_row_or_the_footer():
-    assert gates._third_row(dump.sample_model("normal3")).key == "scoped:fable"
-    for name in ("normal2", "warning", "critical", "stale", "offline", "paused", "rate_limited", "no_credentials"):
-        assert gates._third_row(dump.sample_model(name)) is None, name
-    assert gates._third_row(model(13.0, 2.0, scoped=0.0)) is not None
-    assert gates._third_row(model(80.0, 2.0, scoped=3.0)) is None          # attention takes the slot
-    assert gates._third_row(model(13.0, 2.0, scoped=96.0, status=ApiStatus.OFFLINE)) is None
+ALL_STATUSES = (ApiStatus.LIVE, ApiStatus.STALE, ApiStatus.OFFLINE, ApiStatus.PAUSED, ApiStatus.RATE_LIMITED,
+                ApiStatus.NO_CREDENTIALS, ApiStatus.LOADING)
 
 
-def test_the_widget_shows_the_fable_row_only_when_the_footer_is_not_needed():
-    with_fable = skin().render_floating(model(13.0, 2.0, scoped=4.0), theme(), variant("system-dark"), 1.0, None)
-    without = skin().render_floating(model(13.0, 2.0), theme(), variant("system-dark"), 1.0, None)
-    bar_y = 24 + 92 + gates.BAR_DY + 2                                    # the third row's bar
-    assert at(with_fable, 60, 92 + gates.BAR_DY + 2) != at(without, 60, 92 + gates.BAR_DY + 2) or \
-        with_fable.tobytes() != without.tobytes()
-    assert bar_y > 0
+def test_every_scoped_row_of_the_model_gets_a_row_in_every_state():
+    """The scoped (Fable) row used to hide while the feed was not live or the session or the weekly row asked for
+    attention. It is a row like the others now: whatever the model carries is shown, whatever the status says."""
+    for status in ALL_STATUSES:
+        assert [row.key for row in gates._scoped_rows(model(13.0, 2.0, scoped=3.0, status=status))] == ["scoped:fable"]
+    assert gates._scoped_rows(model(80.0, 2.0, scoped=3.0, severity=("warning", None)))        # attention takes no slot
+    assert gates._scoped_rows(model(13.0, 95.0, scoped=3.0, severity=(None, "critical")))
+    assert gates._scoped_rows(model(13.0, 2.0, scoped=96.0, status=ApiStatus.OFFLINE))
+    assert gates._scoped_rows(model(13.0, 2.0, scoped=0.0))                                    # a limit at 0 % still shows
+    assert gates._scoped_rows(model(13.0, 2.0)) == []                                          # nothing to show: no row
+    for name in ("normal3", "warning", "critical"):
+        assert [row.key for row in gates._scoped_rows(dump.sample_model(name))] == ["scoped:fable"], name
+
+
+def test_the_card_shows_the_scoped_row_in_every_state_and_the_footer_under_it(monkeypatch):
+    made = drawn_canvases(monkeypatch)
+    v = variant("system-dark")
+    pal = Palette.for_variant(theme(), v)
+    for status in ALL_STATUSES:
+        m = model(session=41.0, weekly=7.0, scoped=40.0, status=status)
+        image = skin().render_floating(m, theme(), v, 1.0, None)
+        assert image.size == (336, 48 + 155), status                      # two rows and one more: 27 px taller
+        shown = row_texts(made[-1], list(gates.ROW_TOPS))
+        assert ("Fable weekly" in [t for t, _ in shown[2]]) and ("40%" in [t for t, _ in shown[2]]), status
+        bar_y = gates.ROW_TOPS[2] + gates.BAR_DY + 2
+        assert near(at(image, 60, bar_y), gates._usage_color(pal, m, m.rows[2]), 3), status     # its bar is drawn
+        foot_top = gates.ROW_TOPS[2] + gates.ROW_PITCH + gates.FOOT_GAP
+        feet = [(text, baseline) for text, _x, baseline, *_ in made[-1]._texts
+                if text in {run[0] for run in gates._footer_runs(m)}]
+        assert feet and all(baseline >= foot_top for _text, baseline in feet), status           # the footer comes last
+
+
+def test_two_scoped_rows_make_the_card_two_rows_taller():
+    one = model(13.0, 2.0, scoped=3.0)
+    two = replace(one, rows=[*one.rows, replace(one.rows[2], key="scoped:other", label="OTHER WEEKLY", percent=9.0)])
+    sizes = [skin().render_floating(m, theme(), variant("system-dark"), 1.0, None).size for m in (model(13.0, 2.0), one, two)]
+    assert [height for _w, height in sizes] == [176, 203, 230]
+    assert skin().floating_size(theme(), two, 1.0) == sizes[2]
 
 
 def test_the_footer_copy_follows_the_state():
@@ -924,8 +974,8 @@ def test_a_machine_without_the_windows_fonts_still_renders(monkeypatch):
     monkeypatch.setattr(gates, "_fonts", lambda _theme: gates.Fonts(empty, empty, None))
     for name in ("normal3", "stale", "loading"):
         m = dump.sample_model(name)
-        assert skin().render_floating(m, theme(), variant("system-dark"), 1.0, None).size == (336, 176)
-        assert skin().render_floating(m, theme(), variant("system-light"), 1.5, None).size == (504, 264)
+        assert skin().render_floating(m, theme(), variant("system-dark"), 1.0, None).size == frame_size(m)
+        assert skin().render_floating(m, theme(), variant("system-light"), 1.5, None).size == frame_size(m, 1.5)
         assert skin().render_taskbar(m, theme(), variant("system-dark"), 48, 1.0, None).size == (248, 48)
         assert skin().render_tooltip(m, theme(), variant("system-dark"), 1.0).width == 336
         assert skin().render_tray_icon(m, theme(), variant("system-dark"), 32).size == (32, 32)
@@ -940,7 +990,7 @@ def test_a_machine_with_only_segoe_ui_uses_the_static_faces(monkeypatch):
     mono = gates._static_typeface(gates._STATIC_MONO) or gates._bundled_mono() or gates.Typeface((), False)
     monkeypatch.setattr(gates, "_fonts", lambda _theme: gates.Fonts(body, mono, None))
     image = skin().render_floating(dump.sample_model("warning"), theme(), variant("system-light"), 1.25, None)
-    assert image.size == (420, 220)
+    assert image.size == frame_size(dump.sample_model("warning"), 1.25)
     face = gates.Ink(288, 128, 1.0, None).face(body, 12, 600)
     assert face.path is not None and not face.variable and face.wght == 0
 
@@ -1003,7 +1053,7 @@ def test_dump_frames_writes_gates_frames_and_a_contact_sheet(tmp_path: Path):
     assert (folder / "tooltip_critical_x1.png").is_file() and (folder / "tray_critical_32.png").is_file()
     assert report.files == 2 * 2 * (1 + len(dump.TASKBAR_HEIGHTS_AT_1X) + 1) + 2 * 4
     with Image.open(folder / "floating_normal3_x2.png") as opened:
-        assert opened.size == (672, 352)
+        assert opened.size == frame_size(dump.sample_model("normal3"), 2.0) == (672, 406)
     with Image.open(report.sheets[0]) as sheet:
         assert sheet.format == "PNG" and sheet.width > 600
 

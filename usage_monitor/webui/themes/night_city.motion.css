@@ -1,0 +1,264 @@
+/* Night City motion: a HUD that jacks in. Hard frames and short glitches, then everything snaps clean.
+   Entrance (about 0.9 s): card i starts at 40 + 45 i ms. Every delay is  var(--fx-c0, 40ms) + var(--fx-i, 0) * 45ms + the
+   rule's own offset, so a bar, rail or chart whose data arrives later (.fx-land: --fx-c0 and --fx-i are 0) plays the same
+   fill from its own start. Colours come only from the theme tokens (--nc-*), so the effects follow Blackwall, Relic,
+   Edgerun and Mox. The refresh hit (.nc-hit, night_city.css) is not touched. */
+
+/* ── entrance ─────────────────────────────────────────────────────────────────────────────────────── */
+html[data-theme="night_city"] .fx-run :is(.nm-head, .nm-toolbar) { animation: ncx-head 300ms steps(1, end) backwards; }
+@keyframes ncx-head {
+  0% { opacity: 0; }
+  12% { opacity: 1; transform: translateX(-8px); }
+  26% { opacity: .3; transform: translateX(5px); }
+  40% { opacity: 1; transform: translateX(-2px); }
+  55%, 100% { opacity: 1; transform: none; }
+}
+html[data-theme="night_city"] .fx-run .nm-h1[data-fx]::after { animation: ncx-split 300ms steps(1, end) backwards; }
+@keyframes ncx-split {
+  0%   { text-shadow: -4px 0 0 var(--nc-sel), 4px 0 0 var(--nc-danger); }
+  20%  { text-shadow: 3px 0 0 var(--nc-sel), -3px 0 0 var(--nc-danger); }
+  40%  { text-shadow: -2px 0 0 var(--nc-sel), 2px 0 0 var(--nc-danger); }
+  60%  { text-shadow: 1px 0 0 var(--nc-sel), -1px 0 0 var(--nc-danger); }
+  80%, 100% { text-shadow: none; }
+}
+
+/* a card tears on: it jumps sideways for five frames while horizontal bands of it are missing, then it is whole.
+   A cyan scan line crosses it once. */
+html[data-theme="night_city"] .fx-run .nm-card {
+  animation:
+    ncx-card 300ms steps(1, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 45ms) backwards,
+    ncx-slice 300ms steps(1, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 45ms) backwards;
+}
+@keyframes ncx-card {
+  0%   { opacity: 0; transform: translateX(-12px); }
+  10%  { opacity: 1; transform: translateX(9px); }
+  22%  { opacity: .35; transform: translateX(-5px); }
+  34%  { opacity: 1; transform: translateX(3px); }
+  48%  { opacity: .7; transform: translateX(-1px); }
+  62%, 100% { opacity: 1; transform: none; }
+}
+@keyframes ncx-slice {
+  0%   { clip-path: polygon(0 0, 100% 0, 100% 34%, 0 34%, 0 42%, 100% 42%, 100% 100%, 0 100%); }
+  10%  { clip-path: polygon(0 0, 100% 0, 100% 66%, 0 66%, 0 71%, 100% 71%, 100% 100%, 0 100%); }
+  22%  { clip-path: polygon(0 18%, 100% 18%, 100% 100%, 0 100%); }
+  34%  { clip-path: polygon(0 0, 100% 0, 100% 56%, 0 56%); }
+  48%  { clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%); }
+  62%, 100% { clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut)); }
+}
+html[data-theme="night_city"] .fx-run .nm-card-in::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 100%; z-index: 4; pointer-events: none;
+  background: linear-gradient(180deg, transparent 0, transparent 91%, color-mix(in srgb, var(--nc-sel) 30%, transparent) 97%, var(--nc-sel) 100%);
+  animation: ncx-scan 260ms steps(13, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 45ms + 50ms) both;
+}
+@keyframes ncx-scan { from { transform: translateY(-100%); opacity: 1; } to { transform: translateY(0); opacity: 0; } }
+
+/* figures decode: while any character is still unlocked the whole figure wears a colour split */
+html[data-theme="night_city"] [data-fx][data-fx-d]::after { text-shadow: -1px 0 0 var(--nc-sel), 1px 0 0 var(--nc-danger); }
+
+/* RAM cells fill with a colour split that snaps clean */
+html[data-theme="night_city"] :is(.fx-run .nm-cells, .nm-cells.fx-land, .fx-run .nm-ratio, .nm-ratio.fx-land) i:is(.on, .part) {
+  animation: ncx-cell 240ms steps(1, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 45ms + 100ms + var(--fx-k, 0) * 8ms) backwards;
+}
+@keyframes ncx-cell {
+  0%  { opacity: 0; }
+  14% { opacity: 1; box-shadow: -2px 0 0 var(--nc-sel), 2px 0 0 var(--nc-danger); transform: translateX(-1px); }
+  42% { box-shadow: 2px 0 0 var(--nc-sel), -2px 0 0 var(--nc-danger); transform: translateX(1px); }
+  70%, 100% { box-shadow: none; transform: none; }
+}
+html[data-theme="night_city"] :is(.fx-run .nm-rail, .nm-rail.fx-land) { animation: ncx-t 320ms steps(10, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 45ms + 150ms) backwards; }
+@keyframes ncx-t { from { --t: 0%; } }
+/* Edgerun draws the time left in a window as a bar (.nm-remain, hidden in the other variants): its fill is cut in ten steps */
+html[data-theme="night_city"] :is(.fx-run .nm-remain, .nm-remain.fx-land)::before { animation: ncx-remain 320ms steps(10, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 45ms + 150ms) backwards; }
+@keyframes ncx-remain { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+
+/* tables: the first rows come up in two steps with a slip to the side */
+html[data-theme="night_city"] .fx-run .nm-table tbody tr { animation: ncx-row 120ms steps(2, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 45ms + 110ms + var(--fx-r, 0) * 22ms) backwards; }
+@keyframes ncx-row { from { opacity: 0; transform: translateX(-3px); } }
+
+/* charts: columns rise in five steps with a colour split; a line is drawn in 20 steps with its dots */
+html[data-theme="night_city"] :is(.fx-run, .fx-land) .cum-columns :is(.cum-mark, .cum-hot) {
+  transform-box: fill-box; transform-origin: 50% 100%;
+  animation: ncx-col 300ms steps(5, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 45ms + 160ms + var(--fx-c, 0) * 7ms) backwards;
+}
+@keyframes ncx-col {
+  from { transform: scaleY(0); filter: drop-shadow(-2px 0 0 var(--nc-sel)) drop-shadow(2px 0 0 var(--nc-danger)); }
+  70%  { filter: drop-shadow(1px 0 0 var(--nc-sel)) drop-shadow(-1px 0 0 var(--nc-danger)); }
+  100% { filter: none; }
+}
+html[data-theme="night_city"] :is(.fx-run, .fx-land) .cum-line { animation: ncx-draw 380ms steps(20, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 45ms + 110ms) backwards; }
+@keyframes ncx-draw {
+  from { clip-path: inset(0 100% 0 0); filter: drop-shadow(-2px 0 0 var(--nc-sel)) drop-shadow(2px 0 0 var(--nc-danger)); }
+  to   { clip-path: inset(0 0 0 0); filter: drop-shadow(0 0 3px var(--nc-glow)); }
+}
+html[data-theme="night_city"] :is(.fx-run, .fx-land) .cum-dot { animation: ncx-blip 100ms steps(2, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 45ms + 110ms + var(--fx-d, 0) * 330ms / var(--fx-dn, 1)) backwards; }
+@keyframes ncx-blip { from { opacity: 0; } }
+html[data-theme="night_city"] :is(.fx-run, .fx-land) :is(.cum-grid, .cum-now, .cum-t) { animation: ncx-blip 200ms steps(3, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 45ms + 110ms) backwards; }
+html[data-theme="night_city"] :is(.fx-run, .fx-land) :is(.cum-ideal, .cum-fore) { animation: ncx-blip 200ms steps(3, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 45ms + 390ms) backwards; }
+html[data-theme="night_city"] :is(.fx-run, .fx-land) .cum-seg { transform-box: fill-box; transform-origin: 0 50%; animation: ncx-seg 280ms steps(7, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 45ms + 160ms) backwards; }
+@keyframes ncx-seg { from { transform: scaleX(0); } }
+html[data-theme="night_city"] :is(.fx-run, .fx-land) .cum-hbars .cum-row { animation: ncx-blip 200ms steps(3, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 45ms + 100ms + var(--fx-r, 0) * 40ms) backwards; }
+/* the heat maps come in as one unit, wiped on from the left a column at a time (4 ms a column, at most 400 ms): one animation
+   for the whole map, not one per cell */
+html[data-theme="night_city"] :is(.fx-run, .fx-land) :is(.cum-calendar, .cum-matrix) { animation: ncx-reveal min(var(--fx-cn, 1) * 4ms, 400ms) steps(var(--fx-cn, 1), end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 45ms + 100ms) backwards; }
+@keyframes ncx-reveal { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+
+/* ── placeholders: a figure's slot cycles glyph noise (night_city.js, 12 frames a second, only while the window is shown)
+   and locks to its value when the data arrives; a bar shows a faint scan crossing its track. Static, in a dim tone,
+   under reduced motion. ── */
+html[data-theme="night_city"] [data-fx-pend="num"] { color: var(--nc-ink-3); text-shadow: none; }
+html[data-theme="night_city"] [data-fx-pend="num"][data-fx]::after { color: var(--nc-ink-3); text-shadow: none; }
+/* the plan multiple sits on a signal plate: its noise is the plate's dark ink, softened */
+html[data-theme="night_city"] .nm-plan .nm-big.m[data-fx-pend="num"][data-fx]::after { color: var(--nc-ink); opacity: .6; }
+/* a static placeholder (reduced motion: no noise runs) is a row of dashes in the dim tone */
+html[data-theme="night_city"] [data-fx-pend="num"]:not([data-fx])::after { content: "- - -"; position: absolute; left: 0; top: 0; white-space: pre; color: var(--nc-ink-3); }
+/* a line of words (a caption, a table cell): one dim block the size of the text it will be */
+html[data-theme="night_city"] [data-fx-pend="text"]::before { content: ""; position: absolute; inset: .3em 0; background: var(--nc-hair); }
+html[data-theme="night_city"] :is(.nm-cells, .nm-ratio)[data-fx-pend="bar"] { overflow: hidden; }
+html[data-theme="night_city"] :is(.nm-cells, .nm-ratio)[data-fx-pend="bar"]::after {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 22%; pointer-events: none;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--nc-sel) 42%, transparent), transparent);
+  transform: translateX(-100%); animation: ncx-track 1.5s steps(15, end) infinite;
+}
+@keyframes ncx-track { from { transform: translateX(-100%); } to { transform: translateX(460%); } }
+/* a bar with no cells yet still shows its empty cells */
+html[data-theme="night_city"] .nm-cells[data-fx-pend="bar"]:empty { background: repeating-linear-gradient(90deg, var(--nc-track) 0 calc(5% - 2px), transparent calc(5% - 2px) 5%); }
+html[data-theme="night_city"] .nm-ratio[data-fx-pend="bar"]:empty { background: repeating-linear-gradient(90deg, var(--nc-track) 0 calc(16.67% - 3px), transparent calc(16.67% - 3px) 16.67%); }
+html[data-theme="night_city"] .nm-chart-host[data-fx-pend="chart"] {
+  min-height: 60px; overflow: hidden; background: repeating-linear-gradient(180deg, var(--nc-hair) 0 1px, transparent 1px 22px);
+}
+html[data-theme="night_city"] .nm-chart-host[data-fx-pend="chart"]::before {
+  content: "SYNCING"; position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none;
+  font: 400 11px/1 var(--f-data); letter-spacing: .2em; color: var(--nc-ink-3);
+}
+html[data-theme="night_city"] .nm-chart-host[data-fx-pend="chart"]::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 100%; pointer-events: none;
+  background: linear-gradient(180deg, transparent 0, transparent 94%, color-mix(in srgb, var(--nc-sel) 34%, transparent) 98%, var(--nc-sel) 100%);
+  transform: translateY(-100%); animation: ncx-chartscan 1.8s steps(18, end) infinite;
+}
+@keyframes ncx-chartscan { from { transform: translateY(-100%); } to { transform: translateY(0); } }
+html[data-theme="night_city"] svg.cum-spark[data-fx-pend="chart"] { opacity: .45; }
+
+/* ── hover: two frames of jitter and a tear (190 ms, hard steps), then it settles. Only where a pointer can hover. ── */
+@keyframes ncx-jit {
+  0%   { transform: translate(-2px, 0); }
+  26%  { transform: translate(2px, -1px); }
+  52%  { transform: translate(-1px, 1px); }
+  78%  { transform: translate(1px, 0); }
+  100% { transform: none; }
+}
+@keyframes ncx-tear {
+  0%   { clip-path: polygon(0 0, 100% 0, 100% 30%, 0 30%, 0 37%, 100% 37%, 100% 100%, 0 100%); }
+  26%  { clip-path: polygon(0 0, 100% 0, 100% 64%, 0 64%, 0 68%, 100% 68%, 100% 100%, 0 100%); }
+  52%, 100% { clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut)); }
+}
+@keyframes ncx-fringe {
+  0%   { text-shadow: -2px 0 0 var(--nc-sel), 2px 0 0 var(--nc-danger); }
+  26%  { text-shadow: 2px 0 0 var(--nc-sel), -2px 0 0 var(--nc-danger); }
+  52%  { text-shadow: -1px 0 0 var(--nc-sel), 1px 0 0 var(--nc-danger); }
+  78%, 100% { text-shadow: 0 0 0 transparent; }
+}
+@keyframes ncx-nav {
+  0%   { transform: translateX(3px); text-shadow: -1px 0 0 var(--nc-sel), 1px 0 0 var(--nc-danger); }
+  33%  { transform: translateX(-2px); text-shadow: 1px 0 0 var(--nc-sel), -1px 0 0 var(--nc-danger); }
+  66%  { transform: translateX(1px); text-shadow: 0 0 0 transparent; }
+  100% { transform: none; }
+}
+@media (hover: hover) {
+  html[data-theme="night_city"] .nm-main:not(.fx-run):not(.fx-quiet) .nm-card:hover { animation: ncx-jit 190ms steps(1, end) 1, ncx-tear 190ms steps(1, end) 1; }
+  html[data-theme="night_city"] .nm-main:not(.fx-run):not(.fx-quiet) .nm-stat:hover { animation: ncx-jit 190ms steps(1, end) 1; }
+  html[data-theme="night_city"] .nm-main:not(.fx-run):not(.fx-quiet) .nm-card:hover :is(.nm-big:not(.nc-hit), .nm-tag, .nm-ttl) { animation: ncx-fringe 190ms steps(1, end) 1; }
+  html[data-theme="night_city"] .nm-menu a:hover { animation: ncx-nav 160ms steps(1, end) 1; }
+  html[data-theme="night_city"] :is(.nm-refresh:not(:disabled), .nm-sw button, .nm-btn:not(:disabled)):hover { animation: ncx-nav 160ms steps(1, end) 1; }
+}
+
+/* ── the boot: jack-in ───────────────────────────────────────────────────────────────────────────── */
+html[data-theme="night_city"] .nc-boot {
+  position: absolute; inset: 0; z-index: 90; display: none; overflow: hidden; cursor: pointer;
+  background:
+    radial-gradient(900px 520px at 80% -8%, var(--nc-wall-a) 0%, transparent 70%),
+    radial-gradient(640px 460px at -4% 112%, var(--nc-wall-c) 0%, transparent 72%),
+    linear-gradient(180deg, var(--nc-bg-2) 0%, var(--nc-bg-0) 70%);
+}
+html[data-theme="night_city"] .nc-boot.is-on { display: block; }
+html[data-theme="night_city"] .nc-boot::before { content: ""; position: absolute; inset: 0; z-index: 5; pointer-events: none; background: repeating-linear-gradient(0deg, var(--nc-scan) 0 1px, transparent 1px 3px); }
+html[data-theme="night_city"] .nc-b-hz { position: absolute; left: 0; right: 0; top: 0; height: 4px; background: var(--nc-hazard); }
+html[data-theme="night_city"] .nc-b-scan { position: absolute; left: 0; right: 0; top: 0; height: 100%; z-index: 4; pointer-events: none; opacity: 0;
+  background: linear-gradient(180deg, transparent 0, transparent 94%, color-mix(in srgb, var(--nc-sel) 30%, transparent) 98%, var(--nc-sel) 100%); }
+html[data-theme="night_city"] .nc-boot.is-on .nc-b-scan { animation: ncx-bscan 520ms steps(26, end) 1 both; }
+@keyframes ncx-bscan { from { transform: translateY(-100%); opacity: 1; } to { transform: translateY(0); opacity: 0; } }
+html[data-theme="night_city"] .nc-b-wrap { position: absolute; left: 50%; top: 50%; width: min(800px, calc(100% - 36px)); transform: translate(-50%, -50%); }
+html[data-theme="night_city"] .nc-b-in {
+  position: relative; padding: 1px; background: var(--nc-line-a); --cut: 16px;
+  clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+}
+html[data-theme="night_city"] .nc-b-pan {
+  position: relative; display: grid; gap: 18px; padding: 22px 26px 24px; background: var(--nc-panel);
+  clip-path: polygon(calc(var(--cut) - .6px) 0, 100% 0, 100% calc(100% - var(--cut) + .6px), calc(100% - var(--cut) + .6px) 100%, 0 100%, 0 calc(var(--cut) - .6px));
+}
+html[data-theme="night_city"] .nc-b-head { display: flex; align-items: center; gap: 14px; }
+html[data-theme="night_city"] .nc-b-plate { display: inline-block; transform: skewX(-12deg); padding: 5px 11px 4px; background: var(--nc-signal); color: var(--nc-ink); font: 700 13px/1 var(--f-label); letter-spacing: .14em; }
+html[data-theme="night_city"] .nc-b-title { font: 700 26px/1 var(--f-display); letter-spacing: .08em; text-transform: uppercase; color: var(--nc-fg-hi); white-space: nowrap; }
+html[data-theme="night_city"] .nc-b-rev { margin-left: auto; font: 400 12px/1 var(--f-data); letter-spacing: .1em; color: var(--nc-ink-2); white-space: nowrap; }
+html[data-theme="night_city"] .nc-b-main { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 26px; align-items: start; }
+html[data-theme="night_city"] .nc-b-log { margin: 0; font: 400 14px/1.75 var(--f-data); letter-spacing: .04em; color: var(--nc-fg); white-space: pre; min-height: 9.6em; overflow: hidden; }
+html[data-theme="night_city"] .nc-b-log .ln { display: block; height: 1.75em; white-space: pre; opacity: 0; }
+html[data-theme="night_city"] .nc-b-log .ln.is-on { opacity: 1; }
+html[data-theme="night_city"] .nc-b-log .pfx { color: var(--nc-signal); }
+html[data-theme="night_city"] .nc-b-log .st { color: var(--nc-sel); font-weight: 400; }
+html[data-theme="night_city"] .nc-b-log .st.is-hot { color: var(--nc-yg); }
+html[data-theme="night_city"] .nc-b-side .mh { display: inline-block; padding: 2px 8px 1px; background: var(--nc-signal); color: var(--nc-ink); font: 700 11px/12px var(--f-label); letter-spacing: .14em; text-transform: uppercase; }
+html[data-theme="night_city"] .nc-b-mx { margin-top: 9px; }
+html[data-theme="night_city"] .nc-b-mx i { height: 28px !important; font-size: 15px !important; line-height: 28px !important; }
+html[data-theme="night_city"] .nc-b-mx i.is-scr { color: color-mix(in srgb, var(--nc-yg) 62%, var(--nc-bg-0)); }
+html[data-theme="night_city"] .nc-b-buf { margin-top: 12px; }
+html[data-theme="night_city"] .nc-b-buf i { height: 26px !important; font-size: 14px !important; line-height: 26px !important; }
+html[data-theme="night_city"] .nc-b-buf i.on { animation: ncx-flash 220ms steps(2, end) 1; }
+@keyframes ncx-flash { 0% { background: var(--nc-fg-hi); } 50% { background: var(--nc-yg); transform: translateX(1px); } }
+html[data-theme="night_city"] .nc-b-ram { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+html[data-theme="night_city"] .nc-b-lab { font: 700 12px/1 var(--f-label); letter-spacing: .16em; color: var(--nc-fg-hi); }
+html[data-theme="night_city"] .nc-b-cells { display: flex; gap: 2px; height: 14px; }
+html[data-theme="night_city"] .nc-b-cells i { flex: 1 1 0; display: block; background: var(--nc-track); }
+html[data-theme="night_city"] .nc-b-cells i.on { background: var(--nc-bar); }
+html[data-theme="night_city"] .nc-b-cells i.lead { background: var(--nc-fg-hi); box-shadow: 0 0 10px var(--nc-glow); }
+html[data-theme="night_city"] .nc-b-cnt { min-width: 5.2em; text-align: right; font: 400 13px/1 var(--f-data); letter-spacing: .06em; color: var(--nc-fg-hi); }
+html[data-theme="night_city"] .nc-b-grant { display: flex; align-items: center; gap: 14px; min-height: 30px; visibility: hidden; }
+html[data-theme="night_city"] .nc-b-grant.is-on { visibility: visible; }
+html[data-theme="night_city"] .nc-b-grant .nc-b-plate { font-size: 16px; padding: 7px 16px 6px; background: var(--nc-bar); }
+html[data-theme="night_city"] .nc-b-grant.is-on .nc-b-plate { animation: ncx-plate 240ms steps(1, end) 1 both; }
+html[data-theme="night_city"] .nc-b-grant .tag { font: 400 13px/1 var(--f-data); letter-spacing: .08em; color: var(--nc-ink-2); }
+html[data-theme="night_city"] .nc-b-head .nc-b-plate { animation: ncx-plate 260ms steps(1, end) 1 both; }
+@keyframes ncx-plate {
+  0%   { opacity: 0; }
+  18%  { opacity: 1; transform: skewX(-12deg) translateX(10px); clip-path: polygon(0 0, 100% 0, 100% 40%, 0 40%); }
+  36%  { transform: skewX(-12deg) translateX(-7px); clip-path: polygon(0 55%, 100% 55%, 100% 100%, 0 100%); text-shadow: -3px 0 0 var(--nc-sel), 3px 0 0 var(--nc-danger); }
+  56%  { transform: skewX(-12deg) translateX(3px); clip-path: none; text-shadow: 2px 0 0 var(--nc-sel), -2px 0 0 var(--nc-danger); }
+  78%, 100% { transform: skewX(-12deg); clip-path: none; text-shadow: none; }
+}
+/* the one-shot RGB split: three frames, then the screen collapses to a line */
+html[data-theme="night_city"] .nc-boot.is-split .nc-b-pan { text-shadow: -3px 0 0 var(--nc-sel), 3px 0 0 var(--nc-danger); }
+html[data-theme="night_city"] .nc-boot.is-split .nc-b-wrap { animation: ncx-bsplit 180ms steps(1, end) 1 both; }
+@keyframes ncx-bsplit {
+  0%    { transform: translate(calc(-50% + 12px), -50%); filter: drop-shadow(-8px 0 0 var(--nc-sel)) drop-shadow(8px 0 0 var(--nc-danger)); }
+  33.3% { transform: translate(calc(-50% - 7px), -50%); filter: drop-shadow(5px 0 0 var(--nc-sel)) drop-shadow(-5px 0 0 var(--nc-danger)); }
+  66.6% { transform: translate(calc(-50% + 3px), -50%); filter: drop-shadow(-2px 0 0 var(--nc-sel)) drop-shadow(2px 0 0 var(--nc-danger)); }
+  100%  { transform: translate(-50%, -50%); filter: none; }
+}
+html[data-theme="night_city"] .nc-boot.is-split .nc-b-in { animation: ncx-bslice 180ms steps(1, end) 1 both; }
+@keyframes ncx-bslice {
+  0%    { clip-path: polygon(0 0, 100% 0, 100% 30%, 0 30%, 0 38%, 100% 38%, 100% 100%, 0 100%); }
+  33.3% { clip-path: polygon(0 0, 100% 0, 100% 64%, 0 64%, 0 70%, 100% 70%, 100% 100%, 0 100%); }
+  66.6%, 100% { clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut)); }
+}
+html[data-theme="night_city"] .nc-boot.is-collapse { animation: ncx-bout 240ms cubic-bezier(.7, 0, .9, .4) 1 forwards; pointer-events: none; }
+@keyframes ncx-bout {
+  0%   { clip-path: inset(0 0 0 0); opacity: 1; }
+  62%  { clip-path: inset(49% 0 49% 0); opacity: 1; }
+  100% { clip-path: inset(49.6% 0 49.6% 0); opacity: 0; }
+}
+@media (max-width: 560px), (max-height: 540px) {
+  html[data-theme="night_city"] .nc-b-pan { padding: 16px 16px 18px; gap: 14px; }
+  html[data-theme="night_city"] .nc-b-main { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  html[data-theme="night_city"] .nc-b-log { font-size: 12px; min-height: 0; }
+  html[data-theme="night_city"] .nc-b-title { font-size: 20px; }
+  html[data-theme="night_city"] :is(.nc-b-rev, .nc-b-side) { display: none; }
+}

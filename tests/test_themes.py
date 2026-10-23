@@ -126,7 +126,7 @@ def test_shipped_variant_extras_come_from_the_keyed_tables(
 ) -> None:
     assert shipped["nostromo"].variant("amber").extras["ghost"] == "#2a1c08"
     assert shipped["night_city"].variant("blackwall").extras["fg-hi"] == "#ffd9cf"
-    assert shipped["night_city"].variant("mox").extras["bar"] == "#ff7ac3"
+    assert shipped["night_city"].variant("mox").extras["bar"] == "#ef78c4"
     assert shipped["gates"].variant("teal-dark").extras["accent_soft"] == "#4dd6c224"
 
 
@@ -600,6 +600,103 @@ def test_stale_stays_dimmer_than_live_text_in_every_nostromo_variant(shipped: di
 def test_nostromo_css_defaults_to_the_amber_stale_token(shipped: dict[str, themes.Theme]) -> None:
     css = (SHIPPED.parent / "webui" / "themes" / "nostromo.css").read_text(encoding="utf-8")
     assert f"--stale: {shipped['nostromo'].variant('amber').colors['stale']};" in css
+
+
+# ── Night City: the approved Relic and Mox palettes ───────────────────────────
+
+# relic_a and mox_a of the palette proposals the owner approved (the stale colour and Relic's plate colour are the
+# QA refinements, pinned in their own tests below).
+RELIC_A = {
+    "bg": "#0c0d11", "surface": "#151c26", "surface_alt": "#2a1218", "border": "#3fb0baa0", "border_dim": "#3fb0ba52",
+    "text": "#7ddee7", "text_bright": "#d7d4d0", "text_dim": "#8ba5ad", "accent": "#7bacf9", "accent_alt": "#9cd5f0",
+    "ok": "#7ddee7", "warn": "#f9d34c", "alert": "#ee6f6f", "track": "#4a2d33", "glow": "#7ddee766",
+}
+MOX_A = {
+    "bg": "#0b0c22", "surface": "#15173f", "surface_alt": "#1d1f52", "border": "#e03ea1a0", "border_dim": "#e03ea152",
+    "text": "#ef78c4", "text_bright": "#f9e4f8", "text_dim": "#d7a5db", "accent": "#2cc2e9", "accent_alt": "#90a8fc",
+    "ok": "#c2f7fd", "warn": "#ffe600", "alert": "#ff5c47", "track": "#55245f", "glow": "#e03ea173",
+}
+NIGHT_CITY_SURFACE_TOKENS = ("bg-0", "bg-1", "bg-2", "panel", "page", "wall-a", "wall-b", "wall-c")
+
+
+def _night_city_surfaces(variant: themes.Variant) -> dict[str, str]:
+    """Every colour a Night City text sits on: the three role surfaces, the dashboard's panels and its page glows."""
+    surfaces = {role: variant.colors[role] for role in ("bg", "surface", "surface_alt")}
+    surfaces.update({key: variant.extras[key] for key in NIGHT_CITY_SURFACE_TOKENS})
+    return {name: value[:7] for name, value in surfaces.items()}
+
+
+@pytest.mark.parametrize(("variant_id", "name", "approved"), [("relic", "Relic", RELIC_A), ("mox", "Mox", MOX_A)])
+def test_relic_and_mox_carry_the_approved_a_palettes_under_their_own_ids(
+    shipped: dict[str, themes.Theme], variant_id: str, name: str, approved: dict[str, str]
+) -> None:
+    theme = shipped["night_city"]
+    variant = theme.variant(variant_id)
+    assert (variant.id, variant.name, variant.default, variant.mode) == (variant_id, name, False, "dark")
+    for role, value in approved.items():
+        assert variant.colors[role] == value, (variant_id, role)
+    for other in theme.variants:                       # every key the other variants have
+        assert set(variant.colors) == set(other.colors), (variant_id, other.id)
+        assert set(variant.extras) == set(other.extras), (variant_id, other.id)
+    assert variant.extras["bar"] == variant.colors["text"], "usage fills in the text colour, as the token notes say"
+
+
+def test_relics_plates_are_a_colour_of_their_own(shipped: dict[str, themes.Theme]) -> None:
+    """The selected tab and the plates are #0b8eb9: not the LIVE colour (ok), not the cyan text, and the dark ink on
+    them still reads."""
+    relic = shipped["night_city"].variant("relic")
+    plate = relic.extras["signal"]
+    assert plate == "#0b8eb9"
+    for role in ("ok", "text", "accent"):
+        assert colour.delta_e76(plate, relic.colors[role][:7]) >= 25, role
+    assert colour.contrast_ratio(relic.extras["ink"][:7], plate) >= 4.5
+    assert shipped["night_city"].variant("mox").extras["signal"] == MOX_A["text"], "Mox's plates stay pink"
+
+
+@pytest.mark.parametrize("variant_id", ["relic", "mox"])
+def test_the_stale_colour_is_clear_of_every_live_colour_and_readable_on_every_surface(
+    shipped: dict[str, themes.Theme], variant_id: str
+) -> None:
+    """The sign-in-lost tone must not pass for the text, the dim text, the accent or any status colour (25 dE76), and
+    must read (4.5:1) on every surface it can land on."""
+    variant = shipped["night_city"].variant(variant_id)
+    stale = variant.colors["stale"][:7]
+    live = {role: variant.colors[role][:7] for role in ("text", "text_bright", "text_dim", "accent", "ok", "warn", "alert")}
+    live["bar"] = variant.extras["bar"][:7]
+    for name, value in live.items():
+        assert colour.delta_e76(stale, value) >= 25, (variant_id, name)
+    for name, surface in _night_city_surfaces(variant).items():
+        assert colour.contrast_ratio(stale, surface) >= 4.5, (variant_id, name)
+    assert variant.extras["stale"][:7] == stale, "the token and the role agree"
+
+
+@pytest.mark.parametrize("variant_id", NIGHT_CITY_IDS)
+def test_night_city_body_text_reads_on_every_surface(shipped: dict[str, themes.Theme], variant_id: str) -> None:
+    variant = shipped["night_city"].variant(variant_id)
+    for role in ("text", "text_bright", "text_dim"):
+        for name, surface in _night_city_surfaces(variant).items():
+            assert colour.contrast_ratio(variant.colors[role][:7], surface) >= 4.5, (variant_id, role, name)
+
+
+@pytest.mark.parametrize("variant_id", ["relic", "mox"])
+def test_ok_warn_and_alert_stay_distinct_in_the_a_palettes(shipped: dict[str, themes.Theme], variant_id: str) -> None:
+    colors = shipped["night_city"].variant(variant_id).colors
+    for first, second in (("ok", "warn"), ("ok", "alert"), ("warn", "alert")):
+        assert colour.delta_e76(colors[first][:7], colors[second][:7]) >= 25, (variant_id, first, second)
+
+
+def test_the_night_city_contrast_notes_describe_the_shipped_palettes(shipped: dict[str, themes.Theme]) -> None:
+    """extras.contrast is documentation, so it must not drift from the tokens it describes."""
+    theme = shipped["night_city"]
+    for variant_id in ("relic", "mox"):
+        variant = theme.variant(variant_id)
+        notes = theme.extras["contrast"][variant_id]
+        panel = variant.extras["panel"][:7]
+        assert notes["fg_on_panel"] == pytest.approx(colour.contrast_ratio(variant.colors["text"][:7], panel), abs=0.01)
+        assert notes["stale_on_panel"] == pytest.approx(colour.contrast_ratio(variant.colors["stale"][:7], panel), abs=0.01)
+        assert notes["ink_on_signal"] == pytest.approx(
+            colour.contrast_ratio(variant.extras["ink"][:7], variant.extras["signal"][:7]), abs=0.01)
+        assert notes["stale_de_min"] >= 25 and notes["stale_min_on_any_surface"] >= 4.5
 
 
 # ── The usable system accent ──────────────────────────────────────────────────

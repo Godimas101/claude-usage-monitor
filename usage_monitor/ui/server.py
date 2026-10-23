@@ -126,6 +126,15 @@ def _nullable(check: Callable[[Any], bool]) -> Callable[[Any], bool]:
 
 
 _SLUG = re.compile(r"[a-z0-9][a-z0-9_-]{0,39}")
+# The update block of /api/state (see _update_view). Both values come off the network via the release check, so
+# only a plain version and a plain github.com address are passed on to the page.
+_SAFE_VERSION = re.compile(r"[0-9A-Za-z][0-9A-Za-z._+-]{0,39}")
+_RELEASE_URL = re.compile(r"https://github\.com/[0-9A-Za-z._~%+/-]{1,300}")
+
+
+def plain_version(value: Any) -> str | None:
+    """``value`` when it is a plain version ("2.1.0", "3.0.0-rc.1") fit for a page, a menu or a toast, else None."""
+    return value if isinstance(value, str) and _SAFE_VERSION.fullmatch(value) else None
 
 
 def _is_slug(value: Any) -> bool:
@@ -722,6 +731,10 @@ class ApiServer:
     what it returns. ``pricing_provider`` returns the data service's current pricing table (it is
     only used for display names), ``clock`` is a monotonic clock in seconds (the caches' time) and
     ``wall_clock`` the current time as an aware datetime.
+
+    ``update_cb`` maps ``info`` (the newest release the update check found, as a dict, or None), ``check``,
+    ``apply`` and ``skip`` to callables. The last three answer POST /api/update/<name> (a missing one is a 501);
+    ``info`` feeds the ``update`` block of /api/state (see ``_update_view``).
     """
 
     def __init__(
@@ -1258,6 +1271,21 @@ class ApiServer:
         return entries
 
     def _update_view(self) -> dict[str, Any]:
+        """The ``update`` block of /api/state: everything the dashboard's update banner and the Settings
+        page need, built from what the app's ``info`` callback returns (None while no newer release is known).
+
+            available        a newer release was found (also when the user skipped it)
+            version          its version, "2.1.0" (None when the info carries no usable one)
+            url              its release page, always a github.com link (None when the info has none)
+            can_self_update  True when "Update now" installs it in place (the installed build, this project's own
+                             installer with a SHA-256 to check); False when it opens the release page instead
+            skipped          the user chose "Skip this version" for exactly this version
+            info             the whole info dict, as before (version, tag, url, notes, asset_*, can_self_update)
+            skip_version     the version that was skipped ("" for none)
+
+        The banner shows when ``available and not skipped``. ``available``, ``info`` and ``skip_version`` are the
+        original three keys; the rest are derived here from the info and the setting, so a callback that returns
+        only ``{"version": ...}`` still gives a complete block."""
         info = None
         getter = self._update_cb.get("info")
         if getter is not None:
@@ -1265,8 +1293,20 @@ class ApiServer:
                 info = to_jsonable(getter())
             except Exception:  # an update check that fails must not break the dashboard
                 log.exception("update info unavailable")
-        return {"available": info is not None, "info": info,
-                "skip_version": str(self._settings.get("skip_version", "") or "")}
+        found = info if isinstance(info, dict) else {}
+        skip_version = str(self._settings.get("skip_version", "") or "")
+        version = plain_version(found.get("version"))
+        url = found.get("url")
+        url = url if isinstance(url, str) and _RELEASE_URL.fullmatch(url) else None
+        return {
+            "available": info is not None,
+            "version": version,
+            "url": url,
+            "can_self_update": found.get("can_self_update") is True,
+            "skipped": version is not None and version == skip_version,
+            "info": info,
+            "skip_version": skip_version,
+        }
 
 
 # ── Helpers shared with the dashboard and the dev server ─────────────────────────

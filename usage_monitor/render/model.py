@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from usage_monitor.data.models import ApiStatus, Limit, MonitorState, UsageSnapshot
 from usage_monitor.data.windows import PACE_BAND_POINTS
@@ -39,6 +39,32 @@ SEVERITY_NORMAL = "normal"
 SEVERITY_WARNING = "warning"
 SEVERITY_CRITICAL = "critical"
 _SEVERITY_RANK = {SEVERITY_NORMAL: 0, SEVERITY_WARNING: 1, SEVERITY_CRITICAL: 2}
+
+# The lamp kinds: what a status looks like on a surface with no room for words (the taskbar strip, the tray icon).
+# Each skin draws its own mark for a kind, but they all tell the same states apart: live, paused, last known
+# (stale: the sign-in is lost or missing, so the user acts), offline (no connection) and limited (the usage API is
+# throttling the monitor; both of those retry by themselves). A status still loading has a kind of its own, so a
+# skin may draw it like "stale" (nothing to show yet) without the two sharing a name.
+LAMP_LIVE = "live"
+LAMP_PAUSED = "paused"
+LAMP_STALE = "stale"
+LAMP_OFFLINE = "offline"
+LAMP_LIMITED = "limited"
+LAMP_LOADING = "loading"
+LAMP_KINDS: dict[ApiStatus, str] = {
+    ApiStatus.LIVE: LAMP_LIVE,
+    ApiStatus.PAUSED: LAMP_PAUSED,
+    ApiStatus.STALE: LAMP_STALE,
+    ApiStatus.NO_CREDENTIALS: LAMP_STALE,
+    ApiStatus.OFFLINE: LAMP_OFFLINE,
+    ApiStatus.RATE_LIMITED: LAMP_LIMITED,
+    ApiStatus.LOADING: LAMP_LOADING,
+}
+
+
+def lamp_kind(status: ApiStatus) -> str:
+    """The lamp kind of a status (see LAMP_KINDS). An unknown status reads as stale: nothing live to show."""
+    return LAMP_KINDS.get(status, LAMP_STALE)
 
 _WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 _NORMAL_NAMES = frozenset({"normal", "ok", "none"})
@@ -81,6 +107,44 @@ class WidgetModel:
     stale_message: str | None
     blink_on: bool
     updated_at: datetime
+
+    @property
+    def lamp(self) -> str:
+        """The lamp kind of the status: live, paused, stale, offline, limited or loading (LAMP_KINDS)."""
+        return lamp_kind(self.status)
+
+
+# The surfaces a skin draws, as the optional skin methods content_insets() and hover_frames() name them.
+SURFACE_FLOATING = "floating"
+SURFACE_TASKBAR = "taskbar"
+SURFACE_TOOLTIP = "tooltip"
+
+# (left, top, right, bottom): the transparent pixels between the edge of a rendered frame and the visible surface in
+# it, at the frame's own scale. A frame with a soft shadow around its card has them, and the widgets place the card,
+# not the padded frame, so the tooltip, the screen edge and the default corner measure from what the user sees.
+Insets = tuple[int, int, int, int]
+NO_INSETS: Insets = (0, 0, 0, 0)
+
+
+@dataclass(frozen=True, slots=True)
+class HoverPlay:
+    """A response to the pointer entering a widget, pre-rendered by a skin and played by ui/widgets.py.
+
+    ``frames`` are PIL images of the size of the frame they were made from. frames[0] shows at once, and each
+    frame stays up for the delay in ``delays_ms`` at its own index before the next one follows. After the last
+    frame the surface returns to its normal frame once that frame's delay has passed, unless ``hold`` is set: the
+    last frame then stays while the pointer is over the widget, and ``leave`` (each shown for ``leave_ms``) plays on
+    the way out before the normal frame returns. Nothing here draws or touches a window: it is plain data.
+    """
+    frames: tuple[Any, ...]
+    delays_ms: tuple[int, ...]
+    hold: bool = False
+    leave: tuple[Any, ...] = ()
+    leave_ms: int = 40
+
+    def __post_init__(self) -> None:
+        if not self.frames or len(self.delays_ms) != len(self.frames):
+            raise ValueError("a hover play needs at least one frame and one delay for each")
 
 
 # ── Public entry point ────────────────────────────────────────────────────────

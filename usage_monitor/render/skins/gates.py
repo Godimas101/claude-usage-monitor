@@ -11,7 +11,10 @@ in colors["accent"]: lifted to read on the card, and kept out of the severity co
 (Palette.fill; usage_monitor/themes/__init__.py, "Gates accents").
 
 Surfaces
-  floating   a 288 x 128 card in a 336 x 176 frame: the extra 24 px per side holds the soft shadow.
+  floating   a 288 px wide card in a frame 24 px bigger on every side, which holds the soft shadow. The card shows
+             the session and weekly rows, then one row for every scoped limit (Fable) the model carries, in every
+             state, and the footer last: 128 px tall with two rows, 27 px more for each further row. content_insets()
+             says how much of the frame is margin, so the widgets place the card and not the padded frame.
   tooltip    the same card, taller: one block per row with the exact percentage, reset time and pace.
   taskbar    a 248 x 40 strip (a Fluent "hover" plate) that adapts to the taskbar height.
   tray       a ring of the session percent; the 32 px size prints the number.
@@ -22,9 +25,10 @@ radius and a two-layer shadow. The strip has its own plate and the tray ring a t
 taskbar colour, so both read on a dark and on a light taskbar whatever the Windows modes are. Windows
 fonts are read from the Fonts folder, never bundled.
 
-Gates has no animation and no glow: the lamp is steady (blink_on and reduce_motion change nothing) and
-text_fx has nothing to switch. transparent_bg drops the card fill, the highlight and the shadow and
-keeps the 1 px frame and the content (on the strip, it drops the plate).
+Gates has no ambient animation and no glow: the lamp is steady (blink_on and reduce_motion change nothing
+about a frame) and text_fx has nothing to switch. Its one motion is the pointer response, hover_frames(): a
+small spring lift that the widgets play (never under reduce_motion). transparent_bg drops the card fill, the
+highlight and the shadow and keeps the 1 px frame and the content (on the strip, it drops the plate).
 """
 from __future__ import annotations
 
@@ -45,9 +49,20 @@ from usage_monitor.log import get_logger
 from usage_monitor.render import engine
 from usage_monitor.render.engine import Canvas, Color, Layer, TRANSPARENT, parse_color, with_alpha
 from usage_monitor.render.model import (
+    LAMP_LIMITED,
+    LAMP_LIVE,
+    LAMP_OFFLINE,
+    LAMP_PAUSED,
+    LAMP_STALE,
+    NO_INSETS,
     SEVERITY_CRITICAL,
     SEVERITY_NORMAL,
     SEVERITY_WARNING,
+    SURFACE_FLOATING,
+    SURFACE_TASKBAR,
+    SURFACE_TOOLTIP,
+    HoverPlay,
+    Insets,
     Row,
     WidgetModel,
     pace_delta,
@@ -59,7 +74,7 @@ log = get_logger(__name__)
 # ── Geometry (logical px, card origin top-left) ───────────────────────────────
 
 CARD_W = 288
-CARD_H = 128
+CARD_H = 128                    # the card with its two limit rows and the footer; each row after them adds ROW_PITCH
 MARGIN = 24                     # transparent frame margin per side: holds the shadow
 RADIUS = 8.0                    # theme.shape.radius
 BORDER = 1.0
@@ -95,8 +110,10 @@ TICK_H = 6
 BAR_DY = 23
 BAR_H = 4
 BAR_RADIUS = 2.0
-FOOT_TOP = 98
+FOOT_TOP = 98                   # the footer's line box on a two-row card ...
 FOOT_LINE = 16
+FOOT_GAP = FOOT_TOP - (ROW_TOP + 2 * ROW_PITCH)      # ... starts this far under the last row's slot
+FOOT_PAD_BOTTOM = CARD_H - FOOT_TOP - FOOT_LINE      # and ends this far above the card's bottom edge
 
 TIP_ROW0 = ROW_TOP
 TIP_PITCH = 50
@@ -486,6 +503,17 @@ class Ink(Canvas):
         mask = _disc_ring_mask(size, self.stroke_px(ring)) if ring > 0 else _ellipse_mask(size, size)
         self.stamp(Layer(mask, left, top), color)
 
+    def half_disc(self, cx: float, cy: float, radius: float, color: Color) -> None:
+        """The left half of a filled circle (the same circle ``disc`` draws), for the lamp of a throttled feed."""
+        if color[3] == 0:
+            return
+        size = max(self.ss, round(2 * radius * self.k / self.ss) * self.ss)
+        left = self._snap(cx - radius, self.kx)
+        top = self._snap(cy - radius, self.ky)
+        mask = _ellipse_mask(size, size).copy()        # the cached mask is shared: cut a copy
+        mask.paste(0, (size // 2, 0, size, size))
+        self.stamp(Layer(mask, left, top), color)
+
     def ramp(self, x0: float, y0: float, x1: float, y1: float, color: Color) -> None:
         if color[3] == 0:
             return
@@ -682,14 +710,18 @@ def _over(base: Color, wash: Color) -> Color:
 
 # ── Reading the model ─────────────────────────────────────────────────────────
 
+# The lamp of each status: a filled grey disc when the sign-in is lost or missing (last known), a hollow ring when
+# there is no connection or nothing is loaded yet, a half-filled disc while the API throttles the monitor, a ring in
+# the accent while paused, and the lit green disc with its halo when live. Every kind has a shape of its own, so the
+# strip (which has no word) tells them apart without colour.
 _LAMP_KIND = {
-    ApiStatus.LIVE: "live",
-    ApiStatus.STALE: "stale",
-    ApiStatus.OFFLINE: "offline",
-    ApiStatus.PAUSED: "paused",
-    ApiStatus.RATE_LIMITED: "stale",
-    ApiStatus.NO_CREDENTIALS: "stale",
-    ApiStatus.LOADING: "offline",
+    ApiStatus.LIVE: LAMP_LIVE,
+    ApiStatus.STALE: LAMP_STALE,
+    ApiStatus.OFFLINE: LAMP_OFFLINE,
+    ApiStatus.PAUSED: LAMP_PAUSED,
+    ApiStatus.RATE_LIMITED: LAMP_LIMITED,
+    ApiStatus.NO_CREDENTIALS: LAMP_STALE,
+    ApiStatus.LOADING: LAMP_OFFLINE,
 }
 
 # status -> (lead, rest, lead colour role). The three the mockup shows are STALE, OFFLINE and PAUSED.
@@ -763,15 +795,21 @@ def _rows_with_data(model: WidgetModel) -> list[Row]:
     return [row for row in model.rows if row.percent is not None]
 
 
-def _third_row(model: WidgetModel) -> Row | None:
-    """The row for the third slot. The Fable row shows while the feed is live and neither the
-    session nor the weekly limit asks for attention; otherwise the footer takes the slot."""
-    if model.status is not ApiStatus.LIVE:
-        return None
-    if any(row.severity != SEVERITY_NORMAL for row in model.rows[:2] if row.percent is not None):
-        return None
-    scoped = [row for row in model.rows[2:] if row.percent is not None]
-    return max(scoped, key=lambda row: row.percent) if scoped else None   # type: ignore[arg-type, return-value]
+def _scoped_rows(model: WidgetModel) -> list[Row]:
+    """The rows after the session and the weekly one: every scoped limit (Fable) the model carries, in every state.
+    The card grows by one row for each, and the footer always comes last."""
+    return [row for row in model.rows[2:] if row.percent is not None]
+
+
+def _row_top(index: int) -> int:
+    """Top of the card's row ``index`` (0 is the session row)."""
+    return ROW_TOP + ROW_PITCH * index
+
+
+def _card_height(rows: int) -> int:
+    """The card's height for ``rows`` limit rows: 128 for two, and one more row's pitch for each after them. The
+    footer sits under the last row, FOOT_GAP below where the next row would start."""
+    return _row_top(rows) + FOOT_GAP + FOOT_LINE + FOOT_PAD_BOTTOM
 
 
 _RANK = {SEVERITY_NORMAL: 0, SEVERITY_WARNING: 1, SEVERITY_CRITICAL: 2}
@@ -852,14 +890,18 @@ def _value_color(pal: Palette, model: WidgetModel, row: Row) -> Color:
 
 
 def _lamp(ink: Ink, pal: Palette, kind: str, cx: float, cy: float) -> None:
-    """The status lamp: filled with a halo when live, filled grey when stale, a hollow ring otherwise."""
+    """The status lamp: filled with a halo when live, filled grey when stale, half filled when limited, a ring in the
+    accent when paused and a grey ring otherwise (offline, loading)."""
     radius = LAMP_SIZE / 2
-    if kind == "live":
+    if kind == LAMP_LIVE:
         ink.disc(cx, cy, radius + LAMP_HALO, pal.lamp_halo)
         ink.disc(cx, cy, radius, pal.ok)
-    elif kind == "stale":
+    elif kind == LAMP_STALE:
         ink.disc(cx, cy, radius, pal.stale)
-    elif kind == "paused":
+    elif kind == LAMP_LIMITED:
+        ink.disc(cx, cy, radius, pal.stale, ring=1.5)
+        ink.half_disc(cx, cy, radius, pal.stale)
+    elif kind == LAMP_PAUSED:
         ink.disc(cx, cy, radius, pal.fill, ring=1.5)
     else:
         ink.disc(cx, cy, radius, pal.stale, ring=1.5)
@@ -872,7 +914,7 @@ def _timer_glyph(ink: Ink, color: Color, cx: float, cy: float) -> None:
     ink.rect(cx - 0.65, cy - 2.2, cx + 0.65, cy + 1.6, color)
 
 
-@functools.lru_cache(maxsize=4)
+@functools.lru_cache(maxsize=12)
 def _card_base(card_h: float, scale: float, card: Color, border: Color, highlight: Color,
                transparent: bool) -> Image.Image:
     """The card's own surface at buffer size: fill, 1 px border and top highlight (the fill and the
@@ -1060,23 +1102,19 @@ class GatesSkin:
     theme_id = "gates"
 
     def floating_size(self, theme: Any, model: WidgetModel, scale: float) -> tuple[int, int]:
-        return _frame_size(CARD_H, scale)
+        return _frame_size(_card_height(2 + len(_scoped_rows(model))), scale)
 
     def render_floating(self, model: WidgetModel, theme: Any, variant: Any, scale: float = 1.0,
                         opts: RenderOptions | Mapping[str, Any] | None = None) -> Image.Image:
         o = coerce_options(opts)
         pal = Palette.for_variant(theme, variant)
-        ink = _card_canvas(CARD_H, scale, theme)
+        limits = [*_rows(model)[:2], *_scoped_rows(model)]
+        ink = _card_canvas(_card_height(len(limits)), scale, theme)
         _paint_card(ink, pal, o.transparent_bg)
         _header(ink, pal, model, more=True)
-        third = _third_row(model)
-        first, second = _rows(model)[:2]
-        _row(ink, pal, model, first, ROW_TOPS[0])
-        _row(ink, pal, model, second, ROW_TOPS[1])
-        if third is not None:
-            _row(ink, pal, model, third, ROW_TOPS[2])
-        else:
-            _footer(ink, pal, model, FOOT_TOP)
+        for index, row in enumerate(limits):
+            _row(ink, pal, model, row, _row_top(index))
+        _footer(ink, pal, model, _row_top(len(limits)) + FOOT_GAP)
         return _compose(ink.finish(), scale, pal, o.transparent_bg)
 
     def render_tooltip(self, model: WidgetModel, theme: Any, variant: Any, scale: float = 1.0) -> Image.Image:
@@ -1115,6 +1153,69 @@ class GatesSkin:
             raise ValueError(f"tray icon size must be at least {TRAY_MIN} px, not {size}")
         pal = Palette.for_variant(theme, variant)
         return _render_tray(model, pal, theme, size)
+
+    def content_insets(self, surface: str, theme: Any, model: WidgetModel, scale: float) -> Insets:
+        """The transparent margin round the visible surface. The floating widget and the tooltip are a card inside a
+        frame MARGIN px bigger on every side (the room of its soft shadow). The strip is the taskbar band itself, and
+        the tooltip stands off the band, not off the plate: no margin to subtract."""
+        if surface in (SURFACE_FLOATING, SURFACE_TOOLTIP):
+            margin = round(MARGIN * scale)
+            return (margin, margin, margin, margin)
+        return NO_INSETS
+
+    def hover_frames(self, frame: Image.Image, surface: str, scale: float,
+                     opts: RenderOptions | Mapping[str, Any] | None = None) -> HoverPlay | None:
+        """The pointer response of the floating widget and the strip: the card lifts on a gentle spring (1, 3, 2 and 2
+        px, 40 ms apart) over a soft shadow that stays on the ground, holds while the pointer is over it, and settles
+        back (1 px, then 0) on the way out."""
+        if surface not in (SURFACE_FLOATING, SURFACE_TASKBAR):
+            return None
+        return _lift(frame, scale, shadow=not coerce_options(opts).transparent_bg)
+
+
+# ── Hover ─────────────────────────────────────────────────────────────────────
+
+HOVER_LIFTS = (1, 3, 2, 2)      # logical px the card rises on each frame of the spring
+HOVER_STEP_MS = 40
+HOVER_LEAVE_LIFT = 1            # on the way out the card is 1 px up for one step, then down
+HOVER_SHADOW_DY = 2.0           # the shadow the lifted card leaves on the ground: offset, blur (sigma) and strength
+HOVER_SHADOW_SIGMA = 3.3
+HOVER_SHADOW_ALPHA = 0.30
+_HOVER_SHADOW_LUT = [int(v * HOVER_SHADOW_ALPHA + 0.5) for v in range(256)]
+
+
+def _lift(frame: Image.Image, scale: float, shadow: bool) -> HoverPlay:
+    """The spring of a card rising in its own frame. The frame's transparent margin above the card (the shadow's room
+    on the floating widget, the strip's gap above its plate) is what it rises into, so nothing is resized and a lift
+    never goes past that margin. The shadow is made once, from the card's shape, and every frame sits on it."""
+    rgba = frame.convert("RGBA")
+    card = rgba.getchannel("A").point(lambda v: 255 if v >= 128 else 0)
+    box = card.getbbox()
+    room = box[1] if box else 0
+    ground = _hover_shadow(card, scale) if shadow and box else None
+
+    def lifted(logical: float) -> Image.Image:
+        rise = min(int(logical * scale + 0.5), room)
+        out = Image.new("RGBA", rgba.size, TRANSPARENT)
+        out.paste(rgba, (0, -rise))
+        return Image.alpha_composite(ground, out) if ground is not None else out
+
+    frames = tuple(lifted(logical) for logical in HOVER_LIFTS)
+    delays = (HOVER_STEP_MS,) * (len(frames) - 1) + (0,)
+    return HoverPlay(frames=frames, delays_ms=delays, hold=True, leave=(lifted(HOVER_LEAVE_LIFT),),
+                     leave_ms=HOVER_STEP_MS)
+
+
+def _hover_shadow(card: Image.Image, scale: float) -> Image.Image:
+    """A soft black shadow under ``card`` (a 0 / 255 mask), offset down and blurred, at HOVER_SHADOW_ALPHA. The blur
+    runs at half size, which is the same picture for a quarter of the work."""
+    moved = Image.new("L", card.size, 0)
+    moved.paste(card, (0, int(HOVER_SHADOW_DY * scale + 0.5)))
+    blurred = moved.reduce(2).filter(ImageFilter.GaussianBlur(max(0.5, HOVER_SHADOW_SIGMA * scale / 2)))
+    mask = blurred.resize(card.size, Image.Resampling.BILINEAR).point(_HOVER_SHADOW_LUT)
+    shade = Image.new("RGBA", card.size, TRANSPARENT)
+    shade.putalpha(mask)
+    return shade
 
 
 # ── Taskbar strip ─────────────────────────────────────────────────────────────
@@ -1239,6 +1340,58 @@ def _tinted(mask: Image.Image, color: Color) -> Image.Image:
     return layer
 
 
+# The tray ring's centre mark for the states that need one: a cross when there is no connection and three dots while
+# the API throttles the monitor. A stale ring stays empty (the number at 32 px), so the three differ from each other
+# down to 16 px. size -> (the cross's half extent, its stroke, a dot's radius), in px; sizes between two keys
+# interpolate and the ends scale.
+TRAY_GLYPH: dict[int, tuple[float, float, float]] = {
+    16: (1.9, 1.3, 1.0),
+    24: (2.9, 1.8, 1.4),
+    32: (4.6, 2.4, 1.9),
+}
+TRAY_GLYPH_KINDS = (LAMP_OFFLINE, LAMP_LIMITED)
+
+
+def _glyph_geometry(size: int) -> tuple[float, float, float]:
+    keys = sorted(TRAY_GLYPH)
+    if size <= keys[0]:
+        return tuple(value * size / keys[0] for value in TRAY_GLYPH[keys[0]])      # type: ignore[return-value]
+    if size >= keys[-1]:
+        return tuple(value * size / keys[-1] for value in TRAY_GLYPH[keys[-1]])     # type: ignore[return-value]
+    low = max(k for k in keys if k <= size)
+    high = min(k for k in keys if k >= size)
+    if low == high:
+        return TRAY_GLYPH[low]
+    t = (size - low) / (high - low)
+    return tuple(a + (b - a) * t for a, b in zip(TRAY_GLYPH[low], TRAY_GLYPH[high]))   # type: ignore[return-value]
+
+
+def _glyph_mask(kind: str, size: int, grow: float = 0.0) -> Image.Image | None:
+    """Coverage of the centre mark of a lamp kind at ``size`` px (drawn at 8x and reduced), or None. ``grow`` widens
+    every stroke and dot by that many px on each side, for the keyline."""
+    if kind not in TRAY_GLYPH_KINDS:
+        return None
+    half, stroke, dot = _glyph_geometry(size)
+    big = size * TRAY_SS
+    mask = Image.new("L", (big, big), 0)
+    draw = ImageDraw.Draw(mask)
+    middle = big / 2
+    if kind == LAMP_OFFLINE:
+        reach = half * TRAY_SS
+        width = max(1, round((stroke + 2 * grow) * TRAY_SS))
+        for start, end in (((-reach, -reach), (reach, reach)), ((-reach, reach), (reach, -reach))):
+            draw.line([(middle + start[0], middle + start[1]), (middle + end[0], middle + end[1])], fill=255, width=width)
+            for x, y in (start, end):                          # round ends
+                draw.ellipse([middle + x - width / 2, middle + y - width / 2, middle + x + width / 2,
+                              middle + y + width / 2], fill=255)
+    else:
+        radius = (dot + grow) * TRAY_SS
+        for step in (-1, 0, 1):
+            x = middle + step * 2.7 * dot * TRAY_SS
+            draw.ellipse([x - radius, middle - radius, x + radius, middle + radius], fill=255)
+    return mask.reduce(TRAY_SS)
+
+
 def _render_tray(model: WidgetModel, pal: Palette, theme: Any, size: int) -> Image.Image:
     row = model.rows[0] if model.rows else None
     percent = row.percent if row is not None else None
@@ -1257,7 +1410,12 @@ def _render_tray(model: WidgetModel, pal: Palette, theme: Any, size: int) -> Ima
     icon = _tinted(ImageChops.lighter(outline_track, outline_arc), pal.keyline)
     icon.alpha_composite(_tinted(track, pal.tray_track))
     icon.alpha_composite(_tinted(arc, arc_color))
-    if size >= TRAY_NUMBER_MIN:
+    glyph = _glyph_mask(model.lamp, size)
+    if glyph is not None:
+        keyline = _glyph_mask(model.lamp, size, grow=min(1.0, KEYLINE * size / 16))
+        icon.alpha_composite(_tinted(keyline, pal.keyline))
+        icon.alpha_composite(_tinted(glyph, pal.tray_fg))
+    elif size >= TRAY_NUMBER_MIN:
         _tray_number(icon, size, percent, pal, theme)
     return icon
 

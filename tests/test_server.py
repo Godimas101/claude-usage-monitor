@@ -50,6 +50,10 @@ UI_TESTS = os.environ.get("CUM_UI_TESTS") == "1"
 REAL_PROFILE_ENV = {k: os.environ[k] for k in ("APPDATA", "LOCALAPPDATA", "USERPROFILE", "HOME", "PYTHONUSERBASE")
                     if k in os.environ}
 ui_only = pytest.mark.skipif(not UI_TESTS, reason="needs CUM_UI_TESTS=1 (real windows or processes)")
+# Every console program a test starts (python, tasklist, taskkill) gets this flag: pytest may have no console of its own
+# (an editor, a task runner, an agent), and then each such process would open a terminal window on the desktop.
+# test_update_check.py has the test that keeps every test file honest about it.
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 NOW = datetime(2026, 10, 21, 16, 12, tzinfo=timezone.utc)
 
 
@@ -592,7 +596,8 @@ def test_state_reports_the_theme_and_update_info(make_server: Any, themes_module
     assert payload["theme"]["variant"] == "amber"
     assert payload["theme"]["mode"] == "dark"
     assert payload["theme"]["css_vars"]["--bg"] == "#090909"
-    assert payload["update"] == {"available": True, "info": {"version": "2.1.0"}, "skip_version": ""}
+    assert payload["update"] == {"available": True, "version": "2.1.0", "url": None, "can_self_update": False,
+                                 "skipped": False, "info": {"version": "2.1.0"}, "skip_version": ""}
     assert payload["settings"]["launch_on_startup"] is False
 
 
@@ -603,7 +608,106 @@ def test_state_survives_a_broken_update_info_getter(make_server: Any, themes_mod
     server, _ = make_server(update_cb={"info": broken})
     status, _, body = request(server, "GET", "/api/state")
     assert status == 200
-    assert json.loads(body)["update"]["available"] is False
+    block = json.loads(body)["update"]
+    assert block == NO_UPDATE                 # a complete block, not a half one: the page reads every key
+
+
+# ── The update block of /api/state: what the dashboard's banner and Settings page read ───────────────────
+
+UPDATE_KEYS = {"available", "version", "url", "can_self_update", "skipped", "info", "skip_version"}
+RELEASE_PAGE = "https://github.com/Godimas101/claude-usage-monitor/releases/tag/v2.1.0"
+NO_UPDATE = {"available": False, "version": None, "url": None, "can_self_update": False, "skipped": False,
+             "info": None, "skip_version": ""}
+
+
+def update_block(make_server: Any, info: Any) -> dict[str, Any]:
+    """The ``update`` block of /api/state when the app's info callback answers ``info``."""
+    server, _ = make_server(update_cb={"info": lambda: info})
+    return json.loads(request(server, "GET", "/api/state")[2])["update"]
+
+
+def test_the_update_block_carries_what_the_banner_needs(make_server: Any) -> None:
+    info = {"version": "2.1.0", "tag": "v2.1.0", "url": RELEASE_PAGE, "can_self_update": True, "notes": "Faster.",
+            "asset_url": "https://github.com/Godimas101/claude-usage-monitor/releases/download/v2.1.0/Setup.exe",
+            "asset_digest": "sha256:" + "a" * 64}
+    block = update_block(make_server, info)
+    assert set(block) == UPDATE_KEYS
+    assert block == {"available": True, "version": "2.1.0", "url": RELEASE_PAGE, "can_self_update": True,
+                     "skipped": False, "info": info, "skip_version": ""}
+
+
+def test_no_known_release_is_a_complete_block_of_nothing(make_server: Any) -> None:
+    assert update_block(make_server, None) == NO_UPDATE
+    server, _ = make_server(update_cb={})                    # the dev server and the tests that give no info callback
+    assert json.loads(request(server, "GET", "/api/state")[2])["update"] == NO_UPDATE
+
+
+def test_a_skipped_version_is_marked_skipped_and_a_newer_one_is_not(make_server: Any, settings: Settings) -> None:
+    settings.set("skip_version", "2.1.0")
+    skipped = update_block(make_server, {"version": "2.1.0", "url": RELEASE_PAGE})
+    assert skipped["available"] is True and skipped["skipped"] is True and skipped["skip_version"] == "2.1.0"
+    newer = update_block(make_server, {"version": "2.2.0", "url": RELEASE_PAGE})
+    assert newer["available"] is True and newer["skipped"] is False and newer["skip_version"] == "2.1.0"
+    # The banner shows when `available and not skipped`; Settings keeps its Install and Skip buttons while `available`.
+
+
+@pytest.mark.parametrize("version", ["2.1.0<script>", "2.1.0 ", " 2.1.0", "x" * 41, "", ".1.0", "2.1.0\n", "2,1", 5, None, ["2.1.0"]])
+def test_a_version_that_is_not_plain_is_not_passed_to_the_page(make_server: Any, settings: Settings, version: Any) -> None:
+    if isinstance(version, str):
+        settings.set("skip_version", version)                # even a skipped odd version is not "skipped": it is not a version
+    block = update_block(make_server, {"version": version, "url": RELEASE_PAGE})
+    assert block["version"] is None and block["skipped"] is False
+    assert block["url"] == RELEASE_PAGE                      # the address is judged on its own
+
+
+@pytest.mark.parametrize("version", ["2.1.0", "10.0.12", "3.0.0-rc.1", "2.1.0+build.5", "v2.1.0", "x" * 40])
+def test_plain_versions_pass(version: str) -> None:
+    assert server_mod.plain_version(version) == version
+
+
+@pytest.mark.parametrize("url", [
+    "javascript:alert(1)", "http://github.com/Godimas101/claude-usage-monitor/releases/tag/v2.1.0",
+    "https://evil.example/Godimas101/claude-usage-monitor", "https://github.com.evil.example/x",
+    "https://github.com@evil.example/x", "https://github.com/", "https://github.com/a b", "https://github.com/a\nb",
+    "https://github.com/x?next=https://evil.example", "https://github.com/x#frag", "https://github.com/" + "a" * 301,
+    "https://GITHUB.com/x", "//github.com/x", "", 5, None, ["https://github.com/x"],
+])
+def test_a_release_address_that_is_not_a_plain_github_page_is_not_passed_to_the_page(make_server: Any, url: Any) -> None:
+    block = update_block(make_server, {"version": "2.1.0", "url": url})
+    assert block["url"] is None and block["version"] == "2.1.0"
+
+
+@pytest.mark.parametrize(("flag", "expected"), [(True, True), (False, False), ("yes", False), (1, False), (None, False)])
+def test_only_a_real_true_means_the_update_installs_in_place(make_server: Any, flag: Any, expected: bool) -> None:
+    assert update_block(make_server, {"version": "2.1.0", "can_self_update": flag})["can_self_update"] is expected
+
+
+@pytest.mark.parametrize("info", [{}, "2.1.0", ["2.1.0"], 5, {"version": {"x": 1}}])
+def test_an_info_that_is_not_a_release_still_gives_a_complete_block(make_server: Any, info: Any) -> None:
+    block = update_block(make_server, info)
+    assert set(block) == UPDATE_KEYS and block["version"] is None and block["url"] is None
+    assert block["can_self_update"] is False and block["skipped"] is False
+
+
+def test_the_update_block_changes_the_etag_when_a_release_is_found(make_server: Any) -> None:
+    """The dashboard polls with If-None-Match: finding a release has to reach it as a new answer, not a 304."""
+    found: list[Any] = [None]
+    server, _ = make_server(update_cb={"info": lambda: found[0]})
+    first = request(server, "GET", "/api/state")[1]["etag"]
+    found[0] = {"version": "2.1.0", "url": RELEASE_PAGE}
+    status, headers, _ = request(server, "GET", "/api/state", headers={"If-None-Match": first})
+    assert status == 200 and headers["etag"] != first
+
+
+def test_the_notified_version_is_the_apps_own_business(make_server: Any, settings: Settings) -> None:
+    """The toast bookkeeping lives in the settings file, not in the API: the page can neither read nor write it."""
+    server, _ = make_server()
+    settings.set("notified_version", "2.1.0")
+    state = json.loads(request(server, "GET", "/api/state")[2])
+    assert "notified_version" not in state["settings"] and "notified_version" not in server_mod.SETTING_SPECS
+    status, body = post_json(server, "/api/settings", {"notified_version": "9.9.9"})
+    assert status == 400 and "unknown setting" in body["error"]
+    assert settings.get("notified_version") == "2.1.0"
 
 
 def test_state_theme_is_null_when_the_loader_is_missing(make_server: Any, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2641,7 +2745,7 @@ def test_dashboard_main_checks_the_position_before_the_window_is_shown(monkeypat
     fake.start = lambda: [handler() for handler in window.events.before_show] and None  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "webview", fake)
     monkeypatch.setenv(dashboard.TOKEN_ENV, "tok")
-    monkeypatch.setattr(dashboard, "_saved_bounds", lambda base, token: {"x": 9000, "y": 100, "w": 1200, "h": 780})
+    monkeypatch.setattr(dashboard, "_read_state", lambda base, token: _state_with_bounds({"x": 9000, "y": 100, "w": 1200, "h": 780}))
     monkeypatch.setattr(dashboard, "_save_bounds", lambda *a: None)
     monkeypatch.setattr(dashboard, "keep_on_screen", lambda w: checked.append(w) or True)
     assert dashboard.dashboard_main(["--dashboard", "--port", "5127"]) == 0
@@ -2664,7 +2768,7 @@ def test_dashboard_main_copes_with_a_pywebview_that_has_no_before_show(monkeypat
     fake.start = lambda: None  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "webview", fake)
     monkeypatch.setenv(dashboard.TOKEN_ENV, "tok")
-    monkeypatch.setattr(dashboard, "_saved_bounds", lambda base, token: None)
+    monkeypatch.setattr(dashboard, "_read_state", lambda base, token: None)
     assert dashboard.dashboard_main(["--dashboard", "--port", "5128"]) == 0
 
 
@@ -2673,6 +2777,94 @@ def test_geometry_uses_saved_bounds_or_the_default_size() -> None:
     saved = {"x": 10, "y": 20, "w": 1400, "h": 900}
     assert dashboard._geometry(saved) == {"x": 10, "y": 20, "width": 1400, "height": 900}
     assert dashboard._geometry({"x": 1}) == {"x": None, "y": None, "width": 1200, "height": 780}
+
+
+def _state_with_bounds(bounds: Any, bg: Any = None) -> dict[str, Any]:
+    """The part of /api/state the dashboard process reads before its window opens."""
+    state: dict[str, Any] = {"settings": {"dashboard_bounds": bounds}}
+    if bg is not None:
+        state["theme"] = {"id": "gates", "css_vars": {"--bg": bg}}
+    return state
+
+
+def test_the_saved_bounds_are_read_from_the_state_when_there_are_some() -> None:
+    bounds = {"x": 10, "y": 20, "w": 1400, "h": 900}
+    assert dashboard._saved_bounds(_state_with_bounds(bounds)) == bounds
+    for state in (None, {}, {"settings": None}, {"settings": {}}, {"settings": {"dashboard_bounds": None}},
+                  {"settings": {"dashboard_bounds": [1, 2]}}, "not a state"):
+        assert dashboard._saved_bounds(state) is None
+
+
+@pytest.mark.parametrize(("bg", "expected"), [
+    ("#f3f3f3", "#f3f3f3"),                 # Gates, light: the window must not open black and then jump to light
+    ("#202020", "#202020"),                 # Gates, dark
+    ("#0B0C22", "#0B0C22"),                 # Night City Mox
+    ("#090909", "#090909"),
+])
+def test_the_window_opens_on_the_themes_own_page_colour(bg: str, expected: str) -> None:
+    assert dashboard._window_background(_state_with_bounds(None, bg)) == expected
+
+
+@pytest.mark.parametrize("state", [
+    None, {}, "state", {"theme": None}, {"theme": {}}, {"theme": {"css_vars": None}}, {"theme": {"css_vars": {}}},
+    {"theme": {"css_vars": {"--bg": None}}}, {"theme": {"css_vars": {"--bg": 0xf3f3f3}}},
+    {"theme": {"css_vars": {"--bg": "#fff"}}},                        # pywebview's WebView2 path reads six digits
+    {"theme": {"css_vars": {"--bg": "#f3f3f3ff"}}}, {"theme": {"css_vars": {"--bg": "f3f3f3"}}},
+    {"theme": {"css_vars": {"--bg": "white"}}}, {"theme": {"css_vars": {"--bg": "rgb(1, 2, 3)"}}},
+    {"theme": {"css_vars": {"--bg": "#f3f3f3; x"}}},
+])
+def test_without_a_usable_theme_colour_the_window_keeps_the_default_background(state: Any) -> None:
+    assert dashboard._window_background(state) == dashboard.DEFAULT_BACKGROUND == "#090909"
+
+
+def _create_window_calls(monkeypatch: pytest.MonkeyPatch, state: Any, calls: list[dict[str, Any]]) -> None:
+    class Window:
+        def __init__(self) -> None:
+            self.events = FakeEvents()
+            self.native = None
+            self.x = self.y = 0
+            self.width, self.height = 1200, 780
+
+    fake = types.ModuleType("webview")
+
+    def create_window(*args: Any, **kwargs: Any) -> Window:
+        calls.append(kwargs)
+        return Window()
+
+    fake.create_window = create_window  # type: ignore[attr-defined]
+    fake.start = lambda: None  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "webview", fake)
+    monkeypatch.setenv(dashboard.TOKEN_ENV, "tok")
+    monkeypatch.setattr(dashboard, "_read_state", lambda base, token: state)
+
+
+def test_dashboard_main_gives_the_window_the_themes_page_colour(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, Any]] = []
+    _create_window_calls(monkeypatch, _state_with_bounds({"x": 1, "y": 2, "w": 1300, "h": 800}, "#f3f3f3"), calls)
+    assert dashboard.dashboard_main(["--dashboard", "--port", "5129"]) == 0
+    assert calls[0]["background_color"] == "#f3f3f3"
+    assert (calls[0]["x"], calls[0]["y"], calls[0]["width"], calls[0]["height"]) == (1, 2, 1300, 800)
+
+
+def test_dashboard_main_keeps_the_default_colour_when_the_state_cannot_be_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, Any]] = []
+    _create_window_calls(monkeypatch, None, calls)
+    assert dashboard.dashboard_main(["--dashboard", "--port", "5130"]) == 0
+    assert calls[0]["background_color"] == "#090909"
+    assert (calls[0]["width"], calls[0]["height"]) == dashboard.DEFAULT_SIZE
+
+
+def test_the_dashboard_process_reads_the_light_gates_colour_from_the_real_server(
+    make_server: Any, settings: Settings, themes_module: types.ModuleType, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End to end with the real ApiServer: the key the window reads is the one /api/state sends, for a light variant."""
+    light = dataclasses.replace(FAKE_THEMES["gates"].variants[2], colors={"bg": "#f3f3f3", "text": "#1b1b1b", "accent": "#0067c0"})
+    monkeypatch.setitem(FAKE_THEMES, "gates", dataclasses.replace(FAKE_THEMES["gates"], variants=(light,)))
+    settings.update({"theme_id": "gates", "theme_variant": "system-light"})
+    server, _ = make_server()
+    state = dashboard._read_state(f"http://127.0.0.1:{server.port}", server.token)
+    assert state is not None and dashboard._window_background(state) == "#f3f3f3"
+    assert dashboard._read_state(f"http://127.0.0.1:{server.port}", "wrong token") is None      # a 401 is "cannot be read"
 
 
 class FakePopen:
@@ -2835,7 +3027,7 @@ def test_the_job_structures_match_the_windows_layout() -> None:
 def test_a_real_job_ends_its_process_when_the_last_handle_closes() -> None:
     from usage_monitor.ui import win32
 
-    sleeper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    sleeper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], creationflags=NO_WINDOW)
     try:
         job = win32.create_kill_on_close_job()
         win32.assign_to_job(job, int(sleeper._handle))  # type: ignore[attr-defined]
@@ -2861,7 +3053,7 @@ time.sleep(120)
 
 def _pid_alive(pid: int) -> bool:
     out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
-                         capture_output=True, text=True, check=False).stdout
+                         capture_output=True, text=True, check=False, creationflags=NO_WINDOW).stdout
     return f'"{pid}"' in out
 
 
@@ -2871,7 +3063,7 @@ def test_the_dashboard_child_dies_when_the_monitor_is_killed(tmp_path: Path) -> 
     End task and taskkill /F do). Nothing gets to tear down, so only the job can end the child."""
     repo = str(Path(__file__).resolve().parents[1])
     parent = subprocess.Popen([sys.executable, "-c", _PARENT.format(repo=repo)], stdout=subprocess.PIPE,
-                              env=dict(os.environ, **REAL_PROFILE_ENV), cwd=repo)
+                              env=dict(os.environ, **REAL_PROFILE_ENV), cwd=repo, creationflags=NO_WINDOW)
     child_pid = 0
     try:
         assert parent.stdout is not None
@@ -2886,7 +3078,8 @@ def test_the_dashboard_child_dies_when_the_monitor_is_killed(tmp_path: Path) -> 
     finally:
         parent.kill()
         if child_pid:
-            subprocess.run(["taskkill", "/F", "/PID", str(child_pid)], capture_output=True, check=False)
+            subprocess.run(["taskkill", "/F", "/PID", str(child_pid)], capture_output=True, check=False,
+                           creationflags=NO_WINDOW)
 
 
 def test_launcher_reports_failure_when_the_process_cannot_start(make_server: Any, settings: Settings,
@@ -2909,7 +3102,7 @@ def test_dashboard_main_without_token_or_port_exits_2(monkeypatch: pytest.Monkey
 def test_dashboard_main_falls_back_to_the_browser_without_pywebview(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(dashboard.TOKEN_ENV, "tok")
     monkeypatch.setitem(sys.modules, "webview", None)  # importing it raises ImportError
-    monkeypatch.setattr(dashboard, "_saved_bounds", lambda base, token: None)
+    monkeypatch.setattr(dashboard, "_read_state", lambda base, token: None)
     opened: list[str] = []
     monkeypatch.setattr(dashboard.webbrowser, "open", lambda url: opened.append(url) or True)
     assert dashboard.dashboard_main(["--dashboard", "--port", "5123"]) == dashboard.EXIT_BROWSER_FALLBACK
@@ -2950,7 +3143,7 @@ def test_dashboard_main_falls_back_when_the_webview_will_not_start(monkeypatch: 
     fake.start = no_webview2  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "webview", fake)
     monkeypatch.setenv(dashboard.TOKEN_ENV, "tok")
-    monkeypatch.setattr(dashboard, "_saved_bounds", lambda base, token: {"x": 1, "y": 2, "w": 1200, "h": 780})
+    monkeypatch.setattr(dashboard, "_read_state", lambda base, token: _state_with_bounds({"x": 1, "y": 2, "w": 1200, "h": 780}))
     opened: list[str] = []
     monkeypatch.setattr(dashboard.webbrowser, "open", lambda url: opened.append(url) or True)
     assert dashboard.dashboard_main(["--dashboard", "--port", "5124"]) == dashboard.EXIT_BROWSER_FALLBACK
@@ -2969,7 +3162,7 @@ def test_dashboard_main_reports_a_failing_window_call_as_an_error(monkeypatch: p
     fake.start = lambda: pytest.fail("a window that was never created cannot be started")  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "webview", fake)
     monkeypatch.setenv(dashboard.TOKEN_ENV, "tok")
-    monkeypatch.setattr(dashboard, "_saved_bounds", lambda base, token: None)
+    monkeypatch.setattr(dashboard, "_read_state", lambda base, token: None)
     opened: list[str] = []
     monkeypatch.setattr(dashboard.webbrowser, "open", lambda url: opened.append(url) or True)
     code = dashboard.dashboard_main(["--dashboard", "--port", "5126"])
@@ -3011,7 +3204,7 @@ def test_dashboard_saves_bounds_once_on_close(monkeypatch: pytest.MonkeyPatch) -
     fake.start = run  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "webview", fake)
     monkeypatch.setenv(dashboard.TOKEN_ENV, "tok")
-    monkeypatch.setattr(dashboard, "_saved_bounds", lambda base, token: None)
+    monkeypatch.setattr(dashboard, "_read_state", lambda base, token: None)
     monkeypatch.setattr(dashboard, "_save_bounds", lambda base, token, bounds: saved.append((token, bounds)))
     assert dashboard.dashboard_main(["--dashboard", "--port", "5125"]) == 0
     assert saved == [("tok", {"x": 100, "y": 50, "w": 1400, "h": 900})]
@@ -3024,7 +3217,8 @@ def test_dashboard_child_opens_a_window_and_stays_up(tmp_path: Path, make_server
     env = dict(os.environ, **REAL_PROFILE_ENV, CUM_DASHBOARD_TOKEN=server.token, CUM_APPDATA_DIR=str(tmp_path / "app"))
     repo = str(Path(__file__).resolve().parents[1])
     child = subprocess.Popen([sys.executable, "-m", "usage_monitor.ui.dashboard", "--port", str(server.port)],
-                             env=env, cwd=repo, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                             env=env, cwd=repo, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             creationflags=NO_WINDOW)
     try:
         time.sleep(6)
         code = child.poll()
@@ -3047,7 +3241,8 @@ def test_a_dashboard_saved_off_screen_opens_on_a_screen(tmp_path: Path, make_ser
     env = dict(os.environ, **REAL_PROFILE_ENV, CUM_DASHBOARD_TOKEN=server.token, CUM_APPDATA_DIR=str(tmp_path / "app"))
     repo = str(Path(__file__).resolve().parents[1])
     child = subprocess.Popen([sys.executable, "-m", "usage_monitor.ui.dashboard", "--port", str(server.port)],
-                             env=env, cwd=repo, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                             env=env, cwd=repo, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             creationflags=NO_WINDOW)
     try:
         hwnd = None
         deadline = time.monotonic() + 25
@@ -3119,8 +3314,12 @@ results = []
 
 def probe(window):
     try:
+        # The page draws every card at once, with placeholders (section.nm-card[data-state=pending], figures marked
+        # data-pending). Measure once the cost card holds its numbers and its plan lines and nothing is pending.
         for _ in range(150):
-            if window.evaluate_js("!!document.querySelector('#cost .nm-tile')"):
+            if window.evaluate_js("!!document.querySelector('#cost .nm-tile') && "
+                                  "document.querySelectorAll('#cost .nm-plan .nm-facts span').length >= 2 && "
+                                  "!document.querySelector('.nm-grid [data-pending], .nm-grid .nm-card[data-state=pending]')"):
                 break
             time.sleep(0.2)
         for width, height in SIZES:
@@ -3154,7 +3353,7 @@ def test_overview_cards_never_clip_their_content_in_the_real_web_view(tmp_path: 
         sizes = [[1200, 780], [1200, 700], [1100, 780], [1060, 640]]
         run = subprocess.run([sys.executable, "-c", _LAYOUT_PROBE, server.url, json.dumps(sizes)], env=env,
                              cwd=str(Path(__file__).resolve().parents[1]), capture_output=True, text=True,
-                             timeout=120, check=False)
+                             timeout=120, check=False, creationflags=NO_WINDOW)
     finally:
         server.stop()
         settings.close()
@@ -3170,6 +3369,127 @@ def test_overview_cards_never_clip_their_content_in_the_real_web_view(tmp_path: 
         assert not clipped, f"{size} (page {result['vw']} x {result['vh']}): cards cut their content off: {clipped}"
         cost = next(card for card in result["cards"] if card["name"] == "cost")
         assert cost["tiles"] is not None and cost["tiles"] >= 4, f"{size}: the tile numerals touch the card edge"
+
+
+# ── No card moves when its report lands (real web view) ───────────────────────────
+
+# Runs in a child process like _LAYOUT_PROBE. For each size it loads the Cost page afresh, measures every card while the
+# reports are still held back (each one a placeholder), waits until the numbers are in and nothing moves any more, and measures
+# again. The reports are held by the test (see _hold_reports); the probe only checks that it did see placeholders.
+_SHIFT_PROBE = r"""
+import json, sys, time
+import webview
+
+URL, SIZES = sys.argv[1], json.loads(sys.argv[2])
+CARDS = '''(() => {
+  const cards = {};
+  document.querySelectorAll('#main [data-card]').forEach(card => {
+    cards[card.getAttribute('data-card')] = {state: card.getAttribute('data-state'), h: card.offsetHeight};
+  });
+  return JSON.stringify({vw: innerWidth, vh: innerHeight, cards: cards});
+})()'''
+FRESH = "!window.__shiftProbe && document.querySelectorAll('#main [data-card]').length > 0"
+SETTLED = '''(() => {
+  const cards = [...document.querySelectorAll('#main [data-card]')];
+  return cards.length > 0 && cards.every(c => c.getAttribute('data-state') === 'ready') &&
+    !document.querySelector('#main [data-pending]') && !document.getElementById('main').classList.contains('fx-run');
+})()'''
+results = []
+
+
+def ask(window, script):
+    try:
+        return window.evaluate_js(script)
+    except Exception:
+        return None                              # the page is between two documents
+
+
+def wait_for(window, script, seconds):
+    end = time.time() + seconds
+    while time.time() < end:
+        if ask(window, script):
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def probe(window):
+    try:
+        for index, (width, height) in enumerate(SIZES):
+            window.resize(width, height)
+            if index:
+                ask(window, "window.__shiftProbe = 1")           # a mark only the old document has: the new one is the page to measure
+                window.load_url(URL + "?size=%d#cost" % index)
+            if not wait_for(window, FRESH, 30):
+                raise RuntimeError("the Cost page did not draw its cards")
+            pending = json.loads(ask(window, CARDS))
+            settled = wait_for(window, SETTLED, 60)
+            time.sleep(1.5)                                      # the entrance and the arrival effects are over
+            loaded = json.loads(ask(window, CARDS))
+            results.append({"size": [width, height], "pending": pending, "loaded": loaded, "settled": settled})
+    finally:
+        print(json.dumps(results), flush=True)
+        window.destroy()
+
+
+window = webview.create_window("shift probe", URL + "#cost", width=SIZES[0][0], height=SIZES[0][1], x=-30000, y=-30000)
+try:
+    webview.start(probe, window)
+except Exception as exc:
+    print("no web view here:", type(exc).__name__, file=sys.stderr)
+    sys.exit(3)
+"""
+
+
+def _hold_reports(server: ApiServer, seconds: float) -> None:
+    """Every statistics answer waits ``seconds`` first, so a page has placeholders for that long (the real reports take 1 to
+    400 ms; a slow disk or a busy machine takes longer, which is the case the layout has to survive)."""
+    real = server._reader.read
+
+    def held(key: Any, compute: Any) -> Any:
+        time.sleep(seconds)
+        return real(key, compute)
+
+    server._reader.read = held                                   # type: ignore[method-assign]
+
+
+@ui_only
+@pytest.mark.parametrize("theme", ["nostromo/amber", "night_city/edgerun", "gates/blue-light"])
+def test_no_cost_card_changes_height_when_its_report_lands_in_the_real_web_view(tmp_path: Path, theme: str) -> None:
+    """The Fast mode card was a one line note while the report was on its way and a boxed note of three lines when it landed,
+    so it grew by 21 to 59 px and the cards below it dropped, at every window narrower than about 1260 px (a wider window
+    hides it: the row is held open by taller cards beside it, which is why a check at 1280 x 800 never saw it). The Main and
+    subagents card grew a line in a narrow window the same way, because the placeholder "0% · 0 requests" is shorter than a
+    real "97% · 2,670 requests". Measured in WebView2, the engine the dashboard really uses, in the default window and a
+    narrower one, with the reports held back for 5 s so the placeholders are what is measured first."""
+    server, settings = devserver.make_server("normal", 0, settings_dir=tmp_path / "dev", theme=theme, warm=True)
+    _hold_reports(server, 5.0)
+    server.start()
+    try:
+        env = dict(os.environ, **REAL_PROFILE_ENV, CUM_APPDATA_DIR=str(tmp_path / "app"))
+        sizes = [[1200, 780], [1000, 700]]
+        run = subprocess.run([sys.executable, "-c", _SHIFT_PROBE, server.url, json.dumps(sizes)], env=env,
+                             cwd=str(Path(__file__).resolve().parents[1]), capture_output=True, text=True,
+                             timeout=240, check=False, creationflags=NO_WINDOW)
+    finally:
+        server.stop()
+        settings.close()
+    if run.returncode == 3:
+        pytest.skip("pywebview or WebView2 is not available here")
+    assert run.returncode == 0, run.stderr[-800:]
+    measured = json.loads(run.stdout.strip().splitlines()[-1])
+    assert [result["size"] for result in measured] == sizes
+    for result in measured:
+        before, after = result["pending"]["cards"], result["loaded"]["cards"]
+        where = f"{result['size']} (page {result['pending']['vw']} x {result['pending']['vh']})"
+        assert result["settled"], f"{where}: the page did not settle: {after}"
+        assert set(before) == set(after), f"{where}: cards came or went: {sorted(set(before) ^ set(after))}"
+        assert {"by-model", "threads", "fast"} <= set(before)
+        assert all(before[key]["state"] == "pending" for key in ("by-model", "threads", "fast")), \
+            f"{where}: the page was not measured while it waited for its reports: {before}"
+        assert all(card["state"] == "ready" for card in after.values()), f"{where}: {after}"
+        moved = {key: (before[key]["h"], after[key]["h"]) for key in before if abs(before[key]["h"] - after[key]["h"]) > 1}
+        assert not moved, f"{where}: cards changed height when their report landed (placeholder, then real): {moved}"
 
 
 # ── Dev server and the fake state ──────────────────────────────────────────────────
@@ -3241,7 +3561,7 @@ def test_devserver_process_answers_on_loopback(tmp_path: Path) -> None:
     env = dict(os.environ, **REAL_PROFILE_ENV, CUM_APPDATA_DIR=str(tmp_path / "dev"))
     child = subprocess.Popen([sys.executable, "-m", "usage_monitor.ui.devserver", "--port", str(port),
                               "--scenario", "warning"], env=env, cwd=str(Path(__file__).resolve().parents[1]),
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=NO_WINDOW)
     try:
         deadline = time.monotonic() + 20
         page = b""

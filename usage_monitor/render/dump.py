@@ -57,6 +57,12 @@ STATE_NAMES: tuple[str, ...] = (
     "paused", "rate_limited", "no_credentials", "loading",
 )
 
+# The not-live states again, with the scoped (Fable) row the live data would still carry: the second
+# and third of these are what a widget shows when the sign-in was lost or the network is down on an
+# account that has the row. dump_frames() renders them with the rest, the contact sheet leaves them out.
+SCOPED_STATE_NAMES: tuple[str, ...] = ("stale3", "offline3", "paused3", "rate_limited3")
+DUMP_STATE_NAMES: tuple[str, ...] = STATE_NAMES + SCOPED_STATE_NAMES
+
 _SAMPLE_VALUES: dict[str, tuple[float, float]] = {
     # state -> (session percent, weekly percent); fable is derived below
     "normal3": (13, 2), "normal2": (13, 2), "warning": (78, 21), "critical": (93, 58),
@@ -70,7 +76,9 @@ def sample_state(name: str, now: datetime = SAMPLE_NOW) -> MonitorState | None:
         return None
     if name == "no_credentials":
         return _state(now, ApiStatus.NO_CREDENTIALS, None, 0)
-    session, weekly = _SAMPLE_VALUES[name]
+    scoped = name in SCOPED_STATE_NAMES
+    kind = name[:-1] if scoped else name       # "stale3" is "stale" with the third row
+    session, weekly = _SAMPLE_VALUES[kind]
     limits = [
         Limit(kind="session", group="session", percent=session, severity=None,
               resets_at=now + timedelta(hours=3, minutes=27), is_active=True, label="SESSION",
@@ -79,8 +87,8 @@ def sample_state(name: str, now: datetime = SAMPLE_NOW) -> MonitorState | None:
               resets_at=now + timedelta(days=3, hours=0, minutes=0), is_active=True, label="WEEKLY",
               window_seconds=604800),
     ]
-    if name in ("normal3", "warning", "critical"):
-        fable = {"normal3": 0.0, "warning": 4.0, "critical": 12.0}[name]
+    if scoped or name in ("normal3", "warning", "critical"):
+        fable = {"normal3": 0.0, "warning": 4.0, "critical": 12.0}.get(name, 4.0)
         limits.append(Limit(
             kind="weekly_scoped", group="weekly", percent=fable, severity=None,
             resets_at=now + timedelta(days=3), is_active=True, label="FABLE WEEKLY",
@@ -90,8 +98,8 @@ def sample_state(name: str, now: datetime = SAMPLE_NOW) -> MonitorState | None:
         "normal3": ApiStatus.LIVE, "normal2": ApiStatus.LIVE, "warning": ApiStatus.LIVE,
         "critical": ApiStatus.LIVE, "stale": ApiStatus.STALE, "offline": ApiStatus.OFFLINE,
         "paused": ApiStatus.PAUSED, "rate_limited": ApiStatus.RATE_LIMITED,
-    }[name]
-    age = {"stale": 41 * 60, "offline": 2 * 60, "rate_limited": 6 * 60}.get(name, 12)
+    }[kind]
+    age = {"stale": 41 * 60, "offline": 2 * 60, "rate_limited": 6 * 60}.get(kind, 12)
     return _state(now, status, limits, age)
 
 
@@ -138,14 +146,14 @@ def dump_frames(
     """Render every theme x variant x state x scale. Returns what was written.
 
     themes: theme ids or loaded theme objects; None means every shipped theme.
-    variants, states, scales: optional filters (ids, STATE_NAMES entries, scale factors).
+    variants, states, scales: optional filters (ids, DUMP_STATE_NAMES entries, scale factors).
     """
     out = Path(out_dir)
     loaded = load_theme_objects()
     selected = _select_themes(loaded, themes)
     variant_filter = None if variants is None else set(variants)
-    state_names = STATE_NAMES if states is None else tuple(states)
-    unknown = set(state_names) - set(STATE_NAMES)
+    state_names = DUMP_STATE_NAMES if states is None else tuple(states)
+    unknown = set(state_names) - set(DUMP_STATE_NAMES)
     if unknown:
         raise KeyError(f"unknown dump state(s): {', '.join(sorted(unknown))}")
     scale_values = SCALES if scales is None else tuple(float(s) for s in scales)

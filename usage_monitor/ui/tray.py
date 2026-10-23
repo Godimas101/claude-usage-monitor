@@ -259,13 +259,19 @@ class TrayIcon:
         return self._modify_with(self._data(flags | win32.NIF_MESSAGE))
 
     def _modify_with(self, data: win32.NOTIFYICONDATAW) -> bool:
+        """Apply ``data`` to the icon. True only when the shell accepted that change.
+
+        A refused change usually means the shell lost the icon (Explorer restarted) or was busy, so the icon is added
+        again and the same change is tried once more. Re-adding alone is not success: it brings the icon back without
+        the balloon, the tooltip or the artwork this call carried, and a caller that raised a toast (``notify``) must
+        not be told it was shown when nobody saw it."""
         if not self._added:
             return self.ensure_added() and self._modify_with(data)
         if win32.Shell_NotifyIconW(win32.NIM_MODIFY, ctypes.byref(data)):
             return True
         log.debug("NIM_MODIFY failed (%s); adding the icon again", win32.error_text())
         self._added = False
-        return self.ensure_added()
+        return self.ensure_added() and bool(win32.Shell_NotifyIconW(win32.NIM_MODIFY, ctypes.byref(data)))
 
     # ── Artwork ──
 

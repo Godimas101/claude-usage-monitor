@@ -497,7 +497,8 @@ def test_the_devserver_process_serves_a_database_copy_with_a_theme(tmp_path: Pat
     child = subprocess.Popen(
         [sys.executable, "-m", "usage_monitor.ui.devserver", "--port", str(port), "--db", str(path),
          "--theme", "gates/blue-light"],
-        env=env, cwd=str(Path(__file__).resolve().parents[1]), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        env=env, cwd=str(Path(__file__).resolve().parents[1]), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))        # python is a console program: no window
     try:
         deadline = time.monotonic() + 30
         page = b""

@@ -1322,6 +1322,117 @@ def test_the_icon_keeps_retrying_until_the_shell_accepts_it(host, tray, monkeypa
     assert tray._retry_timer is None
 
 
+# A toast the shell never showed is not a toast that was shown. These need no window: a host double and a notification
+# area double stand in for the real ones, so they run in the plain suite.
+
+class _ToastHost:
+    """The part of UIHost that TrayIcon uses; everything runs inline on the calling thread."""
+
+    hwnd = 0
+
+    def __init__(self):
+        self.timers = {}
+        self._next = 1
+
+    def on_ui_thread(self):
+        return True
+
+    def post(self, fn):
+        fn()
+
+    def add_message_handler(self, msg, fn):
+        return lambda: None
+
+    def on_taskbar_created(self, cb):
+        return lambda: None
+
+    def on_display_change(self, cb):
+        return lambda: None
+
+    def on_settings_change(self, cb):
+        return lambda: None
+
+    def add_cleanup(self, fn):
+        return lambda: None
+
+    def set_timer(self, ms, fn, repeat=True):
+        self._next += 1
+        self.timers[self._next] = fn
+        return self._next
+
+    def kill_timer(self, timer_id):
+        self.timers.pop(timer_id, None)
+
+
+class _NotificationArea:
+    """One notification-area icon behind Shell_NotifyIconW. A balloon is shown only when the shell accepts a NIM_MODIFY
+    that carries NIF_INFO for an icon it holds; ``refuse_balloons`` makes it refuse that many such calls first (Explorer
+    busy or restarting), and ``dead`` makes it refuse everything."""
+
+    def __init__(self):
+        self.has_icon = False
+        self.refuse_balloons = 0
+        self.dead = False
+        self.balloons = []
+
+    def __call__(self, message, data_ref):
+        data = data_ref._obj
+        if self.dead:
+            return False
+        if message == win32.NIM_ADD:
+            if self.has_icon:
+                return False
+            self.has_icon = True
+            return True
+        if message == win32.NIM_MODIFY:
+            if not self.has_icon:
+                return False
+            if data.uFlags & win32.NIF_INFO:
+                if self.refuse_balloons:
+                    self.refuse_balloons -= 1
+                    return False
+                self.balloons.append(data.szInfo)
+            return True
+        if message == win32.NIM_DELETE:
+            self.has_icon = False
+        return message in (win32.NIM_SETVERSION, win32.NIM_DELETE)
+
+
+def _toast_tray(monkeypatch, area):
+    monkeypatch.setattr(win32, "Shell_NotifyIconW", area)
+    icon = TrayIcon(_ToastHost(), "CUM test (dev)", None, None)
+    assert icon.added and area.has_icon
+    return icon
+
+
+@pytest.mark.parametrize(("setup", "shown", "balloons"), [
+    pytest.param({}, True, 1, id="the shell shows it"),
+    pytest.param({"has_icon": False}, True, 1, id="explorer restarted: icon added again, toast sent again"),
+    pytest.param({"refuse_balloons": 1}, True, 1, id="the shell was busy once: the second try is shown"),
+    pytest.param({"refuse_balloons": 2}, False, 0, id="the shell refuses the toast even after the icon is added again"),
+    pytest.param({"dead": True}, False, 0, id="the shell refuses everything"),
+])
+def test_notify_says_true_only_when_the_shell_took_the_balloon(monkeypatch, setup, shown, balloons):
+    area = _NotificationArea()
+    icon = _toast_tray(monkeypatch, area)
+    for name, value in setup.items():
+        setattr(area, name, value)
+    assert icon.notify("Claude Usage Monitor v2.1.0 is available", "Open the tray menu or the dashboard to update") is shown
+    assert len(area.balloons) == balloons
+    icon.remove()
+
+
+def test_a_lost_toast_leaves_the_icon_in_place_and_the_next_toast_can_be_shown(monkeypatch):
+    """The icon is re-added whether or not the retried toast was accepted, so a later notify() (the app tries again at the
+    next state) reaches an icon that is there."""
+    area = _NotificationArea()
+    icon = _toast_tray(monkeypatch, area)
+    area.refuse_balloons = 2
+    assert icon.notify("T", "B") is False and icon.added and area.has_icon
+    assert icon.notify("T", "B") is True and len(area.balloons) == 1
+    icon.remove()
+
+
 def shell_message(host, event, x=0, y=0, icon_id=1):
     """Deliver one NOTIFYICON_VERSION_4 callback message to the controller, as the shell would."""
     return win32.SendMessageW(

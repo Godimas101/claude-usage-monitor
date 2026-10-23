@@ -1231,7 +1231,8 @@ def test_by_folder_groups_real_git_worktrees_with_their_repository(tmp_path, mon
 
     def git(*args: str) -> None:
         subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.com",
-                        "-c", "commit.gpgsign=false", *args], check=True, capture_output=True)
+                        "-c", "commit.gpgsign=false", *args], check=True, capture_output=True,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))     # git is a console program: no window
 
     git("init", "-q")
     git("commit", "-q", "--allow-empty", "-m", "first")

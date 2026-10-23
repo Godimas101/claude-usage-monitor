@@ -22,7 +22,7 @@ Privacy, everywhere: never print, store or log message text, prompts, file conte
 | `usage_monitor/ui/` | Win32 layer (ctypes, no Tk): host, layered windows, widgets, tray, menu, server, dashboard |
 | `usage_monitor/render/` | Pillow renderers: view model, drawing engine, one skin per theme |
 | `usage_monitor/themes/` | Theme tokens (`<id>.json`) and their loader |
-| `usage_monitor/webui/` | Dashboard HTML/CSS/JS and the bundled OFL fonts (the Pillow skins read them too) |
+| `usage_monitor/webui/` | Dashboard HTML/CSS/JS, the motion layer (`motion.js`, `motion.css`, `themes/<id>.motion.css`) and the bundled OFL fonts (the Pillow skins read them too) |
 | `update_check.py`, `version.py` | GitHub release check and self-update; version read from `VERSION` |
 | `tests/` | pytest, offline, synthetic fixtures only |
 
@@ -47,6 +47,11 @@ strip, tooltip, tray icon) plus a **pywebview dashboard** (WebView2) served by a
 
 Tokens live in `usage_monitor/themes/<id>.json` and feed both the Pillow skins and the dashboard CSS.
 Settings: `theme_id`, `theme_variant`, `theme_mode`, `reduce_motion`. Theme changes apply live.
+
+**Motion** is part of each theme: the dashboard's page entrances, placeholders and boots (`webui/motion.js` plus the
+theme's `.motion.css` and script, see `docs/UI_ARCHITECTURE.md` "Motion") and the desktop widgets' hover response
+(`hover_frames` in the skins). Everything that moves obeys `reduce_motion`, `prefers-reduced-motion` and, for the widgets,
+Windows' own animation switch. A new effect that does not is a bug.
 
 - **Nostromo** (default): amber phosphor on CRT black, the shipped identity — *preserve it*. Variants
   amber (default), green, white, red, blue, cyan, orange, purple. The only theme whose widgets blink
@@ -93,10 +98,23 @@ python main.py            (console: Ctrl+C quits, errors print)     or    launch
 - `CUM_UI_TESTS=1 python -m pytest` — adds the tests that create real windows, tray icons or
   processes. They need an interactive desktop, park widgets off-screen and use a fake data service.
   A new test that opens a window, a tray icon or a process must be gated the same way.
-- The dashboard scripts (`app.js`, `charts.js`) are tested by running them under node:
-  `tests/webui_checks.js` loads them with a fake DOM and the test hook at the end of `app.js`, and
-  `tests/test_webui.py` asserts on what they return. They start node, so they are gated with
-  `CUM_UI_TESTS=1`; `tests.yml` runs that file once more with it set, so CI covers them.
+- The dashboard scripts (`app.js`, `charts.js`, `motion.js`) are tested by running them under node:
+  `tests/webui_checks.js` loads `charts.js` and `app.js` with a fake DOM and the test hook at the end of `app.js`, and
+  `tests/test_webui.py` asserts on what they return; `tests/test_motion.py` runs `motion.js` on its own fake DOM and
+  checks the motion stylesheets, and runs each theme script with no `motion.js` (`tests/theme_scripts_checks.js`). They
+  start node, so they are gated with `CUM_UI_TESTS=1`; `tests.yml` runs both files once more with it set, so CI covers them.
+  A check that reads a script's source for a phrase proves the phrase is there, not that the script works: where the claim
+  is behaviour, run the script.
+- **No test opens a console window.** A console program started by a process that has no console (pytest run from an
+  editor, a task runner or an agent) gets a visible terminal window of its own. A test that starts `git`, `node`,
+  `python`, `cmd` or anything else passes `creationflags=subprocess.CREATE_NO_WINDOW`; `os.system` and `os.popen` are
+  never used. Two layers keep it so. At run time, `tests/conftest.py` installs `tests/console_guard.py` for the whole
+  session: every `subprocess.Popen` that is started without the flag is refused, and the test that was running fails even if
+  the code under test swallowed the error (this covers the code a test calls, not only the test's own lines). In the source,
+  `test_no_test_starts_a_console_program_without_the_flag` parses every `tests/*.py` and resolves aliases
+  (`import subprocess as sp`, `from subprocess import run as go`, `asyncio.create_subprocess_exec`) to find a start that
+  forgets it. To check a run by eye, sample the top-level windows during it: on Windows Terminal the class to count is
+  `CASCADIA_HOSTING_WINDOW_CLASS` as well as `ConsoleWindowClass`.
 
 ## DELETE ME/ convention
 
