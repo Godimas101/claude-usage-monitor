@@ -5,9 +5,10 @@ Code, so a long or parallel run (a multi-agent workflow, a big fan-out) can pace
 burning through the 5-hour session or the week before the reset.
 
 Every way in reads the same thing: `%APPDATA%\ClaudeUsageMonitor\state.json`, which the running app
-rewrites whenever the reading changes (a new fetch, a change of status or burn rate), and at
-least every 15 minutes. All of them are read-only, cost no model
-tokens, and never show the sign-in token.
+rewrites whenever the reading changes (a new fetch, or a change of status or of burn velocity), and at
+least every 15 minutes. All of them are read-only and make no model request of their own. What they
+return joins the conversation (about 100 tokens for the hook line, a few hundred for a tool call),
+and none of them shows the sign-in token.
 
 | Way in | What it does | Set up with |
 |---|---|---|
@@ -37,11 +38,20 @@ Claude plan usage (Max 5x, reading from 2m ago): session 30%, resets in 1h 50m (
 Times are local. "An even pace" is the share of the window that has passed: 80% used when 41% of
 the week has gone is 39 points ahead of it.
 
+For unattended runs, allow the tool so that it never stops at a permission prompt: add
+`"mcp__claude-usage__get_plan_usage"` to `permissions.allow` in your settings. Installing a monitor
+update closes the server; reconnect it with `/mcp`, or start a new session.
+
 ## Hooks
 
 Hooks go in your user settings, `C:\Users\<you>\.claude\settings.json`, under `"hooks"`. Each entry
 below starts the exe directly with its arguments (the `args` form), so no shell is involved and the
 spaces in the path need no quoting.
+
+The `args` form needs **Claude Code 2.1.139 or newer** (check with `claude --version`, update with
+`claude update`). An older build ignores `args` and starts the bare exe, which opens the dashboard on
+every hook call. The VS Code extension and the `claude` in your terminal can be different versions,
+and both read this file, so check both.
 
 ```json
 {
@@ -53,7 +63,7 @@ spaces in the path need no quoting.
             "type": "command",
             "command": "C:/Users/<you>/AppData/Local/ClaudeUsageMonitor/ClaudeUsageMonitor.exe",
             "args": ["--hook", "--always"],
-            "timeout": 20
+            "timeout": 30
           }
         ]
       }
@@ -78,7 +88,7 @@ spaces in the path need no quoting.
             "type": "command",
             "command": "C:/Users/<you>/AppData/Local/ClaudeUsageMonitor/ClaudeUsageMonitor.exe",
             "args": ["--gate", "--session", "95", "--weekly", "85"],
-            "timeout": 30
+            "timeout": 45
           }
         ]
       }
@@ -123,12 +133,15 @@ The exit code is 1 when there is no reading at all.
   fresher numbers. `usage_fetched_at` in the reading says when it was taken.
 - **While the screen is locked**, the app normally pauses. When a Claude session has asked for the
   usage in the last hour, it keeps polling instead, because a locked screen is when unattended runs
-  happen. A reader that finds a paused reading waits up to 15 seconds for the app to wake up.
-- **When the app is closed**, `--status`, the MCP tool and the gate ask the usage API once
-  themselves and keep the answer in `state.json` for two minutes, so the callers in that time share
-  it. The session's rate of climb is then left out. It comes from the history the running app keeps.
-- A reading is marked **stale** when it is older than 30 minutes, or older than two poll intervals
-  if those are longer.
+  happen. A reader that finds a paused reading older than a poll interval waits up to 15 seconds
+  (the gate, 5) for the app to wake up and fetch.
+- **When there is no current reading** (the app is closed, or an older version is running),
+  `--status`, the MCP tool, the gate and the SessionStart hook ask the usage API themselves, one at a
+  time: the others wait for that answer, and it is kept in `state.json` for two minutes so that the
+  callers in that time share it. The burn rate is then left out (it comes from the transcripts the
+  running app reads). The pace still uses the history the app stored while it ran.
+- A reading is marked **stale** when it is older than 30 minutes, or than two poll intervals plus a
+  minute when that is longer.
 
 ## state.json
 
@@ -157,10 +170,12 @@ These modes only read. They write only small files in the app data folder:
 - `agent-demand`, an empty file whose date says when a session last asked.
 - `hook-seen.json`, which records which steps the hook has already reported, per session ID, for
   seven days.
+- `state.lock`, an empty file that lets one reader at a time ask the usage API.
 - `agent.log`, warnings only.
 
 No prompt, transcript text, file content or token goes into any of them. On a quiet machine they
 add a few small writes an hour: `state.json` only changes with the reading, and the demand file
-is renewed at most every 5 minutes. When the app is closed,
-the one request a reader makes is the same usage request the app makes, with the same sign-in, to
-`api.anthropic.com`.
+is renewed at most every 5 minutes. When there is no current
+reading, the request a reader makes is the same usage request the app makes, with the same sign-in,
+to `api.anthropic.com`. With the app closed, a reader also opens `usage.db` to work out the pace,
+and creates it if it is missing.

@@ -2,8 +2,8 @@
 
 Claude Code starts it as ``ClaudeUsageMonitor.exe --mcp``. Messages are JSON-RPC 2.0, one per
 line, as the MCP stdio transport defines. Only replies go to stdout; anything worth logging goes
-to agent.log. The tool reads the status file (agent/status.py), so a call costs no model tokens
-and, while the app runs, no request of its own.
+to agent.log. The tool reads the status file (agent/status.py), so serving a call needs no model
+request and, while the app has a current reading, no usage request either.
 """
 from __future__ import annotations
 
@@ -51,8 +51,11 @@ def serve(stdin: BinaryIO, stdout: BinaryIO, *, folder: Path, clock: Callable[[]
             continue
         try:
             message = json.loads(line)
-        except ValueError:
+        except (ValueError, RecursionError):  # nesting too deep to parse counts as bad JSON
             _send(stdout, _error(None, _PARSE_ERROR, "Parse error"))
+            continue
+        if message == []:
+            _send(stdout, _error(None, _INVALID_REQUEST, "Invalid Request"))
             continue
         batch = message if isinstance(message, list) else [message]
         replies = [reply for reply in (handle(item, folder=folder, clock=clock, app_version=app_version)
@@ -68,7 +71,11 @@ def handle(message: Any, *, folder: Path, clock: Callable[[], datetime], app_ver
         return _error(message.get("id") if isinstance(message, dict) else None, _INVALID_REQUEST,
                       "Invalid Request")
     method = message.get("method")
-    if "id" not in message or not isinstance(method, str):
+    if not isinstance(method, str):
+        if "result" in message or "error" in message or "id" not in message:
+            return None  # a response to a request this server never sends, or a broken notification
+        return _error(message["id"], _INVALID_REQUEST, "Invalid Request")
+    if "id" not in message:  # a notification: no reply
         return None
     msg_id = message["id"]
     params = message.get("params") if isinstance(message.get("params"), dict) else {}

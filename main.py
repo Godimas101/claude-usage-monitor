@@ -31,6 +31,8 @@ import version
 
 DASHBOARD_LOG = "dashboard.log"
 AGENT_LOG = "agent.log"             # --status, --hook, --gate and --mcp: many can run at once, beside the app
+AGENT_KINDS = ("status", "hook", "gate", "mcp")
+HOOK_KINDS = ("hook", "gate")       # Claude Code hooks: exit 0 whatever happens, never blocking a prompt or a tool
 FAULT_LOG = "faults.log"
 UNKNOWN_VERSION = "0.0.0"           # what version.py reports when it cannot read the VERSION file
 _fault_file: IO[str] | None = None  # faulthandler needs its file open for the life of the process
@@ -202,7 +204,7 @@ def _agent(command: Command) -> int:
 
     setup_logging("WARNING", path=paths.app_data_dir() / AGENT_LOG)
     if sys.stdout is None:  # a windowed build started without a pipe has nowhere to answer
-        return 1
+        return 0 if command.kind in HOOK_KINDS else 1
     out = sys.stdout.buffer
     stdin = sys.stdin.buffer if sys.stdin is not None else None
     folder = paths.app_data_dir()
@@ -236,7 +238,7 @@ def run_command(command: Command, argv: Sequence[str]) -> int:
         return _dump_frames(command.path or "")
     if command.kind == "smoke_test":
         return _smoke_test(command.seconds, command.path or "")
-    if command.kind in ("status", "hook", "gate", "mcp"):
+    if command.kind in AGENT_KINDS:
         return _agent(command)
     return _app()
 
@@ -274,7 +276,7 @@ def _log_crash(kind: str) -> None:
     try:
         from usage_monitor.log import get_logger, setup_logging
 
-        if kind != "dashboard":  # the dashboard set up its own log file already
+        if kind != "dashboard" and kind not in AGENT_KINDS:  # these set up their own log file already
             setup_logging()
         get_logger("main").critical("unhandled exception in the %s command", kind, exc_info=True)
     except Exception:  # nothing else can be done when logging itself fails
@@ -294,7 +296,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 130
     except Exception:
         _log_crash(command.kind)
-        return 1
+        return 0 if command.kind in HOOK_KINDS else 1
 
 
 if __name__ == "__main__":

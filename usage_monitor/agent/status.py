@@ -22,7 +22,7 @@ import os
 import sys
 import tempfile
 import time
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from ctypes import wintypes
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,6 +36,7 @@ log = get_logger(__name__)
 SCHEMA = 1
 STATUS_NAME = "state.json"
 DEMAND_NAME = "agent-demand"
+LOCK_NAME = "state.lock"      # one reader at a time asks the API; the OS frees it when its holder dies
 SOURCE_MONITOR = "monitor"    # written by the running app after a data cycle
 SOURCE_CLI = "cli"            # written by --status or --mcp after a request of their own
 FRESH_S = 120.0               # with the app closed, a reading this young is reused, not fetched again
@@ -44,6 +45,7 @@ DEMAND_TOUCH_S = 5 * 60       # readers renew the demand at most this often: a s
 REFRESH_S = 15 * 60           # the app rewrites an unchanged reading at most this often
 STALE_FLOOR_S = 30 * 60       # a reading is stale past this, or past two poll intervals when longer
 WAIT_S = 15.0                 # how long a reader waits for a monitor that a locked screen paused
+FETCH_LOCK_S = 25.0           # how long a reader waits for another reader's request (a request can take 20 s)
 PAUSED = "paused"             # ApiStatus.PAUSED.value
 _HEALTHY = frozenset({"live", PAUSED})  # the app's statuses that mean it is not failing to fetch
 MUTEX_NAME = "Global\\ClaudeUsageMonitor"   # app.MUTEX_NAME (app.py is too heavy to import here)
@@ -235,18 +237,64 @@ def current(folder: Path, *, now: datetime, fetch: bool, wait_s: float = 0.0, ap
     touch_demand(folder)
     path = folder / STATUS_NAME
     doc = read(path)
-    if running and wait_s > 0 and doc is not None and doc.get("status") == PAUSED:
+    if running and wait_s > 0 and _worth_waiting(doc, now):
         doc = _await_cycle(path, doc, wait_s)
     if running and doc is not None and (not is_stale(doc, now) or _app_is_retrying(doc)):
         return doc, True
     if not fetch or _reusable(doc, now):
         return doc, running
-    doc = fetch_once(now, previous=doc, app_version=app_version)
-    try:
-        write(doc, path)
-    except OSError as exc:  # the answer is still good for this caller
-        log.warning("could not keep the usage reading in %s (%s)", path, type(exc).__name__)
+    with _fetch_lock(folder) as held:
+        latest = read(path)  # another reader may have asked while this one waited for the lock
+        if not held or _reusable(latest, now):
+            return latest or doc, running
+        doc = fetch_once(now, previous=latest or doc, app_version=app_version)
+        newer = read(path)
+        if _newer(newer, doc):  # the app wrote a later reading during the request: never write over it
+            return newer, running
+        try:
+            write(doc, path)
+        except OSError as exc:  # the answer is still good for this caller
+            log.warning("could not keep the usage reading in %s (%s)", path, type(exc).__name__)
     return doc, running
+
+
+@contextlib.contextmanager
+def _fetch_lock(folder: Path) -> Iterator[bool]:
+    """Yields True once this process holds the fetch lock, or False after FETCH_LOCK_S without it.
+
+    A byte-range lock that Windows releases when its holder exits or is killed, as Claude Code does
+    to a hook at its timeout, so no stale lock file can block the others. Elsewhere it is a no-op.
+    """
+    if sys.platform != "win32":
+        yield True
+        return
+    import msvcrt
+
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        fd = os.open(folder / LOCK_NAME, os.O_RDWR | os.O_CREAT)
+    except OSError:  # an unwritable folder: ask anyway, as before the lock existed
+        yield True
+        return
+    try:
+        deadline = time.monotonic() + FETCH_LOCK_S
+        while True:
+            try:
+                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    yield False
+                    return
+                time.sleep(0.05)
+        try:
+            yield True
+        finally:
+            os.lseek(fd, 0, os.SEEK_SET)
+            with contextlib.suppress(OSError):
+                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+    finally:
+        os.close(fd)
 
 
 def fetch_once(now: datetime, *, previous: Mapping[str, Any] | None, app_version: str = "") -> dict:
@@ -295,12 +343,33 @@ def _pacing(usage: UsageSnapshot, now: datetime) -> dict:
 
 
 def _reusable(doc: Mapping[str, Any] | None, now: datetime) -> bool:
-    """With the app closed: whether ``doc`` is young enough to answer without asking the API."""
+    """With the app closed: whether ``doc`` is young enough to answer without asking the API.
+
+    A document written after ``now`` counts as young: a reader that waited for the fetch lock
+    holds a ``now`` from before the wait.
+    """
     if not doc:
         return False
     stamp = doc.get("written_at") if doc.get("source") == SOURCE_CLI else doc.get("usage_fetched_at")
     age = _age_s(stamp, now)
-    return age is not None and 0 <= age < FRESH_S
+    return age is not None and -FRESH_S <= age < FRESH_S
+
+
+def _newer(candidate: Mapping[str, Any] | None, doc: Mapping[str, Any]) -> bool:
+    """Whether ``candidate`` holds a later reading than ``doc``."""
+    if not candidate:
+        return False
+    theirs, ours = parse_time(candidate.get("usage_fetched_at")), parse_time(doc.get("usage_fetched_at"))
+    return theirs is not None and (ours is None or theirs > ours)
+
+
+def _worth_waiting(doc: Mapping[str, Any] | None, now: datetime) -> bool:
+    """A paused reading older than a poll interval: the app, woken by the demand, will fetch a newer one."""
+    if not doc or doc.get("status") != PAUSED:
+        return False
+    age = _age_s(doc.get("usage_fetched_at"), now)
+    poll = doc.get("poll_interval_s")
+    return age is None or age >= (poll if isinstance(poll, (int, float)) and poll > 0 else REFRESH_S)
 
 
 def _app_is_retrying(doc: Mapping[str, Any]) -> bool:
@@ -361,11 +430,13 @@ def _session_text(entry: Any, now: datetime) -> str:
     if not isinstance(entry, Mapping) or entry.get("percent") is None:
         return ""
     text = f"session {_pct(entry['percent'])}{_reset_text(entry, now)}"
+    if _ended(entry, now):  # what the reading said about a window that is over no longer holds
+        return text
     verdict = entry.get("verdict")
     limit_at = parse_time(entry.get("projected_limit_at"))
     if verdict == "LIMITED":
         text += ", LIMIT REACHED"
-    elif verdict == "AT_RISK" and limit_at is not None:
+    elif verdict == "AT_RISK" and limit_at is not None and limit_at > now:
         text += f", at this rate the limit is hit {when(limit_at, now)}"
     elif verdict == "SAFE":
         text += ", safe at this rate"
@@ -376,6 +447,8 @@ def _window_text(name: str, entry: Any, now: datetime) -> str:
     if not isinstance(entry, Mapping) or entry.get("percent") is None:
         return ""
     text = f"{name} {_pct(entry['percent'])}{_reset_text(entry, now)}"
+    if _ended(entry, now):
+        return text
     delta = entry.get("pace_delta_pp")
     if entry.get("percent", 0) >= 100:
         text += ", LIMIT REACHED"
@@ -386,9 +459,15 @@ def _window_text(name: str, entry: Any, now: datetime) -> str:
     elif entry.get("verdict") == "ON_PACE":
         text += ", on an even pace"
     limit_at = parse_time(entry.get("projected_limit_at"))
-    if limit_at is not None:
+    if limit_at is not None and limit_at > now:
         text += f", at its average pace so far 100% is reached {when(limit_at, now)}"
     return text
+
+
+def _ended(entry: Mapping[str, Any], now: datetime) -> bool:
+    """Whether the window of ``entry`` has reset since the reading."""
+    resets = parse_time(entry.get("resets_at"))
+    return resets is not None and resets <= now
 
 
 def _reset_text(entry: Mapping[str, Any], now: datetime) -> str:

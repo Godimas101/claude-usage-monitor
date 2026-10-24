@@ -38,7 +38,7 @@ A free Windows tray utility that keeps your **Claude Code plan usage** where you
 | 🎨 | **Three themes**, switched live: Nostromo, Night City and Gates, each with motion of its own. |
 | 🤖 | **Claude can check it too:** an MCP tool, `get_plan_usage`, and optional Claude Code hooks let a long run see how much of the plan is left, and stop launching agents past a cap you set. [Set it up](docs/AGENT_HOOK.md). |
 | 🔒 | **All local.** No account, no telemetry, no server of ours. The only network calls are listed [below](#-privacy). |
-| 😴 | **Polite:** it pauses while your screen is locked, hides the strip while a fullscreen app runs, and only redraws when something changes. **Reduce motion** stops every animation, and the dashboard and the widgets' pointer response also follow Windows' own animation setting. |
+| 😴 | **Polite:** it pauses while your screen is locked (unless a Claude session asked for the usage in the last hour), hides the strip while a fullscreen app runs, and only redraws when something changes. **Reduce motion** stops every animation, and the dashboard and the widgets' pointer response also follow Windows' own animation setting. |
 
 ## 🎨 Themes
 
@@ -131,7 +131,7 @@ Native Windows 11 Fluent surfaces: rounded cards, a thin time rail above every u
 
 Each usage bar comes with a thin **time line**: how much of that window has already passed. A bar ahead of its line means you are using the window faster than an even pace. The pace verdict is **on pace** while usage is within 10 points of the clock, **ahead** when it leads by more than that, and **behind** (some themes say *under pace*) when it trails by more. Bars turn to *warning* at 75% and *critical* at 90%, unless the usage API reports its own severity. A scoped limit (such as Fable) gets its own row once it is in use, and **Scoped rows** in Settings can force it on or off. (On Gates the floating widget grows by a row for each scoped limit it shows.) The strip and the tray icon mark every state apart: sign-in lost, offline, rate limited and paused each get a mark of their own in every theme.
 
-**Screen lock.** While your workstation is locked or a screensaver runs, the monitor stops asking the API (the status reads **PAUSED**), and a locked screen stops the animations too. When you come back it refreshes at once.
+**Screen lock.** While your workstation is locked or a screensaver runs, the monitor stops asking the API (the status reads **PAUSED**), and a locked screen stops the animations too. When you come back it refreshes at once. The exception: if a Claude session asked for the usage in the last hour, the monitor keeps asking, so unattended runs see fresh numbers.
 
 ## 🖥️ Dashboard
 
@@ -151,7 +151,8 @@ There is also an **About** page with the version, credits and links. An older `#
 ## 🤖 For Claude sessions
 
 Long runs, such as multi-agent workflows, can burn through a session or a week before anyone
-notices. The monitor shares what it knows with Claude Code, read-only and at no model-token cost:
+notices. The monitor shares what it knows with Claude Code, read-only and with no model request of
+its own (a hook line adds about 100 tokens to the conversation, a tool call a few hundred):
 
 - **`get_plan_usage`**, an MCP tool Claude can call between steps. It returns each limit's
   percent, reset time and pace, the projected time to the limit and the burn rate.
@@ -160,7 +161,8 @@ notices. The monitor shares what it knows with Claude Code, read-only and at no 
 - **`--gate`** refuses new agents and workflows once a limit reaches a cap you choose.
 - **`--status --json`** prints the same reading for your own scripts.
 
-The setup, the settings snippet and the fields are in [docs/AGENT_HOOK.md](docs/AGENT_HOOK.md).
+The setup, the settings snippet and the fields are in [docs/AGENT_HOOK.md](docs/AGENT_HOOK.md). The
+hooks need Claude Code 2.1.139 or newer.
 
 ## 📡 Data Sources
 
@@ -196,7 +198,7 @@ Everything stays on your PC. There is no account, no telemetry and no server of 
 | At start-up, every six hours after that, and on **Check for updates now** (switch it off in Settings → System) | `api.github.com` | An anonymous request for this repository's latest release. |
 | Only when you click **Install update** | `github.com` and GitHub's download servers | The download of the installer. |
 | Only when you open the **About** page | `raw.githubusercontent.com` | An anonymous request for the supporters list, cached for an hour. |
-| Only when the app is closed and a Claude session asks for the usage (the MCP tool, `--status`, the gate) | `api.anthropic.com` | The same usage request, at most once every two minutes. While the app runs, sessions read its last reading instead. |
+| Only when a Claude session asks (the MCP tool, `--status`, the gate, or the hook at session start) and the monitor has no current reading (it is closed, or an older version runs) | `api.anthropic.com` | The same usage request, one reader at a time, and shared for two minutes. While the app runs, sessions read its last reading instead. |
 
 The **installer** (not the app) has one more optional download: Microsoft's small WebView2 runtime installer, from `go.microsoft.com`, and only if you accept its offer. It is run only after Windows confirms that Microsoft Corporation signed it. Prices ship inside the app, so there is no price download. The dashboard is served by a tiny local web server on `127.0.0.1` (a random port and a per-run token), so nothing listens on your network, and the page loads no outside fonts or scripts.
 
@@ -232,7 +234,7 @@ Use `python main.py` instead if you want a console that shows errors (Ctrl+C qui
 | **NO LOGIN** | There is no Claude sign-in on this PC. | Sign in to Claude Code with your Claude account. An API-key-only setup has no plan limits to show. |
 | **OFFLINE** | The usage API could not be reached. Your last numbers stay on screen. | Check your network. It retries after 30 seconds, then waits longer each time, up to 15 minutes. |
 | **RATE LIMITED** | The usage API asked for a pause. | It waits as long as the API says (or 1 minute, growing to 15). A longer fetch interval in Settings helps. |
-| **PAUSED** | Your screen is locked or a screensaver is running. | Nothing: it refreshes the moment you are back. |
+| **PAUSED** | Your screen is locked or a screensaver is running, and no Claude session asked for the usage in the last hour. | Nothing: it refreshes the moment you are back. |
 | No taskbar strip | The strip needs a horizontal taskbar that does not auto-hide, and it hides while a fullscreen app is in front. | Use the floating widget, or change the taskbar setting. |
 | The floating widget is gone | It was switched off, or hidden by **Hide in fullscreen**. | Tray menu → **Floating widget**. |
 | The dashboard opens in my browser | The WebView2 runtime is missing. | Install Microsoft's Evergreen WebView2 runtime, or run the installer again and accept its offer. The dashboard works in your browser meanwhile. |

@@ -24,6 +24,7 @@ HOOK_MEMORY_DAYS = 7
 SESSION_START = "SessionStart"
 GATE_SESSION_CAP = 95.0    # --gate refuses new agents and workflows from these percents
 GATE_WEEKLY_CAP = 90.0
+GATE_WAIT_S = 5.0          # the gate waits less for a paused monitor: it runs before every agent launch
 
 
 def run_status(*, as_json: bool, folder: Path, clock: Callable[[], datetime], app_version: str,
@@ -32,7 +33,7 @@ def run_status(*, as_json: bool, folder: Path, clock: Callable[[], datetime], ap
     doc, running = status.current(folder, now=clock(), fetch=True, wait_s=status.WAIT_S, app_version=app_version)
     report = status.report(doc, now=clock(), running=running)
     _write(out, json.dumps(report, indent=1) if as_json else report["summary"])
-    return 0 if doc else 1
+    return 0 if doc and doc.get("usage_fetched_at") else 1  # the same test as the summary's "no reading"
 
 
 def run_hook(*, threshold: float, always: bool, folder: Path, clock: Callable[[], datetime],
@@ -68,7 +69,7 @@ def run_gate(*, session_cap: float, weekly_cap: float, folder: Path, clock: Call
     _hook_input(stdin)  # read it all, so the caller never meets a closed pipe
     try:
         now = clock()
-        doc, _running = status.current(folder, now=now, fetch=True, wait_s=status.WAIT_S, app_version=app_version)
+        doc, _running = status.current(folder, now=now, fetch=True, wait_s=GATE_WAIT_S, app_version=app_version)
         over = _over_caps(doc, now, session_cap, weekly_cap) if doc else []
     except Exception:  # fail open
         log.exception("the usage gate failed; the tool runs")
@@ -113,7 +114,7 @@ def _hook_input(stdin: BinaryIO | None) -> dict:
 def _should_speak(folder: Path, session_id: Any, doc: Mapping[str, Any], threshold: float,
                   now: datetime) -> bool:
     """Whether a limit has reached ``threshold``, or climbed a step, since this session last heard."""
-    steps = _steps(doc, threshold)
+    steps = _steps(doc, threshold, now)
     if not steps:
         return False
     key = str(session_id or "")
@@ -126,17 +127,19 @@ def _should_speak(folder: Path, session_id: Any, doc: Mapping[str, Any], thresho
     return True
 
 
-def _steps(doc: Mapping[str, Any], threshold: float) -> dict[str, int]:
+def _steps(doc: Mapping[str, Any], threshold: float, now: datetime) -> dict[str, int]:
     """{limit and its window: steps above the threshold} for each limit at or past it.
 
-    The window's reset time is part of the name, so a new window starts from nothing.
+    The window's reset time is part of the name, so a new window starts from nothing, and a window
+    that has reset since the reading no longer counts.
     """
     entries = [("session", doc.get("session")), ("weekly", doc.get("weekly"))]
     entries += [(str(item.get("label")), item) for item in doc.get("scoped") or [] if isinstance(item, Mapping)]
     steps: dict[str, int] = {}
     for name, entry in entries:
         percent = entry.get("percent") if isinstance(entry, Mapping) else None
-        if isinstance(percent, (int, float)) and percent >= threshold:
+        resets = status.parse_time(entry.get("resets_at")) if isinstance(entry, Mapping) else None
+        if isinstance(percent, (int, float)) and percent >= threshold and (resets is None or resets > now):
             steps[f"{name}@{entry.get('resets_at')}"] = math.floor((percent - threshold) / HOOK_STEP)
     return steps
 

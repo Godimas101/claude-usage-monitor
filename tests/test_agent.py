@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import io
 import json
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -33,7 +34,8 @@ NOW = datetime(2026, 10, 24, 16, 0, 0, tzinfo=UTC)
 PLAN = PlanInfo(subscription_type="max", rate_limit_tier="default_claude_max_5x", name="Max 5x",
                 monthly_price_usd=100.0)
 TOKEN = "tok-SYNTHETIC-0123456789"
-REAL_FETCH_ONCE = status.fetch_once  # the autouse fixture replaces it
+REAL_FETCH_ONCE = status.fetch_once  # the autouse fixture replaces these two
+REAL_MONITOR_RUNNING = status.monitor_running
 
 
 def snapshot(fetched_at: datetime = NOW, session: float = 30.0, weekly: float = 80.0) -> UsageSnapshot:
@@ -213,7 +215,7 @@ def test_without_fetch_a_missing_or_old_reading_is_returned_as_it_is(folder, fet
 
 
 def test_a_paused_reading_is_waited_on_until_the_app_writes_again(folder, fetches, monkeypatch):
-    save(folder, document(at=NOW - timedelta(minutes=2), state="paused"))
+    save(folder, document(at=NOW - timedelta(minutes=20), state="paused"))  # older than a poll interval
     sleeps: list[float] = []
 
     def sleep(seconds: float) -> None:  # the app's next cycle lands during the wait
@@ -534,6 +536,165 @@ def test_an_unchanged_reading_is_not_rewritten_until_it_is_due(tmp_path, folder,
         service._safe_cycle()
         service._safe_cycle()
         assert writes == ["live", "live", "paused"]        # a change of status, once per pause
+    finally:
+        service._close_store()
+        settings.close()
+
+
+# ── Review fixes (PR #26) ────────────────────────────────────────────────────────
+
+def test_a_fresh_paused_reading_is_used_without_waiting(folder, fetches, monkeypatch):
+    save(folder, document(at=NOW - timedelta(minutes=2), state="paused"))
+    monkeypatch.setattr(status.time, "sleep", lambda _s: pytest.fail("waited on a reading that is current"))
+    doc, _running = status.current(folder, now=NOW, fetch=True, wait_s=5.0, running=True)
+    assert doc["status"] == "paused" and fetches == []
+
+
+def test_status_exits_1_only_when_there_is_no_reading(folder):
+    out = io.BytesIO()
+    assert cli.run_status(as_json=False, folder=folder, clock=lambda: NOW, app_version="", out=out) == 1
+    assert b"no reading" in out.getvalue()
+    save(folder, document(at=NOW))
+    assert cli.run_status(as_json=False, folder=folder, clock=lambda: NOW, app_version="", out=io.BytesIO()) == 0
+
+
+def test_a_window_that_has_reset_gets_only_its_reset_note():
+    later = NOW + timedelta(hours=3)  # the session reset at +2h
+    limited = status.summary(document(session=100.0, session_verdict="LIMITED"), now=later, running=True)
+    assert "session 100% (window reset 1h 0m ago" in limited
+    assert "LIMIT REACHED" not in limited and "safe at this rate" not in limited
+    at_risk = document(session=92.0, session_verdict="AT_RISK", limit_at=status._iso(NOW + timedelta(minutes=30)))
+    assert "the limit is hit" not in status.summary(at_risk, now=later, running=True)
+
+
+def test_the_hook_does_not_speak_for_a_window_that_has_reset(folder):
+    save(folder, document(session=95.0, weekly=10.0))
+    assert hook(folder, PROMPT, now=NOW + timedelta(hours=3)) is None
+    assert hook(folder, PROMPT) is not None
+
+
+def test_the_gate_refuses_at_the_session_cap(folder):
+    save(folder, document(session=95.0, weekly=10.0))
+    reason = gate(folder, session_cap=95.0)["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "session usage is 95%, at or past the 95% cap" in reason
+    save(folder, document(session=94.9, weekly=10.0))
+    assert gate(folder, session_cap=95.0) is None
+
+
+def test_a_successful_fetch_keeps_the_limits_and_never_the_token(tmp_path, monkeypatch):
+    from usage_monitor.data import usage_api
+
+    config = tmp_path / "claude"
+    config.mkdir(exist_ok=True)
+    (config / ".credentials.json").write_text(json.dumps({"claudeAiOauth": {
+        "accessToken": TOKEN, "subscriptionType": "max", "rateLimitTier": "default_claude_max_5x",
+        "expiresAt": int((NOW + timedelta(hours=8)).timestamp() * 1000)}}), encoding="utf-8")
+
+    class Live:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+        def fetch(self, now: datetime) -> FetchResult:
+            return FetchResult(status=ApiStatus.LIVE, detail="Updated", snapshot=snapshot(now), fresh=True)
+
+    monkeypatch.setattr(usage_api, "UsageClient", Live)
+    doc = REAL_FETCH_ONCE(NOW, previous=None, app_version="2.1.0")
+    assert doc["source"] == status.SOURCE_CLI and doc["plan"]["name"] == "Max 5x"
+    assert doc["session"]["percent"] == 30.0 and doc["weekly"]["percent"] == 80.0
+    assert doc["usage_fetched_at"] == status._iso(NOW) and doc["burn"] is None
+    assert TOKEN not in json.dumps(doc)
+
+
+def test_a_later_reading_written_during_a_fetch_is_kept(folder, monkeypatch):
+    save(folder, document(at=NOW - timedelta(hours=1)))
+
+    def slow_failure(now, *, previous, app_version=""):
+        save(folder, document(at=NOW, session=97.0))  # the app wrote while the request was out
+        doc = dict(previous)
+        doc.update(source=status.SOURCE_CLI, written_at=status._iso(now), status="offline")
+        return doc
+
+    monkeypatch.setattr(status, "fetch_once", slow_failure)
+    doc, _running = status.current(folder, now=NOW, fetch=True, running=False)
+    assert doc["session"]["percent"] == 97.0
+    assert status.read(folder / status.STATUS_NAME)["session"]["percent"] == 97.0
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the fetch lock is a Windows byte-range lock")
+def test_one_reader_at_a_time_holds_the_fetch_lock(folder, monkeypatch):
+    import msvcrt
+    import os
+
+    monkeypatch.setattr(status, "FETCH_LOCK_S", 0.2)
+    folder.mkdir(parents=True, exist_ok=True)
+    fd = os.open(folder / status.LOCK_NAME, os.O_RDWR | os.O_CREAT)
+    try:
+        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)  # another reader holds it
+        with status._fetch_lock(folder) as held:
+            assert held is False
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        with status._fetch_lock(folder) as held:
+            assert held is True
+    finally:
+        os.close(fd)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the single-instance mutex is a Windows object")
+def test_monitor_running_sees_the_mutex(monkeypatch):
+    import ctypes
+    import os
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel32.CreateMutexW.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    name = f"Local\\ClaudeUsageMonitorTest-{os.getpid()}"
+    monkeypatch.setattr(status, "MUTEX_NAME", name)
+    assert REAL_MONITOR_RUNNING(env={}) is False
+    handle = kernel32.CreateMutexW(None, False, name)
+    try:
+        assert REAL_MONITOR_RUNNING(env={}) is True
+    finally:
+        kernel32.CloseHandle(handle)
+    assert REAL_MONITOR_RUNNING(env={}) is False
+
+
+def test_mcp_answers_a_request_without_a_method_an_empty_batch_and_deep_nesting(folder):
+    replies = rpc(folder, {"jsonrpc": "2.0", "id": 4}, b"[]", b"[" * 100_000,
+                  {"jsonrpc": "2.0", "id": 5, "result": {}}, {"jsonrpc": "2.0", "id": 6, "method": "ping"})
+    assert [(reply.get("id"), reply.get("error", {}).get("code")) for reply in replies] == [
+        (4, -32600), (None, -32600), (None, -32700), (6, None)]
+
+
+def test_hooks_exit_0_even_with_no_stdout_or_a_crash(monkeypatch):
+    import usage_monitor.log
+
+    monkeypatch.setattr(usage_monitor.log, "setup_logging", lambda *_a, **_k: None)  # keep the test's own logging
+    monkeypatch.setattr(main.sys, "stdout", None)
+    assert main._agent(main.Command("hook")) == 0
+    assert main._agent(main.Command("gate")) == 0
+    assert main._agent(main.Command("status")) == 1
+    monkeypatch.setattr(main, "run_command", lambda *_a: 1 / 0)
+    assert main.main(["--gate"]) == 0
+    assert main.main(["--status"]) == 1
+
+
+def test_an_overwritten_status_file_is_put_back_on_the_next_cycle(tmp_path, folder):
+    from usage_monitor.settings import Settings
+
+    settings = Settings(tmp_path / "settings.json", save_delay_s=60)
+    service = svc.DataService(settings, store_path=tmp_path / "usage.db", pricing=Pricing.load(),
+                              usage_client=OneClient(), roots=[tmp_path], clock=lambda: NOW,
+                              pause_check=lambda: False, pricing_refresh=lambda _cached: False,
+                              status_dir=folder)
+    try:
+        service._safe_cycle()
+        save(folder, document(at=NOW, source=status.SOURCE_CLI, session=12.0))  # a reader wrote over it
+        service._safe_cycle()
+        doc = status.read(folder / status.STATUS_NAME)
+        assert doc["source"] == status.SOURCE_MONITOR and doc["session"]["percent"] == 30.0
     finally:
         service._close_store()
         settings.close()

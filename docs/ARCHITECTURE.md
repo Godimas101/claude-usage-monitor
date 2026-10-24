@@ -322,13 +322,15 @@ runs happen. A failed write is logged once per kind of failure and never stops t
 
 ### `agent/` (#24)
 `status.py` builds, writes and reads `state.json` (schema 1) and makes the one-line summary.
-`cli.py` holds `--status [--json]` and `--hook`, and `mcp.py` a stdio MCP server whose one tool,
+`cli.py` holds `--status [--json]`, `--hook` and `--gate`, and `mcp.py` a stdio MCP server whose one tool,
 `get_plan_usage`, returns the summary and the reading. They run as light processes beside the app:
 no UI imports, no single-instance mutex, logs in `agent.log`. The app is the only poller; a
 reader asks the usage API itself only when the reading is missing or stale (the app is closed,
 or an older version writes no file), and keeps that answer in `state.json` for two minutes so
-the readers in that time share it. `--hook` never fetches except at `SessionStart`, and never
-exits non-zero. How to wire it into Claude Code: [`AGENT_HOOK.md`](AGENT_HOOK.md).
+the readers in that time share it. A reader that must ask
+first takes a byte-range lock on `state.lock` (Windows frees it when its holder is killed), re-reads
+the file under it, and never writes a reading older than the one on disk. `--hook` never fetches
+except at `SessionStart`, and `--hook` and `--gate` exit 0 on every path. How to wire it into Claude Code: [`AGENT_HOOK.md`](AGENT_HOOK.md).
 
 ## Phase 2 — stats (#11–#14)
 

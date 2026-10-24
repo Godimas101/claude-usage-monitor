@@ -16,13 +16,13 @@ Privacy, everywhere: never print, store or log message text, prompts, file conte
 
 | Path | What |
 |---|---|
-| `main.py` | Entry point: the monitor, `--dashboard`, `--print-version`, `--dump-frames`, `--smoke-test`, and the agent modes `--status`, `--hook`, `--mcp` |
+| `main.py` | Entry point: the monitor, `--dashboard`, `--print-version`, `--dump-frames`, `--smoke-test`, and the agent modes `--status`, `--hook`, `--gate`, `--mcp` |
 | `usage_monitor/app.py` | `MonitorApp`: wires settings, data service, UI host, widgets, tray, local API |
 | `usage_monitor/data/` | Data layer, no UI imports: transcripts, SQLite store, usage API, windows, `DataService` |
 | `usage_monitor/ui/` | Win32 layer (ctypes, no Tk): host, layered windows, widgets, tray, menu, server, dashboard |
 | `usage_monitor/render/` | Pillow renderers: view model, drawing engine, one skin per theme |
 | `usage_monitor/themes/` | Theme tokens (`<id>.json`) and their loader |
-| `usage_monitor/agent/` | Plan-usage awareness for Claude sessions (#24): `state.json`, `--status`, `--hook`, the MCP server. Setup: [`docs/AGENT_HOOK.md`](docs/AGENT_HOOK.md) |
+| `usage_monitor/agent/` | Plan-usage awareness for Claude sessions (#24): `state.json`, `--status`, `--hook`, `--gate`, the MCP server. Setup: [`docs/AGENT_HOOK.md`](docs/AGENT_HOOK.md) |
 | `usage_monitor/webui/` | Dashboard HTML/CSS/JS, the motion layer (`motion.js`, `motion.css`, `themes/<id>.motion.css`) and the bundled OFL fonts (the Pillow skins read them too) |
 | `update_check.py`, `version.py` | GitHub release check and self-update; version read from `VERSION` |
 | `tests/` | pytest, offline, synthetic fixtures only |
@@ -145,10 +145,12 @@ Keep these local (not committed):
 
 A session that runs long or parallel work should check the plan before each phase: call the
 `get_plan_usage` MCP tool, or run `ClaudeUsageMonitor.exe --status` (`--json` for the full
-reading). Both read `%APPDATA%\ClaudeUsageMonitor\state.json`, which the running app refreshes every
-cycle. Wiring, the hook recipe and the JSON fields: [`docs/AGENT_HOOK.md`](docs/AGENT_HOOK.md).
-The modes are read-only and must stay that way: never put the token, transcript text or anything
-from the credentials file in `state.json`, a summary or a log.
+reading). Both read `%APPDATA%\ClaudeUsageMonitor\state.json`, which the running app refreshes when
+the reading changes. Wiring, the hook recipe and the JSON fields: [`docs/AGENT_HOOK.md`](docs/AGENT_HOOK.md).
+The modes are read-only and must stay that way: never put the token or any other secret from the
+credentials file (the plan name and tier are fine), or transcript text, in `state.json`, a summary or
+a log. `--hook` and `--gate` must exit 0 on every path: Claude Code blocks the prompt or the tool on
+exit code 2.
 
 ## Release policy
 

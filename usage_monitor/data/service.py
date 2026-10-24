@@ -127,6 +127,7 @@ class DataService:
         self._status_written: ApiStatus | None = None  # the status of the last status file written
         self._status_key: str | None = None            # its fingerprint (agent_status.fingerprint)
         self._status_mono = 0.0                        # and when it was written, on time.monotonic()
+        self._status_file_ns: int | None = None        # the file's mtime then: a reader or a person may replace it
         self._status_error: str | None = None
 
     # ── Public API ──
@@ -404,18 +405,22 @@ class DataService:
                 plan=state.plan, burn=state.burn,
                 pacing=analytics.pacing_report(store, now=now, usage=self._live_usage(now)),
                 now=now, poll_interval_s=self._poll_interval().total_seconds(), app_version=_app_version())
+            path = self._status_dir / agent_status.STATUS_NAME
             key, mono = agent_status.fingerprint(doc), time.monotonic()
-            if key == self._status_key and mono - self._status_mono < agent_status.REFRESH_S:
-                return  # nothing a reader acts on has changed: spare the disk
-            agent_status.write(doc, self._status_dir / agent_status.STATUS_NAME)
+            if (key == self._status_key and mono - self._status_mono < agent_status.REFRESH_S
+                    and _mtime_ns(path) == self._status_file_ns):
+                return  # nothing a reader acts on has changed, and the file is still ours: spare the disk
+            agent_status.write(doc, path)
+            file_ns = _mtime_ns(path)
         except Exception as exc:  # logged once per kind of failure; the cycle carries on
-            error = f"{type(exc).__name__}: {exc}"[:200]
+            # The kind, not the message: an OSError names a new temporary file every time.
+            error = f"{type(exc).__name__} {getattr(exc, 'winerror', None) or getattr(exc, 'errno', None) or ''}"
             if error != self._status_error:
                 log.exception("could not write the status file for Claude sessions")
             self._status_error = error
             return
         self._status_written, self._status_error = state.status, None
-        self._status_key, self._status_mono = key, mono
+        self._status_key, self._status_mono, self._status_file_ns = key, mono, file_ns
 
     def _publish_best_effort(self) -> None:
         try:
@@ -527,6 +532,13 @@ def _positive(value: Any, default: float) -> float:
     except OverflowError:  # an integer too large for a float
         return float(default)
     return number if math.isfinite(number) and number > 0 else float(default)
+
+
+def _mtime_ns(path: Path) -> int | None:
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return None
 
 
 def _mtime(path: Path) -> float | None:
