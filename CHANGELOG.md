@@ -4,6 +4,7 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
+- Theme: Gates (Windows 11) ([#21](https://github.com/Godimas101/claude-usage-monitor/issues/21)) — closed 2026-10-24 by @Godimas101
 - Ship: packaging, verified self-update and v2.0 release prep ([#23](https://github.com/Godimas101/claude-usage-monitor/issues/23)) — closed 2026-10-24 by @Godimas101
 - Theme: Night City (Cyberpunk 2077) ([#20](https://github.com/Godimas101/claude-usage-monitor/issues/20)) — closed 2026-10-24 by @Godimas101
 - UI: theme system + clickable mockups of Nostromo, Night City and Gates ([#16](https://github.com/Godimas101/claude-usage-monitor/issues/16)) — closed 2026-10-24 by @Godimas101
