@@ -4,6 +4,7 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
+- Stats: history & fun — calendar heatmap, streaks, odometer, export ([#14](https://github.com/Godimas101/claude-usage-monitor/issues/14)) — closed 2026-10-24 by @Godimas101
 - Stats: efficiency — cache savings, thinking share, context size, cost per PR / line ([#12](https://github.com/Godimas101/claude-usage-monitor/issues/12)) — closed 2026-10-24 by @Godimas101
 - Stats: cost & value — per model / project / session, and what the plan is worth ([#11](https://github.com/Godimas101/claude-usage-monitor/issues/11)) — closed 2026-10-24 by @Godimas101
 - Data: robustness pass — threading, settings persistence, offline paths, Win32 nits ([#10](https://github.com/Godimas101/claude-usage-monitor/issues/10)) — closed 2026-10-24 by @Godimas101
