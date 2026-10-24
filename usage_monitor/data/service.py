@@ -127,7 +127,7 @@ class DataService:
         self._status_written: ApiStatus | None = None  # the status of the last status file written
         self._status_key: str | None = None            # its fingerprint (agent_status.fingerprint)
         self._status_mono = 0.0                        # and when it was written, on time.monotonic()
-        self._status_file_ns: int | None = None        # the file's mtime then: a reader or a person may replace it
+        self._status_file: tuple[int, int, int] | None = None  # that file's identity: a reader or a person may replace it
         self._status_error: str | None = None
 
     # ── Public API ──
@@ -408,10 +408,10 @@ class DataService:
             path = self._status_dir / agent_status.STATUS_NAME
             key, mono = agent_status.fingerprint(doc), time.monotonic()
             if (key == self._status_key and mono - self._status_mono < agent_status.REFRESH_S
-                    and _mtime_ns(path) == self._status_file_ns):
+                    and _file_mark(path) == self._status_file):
                 return  # nothing a reader acts on has changed, and the file is still ours: spare the disk
             agent_status.write(doc, path)
-            file_ns = _mtime_ns(path)
+            file_mark = _file_mark(path)
         except Exception as exc:  # logged once per kind of failure; the cycle carries on
             # The kind, not the message: an OSError names a new temporary file every time.
             error = f"{type(exc).__name__} {getattr(exc, 'winerror', None) or getattr(exc, 'errno', None) or ''}"
@@ -420,7 +420,7 @@ class DataService:
             self._status_error = error
             return
         self._status_written, self._status_error = state.status, None
-        self._status_key, self._status_mono, self._status_file_ns = key, mono, file_ns
+        self._status_key, self._status_mono, self._status_file = key, mono, file_mark
 
     def _publish_best_effort(self) -> None:
         try:
@@ -534,11 +534,14 @@ def _positive(value: Any, default: float) -> float:
     return number if math.isfinite(number) and number > 0 else float(default)
 
 
-def _mtime_ns(path: Path) -> int | None:
+def _file_mark(path: Path) -> tuple[int, int, int] | None:
+    """(file ID, mtime, size). Every replace makes a new file, so the ID changes even when two writes
+    land within one tick of the file clock."""
     try:
-        return path.stat().st_mtime_ns
+        stat = path.stat()
     except OSError:
         return None
+    return stat.st_ino, stat.st_mtime_ns, stat.st_size
 
 
 def _mtime(path: Path) -> float | None:
