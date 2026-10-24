@@ -4,6 +4,11 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
+
+## [2.1.0] — 2026-10-24
+
+Claude Usage Monitor 2.1 lets your Claude Code sessions see how much of your plan is left, so long runs can pace themselves. It is also the first update that v2 installs on its own.
+
 ### Highlights
 - **Claude can see your plan:** a new MCP tool, `get_plan_usage`, gives Claude Code the session, weekly and Fable limits with their reset times, pace and projected time to the limit, so long runs can pace themselves.
 - **Hooks for Claude Code:** `--hook` adds a one-line usage summary to Claude's context at session start and when a limit passes a threshold. `--gate` refuses new agents and workflows once a limit reaches a cap you set.
