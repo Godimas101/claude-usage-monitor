@@ -4,9 +4,19 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
-## [2.0.0] — 2026-10-22
+## [2.0.0] — 2026-10-24
 
 Claude Usage Monitor 2 is a rewrite: new widgets, a real dashboard, three themes and a data layer that counts honestly. Install it over v1 and your settings carry over. There was no separate v1.2 release, so the fixes planned for it (correct counting, current prices, local-time windows, a sturdier data layer) ship here, under **Fixed**.
+
+### Highlights
+- **Three themes:** Nostromo (the amber look you know), Night City and Gates, each with colour variants and motion of its own.
+- **A real dashboard:** Overview, Limits, Cost & value, Efficiency, History, Settings and About.
+- **Honest numbers:** each request counted once, current prices for every Claude model back to Claude 3, and days and months on your local clock.
+- **What your plan is worth:** API-equivalent cost by model, folder and session, and how many times over your plan has paid for itself.
+- **Efficiency and history:** cache savings, thinking share and tool use, a year of use as a calendar, streaks, and CSV or JSON export.
+- **Alerts** at 80, 90 and 100% (or your own levels), when a limit resets, and quiet hours.
+- **No hidden prompts:** the monitor never runs `claude` and never sends a model request.
+- **Update notices,** and updates that are checked against GitHub's SHA-256 checksum before they install.
 
 ### Added
 - **Three themes**, switched live in Settings. **Nostromo** is the amber phosphor look you know, and your v1 colours live on as its eight phosphors. **Night City** has Blackwall, Relic, Edgerun and Mox. **Gates** is a Windows 11 Fluent look that follows your Windows accent colour (or Blue, Teal, Purple, Rose, Orange or Green) in light, dark or system mode; an accent too close to a status colour (red, yellow, green or grey) is kept for the window chrome, and normal usage is drawn in Windows' default blue instead. **Reduce motion** stops all of it: the blinking, the flicker, the boot screens, the page and hover animations, the RGB glitch and the rotating comparison. The dashboard also follows Windows' own animation setting.
