@@ -1885,19 +1885,54 @@ class _Block:
         self.pure, self.scripts, self.binaries, self.datas = ["pure"], ["scripts"], ["binaries"], ["datas"]
 
 
-@pytest.fixture(scope="module")
-def spec() -> types.SimpleNamespace:
-    """The spec, run against stand-ins for PyInstaller: what it hands to Analysis, EXE and COLLECT."""
+def _run_spec(collect_submodules: Callable[..., list[str]], path: list[str] | None = None) -> dict[str, Any]:
+    """Run the spec against stand-ins for PyInstaller, with ``path`` as sys.path (default: a copy of the real one)."""
     with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(sys, "path", list(sys.path) if path is None else path)  # the spec adds itself to it
         for name in ("PyInstaller", "PyInstaller.utils"):
             mp.setitem(sys.modules, name, types.ModuleType(name))
         hooks = types.ModuleType("PyInstaller.utils.hooks")
         hooks.collect_all = _collect_all  # type: ignore[attr-defined]
-        hooks.collect_submodules = _collect_submodules  # type: ignore[attr-defined]
+        hooks.collect_submodules = collect_submodules  # type: ignore[attr-defined]
         mp.setitem(sys.modules, "PyInstaller.utils.hooks", hooks)
         namespace: dict[str, Any] = {"SPECPATH": str(ROOT), "Analysis": _Block, "PYZ": _Block, "EXE": _Block, "COLLECT": _Block}
         exec(compile(SPEC_TEXT, "ClaudeUsageMonitor.spec", "exec"), namespace)  # noqa: S102
+    return namespace
+
+
+@pytest.fixture(scope="module")
+def spec() -> types.SimpleNamespace:
+    """The spec, run against stand-ins for PyInstaller: what it hands to Analysis, EXE and COLLECT."""
+    namespace = _run_spec(_collect_submodules)
     return types.SimpleNamespace(analysis=namespace["a"], exe=namespace["exe"], coll=namespace["coll"])
+
+
+def test_the_spec_stops_when_collect_submodules_misses_modules() -> None:
+    """The real collect_submodules returns nothing, without a warning, when usage_monitor is not importable (the
+    `pyinstaller` command, release.yml). The 2026-10-24 CI rehearsal built an exe without the skins that way. The spec
+    must fail the build, not ship it."""
+    def nothing(package: str, filter: Callable[[str], bool] = lambda _n: True, **_kw: Any) -> list[str]:
+        return []
+
+    def no_skins(package: str, filter: Callable[[str], bool] = lambda _n: True, **_kw: Any) -> list[str]:
+        return [name for name in _collect_submodules(package, filter) if ".skins." not in name]
+
+    with pytest.raises(SystemExit, match=r"collect_submodules\('usage_monitor'\) missed"):
+        _run_spec(nothing)
+    with pytest.raises(SystemExit, match=r"usage_monitor\.render\.skins\.gates"):
+        _run_spec(no_skins)
+
+
+def test_the_spec_puts_the_project_on_the_path_before_it_collects() -> None:
+    """So the `pyinstaller` command, which does not put the working folder on sys.path, collects the same as build.bat."""
+    seen: list[bool] = []
+
+    def collect(package: str, filter: Callable[[str], bool] = lambda _n: True, **kw: Any) -> list[str]:
+        seen.append(str(ROOT) in sys.path)
+        return _collect_submodules(package, filter)
+
+    _run_spec(collect, path=[p for p in sys.path if p != str(ROOT)])
+    assert seen == [True]
 
 
 def bundled_files(datas: list[tuple[str, str]]) -> dict[str, Path]:
