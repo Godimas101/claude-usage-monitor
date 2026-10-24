@@ -4,6 +4,7 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
+- Data: one shared poller + incremental transcript ingest + local history store ([#8](https://github.com/Godimas101/claude-usage-monitor/issues/8)) — closed 2026-10-24 by @Godimas101
 - Data: stop running `claude -p .` to refresh the token — show stale data instead ([#7](https://github.com/Godimas101/claude-usage-monitor/issues/7)) — closed 2026-10-24 by @Godimas101
 - Setup: branches + a pytest harness for the usage math ([#3](https://github.com/Godimas101/claude-usage-monitor/issues/3)) — closed 2026-10-24 by @Godimas101
 - Data: stale price table — add Fable + current models, fix model matching, price 1h cache writes ([#5](https://github.com/Godimas101/claude-usage-monitor/issues/5)) — closed 2026-10-24 by @Godimas101
