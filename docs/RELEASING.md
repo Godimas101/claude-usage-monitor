@@ -1,34 +1,54 @@
 # Releasing
 
-A release is a `VERSION` bump that reaches `main`. Nothing else publishes anything, except running the release
-workflow by hand (see below). Releases are the owner's call: each one posts to the public Discord thread, so agents
-ask first and never run `gh release create` (see [`../AGENTS.md`](../AGENTS.md)).
+A release is a `VERSION` bump that reaches `main`. Nothing else prepares one, except running the release workflow by
+hand (see below). Releases are the owner's call: each one posts to the public Discord thread, so agents ask first and
+never run `gh release create` (see [`../AGENTS.md`](../AGENTS.md)).
+
+The workflow never makes a release live by itself. It leaves a **draft**, which is not the "latest release" the in-app
+updater reads (`releases/latest` skips drafts), and which the Discord bot does not mirror until you publish it. The
+first release is the one that matters most: v1.1.5's updater installs it silently on every v1 install and has no
+second chance, so the pipeline is rehearsed first and the draft is checked before it goes live.
 
 ## What happens when `VERSION` reaches `main`
 
-`.github/workflows/release.yml` runs on every push to `main`, and by hand (`workflow_dispatch`, which builds whichever
-branch you pick, while a new release tag goes on the default branch's latest commit: run it on `main` only):
+`.github/workflows/release.yml` runs on every push to `main`, and by hand (`workflow_dispatch`, with a **publish**
+checkbox). Only one run goes at a time (a `concurrency` group), so two pushes cannot both decide that a version is new.
+Every step has a timeout.
 
-1. It reads `VERSION`. If a GitHub **release** `v<VERSION>` already exists it stops, so an ordinary push does nothing.
-   It looks for the release, not the tag: a leftover tag without a release does not stop it, and `gh release create`
-   then attaches the new build to that tag's old commit. Delete such a tag first (`git push --delete origin vX.Y.Z`).
+- **Push to `main`, or Run workflow with publish ticked:** the pipeline below, ending in a draft release.
+- **Run workflow with publish left off (the default): a rehearsal.** The same pipeline from whichever branch you pick,
+  for whatever `VERSION` that branch holds, even one that is already released. It skips the "already exists" check,
+  creates no release and no tag, and keeps the installer as a downloadable artifact of the run
+  (`ClaudeUsageMonitorSetup-v<VERSION>`). Rehearse from a branch that has the release's `VERSION` and `CHANGELOG.md`
+  section before the bump goes to `main`.
+
+1. It reads `VERSION`. If a GitHub **release** `v<VERSION>` already exists it stops (a draft counts), so an ordinary push
+   does nothing. It looks for the release, not the tag: a leftover tag without a release does not stop it, and
+   `gh release create` then attaches the new build to that tag's old commit. Delete such a tag first
+   (`git push --delete origin vX.Y.Z`). A rehearsal skips this check.
 2. On a Windows runner it installs Python 3.14, `requirements.txt` and PyInstaller, held to the versions in
-   `constraints-build.txt`, and runs `pyinstaller --noconfirm ClaudeUsageMonitor.spec`: a windowed onedir bundle,
-   `dist\ClaudeUsageMonitor\`. It then starts the built exe with `--print-version` and stops unless it reports `VERSION`;
-   a 30 second `--smoke-test` follows, which only warns while `continue-on-error` is on (it has not yet been run on a runner).
-3. It installs Inno Setup (Chocolatey, any 6.3 or newer) and runs `ISCC /DAppVer=<VERSION> installer.iss`,
-   which writes `installer\ClaudeUsageMonitorSetup-v<VERSION>.exe`.
-4. It checks that file exists, then runs `gh release create v<VERSION>` with the installer as the only
-   asset. The notes are the body of the `## [<VERSION>]` section of `CHANGELOG.md`, up to the next `## [`
-   heading. If that section is missing or empty, GitHub's generated notes are used instead.
+   `constraints-build.txt`, and runs the test suite (`python -m pytest`, then the node-based dashboard script tests,
+   the two runs of `tests.yml`); a failing test stops the release.
+3. It runs `pyinstaller --noconfirm ClaudeUsageMonitor.spec`: a windowed onedir bundle, `dist\ClaudeUsageMonitor\`. It
+   then starts the built exe with `--print-version` and stops unless it reports `VERSION`, and runs a 45 second
+   `--smoke-test` of the exe, which **fails the release** when it reports a problem (the dashboard's page must start,
+   not only be fetched). The report and the logs are kept as the `smoke-report` artifact whatever happens.
+4. It installs Inno Setup (Chocolatey, any 6.3 or newer) and runs `ISCC /DAppVer=<VERSION> installer.iss`,
+   which writes `installer\ClaudeUsageMonitorSetup-v<VERSION>.exe`. The run summary shows its SHA-256.
+5. It checks that file exists, then runs `gh release create v<VERSION> --draft --target <the built commit>` with the
+   installer as the only asset. The notes are the body of the `## [<VERSION>]` section of `CHANGELOG.md`, up to the next
+   `## [` heading. If that section is missing or empty, GitHub's generated notes are used instead. The tag is created
+   when you publish the draft, on the commit that was built, not on whatever `main` holds by then.
 
 The Discord post is not part of the workflow: the TCS Discord bot mirrors every GitHub release to the tool-updates
 thread, which users watch.
 
 What the workflow does **not** do:
 
-- It runs no tests. `tests.yml` runs them on every push, and the checklist below covers the frozen build beyond what the
-  workflow checks (that the exe starts and reports its version, and the smoke test while it only warns).
+- It does not publish. Publishing the draft is a deliberate click or `gh release edit vX.Y.Z --draft=false`, after the
+  checks under "Before you publish the draft".
+- It does not run the checks that need a person or another machine: the installer on a spare user, the upgrade from
+  v1.1.5, Windows 10 (the checklists below).
 - It pins Pillow, pywebview, PyInstaller and pythonnet to `constraints-build.txt` and uses Python 3.14, which is what the
   checklist's smoke run uses; their own dependencies still float. When you change the pins, run `build.bat` and the smoke
   run below first. `build.bat` prints the toolchain it used; the workflow's log shows CI's.
@@ -77,9 +97,13 @@ signature as well as the digest.
       `CUM_OUTDIR` to short folders if the checkout is deep (both tools fail past 260 characters). Its toolchain line
       (Python, PyInstaller, Pillow, pywebview) should match what the release workflow's last log shows; if it does
       not, build again with CI's versions before the next two items.
-- [ ] The frozen smoke run is clean: with `CUM_DEV_INSTANCE=1`, `CUM_APPDATA_DIR=<scratch folder>` and
+- [ ] **The pipeline has run on a runner.** Run the workflow by hand with publish left off (a rehearsal), from a
+      branch that holds the release's `VERSION` and `CHANGELOG.md` section. It is green, and the `smoke-report` artifact
+      says `"ok": true` with `page_booted` true in the dashboard step. The first run of the smoke step on a hosted runner
+      is the one that can fail for a reason of that machine: read its report before blaming the build.
+- [ ] The frozen smoke run is clean on your own machine too: with `CUM_DEV_INSTANCE=1`, `CUM_APPDATA_DIR=<scratch folder>` and
       `CLAUDE_CONFIG_DIR=<empty folder>` (so your own transcripts stay out of it) run
-      `dist\ClaudeUsageMonitor\ClaudeUsageMonitor.exe --smoke-test 30 report.json`. Exit code 0 and `"ok": true`.
+      `dist\ClaudeUsageMonitor\ClaudeUsageMonitor.exe --smoke-test 45 report.json`. Exit code 0 and `"ok": true`.
       Close any other dev instance first (`python main.py` with `CUM_DEV_INSTANCE=1`): there is one dev mutex,
       and while another holds it the report says `the app never started its loop`.
 - [ ] On a spare Windows 11 user or a VM, **not over your own install**, run the new `ClaudeUsageMonitorSetup`:
@@ -114,12 +138,26 @@ signature as well as the digest.
       opening in the browser; a silent install offers nothing. This is also the only check of version 2 on Windows 10:
       until it has been done there, the README, CHANGELOG and installer comment must keep saying that version 2 is
       tested on Windows 11 only.
-- [ ] Then bump `VERSION` in the change that goes to `main`. That change is the release.
+- [ ] Then bump `VERSION` in the change that goes to `main`. That change starts the release: the workflow builds it and
+      leaves a draft.
 
-## After the workflow finishes
+## Before you publish the draft
 
-- [ ] The release has one asset, with a `sha256:` digest, and the notes are the CHANGELOG section.
-- [ ] `certutil -hashfile ClaudeUsageMonitorSetup-v<VERSION>.exe SHA256` of the downloaded asset equals that digest.
+The draft holds the installer CI built, which is the file every v1 install will be handed. The checks above ran on your
+own build; these run on that one.
+
+- [ ] The draft has one asset, with a `sha256:` digest, and the notes are the CHANGELOG section.
+- [ ] `certutil -hashfile ClaudeUsageMonitorSetup-v<VERSION>.exe SHA256` of the downloaded asset equals that digest, and
+      the sha256 in the run summary.
+- [ ] The v1.1.5 upgrade check above, once with the Start with Windows entry off and once on, with **this downloaded
+      installer** and not your own build. This is the only check on the file that will actually be offered.
+- [ ] Then publish it: `gh release edit v<VERSION> --draft=false` (or the Publish button). The tag is created on the
+      built commit and the Discord bot posts. Delete a draft that fails a check instead (`gh release delete v<VERSION>`);
+      nothing was offered to anyone.
+
+## After you publish
+
+- [ ] `releases/latest` is the new release (`gh release view --json tagName`), with its one asset and `sha256:` digest.
 
 On a machine with the previous version, update through the app. What you look for depends on which version that is.
 

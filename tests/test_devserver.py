@@ -11,10 +11,13 @@ import http.client
 import io
 import json
 import os
+import queue
+import re
 import socket
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable, Iterator
 from datetime import datetime, timedelta, timezone
@@ -486,6 +489,32 @@ def test_main_still_refuses_an_unknown_scenario(capsys: pytest.CaptureFixture[st
 
 # ── The real thing, as a child process (CUM_UI_TESTS=1) ───────────────────────────
 
+def read_devserver_page(child: subprocess.Popen, port: int, timeout: float = 30.0) -> bytes:
+    """The page a dev server child serves at the address it prints (``devserver ... url=http://127.0.0.1:PORT/?k=KEY``).
+
+    Also checks that the same page is refused to a caller without the key: the token is written into it.
+    """
+    box: queue.Queue[bytes] = queue.Queue()
+    threading.Thread(target=lambda: box.put(child.stdout.readline()), daemon=True).start()
+    line = box.get(timeout=timeout).decode("utf-8", "replace")
+    found = re.search(r"\burl=(\S+)", line)
+    assert found, f"the dev server printed no address: {line!r}"
+    address = found.group(1)
+    assert f"127.0.0.1:{port}/?k=" in address
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    try:
+        conn.request("GET", "/")
+        bare = conn.getresponse()
+        bare.read()
+        assert bare.status == 401
+        conn.request("GET", address.split(f":{port}", 1)[1])
+        response = conn.getresponse()
+        assert response.status == 200
+        return response.read()
+    finally:
+        conn.close()
+
+
 @ui_only
 def test_the_devserver_process_serves_a_database_copy_with_a_theme(tmp_path: Path) -> None:
     path = usage_db(tmp_path / "copy.db")
@@ -500,17 +529,7 @@ def test_the_devserver_process_serves_a_database_copy_with_a_theme(tmp_path: Pat
         env=env, cwd=str(Path(__file__).resolve().parents[1]), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))        # python is a console program: no window
     try:
-        deadline = time.monotonic() + 30
-        page = b""
-        while time.monotonic() < deadline:
-            try:
-                conn = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
-                conn.request("GET", "/")
-                page = conn.getresponse().read()
-                conn.close()
-                break
-            except OSError:
-                time.sleep(0.2)
+        page = read_devserver_page(child, port)
         assert b'name="monitor-token" content="' in page
         token = page.decode("utf-8").split('name="monitor-token" content="', 1)[1].split('"', 1)[0]
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)

@@ -12,6 +12,10 @@
  *     "data arrived" effect on just those slots. FX.arrive(slots) does the same by hand if app.js wants to say so itself.
  *   - #main also gets .fx-quiet after its content is replaced, until the pointer moves (a pointer resting on a card must
  *     not replay that card's hover effect).
+ *   - Hover, once per entry. A hover effect moves the thing the pointer is on (a jitter, a settle, a lift, a nudge) or cuts it
+ *     (Night City's tear), so one bound to :hover alone cuts its own ground away and starts again, as long as the pointer rests
+ *     there. The effects hang on data-fx-hot (the pointer is on the target; the persistent ones) and data-fx-play (a one-shot is
+ *     due; the animated ones), which this file sets from pointerenter and pointerleave. See "hover" below.
  *   - Reduced motion (data-reduce-motion="1" on <html>, or prefers-reduced-motion): nothing is scheduled, the final
  *     text is the plain text, a placeholder is a static one.
  *
@@ -595,6 +599,9 @@
 
   /* Starts watching #main (idempotent). Called when the page is ready, by the theme scripts' start(). */
   FX.watch = function (main) {
+    if (main) {
+      startHover(main);
+    }
     if (!main || watch.main === main || typeof window.MutationObserver !== "function") {
       return;
     }
@@ -925,6 +932,153 @@
       reducedQuery.addEventListener("change", reducedTurnedOn);
     } else if (reducedQuery.addListener) {
       reducedQuery.addListener(reducedTurnedOn);
+    }
+  }
+
+  // ── hover: once per entry ───────────────────────────────────────────────────────────
+
+  /* Why the hover effects do not hang on :hover. They move what the pointer is on (Night City's glitch jitters the card 2 px
+   * and its tear cuts slits through it, Nostromo's settle moves it 1 px, Gates lifts it 2 px and nudges the menu and the
+   * stat tiles), and an effect that moves its own target takes the ground from under the pointer that started it: the pointer
+   * rests near an edge, or on a slit, the card moves off it, :hover goes, the card comes back, :hover returns, the effect
+   * starts again, and so on while the pointer rests there. (Night City's glitch played about 30 times a second on a fill bar
+   * next to the edge of the "Cache and thinking" card.) So the effects hang on two attributes of this file's, and the
+   * one-shots never on :hover:
+   *   data-fx-hot   the pointer is on the target. Set on the target's pointerenter. That event does not bubble, which is the
+   *                 point: a child coming under the pointer is not an entry, so the listener is a capturing one on the document.
+   *                 Kept while the target moves under a pointer that has not moved (a leave within HOLD_SLOP px of where the
+   *                 target is now is the target moving, not the pointer leaving) and cleared when the pointer is really out.
+   *                 The themes' persistent effects (a lift, a nudge) read it besides :hover, which still answers at once and
+   *                 restores the look when the page is redrawn under a resting pointer.
+   *   data-fx-play  a one-shot is due. Set on an entry when reduced motion is off, the page is neither entering (fx-run) nor
+   *                 redrawn under a resting pointer (fx-quiet) and the target is armed; cleared PLAY_MS later. A target is
+   *                 armed again REARM_MS after the pointer really left it, so one entry plays once, whatever the effect does to
+   *                 the target's own hit area while it plays.
+   * Both are data-fx attributes, which app.js keeps when it patches a card in place. */
+  var HOVER_TARGETS = ".nm-card, .nm-stat, .nm-menu a, .nm-refresh, .nm-sw button, .nm-btn";
+  var HOLD_SLOP = 4;                         // px: more than any of the effects moves a target (the largest are 2 px)
+  var REARM_MS = 400;                        // a target plays again no sooner than this after the pointer really left it
+  var PLAY_MS = 320;                         // how long data-fx-play stays: the longest one-shot lasts 200 ms
+  var hover = { on: false, main: null, state: new WeakMap(), held: [] };
+
+  function hoverState(el) {
+    var st = hover.state.get(el);
+    if (!st) {
+      st = { armedAt: 0, timer: 0 };
+      hover.state.set(el, st);
+    }
+    return st;
+  }
+
+  function isHoverTarget(node) {
+    return !!node && node.nodeType === 1 && typeof node.matches === "function" && node.matches(HOVER_TARGETS);
+  }
+
+  function inMain(el) {
+    for (var n = el; n; n = n.parentNode) {
+      if (n === hover.main) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /* whether the pointer is on, or within HOLD_SLOP px of, the target where it is now (the rectangle moves with the effect) */
+  function nearTarget(el, x, y) {
+    var r = el.getBoundingClientRect();
+    return x >= r.left - HOLD_SLOP && x <= r.right + HOLD_SLOP && y >= r.top - HOLD_SLOP && y <= r.bottom + HOLD_SLOP;
+  }
+
+  function unhold(el) {
+    var i = hover.held.indexOf(el);
+    if (i >= 0) {
+      hover.held.splice(i, 1);
+    }
+  }
+
+  function cool(el) {
+    el.removeAttribute("data-fx-hot");
+    unhold(el);
+    hoverState(el).armedAt = window.performance.now() + REARM_MS;
+  }
+
+  function coolAll() {
+    hover.held.slice().forEach(cool);
+    if (document.querySelectorAll) {
+      all("[data-fx-hot]", document).forEach(cool);
+    }
+  }
+
+  function mousey(ev) {
+    return !ev.pointerType || ev.pointerType === "mouse" || ev.pointerType === "pen";
+  }
+
+  function onPointerEnter(ev) {
+    var el = ev.target;
+    if (!isHoverTarget(el) || !mousey(ev)) {
+      return;
+    }
+    if (el.hasAttribute("data-fx-hot")) {
+      unhold(el);                            // the target came back under a pointer that never left it: not an entry
+      return;
+    }
+    el.setAttribute("data-fx-hot", "");
+    var st = hoverState(el);
+    if (window.performance.now() < st.armedAt || el.hasAttribute("data-fx-play") || reduced() || hidden()) {
+      return;
+    }
+    if (inMain(el) && (hover.main.classList.contains("fx-run") || hover.main.classList.contains("fx-quiet"))) {
+      return;                                // the page content waits for its entrance and for a pointer that moved
+    }
+    st.armedAt = Infinity;                   // armed again when the pointer really leaves
+    el.setAttribute("data-fx-play", "");
+    window.clearTimeout(st.timer);
+    st.timer = window.setTimeout(function () { el.removeAttribute("data-fx-play"); }, PLAY_MS);
+  }
+
+  function onPointerLeave(ev) {
+    var el = ev.target;
+    if (el === ROOT) {
+      coolAll();                             // the pointer left the window
+      return;
+    }
+    if (!isHoverTarget(el) || !el.hasAttribute("data-fx-hot")) {
+      return;
+    }
+    if (nearTarget(el, ev.clientX, ev.clientY)) {
+      if (hover.held.indexOf(el) < 0) {
+        hover.held.push(el);                 // it moved off the pointer by itself: stay hot until the pointer is really away
+      }
+      return;
+    }
+    cool(el);
+  }
+
+  function onPointerMove(ev) {
+    for (var i = hover.held.length - 1; i >= 0; i--) {
+      var el = hover.held[i];
+      if (!el.isConnected || !nearTarget(el, ev.clientX, ev.clientY)) {
+        cool(el);
+      }
+    }
+  }
+
+  function startHover(main) {
+    hover.main = main;
+    if (hover.on || !document.addEventListener) {
+      return;
+    }
+    hover.on = true;
+    document.addEventListener("pointerenter", onPointerEnter, true);
+    document.addEventListener("pointerleave", onPointerLeave, true);
+    document.addEventListener("pointermove", onPointerMove, { capture: true, passive: true });
+    document.addEventListener("visibilitychange", function () {
+      if (hidden()) {
+        coolAll();
+      }
+    });
+    if (typeof window.addEventListener === "function") {
+      window.addEventListener("blur", coolAll);
     }
   }
 

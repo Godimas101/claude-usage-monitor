@@ -6,6 +6,13 @@ points somewhere else on request. repair_if_enabled() does the same by itself at
 update or a move, but only in the installed (frozen) build: a source checkout must never repoint
 the entry of an installed copy. Registry access is Windows-only; anywhere else the entry simply
 reads as absent.
+
+The Run value is not the whole story. Turning an app off in Settings > Apps > Startup or in Task Manager's Startup
+apps tab leaves its Run value where it is and records the choice under
+Explorer\\StartupApproved\\Run (REG_BINARY, 12 bytes, an odd first byte such as 03 means off); Windows then skips
+the entry at sign-in. So the switch reads "on" only when the entry exists and that record does not turn it off, and
+turning it on removes such a record: an explicit choice made here wins over one made in Windows. Turning it off, and
+the launch-time repair, leave the record alone.
 """
 from __future__ import annotations
 
@@ -18,6 +25,7 @@ from usage_monitor.log import get_logger
 log = get_logger(__name__)
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+APPROVED_KEY = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
 VALUE_NAME = "ClaudeUsageMonitor"
 
 
@@ -33,17 +41,23 @@ def command_line(*, frozen: bool | None = None, executable: str | None = None,
 
 
 def is_enabled() -> bool:
-    """True when the Run entry exists, whatever it points at. Never raises."""
+    """True when the Run entry exists, whatever it points at, and Windows has not been told to skip it. Never raises."""
     try:
-        return _read_value() is not None
+        return _read_value() is not None and not _turned_off_in_windows()
     except OSError as exc:
         log.warning("could not read the startup entry: %s", exc)
         return False
 
 
 def set_enabled(on: bool) -> None:
-    """Add or remove the entry. Raises OSError when the registry refuses the change."""
+    """Add or remove the entry. Raises OSError when the registry refuses the change.
+
+    Adding also lifts a "turned off" record that Windows keeps for the entry (see the module note).
+    """
     if on:
+        if _turned_off_in_windows():
+            log.info("the startup entry was turned off in Windows; turning it back on")
+            _clear_approval()
         _write_value(command_line())
     else:
         _delete_value()
@@ -67,6 +81,18 @@ def repair_if_enabled(*, frozen: bool | None = None) -> bool:
     log.info("repairing the startup entry (it pointed at another location)")
     _write_value(expected)
     return True
+
+
+def _turned_off_in_windows() -> bool:
+    """True when the StartupApproved record for the entry says it is off (odd first byte). An unreadable one says nothing."""
+    try:
+        record = _read_approval()
+    except OSError as exc:
+        log.debug("could not read the startup approval record: %s", exc)
+        return False
+    if isinstance(record, (bytes, bytearray)):
+        return bool(record) and bool(record[0] & 1)
+    return isinstance(record, int) and not isinstance(record, bool) and bool(record & 1)
 
 
 def _quoted(path: str) -> str:
@@ -98,6 +124,26 @@ def _read_value() -> str | None:
     except FileNotFoundError:
         return None
     return str(value)
+
+
+def _read_approval() -> bytes | int | None:
+    """The StartupApproved value for the entry as stored, or None when Windows keeps no record."""
+    winreg = _winreg()
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, APPROVED_KEY) as key:
+            value, _kind = winreg.QueryValueEx(key, VALUE_NAME)
+    except FileNotFoundError:
+        return None
+    return value if isinstance(value, (bytes, bytearray, int)) else None
+
+
+def _clear_approval() -> None:
+    winreg = _winreg()
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, APPROVED_KEY, 0, winreg.KEY_SET_VALUE) as key:
+            winreg.DeleteValue(key, VALUE_NAME)
+    except FileNotFoundError:
+        pass  # no record: nothing turns the entry off
 
 
 def _write_value(command: str) -> None:

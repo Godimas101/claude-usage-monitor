@@ -53,6 +53,20 @@ def setup_logging(level: int | str = logging.INFO, path: str | Path | None = Non
     logger.addHandler(_open_handler(target))
 
 
+def mirror_logger(name: str) -> None:
+    """Also send the library logger ``name`` to the file log setup_logging opened.
+
+    pywebview logs as "pywebview", outside the usage_monitor tree, so its warnings (an unusable renderer, a web view
+    that failed to start) never reached the log file. Repeating the call is harmless.
+    """
+    target = logging.getLogger(name)
+    for handler in _managed_handlers(logging.getLogger(ROOT_NAME)):
+        if handler not in target.handlers:
+            target.addHandler(handler)
+    if target.level == logging.NOTSET:
+        target.setLevel(logging.INFO)
+
+
 def _managed_handlers(logger: logging.Logger) -> list[logging.Handler]:
     return [h for h in logger.handlers if isinstance(h, (_FileHandler, _NullHandler))]
 

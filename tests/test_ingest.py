@@ -4,7 +4,9 @@ from __future__ import annotations
 import builtins
 import json
 import os
+import shutil
 import sqlite3
+import sys
 from dataclasses import replace
 from pathlib import Path
 
@@ -23,6 +25,7 @@ SESSION = "5e1f0c2a-7d3b-4c8e-9a10-000000000001"
 SESSION_A = "aaaaaaaa-0000-4000-8000-00000000000a"
 SESSION_B = "bbbbbbbb-0000-4000-8000-00000000000b"
 SESSION_C = "cccccccc-0000-4000-8000-00000000000c"
+EXTENDED = "\\\\?\\"       # the Win32 extended-length prefix, \\?\
 
 
 def assistant(mid: str, *, out: int = 10, inp: int = 5) -> bytes:
@@ -91,8 +94,16 @@ def requests(store: Store) -> int:
     return store.totals(None, None).requests
 
 
+def _plain(path) -> str:
+    """The path without the extended-length prefix that paths.fs_path puts on it for the I/O call."""
+    text = os.fspath(path)
+    if text.startswith(EXTENDED + "UNC\\"):
+        return "\\\\" + text[len(EXTENDED) + 4:]
+    return text[len(EXTENDED):] if text.startswith(EXTENDED) else text
+
+
 def same_path(a, b) -> bool:
-    return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+    return os.path.normcase(os.path.abspath(_plain(a))) == os.path.normcase(os.path.abspath(_plain(b)))
 
 
 # ── Each file state ───────────────────────────────────────────────────────────────
@@ -563,6 +574,7 @@ def test_a_file_removed_after_the_walk_is_skipped_without_an_error(store, projec
 
     def vanished(path, offset, ctx, **kwargs):
         if same_path(path, f):
+            f.unlink()  # really gone: a file that is still there is a different story (see below)
             raise FileNotFoundError(2, "gone")
         return real_read_new(path, offset, ctx, **kwargs)
 
@@ -571,6 +583,93 @@ def test_a_file_removed_after_the_walk_is_skipped_without_an_error(store, projec
     assert result.errors == []
     assert result.files_read == 0
     assert requests(store) == 0
+
+
+def test_a_listed_file_that_is_still_there_but_will_not_open_is_reported(store, projects, monkeypatch):
+    """FileNotFoundError on a file the walk just listed is not 'removed': it was once swallowed silently for good."""
+    f = main_file(projects)
+    put(f, assistant("m1"))
+
+    def cannot_open(path, offset, ctx, **kwargs):
+        raise FileNotFoundError(3, "The system cannot find the path specified")
+
+    monkeypatch.setattr(tx, "read_new", cannot_open)
+    first = run(store, [projects])
+    assert first.errors == [f"FileNotFoundError on {f.name}"]
+    assert first.files_scanned == 1 and first.files_read == 0
+    assert store.known_files() == []         # no bookmark, so the next run tries the file again
+    assert requests(store) == 0
+
+    monkeypatch.undo()
+    second = run(store, [projects])
+    assert second.errors == [] and second.files_read == 1
+    assert requests(store) == 1
+
+
+# ── Paths of 260 or more characters: Windows' MAX_PATH applies to open() unless LongPathsEnabled; Claude Code's does not ──
+
+windows_only = pytest.mark.skipif(sys.platform != "win32", reason="MAX_PATH is a Windows limit")
+
+
+def long_file(root: Path, total: int, session: str = SESSION) -> Path:
+    """A workflow-subagent transcript whose full path has ``total`` characters, laid out as Claude Code writes them."""
+    tail = Path(session) / "subagents" / "workflows" / "wf_synth" / "agent-a1b2c3d4e5f60718.jsonl"
+    folder = "p" * (total - len(str(root / "x" / tail)) + 1)     # "x" stands for the project folder's first character
+    path = root / folder / tail
+    assert len(str(path)) == total
+    os.makedirs(paths.fs_path(path.parent), exist_ok=True)       # the folders themselves need the long form too
+    return path
+
+
+def remove_long_tree(root: Path, deep: Path) -> None:
+    """Delete the long project folder; pytest's own clean-up of tmp_path cannot always remove a path this deep."""
+    shutil.rmtree(paths.fs_path(root / deep.relative_to(root).parts[0]), ignore_errors=True)
+
+
+def write_long(path: Path, *lines: bytes, mode: str = "wb") -> None:
+    with open(paths.fs_path(path), mode) as handle:
+        handle.write(b"".join(lines))
+
+
+@windows_only
+@pytest.mark.parametrize("total", [262, 300], ids=["file path over the limit", "folder path over the limit too"])
+def test_a_transcript_at_a_path_over_259_characters_is_read_not_skipped(store, projects, total):
+    deep = long_file(projects, total)
+    try:
+        write_long(deep, assistant("d1"), assistant("d2"))
+        put(main_file(projects), assistant("m1"))
+        first = run(store, [projects])
+        assert first.errors == []
+        assert (first.files_scanned, first.files_read) == (2, 2)
+        assert first.items == {"request": 3}
+        assert requests(store) == 3
+        known = store.known_files()
+        assert any(same_path(key, deep) for key in known)         # bookmarked under the plain path ...
+        assert not any(key.startswith(EXTENDED) for key in known)  # ... not the extended one
+
+        extra = assistant("d3")
+        write_long(deep, extra, mode="ab")                         # a grown file: the tail check opens it again
+        second = run(store, [projects])
+        assert (second.files_read, second.bytes_read, second.errors) == (1, len(extra), [])
+        assert requests(store) == 4
+
+        third = run(store, [projects])                             # unchanged: skipped, not re-read
+        assert (third.files_scanned, third.files_read, third.errors) == (2, 0, [])
+    finally:
+        remove_long_tree(projects, deep)
+
+
+@windows_only
+def test_read_new_opens_a_transcript_at_a_path_over_259_characters(tmp_path):
+    deep = long_file(tmp_path, 280)
+    try:
+        write_long(deep, assistant("d1"))
+        ctx = tx.file_context(deep, tmp_path)
+        items, end = tx.read_new(deep, 0, ctx)
+        assert len(items) == 1 and end == len(assistant("d1"))
+        assert ctx.path == str(deep)                                 # the context keeps the plain path
+    finally:
+        remove_long_tree(tmp_path, deep)
 
 
 # ── A value SQLite could not hold does not block the rest of its file ─────────────────

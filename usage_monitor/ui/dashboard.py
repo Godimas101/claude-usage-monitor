@@ -5,11 +5,17 @@ one is already open. The child belongs to a kill-on-close job object that the mo
 ends with the monitor however the monitor ends (End task, taskkill /F, a crash). dashboard_main runs
 in that child: a pywebview window on the local API URL, with the window caption coloured from the
 theme and a saved position that is off every screen pulled back onto one. When pywebview or WebView2
-is missing, the same URL opens in the default browser instead and the exit code says so. The child
-talks to the API over HTTP with the per-run token it receives in the CUM_DASHBOARD_TOKEN
-environment variable, to 127.0.0.1 only and without following a redirect. Its js_api object
-(DashboardApi) is what the page can call: the token, the window chrome, a link opener and
-save_export, which writes a daily-rollup download through the native save dialog.
+is missing, or the window cannot show the page, the same address opens in the default browser instead and
+the exit code says so (pywebview itself raises nothing in either case: without a WebView2 runtime it quietly
+picks the IE11 engine, and a runtime that will not start leaves a blank window, so the child checks the
+runtime first and watches the window's load). The child talks to the API over HTTP with the per-run token
+it receives in the CUM_DASHBOARD_TOKEN environment variable, to 127.0.0.1 only and without following a
+redirect, and opens the page as /?k=<that token>: the page is served only to a caller that knows it.
+The page can call four functions of DashboardApi and nothing else: the token, the window chrome, a link
+opener and save_export, which writes a daily-rollup download through the native save dialog. They are
+registered one by one with window.expose(), never as a js_api object, because pywebview resolves a
+js_api call by plain getattr over a dotted name, private names and the whole object graph behind them
+included.
 """
 from __future__ import annotations
 
@@ -23,6 +29,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -42,6 +49,7 @@ log = get_logger(__name__)
 
 WINDOW_TITLE = "Claude Usage Monitor"
 TOKEN_ENV = "CUM_DASHBOARD_TOKEN"
+KEY_PARAM = "k"      # the query parameter that opens the page (server.KEY_PARAM; the child does not import the server)
 DEFAULT_SIZE = (1200, 780)
 MIN_SIZE = (720, 480)
 # What the window shows until the page has painted, when the active theme's own page colour is not known (Nostromo's black).
@@ -53,6 +61,24 @@ DEFAULT_BACKGROUND = "#090909"
 EXIT_NO_ARGS = 2
 EXIT_WINDOW_ERROR = 1
 EXIT_BROWSER_FALLBACK = 3
+
+# A healthy window has loaded the page in 2 to 3 s. One that has not after this long is not coming (a WebView2 runtime
+# that cannot start leaves a blank window and no error), and the page opens in the browser instead.
+LOAD_TIMEOUT_S = 20.0
+# The launcher treats a dashboard process that is alive but has shown no window for this long as a leftover, not a slow
+# start, and replaces it. Longer than LOAD_TIMEOUT_S, so a child that is about to fall back on its own is left alone.
+START_GRACE_S = 30.0
+
+# The WebView2 runtime registers its version ("pv") under EdgeUpdate, in the same places and by the same rule as
+# pywebview's own check and the installer's (installer.iss, WebView2Installed). The first is the Evergreen runtime,
+# the others the preview channels pywebview also accepts. 86.0.622.0 is the oldest build pywebview will use.
+WEBVIEW2_CLIENTS = (
+    "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
+    "{2CD8A007-E189-409D-A2C8-9AF4EF3C72AA}",
+    "{0D50BFEC-CD6A-4F9A-964C-C7416E3ACB10}",
+    "{65C35B14-6C1D-4122-AC46-7148CC9D6497}",
+)
+WEBVIEW2_MIN_VERSION = (86, 0, 622, 0)
 
 # A saved window counts as reachable while this much of its title bar lies on a screen (work area).
 CAPTION_HEIGHT = 32
@@ -207,13 +233,23 @@ def build_command(port: int, *, frozen: bool | None = None, executable: str | No
 
 
 class DashboardLauncher:
-    """Opens the dashboard in its own process, or brings the open one forward. Thread-safe."""
+    """Opens the dashboard in its own process, or brings the open one forward. Thread-safe.
 
-    def __init__(self, server: Any, settings: Settings) -> None:
+    A child whose window was closed lingers for several seconds while WebView2 shuts down. It says so
+    (window_closed, through POST /api/dashboard/closed), and the next open() then starts a new child
+    instead of answering for the old one. A child that is alive and has shown no window for START_GRACE_S
+    is a leftover and is replaced too, so the tray item cannot stay dead behind a process that never exits.
+    """
+
+    def __init__(self, server: Any, settings: Settings, *, clock: Callable[[], float] = time.monotonic) -> None:
         self._server = server
         self._settings = settings
+        self._clock = clock
         self._lock = threading.Lock()
         self._child: subprocess.Popen[bytes] | None = None
+        self._started_at = 0.0          # clock() when the current child was started
+        self._closing: subprocess.Popen[bytes] | None = None   # the current child, once it reported its window gone
+        self._retired: list[subprocess.Popen[bytes]] = []      # children that were replaced while they were still exiting
         self._job: int | None = None    # kill-on-close job handle: closing it (or dying) ends the child
 
     @property
@@ -235,37 +271,79 @@ class DashboardLauncher:
     def close(self, timeout: float = 5.0) -> None:
         """Terminate the child if it is running. The dashboard saves its own window size when it closes."""
         with self._lock:
-            child = self._child if self._alive() else None
+            children = [self._child] if self._alive() else []
+            children += [child for child in self._retired if child.poll() is None]
+            self._retired = []
             job, self._job = self._job, None
         try:
-            if child is not None:
+            for child in children:
                 child.terminate()
+            deadline = time.monotonic() + timeout
+            for child in children:
                 try:
-                    child.wait(timeout=timeout)
+                    child.wait(timeout=max(0.0, deadline - time.monotonic()))
                 except subprocess.TimeoutExpired:
                     child.kill()
         finally:
             _close_job(job)     # also ends anything the child left behind (WebView2 helpers)
 
+    def window_closed(self, pid: int) -> bool:
+        """The dashboard process ``pid`` reports that its window is gone while it is still shutting down.
+
+        True when it is the current child, which the next open() then replaces. A notice from a child that was
+        replaced already, or from a process that is not ours, changes nothing.
+        """
+        with self._lock:
+            child = self._child
+            if child is None or child.pid != pid or not self._alive():
+                return False
+            self._closing = child
+        log.info("the dashboard window was closed (pid %d is still exiting)", pid)
+        return True
+
     def open(self) -> bool:
         """Show the dashboard. Returns True when a window was focused or a child was started."""
         with self._lock:
-            if self._child is not None and self._alive():
-                if not focus_window(self._child.pid):
+            child = self._child
+            if child is not None and self._alive():
+                if child is self._closing:
+                    log.info("the dashboard window is closed and its process is still exiting; starting a new one")
+                    self._retired = [kept for kept in self._retired if kept.poll() is None] + [child]
+                elif focus_window(child.pid):
+                    return True
+                elif self._clock() - self._started_at <= START_GRACE_S:
                     log.info("dashboard process is running but its window is not visible yet")
-                return True
-            env = dict(os.environ)
-            env[TOKEN_ENV] = self._server.token
-            command = build_command(self._server.port)
-            try:
-                self._child = subprocess.Popen(command, env=env, close_fds=True, creationflags=_NO_WINDOW)
-            except OSError:
-                log.exception("could not start the dashboard process")
-                self._child = None
-                return False
-            log.info("dashboard process started (pid %d)", self._child.pid)
-            self._tie_to_monitor(self._child)
-            return True
+                    return True
+                else:
+                    log.warning("the dashboard process (pid %d) has shown no window for %d s; replacing it",
+                                child.pid, START_GRACE_S)
+                    self._end(child)
+            return self._start()
+
+    def _start(self) -> bool:
+        """Start a child. The lock is held."""
+        env = dict(os.environ)
+        env[TOKEN_ENV] = self._server.token
+        command = build_command(self._server.port)
+        try:
+            self._child = subprocess.Popen(command, env=env, close_fds=True, creationflags=_NO_WINDOW)
+        except OSError:
+            log.exception("could not start the dashboard process")
+            self._child = None
+            return False
+        self._started_at = self._clock()
+        self._closing = None
+        log.info("dashboard process started (pid %d)", self._child.pid)
+        self._tie_to_monitor(self._child)
+        return True
+
+    @staticmethod
+    def _end(child: Any) -> None:
+        """Ask a leftover child to go. It never showed a window, so there is nothing of the user's in it to save."""
+        try:
+            child.terminate()
+        except OSError:
+            log.debug("could not terminate the leftover dashboard process", exc_info=True)
 
     def _tie_to_monitor(self, child: Any) -> None:
         """Put the child in a kill-on-close job that only this process holds. When the monitor dies
@@ -300,6 +378,10 @@ def _close_job(job: int | None) -> None:
 
 # ── Child side ───────────────────────────────────────────────────────────────────
 
+# What the page may call on the window: the whole public surface of DashboardApi (a test holds the two together).
+BRIDGE_FUNCTIONS = ("get_token", "open_external", "save_export", "set_chrome")
+
+
 def _external_allowed(url: Any) -> bool:
     if not isinstance(url, str) or len(url) > 2048:
         return False
@@ -312,9 +394,13 @@ def _export_result(*, ok: bool = False, path: str | None = None, error: str | No
 
 
 class DashboardApi:
-    """The methods the page can call as pywebview.api.<name>. Names starting with _ are not exposed.
+    """The methods the page can call as pywebview.api.<name>: exactly the ones named in BRIDGE_FUNCTIONS.
 
-    ``base`` is the monitor's address, http://127.0.0.1:<port>, which save_export reads the export from.
+    They reach the page through expose_api(), which registers them one by one. The object itself is never
+    handed to pywebview as ``js_api``: pywebview resolves a js_api call by getattr over a dotted name, with no
+    check for a leading underscore, so a page script could walk from _window to the GUI module and the os
+    module behind it. ``base`` is the monitor's address, http://127.0.0.1:<port>, which save_export reads
+    the export from.
     """
 
     def __init__(self, token: str, base: str = "") -> None:
@@ -412,6 +498,11 @@ class DashboardApi:
 
     def _hwnd(self) -> int | None:
         return _native_handle(self._window) or find_window_of(os.getpid())
+
+
+def expose_api(window: Any, api: DashboardApi) -> None:
+    """Give the page the calls in BRIDGE_FUNCTIONS and nothing else (see DashboardApi for why not ``js_api``)."""
+    window.expose(*(getattr(api, name) for name in BRIDGE_FUNCTIONS))
 
 
 def _native_handle(window: Any) -> int | None:
@@ -536,6 +627,15 @@ def _save_bounds(base: str, token: str, bounds: dict[str, int]) -> None:
         log.warning("dashboard could not save its window size")
 
 
+def _notify_closed(base: str, token: str) -> None:
+    """Tell the monitor this process's window is gone, so a tray click opens a new one at once instead of waiting
+    for this process to finish shutting down (WebView2 takes several seconds)."""
+    try:
+        _api_call(base, token, "POST", "/api/dashboard/closed", {"pid": os.getpid()}, timeout=2.0)
+    except (OSError, ValueError):
+        log.debug("the monitor could not be told the dashboard window closed", exc_info=True)
+
+
 class _BoundsTracker:
     """Remembers the last window geometry while the window is open; saved once, on close."""
 
@@ -629,6 +729,90 @@ def keep_on_screen(window: Any) -> bool:
         return False
 
 
+def _version_tuple(text: str) -> tuple[int, ...]:
+    """'141.0.3537.85' as (141, 0, 3537, 85). Stops at the first part that is not a number."""
+    numbers: list[int] = []
+    for part in str(text).strip().split("."):
+        if not part.isdigit():
+            break
+        numbers.append(int(part))
+    return tuple(numbers)
+
+
+def _registered_runtime_versions() -> list[str]:
+    """Every WebView2 runtime version ("pv") registered for this user or this PC. Windows only."""
+    import winreg  # noqa: PLC0415  (Windows only)
+    versions: list[str] = []
+    for client in WEBVIEW2_CLIENTS:
+        places = (
+            (winreg.HKEY_CURRENT_USER, rf"Software\Microsoft\EdgeUpdate\Clients\{client}"),
+            (winreg.HKEY_LOCAL_MACHINE, rf"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{client}"),
+            (winreg.HKEY_LOCAL_MACHINE, rf"SOFTWARE\Microsoft\EdgeUpdate\Clients\{client}"),
+        )
+        for hive, path in places:
+            try:
+                with winreg.OpenKey(hive, path) as key:
+                    value, _kind = winreg.QueryValueEx(key, "pv")
+            except OSError:
+                continue
+            versions.append(str(value))
+    return versions
+
+
+def webview2_runtime_available(webview_module: Any = None) -> bool:
+    """Whether pywebview will find a WebView2 runtime to show the page in.
+
+    pywebview does not fail without one. It quietly picks the IE11 engine (MSHTML), which has no fetch() and no CSS
+    variables, so the dashboard never starts there and the window just stays blank. The child therefore asks first,
+    by the rule pywebview and the installer use: a runtime registered under EdgeUpdate with a version of 86.0.622.0
+    or later, or a fixed runtime named in pywebview's WEBVIEW2_RUNTIME_PATH setting. Anywhere but Windows, and when
+    the registry cannot be read, the answer is yes: pywebview is left to try, and the window guard has the last word.
+    """
+    if sys.platform != "win32":
+        return True
+    try:
+        if getattr(webview_module, "settings", {}).get("WEBVIEW2_RUNTIME_PATH"):
+            return True
+        return any(_version_tuple(v) >= WEBVIEW2_MIN_VERSION for v in _registered_runtime_versions())
+    except Exception:  # the check is a convenience: an odd machine must not lose the window to it
+        log.warning("could not read the WebView2 runtime registration; letting pywebview try", exc_info=True)
+        return True
+
+
+def _window_guard(webview: Any, window: Any, url: str, fallback: threading.Event,
+                  finished: threading.Event) -> Callable[[], None]:
+    """The function that runs beside pywebview's GUI loop (``webview.start(func)``) and checks the window can show the page.
+
+    pywebview raises nothing when the web view is unusable: with the MSHTML renderer, or with a WebView2 that
+    fails to initialise, the window opens and stays blank. So it fails the window itself: it watches for the
+    page's load event, and when the renderer is not WebView2 or the page has not loaded after LOAD_TIMEOUT_S
+    it records the decision in ``fallback``, opens ``url`` in the browser and closes the window. A window the
+    user closes first, or a loop that has ended (``finished``), is left alone.
+    """
+    def guard() -> None:
+        try:
+            renderer = getattr(webview, "renderer", None)
+            if renderer is not None and renderer != "edgechromium":
+                reason = f"pywebview chose its {renderer} renderer"
+            else:
+                deadline = time.monotonic() + LOAD_TIMEOUT_S
+                while True:
+                    if window.events.loaded.wait(0.2):
+                        return                      # the page is up
+                    if finished.is_set() or window.events.closed.is_set():
+                        return                      # the window went first: nothing to rescue
+                    if time.monotonic() >= deadline:
+                        reason = f"the page had not loaded after {LOAD_TIMEOUT_S:.0f} s"
+                        break
+            log.warning("the dashboard window cannot show the page (%s); opening the browser instead", reason)
+            fallback.set()
+            webbrowser.open(url)
+            window.destroy()
+        except Exception:  # a thread of pywebview's: nothing may escape into it
+            log.exception("the dashboard window check failed")
+    return guard
+
+
 def dashboard_main(argv: list[str] | None = None) -> int:
     """Child entry point (``main.py --dashboard --port N``). Returns the process exit code."""
     args = _parse_args(argv)
@@ -637,7 +821,7 @@ def dashboard_main(argv: list[str] | None = None) -> int:
         log.error("dashboard needs %s and --port", TOKEN_ENV)
         return EXIT_NO_ARGS
     base = f"http://127.0.0.1:{args.port}"
-    url = base + "/"
+    url = f"{base}/?{KEY_PARAM}={urllib.parse.quote(token, safe='')}"     # the page is served to whoever has the key
     state = _read_state(base, token)
     saved = _saved_bounds(state)
 
@@ -648,12 +832,17 @@ def dashboard_main(argv: list[str] | None = None) -> int:
         webbrowser.open(url)
         return EXIT_BROWSER_FALLBACK
 
+    if not webview2_runtime_available(webview):
+        log.warning("the WebView2 runtime is not installed; opening the dashboard in the browser")
+        webbrowser.open(url)
+        return EXIT_BROWSER_FALLBACK
+
     api = DashboardApi(token, base)
     try:
         window = webview.create_window(
-            WINDOW_TITLE, url, js_api=api, min_size=MIN_SIZE, background_color=_window_background(state),
-            **_geometry(saved),
+            WINDOW_TITLE, url, min_size=MIN_SIZE, background_color=_window_background(state), **_geometry(saved),
         )
+        expose_api(window, api)
     except Exception:  # our own call failed (a bug or a pywebview change): still show the page, but say so
         log.exception("could not create the dashboard window; opening the browser")
         webbrowser.open(url)
@@ -675,15 +864,20 @@ def dashboard_main(argv: list[str] | None = None) -> int:
     def on_closed(*_args: Any) -> None:
         if tracker.last is not None:
             _save_bounds(base, token, tracker.last)
+        _notify_closed(base, token)
 
     window.events.closed += on_closed
+    fallback = threading.Event()        # set by the guard when it sent the page to the browser
+    finished = threading.Event()        # set once the GUI loop has ended
     try:
-        webview.start()
+        webview.start(_window_guard(webview, window, url, fallback, finished))
     except Exception:
         log.exception("the web view could not start (WebView2 missing?); opening the browser")
         webbrowser.open(url)
         return EXIT_BROWSER_FALLBACK
-    return 0
+    finally:
+        finished.set()
+    return EXIT_BROWSER_FALLBACK if fallback.is_set() else 0
 
 
 def _cli() -> int:  # pragma: no cover - manual entry: python -m usage_monitor.ui.dashboard --port N

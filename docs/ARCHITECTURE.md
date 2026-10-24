@@ -123,7 +123,10 @@ read_new(path: Path, offset: int, ctx: FileContext) -> tuple[list[TranscriptItem
 `read_new` reads from `offset` to the last complete line and returns the new offset (a line
 boundary). It raises `OSError` when the file cannot be opened or read to its end (the
 ingestor then keeps the bookmark and commits nothing); `FileNotFoundError` for a file that
-vanished after the directory walk is skipped quietly. Counts are clamped to 2**53 and lone
+vanished after the directory walk is skipped quietly (one that is still there is reported in
+`IngestResult.errors`). The file is opened through `paths.fs_path`, so a path of 260 or more
+characters (Windows keeps that limit for `open()` unless `LongPathsEnabled`) reads like any other.
+Counts are clamped to 2**53 and lone
 surrogates replaced, so odd values do not block a file. Timestamps before 1970 are rejected.
 A cheap substring prefilter skips lines that can't produce an item; it must be
 proven equivalent to a full parse on real data.
@@ -239,6 +242,11 @@ New file → read from 0. Grown → read appended bytes, unless the 4 KiB before
 Smaller than the bookmark → re-read from 0 (dedupe makes it safe). Missing → `forget_file`.
 Commit per file so an interrupted backfill resumes. Targets: no-change pass < 0.5 s for 4K
 files; 2 GB backfill < 60 s.
+Paths: bookmarks are keyed by the plain absolute path; every directory listing and read goes
+through `paths.fs_path` (the Win32 extended-length form, `\\?\C:\...`), because Claude Code (Node)
+writes subagent transcripts at 260+ characters that `open()` and `os.stat()` cannot reach by their
+plain name. A file the walk listed that still will not open is an entry in `IngestResult.errors`
+(Data health shows it), never a silent skip.
 
 ### `data/usage_api.py`
 ```python
@@ -487,8 +495,16 @@ in local time; may wrap midnight).
 - Threshold: the first time percent ≥ T in a window → one alert for the highest T crossed;
   lower ones are marked done. Severity is `critical` for T ≥ 100, else `warning`. The message
   gives the local reset time ("Resets 4:40 PM"; weekly: "Resets Tue 4:00 PM").
-- Reset: the window identity changes and the previous percent was ≥ the lowest threshold →
-  `info` "Session limit reset".
+- Reset: a window that ended and whose last percent was ≥ the lowest threshold → `info`
+  "Session limit reset". The usage API does not announce the end of a window (the 5-hour session
+  drops out of the answer, or keeps showing the window that ended, until the next message starts
+  another), so the engine ends a window itself: on the first LIVE state with `updated_at` 60 s
+  past the window's `resets_at` it announces the reset ("Usage is back to 0%.") and closes the
+  window. A closed window ignores whatever the API still shows for it (no threshold alerts for a
+  window that is over); the next window to appear starts a quiet baseline, and a limit first seen
+  after its window ended is a baseline too. When the API shows the next window before the clock
+  has ended the old one (a change of identity), the reset is announced from that change instead,
+  with the new window's reset time in the message. Either way one alert per window.
 - Credits: spend enabled and `used` above the last seen value → `info` "Usage credits in
   use", at most once per local day.
 - Master off, kind toggled off, quiet hours, or `suppressed=True` (the caller's fullscreen

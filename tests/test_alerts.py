@@ -19,6 +19,7 @@ NOW = datetime(2026, 10, 22, 12, 0, tzinfo=UTC)               # 7:00 AM local
 SESSION_RESET = datetime(2026, 10, 22, 21, 40, tzinfo=UTC)    # 4:40 PM local
 NEXT_SESSION = SESSION_RESET + timedelta(hours=5)             # 9:40 PM local, same day
 WEEK_RESET = datetime(2026, 10, 27, 21, 0, tzinfo=UTC)        # Tue 4:00 PM local
+LATE_RESET = datetime(2026, 10, 30, 21, 0, tzinfo=UTC)        # a window still open at every clock the quiet-hours tests use
 
 
 @pytest.fixture
@@ -208,6 +209,115 @@ def test_a_limit_first_seen_after_the_baseline_is_baseline_too(engine):
     assert engine.evaluate(state_at(session(10), weekly(96))) == []
 
 
+# ── A window that ends: the reset is announced by the clock, not by the next window ──
+
+def at(minutes_after_reset: float) -> datetime:
+    return SESSION_RESET + timedelta(minutes=minutes_after_reset)
+
+
+def climb_to_100(engine) -> None:
+    """A session that ends at SESSION_RESET after reaching 100%: baseline, then 80/90/100 alerts on the way."""
+    for pct, minutes in ((60, -180), (96, -90), (100, -30)):
+        engine.evaluate(state_at(session(pct), now=at(minutes)))
+
+
+@pytest.mark.parametrize("after_end", [
+    pytest.param(lambda: session(0, None), id="the API keeps the session but without a reset time"),
+    pytest.param(lambda: None, id="the API drops the session"),
+])
+def test_a_session_reset_is_announced_when_the_window_ends_even_if_the_api_shows_no_new_one(engine, after_end):
+    climb_to_100(engine)
+    limit = after_end()
+    state = lambda minutes: state_at(*([limit] if limit is not None else []), now=at(minutes))
+    assert engine.evaluate(state(0.5)) == []                      # inside the 60 s tolerance: still the same window
+    (alert,) = engine.evaluate(state(1.5))
+    assert (alert.kind, alert.title, alert.severity) == ("reset", "Session limit reset", "info")
+    assert alert.message == "Usage is back to 0%."
+    assert alert.key == "reset:session:SESSION:2026-10-22T21:40:00+00:00"
+    for minutes in (5, 45, 120, 300):
+        assert engine.evaluate(state(minutes)) == []              # once, not on every poll
+
+
+def test_a_session_reset_is_announced_when_the_api_keeps_showing_the_window_that_ended(engine):
+    climb_to_100(engine)
+    assert engine.evaluate(state_at(session(100), now=at(0.5))) == []
+    assert titles(engine.evaluate(state_at(session(100), now=at(1.5)))) == ["Session limit reset"]
+    for minutes in (10, 60, 200):                                 # the stale 100% is neither a new alert nor a new reset
+        assert engine.evaluate(state_at(session(100), now=at(minutes))) == []
+
+
+def test_the_first_window_after_an_announced_reset_starts_a_quiet_baseline(engine):
+    climb_to_100(engine)
+    assert titles(engine.evaluate(state_at(session(100), now=at(2)))) == ["Session limit reset"]
+    new_reset = at(300 + 120)
+    assert engine.evaluate(state_at(session(2, new_reset), now=at(300))) == []     # no second reset alert
+    assert titles(engine.evaluate(state_at(session(85, new_reset), now=at(330)))) == ["Session limit at 80%"]
+    assert titles(engine.evaluate(state_at(session(5, new_reset + timedelta(hours=5)), now=at(500)))) == [
+        "Session limit reset"]                                                      # and the ladder is armed again
+
+
+def test_a_new_window_in_the_same_state_as_the_ended_one_still_announces_the_reset_once(engine):
+    climb_to_100(engine)
+    new_reset = at(300)
+    alerts = engine.evaluate(state_at(session(3, new_reset), now=at(200)))          # the clock is past the old end
+    assert [(a.title, a.message) for a in alerts] == [("Session limit reset", "Resets 9:40 PM")]  # the new window's end
+    assert engine.evaluate(state_at(session(3, new_reset), now=at(210))) == []
+
+
+def test_a_window_that_never_reached_the_lowest_threshold_ends_quietly(engine):
+    engine.evaluate(state_at(session(10), now=at(-120)))
+    engine.evaluate(state_at(session(50), now=at(-60)))
+    assert engine.evaluate(state_at(session(50), now=at(5))) == []
+    assert engine.evaluate(state_at(session(2, at(305)), now=at(300))) == []
+
+
+def test_every_limit_ends_on_its_own_clock(engine):
+    engine.evaluate(state_at(session(10), weekly(10), now=at(-300)))
+    engine.evaluate(state_at(session(90), weekly(95), now=at(-200)))
+    assert titles(engine.evaluate(state_at(session(90), weekly(95), now=at(2)))) == ["Session limit reset"]
+    week_end = WEEK_RESET + timedelta(minutes=2)
+    assert titles(engine.evaluate(state_at(session(5, at(300)), weekly(95), now=week_end))) == ["Weekly limit reset"]
+
+
+def test_a_limit_first_seen_after_its_window_ended_is_baseline_not_a_reset(engine):
+    """The app starts, or the API answers, after the window ran out: nothing happened that the user is waiting for."""
+    assert engine.evaluate(state_at(session(100), now=at(30))) == []
+    assert engine.evaluate(state_at(session(100), now=at(60))) == []
+    assert engine.evaluate(state_at(session(1, at(330)), now=at(90))) == []
+    assert titles(engine.evaluate(state_at(session(85, at(330)), now=at(100)))) == ["Session limit at 80%"]
+
+
+def test_a_reset_that_comes_while_alerts_are_withheld_is_not_announced_later(engine, settings):
+    climb_to_100(engine)
+    assert engine.evaluate(state_at(session(100), now=at(2)), suppressed=True) == []
+    assert engine.evaluate(state_at(session(100), now=at(3))) == []
+    settings.set("alerts_enabled", False)
+    engine.evaluate(state_at(session(10, at(300)), now=at(150)))
+    engine.evaluate(state_at(session(97, at(300)), now=at(200)))
+    assert engine.evaluate(state_at(session(97, at(300)), now=at(302))) == []
+    settings.set("alerts_enabled", True)
+    assert engine.evaluate(state_at(session(97, at(300)), now=at(303))) == []
+
+
+def test_the_reset_alert_can_be_switched_off_on_its_own(engine, settings):
+    settings.set("alert_on_reset", False)
+    climb_to_100(engine)
+    assert engine.evaluate(state_at(session(100), now=at(2))) == []
+
+
+@pytest.mark.parametrize("status", [s for s in ApiStatus if s is not ApiStatus.LIVE])
+def test_a_reset_that_comes_while_the_status_is_not_live_is_announced_by_the_next_live_state(engine, status):
+    climb_to_100(engine)
+    assert engine.evaluate(state_at(session(100), now=at(5), status=status)) == []
+    assert titles(engine.evaluate(state_at(session(100), now=at(20)))) == ["Session limit reset"]
+
+
+def test_the_ended_window_does_not_raise_threshold_alerts_for_a_late_reading(engine):
+    engine.evaluate(state_at(session(10), now=at(-120)))
+    assert engine.evaluate(state_at(session(85), now=at(5))) == []                  # 85% of a window that is over
+    assert engine.evaluate(state_at(session(97), now=at(10))) == []
+
+
 # ── Message formats ───────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("limit_fn, resets, expected", [
@@ -339,11 +449,12 @@ def test_credits_switch_off_suppresses_the_credits_alert(engine, settings):
 
 def test_quiet_hours_wrap_midnight_and_consume_the_crossing(engine, settings):
     settings.set("alert_quiet_hours", {"start": "22:00", "end": "07:00"})
-    engine.evaluate(state_at(session(10), now=local(12)))
-    assert engine.evaluate(state_at(session(85), now=local(23, 30))) == []
-    assert engine.evaluate(state_at(session(95), now=local(6, 59, day=23))) == []
-    assert engine.evaluate(state_at(session(95), now=local(7, 0, day=23))) == []
-    assert titles(engine.evaluate(state_at(session(100), now=local(12, day=23)))) == ["Session limit at 100%"]
+    engine.evaluate(state_at(session(10, LATE_RESET), now=local(12)))
+    assert engine.evaluate(state_at(session(85, LATE_RESET), now=local(23, 30))) == []
+    assert engine.evaluate(state_at(session(95, LATE_RESET), now=local(6, 59, day=23))) == []
+    assert engine.evaluate(state_at(session(95, LATE_RESET), now=local(7, 0, day=23))) == []
+    assert titles(engine.evaluate(state_at(session(100, LATE_RESET), now=local(12, day=23)))) == [
+        "Session limit at 100%"]
 
 
 @pytest.mark.parametrize("quiet, hour, minute, expect_alert", [
@@ -359,8 +470,8 @@ def test_quiet_hours_wrap_midnight_and_consume_the_crossing(engine, settings):
 ])
 def test_quiet_hours_edges(engine, settings, quiet, hour, minute, expect_alert):
     settings.set("alert_quiet_hours", quiet)
-    engine.evaluate(state_at(session(10), now=local(4)))
-    alerts = engine.evaluate(state_at(session(85), now=local(hour, minute)))
+    engine.evaluate(state_at(session(10, LATE_RESET), now=local(4)))
+    alerts = engine.evaluate(state_at(session(85, LATE_RESET), now=local(hour, minute)))
     assert (titles(alerts) == ["Session limit at 80%"]) is expect_alert
 
 

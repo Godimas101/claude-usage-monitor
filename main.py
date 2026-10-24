@@ -135,11 +135,12 @@ def _dump_frames(folder: str) -> int:
 
 def _dashboard(argv: Sequence[str]) -> int:
     from usage_monitor import paths
-    from usage_monitor.log import setup_logging
+    from usage_monitor.log import mirror_logger, setup_logging
     from usage_monitor.ui.dashboard import dashboard_main
 
     # Its own file: two processes must not rotate the same log.
     setup_logging(path=paths.app_data_dir() / DASHBOARD_LOG)
+    mirror_logger("pywebview")  # what the web view reports about itself (an unusable renderer, a failed start) goes there too
     _install_crash_hooks()      # the pywebview event threads run here: without a hook they die silently
     return dashboard_main(list(argv))
 

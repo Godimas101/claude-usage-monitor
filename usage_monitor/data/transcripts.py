@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from usage_monitor import paths
 from usage_monitor.data.models import (
     ApiErrorEvent,
     CodeChange,
@@ -358,7 +359,7 @@ def _scan(
     items: list[TranscriptItem] = []
     start = max(offset, 0)
     consumed = 0
-    with open(path, "rb") as fh:  # OSError propagates: the caller keeps its bookmark
+    with open(paths.fs_path(path), "rb") as fh:  # OSError propagates: the caller keeps its bookmark
         size = os.fstat(fh.fileno()).st_size
         if offset > size:
             end = _last_boundary(fh, size)

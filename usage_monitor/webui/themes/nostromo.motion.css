@@ -95,11 +95,16 @@ html[data-theme="nostromo"] .nm-menu a { transition: color 90ms steps(2, end), t
 /* main.fx-quiet (the page was just redrawn and the pointer has not moved) takes the motion away, never the look: a card the
    pointer rests on stays lit through a data refresh, and one lit by a resting pointer after a redraw simply is, with no step in. */
 html[data-theme="nostromo"] .nm-main.fx-quiet .nm-card, html[data-theme="nostromo"] .nm-main.fx-quiet .nm-card :is(.nm-big, .nm-h1) { transition: none; }
+/* The settle is a one-shot and hangs on [data-fx-play] (motion.js: once per entry of the pointer), not on :hover, which would start
+   it again each time the 1 px move took the card off a pointer resting at its edge. The menu's 1 px nudge is a state, so it also
+   reads [data-fx-hot], which stays on while the link moves under a pointer that has not. The brightness and the glow read it
+   too, so that they do not blink off and on while the settle moves the card off a pointer resting at its edge. */
 @media (hover: hover) {
-  html[data-theme="nostromo"] .nm-card:hover { filter: brightness(1.13) saturate(1.05); }
-  html[data-theme="nostromo"] .nm-card:hover .nm-big { text-shadow: 0 0 2px var(--glow), 0 0 20px var(--glow); }
-  html[data-theme="nostromo"] .nm-main:not(.fx-run):not(.fx-quiet) .nm-card:hover { animation: nmx-settle 200ms ease-out 1; }
-  html[data-theme="nostromo"] .nm-menu a:hover { color: var(--hot); text-shadow: 0 0 8px var(--glow); transform: translateX(1px); }
+  html[data-theme="nostromo"] .nm-card:is(:hover, [data-fx-hot]) { filter: brightness(1.13) saturate(1.05); }
+  html[data-theme="nostromo"] .nm-card:is(:hover, [data-fx-hot]) .nm-big { text-shadow: 0 0 2px var(--glow), 0 0 20px var(--glow); }
+  html[data-theme="nostromo"] .nm-main:not(.fx-run):not(.fx-quiet) .nm-card[data-fx-play] { animation: nmx-settle 200ms ease-out 1; }
+  html[data-theme="nostromo"] .nm-menu a:hover { color: var(--hot); text-shadow: 0 0 8px var(--glow); }
+  html[data-theme="nostromo"] .nm-menu a:is(:hover, [data-fx-hot]) { transform: translateX(1px); }
   html[data-theme="nostromo"] .nm-menu a.on:hover { text-shadow: none; }
   html[data-theme="nostromo"] :is(.nm-refresh, .nm-sw button):hover { text-shadow: 0 0 6px var(--glow); }
 }

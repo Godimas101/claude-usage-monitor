@@ -2,8 +2,10 @@
 
 A ThreadingHTTPServer on loopback and a random port. Every request must send a Host header of
 127.0.0.1 or localhost with that port (a DNS-rebinding guard). Every /api/ route also needs the
-per-run X-Monitor-Token header. No CORS header is ever sent. A failing handler becomes a JSON
-error and a log line; nothing is raised into the server thread.
+per-run X-Monitor-Token header, and the page itself (GET /) only opens with that same secret as ?k=...: the
+token is written into the page, so a page anyone on the machine could fetch would hand it to every local user and
+session. The address to open is ApiServer.url, key included. No CORS header is ever sent. A failing handler becomes
+a JSON error and a log line; nothing is raised into the server thread.
 
 The statistics routes (/api/analytics/<name>, /api/export) read through one extra, lazily opened
 Store of their own, so a report never touches the data service's connection. Reports are cached
@@ -50,6 +52,7 @@ log = get_logger(__name__)
 
 DEV_ENV = "CUM_DEV_INSTANCE"
 TOKEN_HEADER = "X-Monitor-Token"
+KEY_PARAM = "k"                 # GET /?k=<the per-run token> opens the page; without it the answer is 401
 MAX_BODY_BYTES = 64 * 1024
 ANALYTICS_NAMES = ("cost", "efficiency", "pacing", "history", "sessions")
 ANALYTICS_TTL_S = 20.0          # how long a computed report is served again without a new query
@@ -732,7 +735,9 @@ class ApiServer:
     only used for display names), ``clock`` is a monotonic clock in seconds (the caches' time) and
     ``wall_clock`` the current time as an aware datetime.
 
-    ``update_cb`` maps ``info`` (the newest release the update check found, as a dict, or None), ``check``,
+    ``dashboard_closed_cb(pid)`` answers POST /api/dashboard/closed, with which the dashboard process says its window
+    is gone while the process itself is still exiting (the launcher then starts a new one at the next request to
+    open it). ``update_cb`` maps ``info`` (the newest release the update check found, as a dict, or None), ``check``,
     ``apply`` and ``skip`` to callables. The last three answer POST /api/update/<name> (a missing one is a 501);
     ``info`` feeds the ``update`` block of /api/state (see ``_update_view``).
     """
@@ -745,6 +750,7 @@ class ApiServer:
         refresh_cb: Callable[[], Any] | None,
         update_cb: Mapping[str, Callable[[], Any]],
         on_settings_applied: Callable[[dict[str, Any]], None] | None = None,
+        dashboard_closed_cb: Callable[[int], Any] | None = None,
         version: str,
         dev: bool,
         port: int = 0,
@@ -761,6 +767,7 @@ class ApiServer:
         self._refresh_cb = refresh_cb
         self._update_cb = dict(update_cb)
         self._on_settings_applied = on_settings_applied
+        self._dashboard_closed_cb = dashboard_closed_cb
         self._version = str(version)
         # CUM_DEV_INSTANCE=1 makes a dev server whatever the caller says: the environment is how every
         # process of a dev run (and a test shell) is told not to touch the installed copy's state.
@@ -794,7 +801,8 @@ class ApiServer:
 
     @property
     def url(self) -> str:
-        return f"http://127.0.0.1:{self.port}/" if self.port else ""
+        """The address that opens the dashboard page: loopback, the port, and the key the page is served for."""
+        return f"http://127.0.0.1:{self.port}/?{KEY_PARAM}={self._token}" if self.port else ""
 
     def start(self) -> int:
         with self._lock:
@@ -852,6 +860,9 @@ class ApiServer:
         path = target.path
         if path == "/":
             self._only(method, "GET")
+            if not self._key_ok(target.query):
+                raise _HttpError(401, "This address needs the key the Claude Usage Monitor adds to it. "
+                                      "Open the dashboard from the monitor's tray icon.", plain=True)
             self._send_index(req)
         elif path.startswith("/static/"):
             self._only(method, "GET")
@@ -872,6 +883,16 @@ class ApiServer:
         if not given:
             return False
         return hmac.compare_digest(given.encode("utf-8", "surrogatepass"), self._token.encode("ascii"))
+
+    def _key_ok(self, query: str) -> bool:
+        """Whether the query of GET / holds the per-run token as its one ``k``. Compared in constant time."""
+        try:
+            given = urllib.parse.parse_qs(query, keep_blank_values=True, max_num_fields=16).get(KEY_PARAM, [])
+        except ValueError:  # more fields than any real address has
+            return False
+        if len(given) != 1 or not given[0]:
+            return False
+        return hmac.compare_digest(given[0].encode("utf-8", "surrogatepass"), self._token.encode("ascii"))
 
     @staticmethod
     def _only(method: str, allowed: str) -> None:
@@ -903,6 +924,7 @@ class ApiServer:
             "/api/supporters": ("GET", self._get_supporters),
             "/api/settings": ("POST", self._post_settings),
             "/api/refresh": ("POST", self._post_refresh),
+            "/api/dashboard/closed": ("POST", self._post_dashboard_closed),
         }
         route = routes.get(path)
         if route is None:
@@ -1113,6 +1135,21 @@ class ApiServer:
             raise _HttpError(501, "refresh is not available")
         self._refresh_cb()
         self._send_json(req, 200, {"ok": True})
+
+    def _post_dashboard_closed(self, req: _Handler) -> None:
+        """The dashboard process reports that its window is gone: ``{"pid": <its process id>}``."""
+        body = self._json_body(req)
+        pid = body.get("pid") if isinstance(body, dict) else None
+        if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+            raise _HttpError(400, "pid must be a process id")
+        if self._dashboard_closed_cb is None:
+            raise _HttpError(501, "the dashboard is not managed here")
+        try:
+            known = bool(self._dashboard_closed_cb(pid))
+        except Exception:
+            log.exception("dashboard-closed notice failed")
+            raise _HttpError(500, "could not record the notice") from None
+        self._send_json(req, 200, {"ok": True, "known": known})
 
     def _post_update(self, req: _Handler, operation: str) -> None:
         self._read_body(req)

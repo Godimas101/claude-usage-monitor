@@ -53,6 +53,25 @@ def projects_dirs() -> list[Path]:
     return found
 
 
+def fs_path(path: str | os.PathLike[str]) -> str:
+    """``path`` in the form that opens past Windows' 260-character limit.
+
+    Python's open() and os.stat() raise FileNotFoundError for a path of 260 or more characters unless the machine has
+    LongPathsEnabled, which Windows leaves off. Claude Code (Node) writes such files without trouble (a subagent
+    transcript sits four folders below the project folder) and os.scandir lists them, so reading them needs the Win32
+    extended-length form: ``\\\\?\\C:\\folder\\file``, or ``\\\\?\\UNC\\server\\share\\file`` for a network path. Use the
+    result for the I/O call only; keep the plain path as a key, in a log line and in a message. Off Windows, and for a
+    path that is already in the extended form, the path comes back unchanged.
+    """
+    text = os.fspath(path)
+    if sys.platform != "win32" or text.startswith(("\\\\?\\", "\\\\.\\")):
+        return text
+    full = os.path.abspath(text)    # the extended form is passed on as it is: it must be absolute, with plain backslashes
+    if full.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + full[2:]
+    return "\\\\?\\" + full
+
+
 def credentials_path() -> Path:
     return claude_dir() / ".credentials.json"
 

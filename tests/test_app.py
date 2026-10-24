@@ -3119,6 +3119,54 @@ def test_the_collector_keeps_errors_warnings_and_counts_server_requests():
     assert collector.errors[0] == "usage_monitor.test_collector: broken"
     assert "KeyError" in collector.errors[1] and "Traceback" not in collector.errors[1]
     assert collector.request_count() == 2
+    assert (collector.count_of("GET /api/state"), collector.count_of("POST /api/refresh"),
+            collector.count_of("GET /api/themes")) == (1, 1, 0)
+
+
+def _dashboard_step_rig(tmp_path, monkeypatch, *, page_requests):
+    """A smoke test whose dashboard child is a fake that is up for the whole step and whose server log shows
+    ``page_requests`` (log lines such as "GET /api/themes") while it is open."""
+    smoke = SmokeTest(45, tmp_path / "r.json")
+    monkeypatch.setattr(SmokeTest, "DASHBOARD_OPEN_S", 0.0)
+    monkeypatch.setattr(SmokeTest, "DASHBOARD_CLOSE_WAIT_S", 0.5)
+    monkeypatch.setattr(SmokeTest, "PAGE_BOOT_WAIT_S", 0.3)
+    state = {"up": False}
+
+    class Launcher:
+        pid = 4321
+
+        @property
+        def running(self):
+            return state["up"]
+
+        def open(self):
+            state["up"] = True
+            for line in page_requests:
+                smoke.collector.requests += 1
+                smoke.collector.seen[line] = smoke.collector.seen.get(line, 0) + 1
+            return True
+
+        def close(self):
+            state["up"] = False
+
+    monkeypatch.setattr(app_mod, "post_close_to_dashboard", lambda pid: state.update(up=False) or True)
+    smoke._app = types.SimpleNamespace(launcher=Launcher())
+    monkeypatch.setattr(smoke, "_get_json", lambda path: {"settings": {"dashboard_bounds": {"x": 0}}})
+    return smoke
+
+
+def test_the_smoke_dashboard_step_wants_a_page_that_started_not_only_one_that_was_fetched(tmp_path, monkeypatch):
+    """The dashboard process reads /api/state itself before it opens a window, and a web view that cannot run the page
+    (pywebview's IE11 fallback, a WebView2 that failed to start) still fetches index.html: only a running page asks for
+    the themes."""
+    booted = _dashboard_step_rig(tmp_path, monkeypatch, page_requests=["GET /api/state", "GET /api/themes"])
+    assert booted._step_dashboard()["page_booted"] is True
+    blank = _dashboard_step_rig(tmp_path, monkeypatch, page_requests=["GET /api/state"])
+    with pytest.raises(RuntimeError, match="never started"):
+        blank._step_dashboard()
+    silent = _dashboard_step_rig(tmp_path, monkeypatch, page_requests=[])
+    with pytest.raises(RuntimeError, match="never loaded the page"):
+        silent._step_dashboard()
 
 
 def test_a_smoke_run_that_never_started_fails_and_says_why(tmp_path):
@@ -3214,6 +3262,7 @@ def test_the_smoke_api_step_checks_the_update_block_the_dashboard_reads(tmp_path
     try:
         result = smoke._step_api()
         assert result["state"]["update_available"] is False
+        assert (result["index_status"], result["token_in_page"], result["keyless_page_status"]) == (200, True, 401)
         assert set(server._update_view()) == set(SmokeTest.UPDATE_KEYS), "the smoke check and the server agree on the block"
         server._update_view = lambda: {"available": False, "info": None}              # a build that lost keys of the block
         with pytest.raises(RuntimeError, match="update has no version, url, can_self_update, skipped, skip_version"):

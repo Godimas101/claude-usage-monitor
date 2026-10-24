@@ -105,6 +105,10 @@ python main.py            (console: Ctrl+C quits, errors print)     or    launch
   start node, so they are gated with `CUM_UI_TESTS=1`; `tests.yml` runs both files once more with it set, so CI covers them.
   A check that reads a script's source for a phrase proves the phrase is there, not that the script works: where the claim
   is behaviour, run the script.
+- **Hover effects play once per entry of the pointer.** A hover rule that animates, moves or clips its own target must not
+  hang on `:hover` alone (it restarts itself under a pointer resting at the target's edge); it hangs on `[data-fx-play]`
+  (a one-shot) or `[data-fx-hot]` (a state), which `motion.js` sets from `pointerenter`. After touching a hover rule or that
+  code, run `tests/browser/hover_probe.js` (Playwright for node, not part of pytest; see `docs/UI_ARCHITECTURE.md`, "Motion").
 - **No test opens a console window.** A console program started by a process that has no console (pytest run from an
   editor, a task runner or an agent) gets a visible terminal window of its own. A test that starts `git`, `node`,
   `python`, `cmd` or anything else passes `creationflags=subprocess.CREATE_NO_WINDOW`; `os.system` and `os.popen` are

@@ -117,20 +117,24 @@ html[data-theme="gates"] :is(.nm-card, .nm-stat) {
 html[data-theme="gates"] .nm-menu a { transition: background-color 100ms, transform 240ms var(--gx-out); }
 html[data-theme="gates"] :is(.nm-btn, .nm-refresh) { transition: background-color 100ms, border-color 100ms, transform 200ms var(--gx-out); }
 html[data-theme="gates"] .nm-sw button { transition: transform 200ms var(--gx-out), box-shadow 160ms var(--gx-out), background-color 100ms; }
+/* The lift moves what the pointer is on, so it reads [data-fx-hot] as well as :hover. A card that lifts 2 px leaves a pointer
+   resting within 2 px of its bottom edge outside it, :hover goes, the card drops, :hover returns and it lifts again, over and
+   over (the same loop as Night City's glitch). motion.js sets [data-fx-hot] when the pointer enters and keeps it while the card
+   moves under a pointer that has not moved; :hover still answers at once and puts the look back after a redraw. */
 @media (hover: hover) {
-  html[data-theme="gates"] .nm-card:hover {
+  html[data-theme="gates"] .nm-card:is(:hover, [data-fx-hot]) {
     transform: translateY(-2px);
     box-shadow: 0 8px 20px var(--g-shadow-lift), 0 1px 2px var(--g-shadow);
     border-color: color-mix(in srgb, var(--text) 16%, var(--border));
     transition-duration: 420ms, 260ms, 160ms;
     transition-timing-function: var(--gx-spring), var(--gx-out), var(--gx-out);
   }
-  html[data-theme="gates"] .nm-stat:hover { transform: translateY(-1px); transition-duration: 320ms, 220ms, 160ms; transition-timing-function: var(--gx-spring-s), var(--gx-out), var(--gx-out); }
+  html[data-theme="gates"] .nm-stat:is(:hover, [data-fx-hot]) { transform: translateY(-1px); transition-duration: 320ms, 220ms, 160ms; transition-timing-function: var(--gx-spring-s), var(--gx-out), var(--gx-out); }
   /* main.fx-quiet (the page was just redrawn and the pointer has not moved) takes the motion away, never the look: a card the
      pointer rests on stays lifted through a data refresh, and one lifted by a resting pointer after a redraw simply is. */
   html[data-theme="gates"] .nm-main.fx-quiet :is(.nm-card, .nm-stat) { transition-duration: 0s; }
-  html[data-theme="gates"] .nm-menu a:hover { transform: translateX(2px); transition-duration: 100ms, 380ms; transition-timing-function: linear, var(--gx-spring-s); }
-  html[data-theme="gates"] .nm-sw button:hover { transform: scale(1.12); transition-duration: 320ms, 160ms, 100ms; transition-timing-function: var(--gx-spring-s), var(--gx-out), linear; }
+  html[data-theme="gates"] .nm-menu a:is(:hover, [data-fx-hot]) { transform: translateX(2px); transition-duration: 100ms, 380ms; transition-timing-function: linear, var(--gx-spring-s); }
+  html[data-theme="gates"] .nm-sw button:is(:hover, [data-fx-hot]) { transform: scale(1.12); transition-duration: 320ms, 160ms, 100ms; transition-timing-function: var(--gx-spring-s), var(--gx-out), linear; }
 }
 /* press: a touch smaller, quickly; it springs back when released */
 html[data-theme="gates"] .nm-card:active { transform: translateY(-1px) scale(.992); transition-duration: 90ms; transition-timing-function: var(--gx-out); }

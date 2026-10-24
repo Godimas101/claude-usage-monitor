@@ -6,6 +6,11 @@ returns nothing, which keeps startup quiet. Settings are read on every evaluatio
 apply at once. Alerts are withheld while the master switch is off, while a kind is toggled off,
 during quiet hours and when the caller reports suppression (fullscreen). The memory still
 advances in those cases, so nothing fires in a burst later.
+
+A limit's reset is announced when its window ends by the clock, not when the API next shows a new window: the
+usage API says nothing at the end of a 5-hour session, which either drops out of its answer or keeps showing the
+window that ended until the next message starts another, so waiting for a new window would announce the reset
+hours late, while the user is already working again.
 """
 from __future__ import annotations
 
@@ -43,6 +48,8 @@ class _Track:
     percent: float                               # last percent seen in that window
     high: float                                  # highest percent seen in that window
     done: set[int] = field(default_factory=set)  # thresholds already handled in that window
+    name: str = ""                               # display name, kept so a reset can be announced without a Limit in hand
+    closed: bool = False                         # the window ended and its reset was dealt with; waits for the next one
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +96,10 @@ class AlertEngine:
                 except Exception:
                     log.exception("alert check failed for limit %r", getattr(limit, "label", None))
             try:
+                candidates.extend(self._expire(cfg, now))
+            except Exception:
+                log.exception("alert check failed for ended windows")
+            try:
                 candidates.extend(self._credits(state.usage.spend, now))
             except Exception:
                 log.exception("alert check failed for usage credits")
@@ -103,12 +114,19 @@ class AlertEngine:
             return []  # nothing to judge without a percent and a reset time
         lid = (str(limit.kind or ""), str(limit.label or ""))
         resets_at = limit.resets_at.astimezone(timezone.utc)
+        ended = now.astimezone(timezone.utc) >= resets_at + _SAME_WINDOW  # over by the clock, whatever the API shows
         track = self._tracks.get(lid)
-        if track is None:
-            # First sight of this limit: whatever level it is at now is baseline, not news.
+        if track is None or track.closed:
+            if track is not None and ended:
+                return []  # still the window that ran out (or another that is over too): nothing to judge
+            # First sight of this limit, or its first window since a reset that was announced when the old one ran
+            # out: whatever level it is at now is baseline, not news.
             self._tracks[lid] = _Track(_window_key(resets_at), resets_at, float(percent), float(percent),
-                                       {t for t in cfg.thresholds if t <= percent})
+                                       {t for t in cfg.thresholds if t <= percent}, _name(limit), closed=ended)
             return []
+        track.name = _name(limit)
+        if ended:
+            return []  # a window that is over has no thresholds left; _expire() announces its reset
 
         out: list[Alert] = []
         if abs(resets_at - track.resets_at) > _SAME_WINDOW:
@@ -142,6 +160,30 @@ class AlertEngine:
                 title=f"{_name(limit)} limit at {top}%",
                 message=_reset_text(limit, self._tz),
             ))
+        return out
+
+    def _expire(self, cfg: _Config, now: datetime) -> list[Alert]:
+        """Reset alerts for the windows whose time has run out, whatever the usage API still shows.
+
+        A window that ended is closed here, once: its level and thresholds are cleared and the next window that appears
+        starts from a quiet baseline (see _limit). The alert needs the window to have reached the lowest threshold, as
+        a reset announced through a change of window does.
+        """
+        out: list[Alert] = []
+        moment = now.astimezone(timezone.utc)
+        for (kind, label), track in self._tracks.items():
+            if track.closed or moment < track.resets_at + _SAME_WINDOW:
+                continue
+            reached = track.percent
+            track.closed, track.percent, track.high, track.done = True, 0.0, 0.0, set()
+            if reached >= cfg.thresholds[0]:
+                out.append(Alert(
+                    key=f"reset:{kind}:{label}:{track.key}",
+                    kind="reset",
+                    severity="info",
+                    title=f"{track.name or 'Usage'} limit reset",
+                    message="Usage is back to 0%.",
+                ))
         return out
 
     def _credits(self, spend: Spend | None, now: datetime) -> list[Alert]:

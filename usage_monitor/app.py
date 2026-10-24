@@ -616,6 +616,7 @@ class MonitorApp:
                 "apply": self._apply_update,
                 "skip": lambda: self.updates.skip(),
             },
+            dashboard_closed_cb=lambda pid: self.launcher is not None and self.launcher.window_closed(pid),
             version=version.APP_VERSION,
             dev=self.dev,
             analytics_store=analytics_store,
@@ -1195,6 +1196,7 @@ class _Collector(logging.Handler):
         self.errors: list[str] = []
         self.warnings: list[str] = []
         self.requests = 0
+        self.seen: dict[str, int] = {}      # "GET /api/themes" -> how many times it was requested
         self._lock = threading.Lock()
 
     def emit(self, record: logging.LogRecord) -> None:
@@ -1209,12 +1211,19 @@ class _Collector(logging.Handler):
                     self.warnings.append(text[:600])
                 elif record.name.endswith("ui.server") and record.getMessage().startswith("api "):
                     self.requests += 1
+                    line = record.getMessage()[len("api "):]
+                    self.seen[line] = self.seen.get(line, 0) + 1
         except Exception:  # a logging handler must never raise into the code that logged
             self.handleError(record)
 
     def request_count(self) -> int:
         with self._lock:
             return self.requests
+
+    def count_of(self, line: str) -> int:
+        """How many times the server logged the request ``line`` ("GET /api/themes": method and path)."""
+        with self._lock:
+            return self.seen.get(line, 0)
 
 
 class SmokeTest:
@@ -1230,6 +1239,8 @@ class SmokeTest:
 
     DASHBOARD_OPEN_S = 5.0
     DASHBOARD_CLOSE_WAIT_S = 6.0
+    PAGE_BOOT_REQUEST = "GET /api/themes"      # what the page's script asks for first, once it runs
+    PAGE_BOOT_WAIT_S = 10.0                    # how much longer than DASHBOARD_OPEN_S a slow start is given
     DATABASE_WAIT_S = 20.0
     # The keys of /api/state's ``update`` block that the dashboard's banner and Settings page read.
     UPDATE_KEYS = ("available", "version", "url", "can_self_update", "skipped", "info", "skip_version")
@@ -1397,14 +1408,18 @@ class SmokeTest:
     def _step_api(self) -> dict[str, Any]:
         app = self._app
         assert app is not None and app.server is not None
-        status, page = self._call("GET", "/", token=False)
-        token_in_page = app.server.token.encode("ascii") in page
+        token = app.server.token.encode("ascii")
+        status, page = self._call("GET", f"/?k={app.server.token}", token=False)     # the address the dashboard opens
+        token_in_page = token in page
+        bare_status, bare_page = self._call("GET", "/", token=False)                 # and the page without its key
         unauthorised, _ = self._call("GET", "/api/state", token=False)
         payload = self._get_json("/api/state")
         themes_payload = self._get_json("/api/themes")
         refreshed = self._post("/api/refresh", {})
         if status != 200 or not token_in_page:
             raise RuntimeError("the page did not load with the monitor token")
+        if bare_status != 401 or token in bare_page:
+            raise RuntimeError(f"the page without its key answered {bare_status}, not 401, or showed the token")
         if unauthorised != 401:
             raise RuntimeError(f"/api/state without the token answered {unauthorised}, not 401")
         for key in ("state", "settings", "theme", "version", "update", "dev"):
@@ -1419,6 +1434,7 @@ class SmokeTest:
         return {
             "index_status": status,
             "token_in_page": token_in_page,
+            "keyless_page_status": bare_status,
             "unauthorised_status": unauthorised,
             "state": self._state_summary(payload),
             "themes": [item.get("id") for item in themes_payload.get("themes", [])],
@@ -1487,19 +1503,22 @@ class SmokeTest:
         assert app is not None and app.launcher is not None
         launcher = app.launcher
         before = self.collector.request_count()
+        themes_before = self.collector.count_of(self.PAGE_BOOT_REQUEST)
         opened = launcher.open()
         began = time.monotonic()
         pid = launcher.pid
         time.sleep(self.DASHBOARD_OPEN_S)
         alive = launcher.running
         requests = self.collector.request_count() - before
+        booted = self._wait_for(lambda: self.collector.count_of(self.PAGE_BOOT_REQUEST) > themes_before,
+                                self.PAGE_BOOT_WAIT_S)       # a cold web view can need longer than the five seconds
         closed_politely = bool(pid and post_close_to_dashboard(pid))
         exited = self._wait_for(lambda: not launcher.running, self.DASHBOARD_CLOSE_WAIT_S)
         if not exited:
             launcher.close()
         bounds = self._get_json("/api/state")["settings"].get("dashboard_bounds")
         result = {
-            "opened": opened, "alive_after_5s": alive, "requests_while_open": requests,
+            "opened": opened, "alive_after_5s": alive, "requests_while_open": requests, "page_booted": booted,
             "close_posted": closed_politely, "exited_after_close": exited,
             "bounds_saved": bounds is not None, "open_seconds": round(time.monotonic() - began, 1),
         }
@@ -1507,6 +1526,11 @@ class SmokeTest:
             raise RuntimeError(f"the dashboard did not stay open: {result}")
         if requests < 1:
             raise RuntimeError(f"the dashboard window never loaded the page: {result}")
+        if not booted:
+            # The child reads /api/state itself before it opens a window, and a web view that cannot run the page
+            # (the IE11 engine, a WebView2 that failed to start) still fetches index.html and its files. Only a page
+            # whose script ran asks for the themes.
+            raise RuntimeError(f"the dashboard page loaded but never started: {result}")
         if not exited:
             raise RuntimeError(f"the dashboard did not close when asked: {result}")
         return result

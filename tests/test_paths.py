@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import shutil
 import sys
 from collections.abc import Iterator
 from logging.handlers import RotatingFileHandler
@@ -121,6 +122,59 @@ def test_projects_dirs_never_lists_one_root_twice(isolated_env: Path, monkeypatc
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
     (config / "projects").mkdir(parents=True)
     assert paths.projects_dirs() == [config / "projects"]
+
+
+# fs_path: the form a file opens in past MAX_PATH (the I/O call gets it, keys and messages keep the plain path)
+
+windows_only = pytest.mark.skipif(sys.platform != "win32", reason="the extended-length form is a Windows thing")
+EXTENDED = "\\\\?\\"       # the Win32 extended-length prefix, \\?\
+
+
+@windows_only
+def test_fs_path_is_the_extended_length_form_of_the_absolute_path(tmp_path: Path) -> None:
+    plain = str(tmp_path / "a" / ".." / "b.jsonl")                  # the extended form is not normalised by Windows
+    assert paths.fs_path(plain) == EXTENDED + os.path.abspath(plain)
+    assert "\\..\\" not in paths.fs_path(plain) and "/" not in paths.fs_path(plain)
+    assert paths.fs_path(Path(plain)) == paths.fs_path(plain)         # a Path works the same
+
+
+@windows_only
+def test_fs_path_makes_a_relative_path_absolute(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert paths.fs_path("sub\\x.jsonl") == EXTENDED + str(tmp_path / "sub" / "x.jsonl")
+
+
+@windows_only
+def test_fs_path_uses_the_unc_form_for_a_network_path() -> None:
+    assert paths.fs_path("\\\\server\\share\\dir\\f.jsonl") == EXTENDED + "UNC\\server\\share\\dir\\f.jsonl"
+
+
+@windows_only
+@pytest.mark.parametrize("already", [EXTENDED + "C:\\dir\\f.jsonl", EXTENDED + "UNC\\server\\share\\f.jsonl",
+                                     "\\\\.\\pipe\\name"])
+def test_fs_path_leaves_a_path_that_is_already_extended_alone(already: str) -> None:
+    assert paths.fs_path(already) == already
+
+
+@windows_only
+def test_fs_path_opens_a_file_whose_plain_path_is_over_259_characters(tmp_path: Path) -> None:
+    deep = tmp_path / ("d" * 100) / ("e" * 100) / ("f" * 60) / "x.txt"
+    assert len(str(deep)) > 259
+    try:
+        os.makedirs(paths.fs_path(deep.parent))
+        with open(paths.fs_path(deep), "wb") as handle:
+            handle.write(b"ok")
+        with open(paths.fs_path(deep), "rb") as handle:
+            assert handle.read() == b"ok"
+        assert os.path.isfile(paths.fs_path(deep))
+    finally:
+        shutil.rmtree(paths.fs_path(tmp_path / ("d" * 100)), ignore_errors=True)
+
+
+def test_fs_path_changes_nothing_off_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
+    assert paths.fs_path("/home/u/.claude/projects/x.jsonl") == "/home/u/.claude/projects/x.jsonl"
+    assert paths.fs_path(Path("rel/x.jsonl")) == str(Path("rel/x.jsonl"))
 
 
 def test_resource_dir_is_the_repo_root_when_run_from_source() -> None:

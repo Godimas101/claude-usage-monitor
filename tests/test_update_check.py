@@ -2029,6 +2029,51 @@ def test_releasing_md_describes_the_updater_and_the_release_workflow_as_they_are
     assert "/MERGETASKS" not in releasing.split("ping 127.0.0.1 -n 4 >nul")[1].split("ping 127.0.0.1 -n 8 >nul")[0]
 
 
+def _workflow_step(workflow: str, name: str) -> str:
+    """The text of the step called ``name`` in a workflow file (up to the next step)."""
+    start = workflow.index(f"- name: {name}")
+    following = re.search(r"\n      - ", workflow[start + 1:])
+    return workflow[start:start + 1 + following.start()] if following else workflow[start:]
+
+
+def test_the_release_workflow_can_be_rehearsed_gates_on_tests_and_smoke_and_only_ever_drafts() -> None:
+    """The first run of this pipeline used to be the live release that v1.1.5's updater installs silently on every v1
+    install: a hand-run on a branch was a no-op (VERSION is already released there) or a public release, the smoke
+    step could fail without stopping anything, no tests ran, and nothing had a time limit."""
+    workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    releasing = (ROOT / "docs" / "RELEASING.md").read_text(encoding="utf-8")
+    # A rehearsal: a hand-run input that defaults to off, which skips the "already exists" stop and publishes nothing.
+    assert re.search(r"publish:\s*\n(?:\s+.*\n)*?\s+type: boolean\s*\n\s+default: false", workflow)
+    exists = _workflow_step(workflow, "Does this release already exist?")
+    assert "github.event_name == 'push' || inputs.publish" in exists
+    rehearsal_branch = exists.split('[ "$PUBLISH" != "true" ]')[1].split("elif")[0]
+    assert "skip=false" in rehearsal_branch
+    kept = _workflow_step(workflow, "Keep the installer (rehearsal)")
+    assert "steps.exists.outputs.publish != 'true'" in kept and "actions/upload-artifact" in kept
+    # What publishes: a draft only, pinned to the commit that was built, and never promoted by the workflow itself.
+    release = _workflow_step(workflow, "Create the draft release")
+    assert "steps.exists.outputs.publish == 'true'" in release
+    creates = [line for line in release.splitlines() if "gh release create" in line]
+    assert len(creates) == 2 and all("--draft" in line and '--target "$GITHUB_SHA"' in line for line in creates)
+    verbs = set(re.findall(r"^\s*(?:elif |if )?gh release (\w+)", workflow, re.M))
+    assert verbs == {"view", "create"}                      # the workflow looks and creates; publishing a draft is yours
+    # The tests run in the release job, and the smoke test gates it.
+    assert "run: python -m pytest" in workflow and "tests/test_webui.py tests/test_motion.py" in workflow
+    assert "continue-on-error" not in workflow
+    smoke = _workflow_step(workflow, "Smoke-test the built exe")
+    assert "throw 'the frozen smoke test failed'" in smoke and "'--smoke-test', '45'" in smoke
+    assert "if: always()" in _workflow_step(workflow, "Keep the smoke report and logs")
+    # Nothing can hang for the default six hours, and two runs cannot race to create the same release.
+    assert re.search(r"^    timeout-minutes: \d+$", workflow, re.M)
+    for name in ("Install dependencies", "Run the tests", "Build the exe", "Smoke-test the built exe", "Install Inno Setup",
+                 "Build the installer"):
+        assert re.search(r"timeout-minutes: \d+", _workflow_step(workflow, name)), name
+    assert "concurrency:" in workflow and "cancel-in-progress: false" in workflow
+    # And the checklist says how to use all of it.
+    assert "rehearsal" in releasing.lower() and "publish left off" in releasing
+    assert "--draft" in releasing and "gh release edit" in releasing and "Before you publish the draft" in releasing
+
+
 # ── No test opens a console window ────────────────────────────────────────────
 #
 # A console program started by a process that has no console of its own gets a new terminal window (on this PC's

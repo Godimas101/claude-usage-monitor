@@ -24,7 +24,9 @@ NEWER = "2099-01-01"        # synthetic: newer than any bundled table will be
 BUNDLED = Pricing.load()
 BUNDLED_VERSION = BUNDLED.version
 
-# The table from the task, one row per tuple: id, name, input, output, cache_read, fast, long-context.
+# The rows of the official pricing page (the bundled table's `source`, checked 2026-10-23), one row per tuple:
+# id, name, input, output, cache_read, fast, long-context. Sonnet 5.5 cache hits are $0.10 (0.05x input, footnote 2
+# of the page), not the $0.20 that Sonnet 5 charges: this table once carried 0.20 for it and the test repeated it.
 SPEC_ROWS = [
     ("claude-fable-5-1", "Fable 5.1", 10, 50, 0.25, None, None),
     ("claude-mythos-5-1", "Mythos 5.1", 10, 50, 0.25, None, None),
@@ -39,7 +41,7 @@ SPEC_ROWS = [
     ("claude-opus-4-1", "Opus 4.1", 15, 75, 1.50, None, None),
     ("claude-opus-4", "Opus 4", 15, 75, 1.50, None, None),
     ("claude-3-opus", "Opus 3", 15, 75, 1.50, None, None),
-    ("claude-sonnet-5-5", "Sonnet 5.5", 2, 10, 0.20, None, None),
+    ("claude-sonnet-5-5", "Sonnet 5.5", 2, 10, 0.10, None, None),
     ("claude-sonnet-5", "Sonnet 5", 2, 10, 0.20, None, None),
     ("claude-sonnet-4-6", "Sonnet 4.6", 3, 15, 0.30, None, None),
     ("claude-sonnet-4-5", "Sonnet 4.5", 3, 15, 0.30, None, (200_000, 6, 22.5, 0.60)),
@@ -172,7 +174,7 @@ class _FakeResponse(io.BytesIO):
 # ── bundled table ────────────────────────────────────────────────────────────────
 
 def test_bundled_file_header_and_row_count():
-    assert BUNDLED.version == "2026-10-21"
+    assert BUNDLED.version == "2026-10-23"
     assert BUNDLED.source == "https://platform.claude.com/docs/en/about-claude/pricing"
     assert BUNDLED.cache_write_multipliers == {"5m": 1.25, "1h": 2.0}
     assert [row.id for row in BUNDLED.rows] == [spec[0] for spec in SPEC_ROWS]
@@ -243,7 +245,10 @@ def test_cache_writes_use_input_rate_times_each_multiplier():
     [
         ("claude-fable-5-1", MILLION, 0.25),
         ("claude-fable-5", MILLION, 1.00),
+        ("claude-opus-5-5", MILLION, 0.20),
         ("claude-opus-4-1", MILLION, 1.50),
+        ("claude-sonnet-5-5", MILLION, 0.10),                # 0.05x input, not Sonnet 5's 0.1x
+        ("claude-sonnet-5", MILLION, 0.20),
         ("claude-sonnet-4-6", MILLION, 0.30),
         ("claude-haiku-5-5", 100_000, 0.01),                 # at threshold: base rate, not long
         ("claude-3-haiku", MILLION, 0.03),
@@ -252,6 +257,22 @@ def test_cache_writes_use_input_rate_times_each_multiplier():
 def test_cache_reads_use_each_rows_own_rate(model, tokens, rate):
     c = BUNDLED.cost(rec(model, cache_read_tokens=tokens))
     assert c.cache_read == pytest.approx(tokens * rate / MILLION)
+
+
+@pytest.mark.parametrize(
+    ("model", "multiplier"),
+    [
+        ("claude-fable-5-1", 0.025),        # footnote 1 of the pricing page
+        ("claude-mythos-5-1", 0.025),
+        ("claude-opus-5-5", 0.05),          # footnote 2
+        ("claude-sonnet-5-5", 0.05),
+    ],
+)
+def test_cache_reads_on_the_footnoted_models_are_the_footnote_multiple_of_input(model, multiplier):
+    row = BUNDLED.match(model)
+    assert row.cache_read == pytest.approx(row.input * multiplier)
+    # And the cost the app reports for a million cache reads follows the table, not a copy of another row.
+    assert BUNDLED.cost(rec(model, cache_read_tokens=MILLION)).cache_read == pytest.approx(row.input * multiplier)
 
 
 def test_haiku_55_switches_to_long_context_above_100k_prompt_tokens():

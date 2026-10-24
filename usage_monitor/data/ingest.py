@@ -14,6 +14,10 @@ stored bookmark. Only what changed is read:
 A file's items and its new bookmark commit in one store transaction, so an interrupted run
 resumes at the first file it did not finish. A file that cannot be read keeps its old bookmark
 and is retried on the next run.
+
+Paths are kept as plain strings (they are the bookmarks' keys); every listing and read goes through
+``paths.fs_path``, so a transcript 260 or more characters down (a subagent file under a long project
+folder) is read like any other instead of being skipped without a trace.
 """
 from __future__ import annotations
 
@@ -97,14 +101,15 @@ class Ingestor:
             bookmark = FileState(path=path, size=stat.st_size, mtime=stat.st_mtime, offset=end,
                                  tail=_tail_digest(path, end))
             counts = self._commit(items, bookmark)
-        except FileNotFoundError:  # removed after the walk: nothing to read, and the next walk forgets it
-            log.debug("ingest: %s vanished during the run", os.path.basename(path))
+        except FileNotFoundError as exc:
+            if not os.path.lexists(paths.fs_path(path)):
+                # removed after the walk: nothing to read, and the next walk forgets it
+                log.debug("ingest: %s vanished during the run", os.path.basename(path))
+                return
+            _record_failure(result, path, exc)  # listed and still there, yet it would not open: say so
             return
         except Exception as exc:  # one bad file must not stop the run; it is retried next time
-            message = f"{type(exc).__name__} on {os.path.basename(path)}"
-            result.errors.append(message)
-            log.warning("ingest failed: %s", message)
-            log.debug("ingest traceback", exc_info=True)
+            _record_failure(result, path, exc)
             return
         result.files_read += 1
         result.bytes_read += max(0, end - start)
@@ -125,6 +130,14 @@ class Ingestor:
             for path in gone:
                 self._store.forget_file(path)
         log.debug("ingest: forgot %d vanished transcript bookmark(s)", len(gone))
+
+
+def _record_failure(result: IngestResult, path: str, exc: Exception) -> None:
+    """Report a file that could not be read: a short message with no content, and a warning in the log."""
+    message = f"{type(exc).__name__} on {os.path.basename(path)}"
+    result.errors.append(message)
+    log.warning("ingest failed: %s", message)
+    log.debug("ingest traceback", exc_info=True)
 
 
 # ── Discovery ─────────────────────────────────────────────────────────────────────
@@ -158,9 +171,9 @@ def _walk(root: str, found: _Found, errors: list[str]) -> bool:
     while pending:
         folder = pending.pop()
         try:
-            with os.scandir(folder) as listing:
+            with os.scandir(paths.fs_path(folder)) as listing:
                 for entry in listing:
-                    if not _take(entry, root, found, pending, errors):
+                    if not _take(entry, folder, root, found, pending, errors):
                         complete = False
         except OSError as exc:
             if folder == root and isinstance(exc, FileNotFoundError):
@@ -170,13 +183,17 @@ def _walk(root: str, found: _Found, errors: list[str]) -> bool:
     return complete
 
 
-def _take(entry: os.DirEntry[str], root: str, found: _Found, pending: list[str], errors: list[str]) -> bool:
-    """Sort one directory entry into the walk. False when the entry could not be examined."""
+def _take(entry: os.DirEntry[str], folder: str, root: str, found: _Found, pending: list[str],
+          errors: list[str]) -> bool:
+    """Sort one directory entry of ``folder`` into the walk. False when the entry could not be examined.
+
+    The path is rebuilt from the plain folder: ``entry.path`` carries the extended-length prefix the listing used.
+    """
     try:
         if entry.is_dir(follow_symlinks=False):
-            pending.append(entry.path)
+            pending.append(os.path.join(folder, entry.name))
         elif entry.name.lower().endswith(TRANSCRIPT_SUFFIX) and entry.is_file():
-            found[entry.path] = (root, entry.stat())
+            found[os.path.join(folder, entry.name)] = (root, entry.stat())
     except OSError as exc:
         errors.append(f"{type(exc).__name__} examining {entry.name}")
         log.debug("ingest: cannot examine %s (%s)", entry.name, type(exc).__name__)
@@ -223,7 +240,7 @@ def _tail_digest(path: str, end: int) -> str | None:
     if end <= 0:
         return None
     begin = max(0, end - TAIL_BYTES)
-    with open(path, "rb") as handle:
+    with open(paths.fs_path(path), "rb") as handle:
         handle.seek(begin)
         return hashlib.sha256(handle.read(end - begin)).hexdigest()
 

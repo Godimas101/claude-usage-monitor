@@ -19,6 +19,7 @@ import json
 import logging
 import math
 import os
+import queue
 import re
 import socket
 import sqlite3
@@ -29,6 +30,7 @@ import threading
 import time
 import types
 import urllib.error
+import urllib.parse
 from collections.abc import Callable, Iterator
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -166,6 +168,9 @@ def themes_module(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
 
 REAL_IS_ENABLED = startup.is_enabled
 REAL_SET_ENABLED = startup.set_enabled
+ORIGINAL_READ_APPROVAL = startup._read_approval
+ORIGINAL_CLEAR_APPROVAL = startup._clear_approval
+ORIGINAL_RUNTIME_VERSIONS = dashboard._registered_runtime_versions
 
 
 @pytest.fixture(autouse=True)
@@ -184,6 +189,9 @@ def startup_fake(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
     monkeypatch.setattr(startup, "is_enabled", is_enabled)
     monkeypatch.setattr(startup, "set_enabled", set_enabled)
+    # The Run value's companion record (StartupApproved) is Windows-owned: no test reads or clears the real one.
+    monkeypatch.setattr(startup, "_read_approval", lambda: None)
+    monkeypatch.setattr(startup, "_clear_approval", lambda: None)
     return store
 
 
@@ -258,7 +266,8 @@ def request(server: ApiServer, method: str, path: str, *, body: bytes | None = N
             host: str | None = None) -> tuple[int, dict[str, str], bytes]:
     conn = http.client.HTTPConnection("127.0.0.1", server.port, timeout=5)
     try:
-        conn.putrequest(method, path, skip_host=host is not None, skip_accept_encoding=True)
+        on_the_wire = f"/?k={server.token}" if token and path == "/" else path     # the page opens with the key
+        conn.putrequest(method, on_the_wire, skip_host=host is not None, skip_accept_encoding=True)
         if host is not None:
             conn.putheader("Host", host)
         all_headers = dict(headers or {})
@@ -292,7 +301,7 @@ def post_json(server: ApiServer, path: str, payload: Any) -> tuple[int, Any]:
 def test_start_binds_loopback_on_a_random_port(make_server: Any) -> None:
     server, _ = make_server()
     assert server.port > 0
-    assert server.url == f"http://127.0.0.1:{server.port}/"
+    assert server.url == f"http://127.0.0.1:{server.port}/?k={server.token}"     # where to open the page
     assert len(server.token) >= 40
     assert server.start() == server.port  # idempotent
 
@@ -345,6 +354,63 @@ def test_index_carries_the_token_in_the_meta_tag(make_server: Any) -> None:
     assert f'<meta name="monitor-token" content="{server.token}">' in body.decode("utf-8")
     assert "default-src 'self'" in headers["content-security-policy"]
     assert headers["cache-control"] == "no-store"
+
+
+def test_the_url_the_server_hands_out_opens_the_page(make_server: Any) -> None:
+    server, _ = make_server()
+    target = server.url.split(f":{server.port}", 1)[1]                  # "/?k=<token>"
+    assert target == f"/?k={server.token}"
+    status, _headers, body = request(server, "GET", target)
+    assert status == 200 and f'<meta name="monitor-token" content="{server.token}">' in body.decode("utf-8")
+    quoted = urllib.parse.quote(server.token, safe="")
+    assert request(server, "GET", f"/?k={quoted}")[0] == 200            # a percent-encoded key is the same key
+    assert request(server, "GET", f"/?x=1&k={server.token}&y=2")[0] == 200
+
+
+@pytest.mark.parametrize("query", [
+    "", "?", "?k=", "?k=wrong", "?key={token}", "?K={token}", "?k={token}x", "?k=x{token}", "?k={cut}",
+    "?k={token}&k={token}", "?k=&k={token}", "?k={token}&k=wrong", "?k=%00", "?k={token}%00", "?{token}", "#k={token}",
+])
+def test_the_page_is_not_served_without_the_key(make_server: Any, query: str) -> None:
+    """GET / writes the per-run token into the page. Anyone on the machine can reach the port, another account or a
+    terminal-server session included, so the page opens only for a caller that already knows the token."""
+    server, _ = make_server()
+    path = "/" + query.format(token=server.token, cut=server.token[:-1])
+    status, headers, body = request(server, "GET", path, token=False)
+    assert status == 401
+    assert headers["content-type"].startswith("text/plain")
+    assert server.token.encode("ascii") not in body and server.token not in "".join(headers.values())
+
+
+def test_nothing_a_caller_without_the_token_can_fetch_contains_it(make_server: Any) -> None:
+    server, _ = make_server()
+    for path in ("/", "/?k=nope", "/static/app.js", "/static/index.html", "/static/themes/nostromo.css",
+                 "/nothing-here", "/api/state", "/api/themes", "/api/analytics/cost", "/api/export?format=csv",
+                 "/static/../index.html"):
+        status, headers, body = request(server, "GET", path, token=False)
+        assert status in (200, 401, 404), path
+        assert server.token.encode("ascii") not in body, path
+        assert server.token not in "".join(headers.values()), path
+
+
+def test_the_key_check_comes_after_the_host_and_method_checks(make_server: Any) -> None:
+    server, _ = make_server()
+    assert request(server, "GET", "/", token=False, host="evil.example:80")[0] == 403
+    assert request(server, "POST", "/", token=False, body=b"{}")[0] == 405
+    assert request(server, "GET", f"/?k={server.token}", host="evil.example:80")[0] == 403
+
+
+def test_the_dashboard_process_opens_the_page_with_the_key_from_its_environment(
+        make_server: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """End to end: the address dashboard_main hands the window is one the real server serves the page for."""
+    server, _ = make_server()
+    created = install_fake_webview(monkeypatch, FakeWindow())
+    monkeypatch.setenv(dashboard.TOKEN_ENV, server.token)
+    assert dashboard.dashboard_main(["--dashboard", "--port", str(server.port)]) == 0
+    opened = created[0]["args"][1]
+    assert opened == server.url
+    status, _headers, body = request(server, "GET", opened.split(f":{server.port}", 1)[1])
+    assert status == 200 and server.token in body.decode("utf-8")
 
 
 # The shell the real index.html has the markers of: the html tag, the colour-scheme meta, the theme link.
@@ -2289,26 +2355,153 @@ def test_is_enabled_never_raises_when_the_registry_fails(monkeypatch: pytest.Mon
     assert startup.is_enabled() is False
 
 
+class _FakeStartupRegistry:
+    """The Run value and its StartupApproved record in memory, under startup's registry primitives."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, *, run: str | None = None, approval: Any = None) -> None:
+        self.run, self.approval, self.writes, self.deletes = run, approval, [], []
+        monkeypatch.setattr(startup, "_read_value", lambda: self.run)
+        monkeypatch.setattr(startup, "_write_value", self._write)
+        monkeypatch.setattr(startup, "_delete_value", self._delete)
+        monkeypatch.setattr(startup, "_read_approval", lambda: self.approval)
+        monkeypatch.setattr(startup, "_clear_approval", self._clear)
+        monkeypatch.setattr(startup, "is_enabled", REAL_IS_ENABLED)
+        monkeypatch.setattr(startup, "set_enabled", REAL_SET_ENABLED)
+
+    def _write(self, command: str) -> None:
+        self.run = command
+        self.writes.append(command)
+
+    def _delete(self) -> None:
+        self.run = None
+        self.deletes.append("run")
+
+    def _clear(self) -> None:
+        self.approval = None
+        self.deletes.append("approval")
+
+
+def _record(first_byte: int) -> bytes:
+    """What Windows stores under StartupApproved: a state DWORD, then a FILETIME (all zero when never turned off)."""
+    return bytes([first_byte, 0, 0, 0]) + bytes(8)
+
+
+ENTRY = '"C:/Users/me/AppData/Local/Programs/Claude Usage Monitor/ClaudeUsageMonitor.exe"'
+
+
+@pytest.mark.parametrize("record", [None, _record(0x02), _record(0x06), _record(0x00), b"", 2, 6],
+                         ids=["no record", "02 enabled", "06 enabled", "00", "empty", "dword 2", "dword 6"])
+def test_the_entry_reads_as_on_unless_windows_turned_it_off(monkeypatch: pytest.MonkeyPatch, record: Any) -> None:
+    _FakeStartupRegistry(monkeypatch, run=ENTRY, approval=record)
+    assert startup.is_enabled() is True
+
+
+@pytest.mark.parametrize("record", [_record(0x03), _record(0x07), _record(0x01), b"\x03", 3, 1],
+                         ids=["03 (Task Manager)", "07", "01", "short 03", "dword 3", "dword 1"])
+def test_an_entry_turned_off_in_task_manager_or_settings_reads_as_off(monkeypatch: pytest.MonkeyPatch,
+                                                                       record: Any) -> None:
+    """The Run value stays, the StartupApproved record says off, and Windows does not start the app at sign-in."""
+    _FakeStartupRegistry(monkeypatch, run=ENTRY, approval=record)
+    assert startup.is_enabled() is False
+
+
+def test_no_run_entry_is_off_whatever_the_record_says(monkeypatch: pytest.MonkeyPatch) -> None:
+    _FakeStartupRegistry(monkeypatch, run=None, approval=_record(0x02))
+    assert startup.is_enabled() is False
+
+
+def test_an_unreadable_record_does_not_switch_the_entry_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = _FakeStartupRegistry(monkeypatch, run=ENTRY)
+
+    def refuse() -> bytes:
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(startup, "_read_approval", refuse)
+    assert startup.is_enabled() is True
+    startup.set_enabled(True)
+    assert registry.run == startup.command_line()
+
+
+def test_turning_the_switch_on_lifts_a_turned_off_record(monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = _FakeStartupRegistry(monkeypatch, run=ENTRY, approval=_record(0x03))
+    assert startup.is_enabled() is False
+    startup.set_enabled(True)
+    assert registry.approval is None and registry.run == startup.command_line()
+    assert startup.is_enabled() is True
+
+
+def test_turning_the_switch_on_when_nothing_is_there_yet_clears_a_stale_off_record(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """Windows keeps the record after the Run value is gone, so off, then on again in the app must still start."""
+    registry = _FakeStartupRegistry(monkeypatch, run=None, approval=_record(0x03))
+    startup.set_enabled(True)
+    assert startup.is_enabled() is True and registry.approval is None
+
+
+def test_turning_the_switch_on_leaves_an_enabled_record_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = _FakeStartupRegistry(monkeypatch, run=None, approval=_record(0x02))
+    startup.set_enabled(True)
+    assert registry.approval == _record(0x02) and "approval" not in registry.deletes
+
+
+def test_turning_the_switch_off_and_the_launch_repair_leave_the_record_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = _FakeStartupRegistry(monkeypatch, run='"C:/old place/ClaudeUsageMonitor.exe"', approval=_record(0x03))
+    assert startup.repair_if_enabled(frozen=True) is True               # a moved install is repointed ...
+    assert registry.run == startup.command_line(frozen=True)
+    assert registry.approval == _record(0x03)                           # ... but Windows' record is not ours to change
+    assert startup.is_enabled() is False
+    startup.set_enabled(False)
+    assert registry.run is None and registry.approval == _record(0x03)
+    assert "approval" not in registry.deletes
+
+
+def test_a_record_that_cannot_be_cleared_fails_the_switch_instead_of_pretending(monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = _FakeStartupRegistry(monkeypatch, run=ENTRY, approval=_record(0x03))
+
+    def refuse() -> None:
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(startup, "_clear_approval", refuse)
+    with pytest.raises(OSError):
+        startup.set_enabled(True)
+    assert registry.writes == []                                        # nothing half done
+    assert startup.is_enabled() is False
+
+
 @ui_only
 def test_registry_round_trip_under_a_throwaway_key(monkeypatch: pytest.MonkeyPatch) -> None:
     if sys.platform != "win32":
         pytest.skip("Windows only")
     import winreg
     key_path = rf"Software\ClaudeUsageMonitorTests-{os.getpid()}"
+    approved_path = rf"Software\ClaudeUsageMonitorTests-{os.getpid()}-approved"    # never the real StartupApproved key
     monkeypatch.setattr(startup, "RUN_KEY", key_path)
+    monkeypatch.setattr(startup, "APPROVED_KEY", approved_path)
     monkeypatch.setattr(startup, "is_enabled", REAL_IS_ENABLED)
     monkeypatch.setattr(startup, "set_enabled", REAL_SET_ENABLED)
+    monkeypatch.setattr(startup, "_read_approval", ORIGINAL_READ_APPROVAL)
+    monkeypatch.setattr(startup, "_clear_approval", ORIGINAL_CLEAR_APPROVAL)
     try:
         startup.set_enabled(True)
         assert startup.is_enabled() is True
         assert startup._read_value() == startup.command_line()
+        with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, approved_path, 0, winreg.KEY_SET_VALUE) as key:
+            winreg.SetValueEx(key, startup.VALUE_NAME, 0, winreg.REG_BINARY, _record(0x03))   # as Task Manager does
+        assert startup._read_approval() == _record(0x03)
+        assert startup.is_enabled() is False                            # the Run value is still there
+        startup.set_enabled(True)
+        assert startup._read_approval() is None and startup.is_enabled() is True
+        with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, approved_path, 0, winreg.KEY_SET_VALUE) as key:
+            winreg.SetValueEx(key, startup.VALUE_NAME, 0, winreg.REG_BINARY, _record(0x06))
+        assert startup.is_enabled() is True
         startup.set_enabled(False)
         assert startup.is_enabled() is False
     finally:
-        try:
-            winreg.DeleteKey(winreg.HKEY_CURRENT_USER, key_path)
-        except FileNotFoundError:
-            pass
+        for path in (key_path, approved_path):
+            try:
+                winreg.DeleteKey(winreg.HKEY_CURRENT_USER, path)
+            except FileNotFoundError:
+                pass
 
 
 # ── Dashboard launcher and child ───────────────────────────────────────────────────
@@ -2730,22 +2923,92 @@ def test_keep_on_screen_never_raises_into_the_window_code(monkeypatch: pytest.Mo
     assert dashboard.keep_on_screen(_NativeWindow(handle=None)) is False        # the window does not exist yet
 
 
-def test_dashboard_main_checks_the_position_before_the_window_is_shown(monkeypatch: pytest.MonkeyPatch) -> None:
-    checked: list[Any] = []
+class FakeEvent(list):
+    """Stands in for pywebview's Event: += adds a handler and returns the same object; set / is_set / wait work as its own."""
 
-    class Window:
-        def __init__(self) -> None:
-            self.events = FakeEvents()
-            self.native = None
-            self.x, self.y, self.width, self.height = 9000, 100, 1200, 780
+    def __init__(self) -> None:
+        super().__init__()
+        self._flag = threading.Event()
 
-    window = Window()
+    def __iadd__(self, handler: Any) -> "FakeEvent":
+        self.append(handler)
+        return self
+
+    def set(self) -> None:
+        self._flag.set()
+
+    def is_set(self) -> bool:
+        return self._flag.is_set()
+
+    def wait(self, timeout: float | None = None) -> bool:
+        return self._flag.wait(timeout)
+
+
+class FakeEvents:
+    def __init__(self) -> None:
+        self.moved = FakeEvent()
+        self.resized = FakeEvent()
+        self.closing = FakeEvent()
+        self.closed = FakeEvent()
+        self.before_show = FakeEvent()
+        self.loaded = FakeEvent()
+
+
+class FakeWindow:
+    """A pywebview window as dashboard_main drives it."""
+
+    def __init__(self, x: int = 1, y: int = 2, width: int = 1200, height: int = 780) -> None:
+        self.events = FakeEvents()
+        self.native = None
+        self.x, self.y, self.width, self.height = x, y, width, height
+        self.exposed: list[str] = []
+        self.destroyed = False
+
+    def expose(self, *functions: Any) -> None:
+        self.exposed += [function.__name__ for function in functions]
+
+    def destroy(self) -> None:
+        self.destroyed = True
+        self.events.closed.set()
+
+
+def _no_loop(func: Any = None, *args: Any, **kwargs: Any) -> None:
+    """A webview.start that returns at once, as if the user had closed the window."""
+
+
+def install_fake_webview(monkeypatch: pytest.MonkeyPatch, window: Any, *, start: Any = _no_loop,
+                         renderer: str | None = "edgechromium", state: Any = None) -> list[dict[str, Any]]:
+    """Put a fake ``webview`` module in place and give the child a token. Returns the create_window keyword arguments."""
+    created: list[dict[str, Any]] = []
     fake = types.ModuleType("webview")
-    fake.create_window = lambda *a, **k: window  # type: ignore[attr-defined]
-    fake.start = lambda: [handler() for handler in window.events.before_show] and None  # type: ignore[attr-defined]
+
+    def create_window(*args: Any, **kwargs: Any) -> Any:
+        created.append({"args": args, **kwargs})
+        return window
+
+    fake.create_window = create_window  # type: ignore[attr-defined]
+    fake.start = start  # type: ignore[attr-defined]
+    fake.settings = {}  # type: ignore[attr-defined]
+    if renderer is not None:
+        fake.renderer = renderer  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "webview", fake)
     monkeypatch.setenv(dashboard.TOKEN_ENV, "tok")
-    monkeypatch.setattr(dashboard, "_read_state", lambda base, token: _state_with_bounds({"x": 9000, "y": 100, "w": 1200, "h": 780}))
+    monkeypatch.setattr(dashboard, "_read_state", lambda base, token: state)
+    monkeypatch.setattr(dashboard, "_notify_closed", lambda base, token: None)
+    return created
+
+
+@pytest.fixture(autouse=True)
+def webview2_installed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Whether the machine running the tests has the WebView2 runtime must not decide a test's outcome."""
+    monkeypatch.setattr(dashboard, "_registered_runtime_versions", lambda: ["141.0.3537.85"])
+
+
+def test_dashboard_main_checks_the_position_before_the_window_is_shown(monkeypatch: pytest.MonkeyPatch) -> None:
+    checked: list[Any] = []
+    window = FakeWindow(x=9000, y=100)
+    install_fake_webview(monkeypatch, window, state=_state_with_bounds({"x": 9000, "y": 100, "w": 1200, "h": 780}),
+                         start=lambda *a, **k: [handler() for handler in window.events.before_show] and None)
     monkeypatch.setattr(dashboard, "_save_bounds", lambda *a: None)
     monkeypatch.setattr(dashboard, "keep_on_screen", lambda w: checked.append(w) or True)
     assert dashboard.dashboard_main(["--dashboard", "--port", "5127"]) == 0
@@ -2753,22 +3016,9 @@ def test_dashboard_main_checks_the_position_before_the_window_is_shown(monkeypat
 
 
 def test_dashboard_main_copes_with_a_pywebview_that_has_no_before_show(monkeypatch: pytest.MonkeyPatch) -> None:
-    class Events:
-        def __init__(self) -> None:
-            self.moved, self.resized, self.closing, self.closed = (FakeEvent() for _ in range(4))
-
-    class Window:
-        events = Events()
-        native = None
-        x = y = 0
-        width, height = 1200, 780
-
-    fake = types.ModuleType("webview")
-    fake.create_window = lambda *a, **k: Window()  # type: ignore[attr-defined]
-    fake.start = lambda: None  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "webview", fake)
-    monkeypatch.setenv(dashboard.TOKEN_ENV, "tok")
-    monkeypatch.setattr(dashboard, "_read_state", lambda base, token: None)
+    window = FakeWindow()
+    del window.events.before_show                          # an older pywebview: the event does not exist
+    install_fake_webview(monkeypatch, window)
     assert dashboard.dashboard_main(["--dashboard", "--port", "5128"]) == 0
 
 
@@ -2817,41 +3067,19 @@ def test_without_a_usable_theme_colour_the_window_keeps_the_default_background(s
     assert dashboard._window_background(state) == dashboard.DEFAULT_BACKGROUND == "#090909"
 
 
-def _create_window_calls(monkeypatch: pytest.MonkeyPatch, state: Any, calls: list[dict[str, Any]]) -> None:
-    class Window:
-        def __init__(self) -> None:
-            self.events = FakeEvents()
-            self.native = None
-            self.x = self.y = 0
-            self.width, self.height = 1200, 780
-
-    fake = types.ModuleType("webview")
-
-    def create_window(*args: Any, **kwargs: Any) -> Window:
-        calls.append(kwargs)
-        return Window()
-
-    fake.create_window = create_window  # type: ignore[attr-defined]
-    fake.start = lambda: None  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "webview", fake)
-    monkeypatch.setenv(dashboard.TOKEN_ENV, "tok")
-    monkeypatch.setattr(dashboard, "_read_state", lambda base, token: state)
-
-
 def test_dashboard_main_gives_the_window_the_themes_page_colour(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[dict[str, Any]] = []
-    _create_window_calls(monkeypatch, _state_with_bounds({"x": 1, "y": 2, "w": 1300, "h": 800}, "#f3f3f3"), calls)
+    created = install_fake_webview(monkeypatch, FakeWindow(),
+                                   state=_state_with_bounds({"x": 1, "y": 2, "w": 1300, "h": 800}, "#f3f3f3"))
     assert dashboard.dashboard_main(["--dashboard", "--port", "5129"]) == 0
-    assert calls[0]["background_color"] == "#f3f3f3"
-    assert (calls[0]["x"], calls[0]["y"], calls[0]["width"], calls[0]["height"]) == (1, 2, 1300, 800)
+    assert created[0]["background_color"] == "#f3f3f3"
+    assert (created[0]["x"], created[0]["y"], created[0]["width"], created[0]["height"]) == (1, 2, 1300, 800)
 
 
 def test_dashboard_main_keeps_the_default_colour_when_the_state_cannot_be_read(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[dict[str, Any]] = []
-    _create_window_calls(monkeypatch, None, calls)
+    created = install_fake_webview(monkeypatch, FakeWindow(), state=None)
     assert dashboard.dashboard_main(["--dashboard", "--port", "5130"]) == 0
-    assert calls[0]["background_color"] == "#090909"
-    assert (calls[0]["width"], calls[0]["height"]) == dashboard.DEFAULT_SIZE
+    assert created[0]["background_color"] == "#090909"
+    assert (created[0]["width"], created[0]["height"]) == dashboard.DEFAULT_SIZE
 
 
 def test_the_dashboard_process_reads_the_light_gates_colour_from_the_real_server(
@@ -3082,6 +3310,176 @@ def test_the_dashboard_child_dies_when_the_monitor_is_killed(tmp_path: Path) -> 
                            creationflags=NO_WINDOW)
 
 
+class _Clock:
+    """A clock the launcher tests move by hand."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+@pytest.fixture
+def launcher_rig(make_server: Any, settings: Settings, monkeypatch: pytest.MonkeyPatch):
+    """A launcher over fake child processes, a hand-moved clock and a recorded focus call. Nothing is a real window."""
+    FakePopen.instances = []
+    monkeypatch.setattr(dashboard.subprocess, "Popen", FakePopen)
+    focus = {"window": False, "calls": []}
+    monkeypatch.setattr(dashboard, "focus_window", lambda pid: focus["calls"].append(pid) or focus["window"])
+    server, _ = make_server()
+    clock = _Clock()
+    return types.SimpleNamespace(launcher=dashboard.DashboardLauncher(server, settings, clock=clock), clock=clock,
+                                 focus=focus, children=FakePopen.instances, server=server)
+
+
+def test_a_click_right_after_the_window_closed_opens_a_new_dashboard_while_the_old_process_exits(launcher_rig) -> None:
+    """The process outlives its window by several seconds (WebView2 shuts down); the tray item must not go dead for them."""
+    rig = launcher_rig
+    assert rig.launcher.open() is True
+    first = rig.children[0]
+    rig.clock.now = 5.0                                             # the user had it open for a while ...
+    assert rig.launcher.window_closed(first.pid) is True            # ... closed it: the child says so and lingers
+    assert first.poll() is None
+    rig.clock.now = 5.2                                             # a click 0.2 s later
+    assert rig.launcher.open() is True
+    assert len(rig.children) == 2 and rig.launcher.pid == rig.children[1].pid
+    assert first.poll() is None                                     # the old one is left to finish by itself
+    assert rig.focus["calls"] == []                                 # and a window that is closing is not focused
+
+
+def test_a_notice_from_an_old_child_does_not_condemn_the_new_one(launcher_rig) -> None:
+    rig = launcher_rig
+    rig.launcher.open()
+    first = rig.children[0]
+    rig.launcher.window_closed(first.pid)
+    rig.launcher.open()
+    second = rig.children[1]
+    assert rig.launcher.window_closed(first.pid) is False           # late, from the process that was replaced
+    rig.clock.now = 2.0
+    assert rig.launcher.open() is True and len(rig.children) == 2   # the new child is still starting: left alone
+    assert rig.launcher.pid == second.pid
+
+
+def test_a_notice_from_a_stranger_or_before_any_child_changes_nothing(launcher_rig) -> None:
+    rig = launcher_rig
+    assert rig.launcher.window_closed(1234) is False                # nothing started yet
+    rig.launcher.open()
+    assert rig.launcher.window_closed(rig.children[0].pid + 1) is False
+    rig.children[0]._returncode = 0
+    assert rig.launcher.window_closed(rig.children[0].pid) is False  # already gone
+    rig.clock.now = 1.0
+    assert rig.launcher.open() is True and len(rig.children) == 2   # an exited child is replaced as it always was
+
+
+def test_a_process_that_is_still_starting_is_left_alone_within_the_grace(launcher_rig) -> None:
+    rig = launcher_rig
+    rig.launcher.open()
+    for seconds in (0.5, 3.0, dashboard.START_GRACE_S):
+        rig.clock.now = seconds
+        assert rig.launcher.open() is True
+    assert len(rig.children) == 1 and rig.children[0].poll() is None
+
+
+def test_a_process_that_shows_no_window_past_the_grace_is_replaced(launcher_rig, caplog: pytest.LogCaptureFixture) -> None:
+    """Without this a child that stays alive and windowless (a stuck web view) would leave the tray item dead for good."""
+    rig = launcher_rig
+    rig.launcher.open()
+    first = rig.children[0]
+    rig.clock.now = dashboard.START_GRACE_S + 0.5
+    with caplog.at_level("WARNING", logger="usage_monitor.ui.dashboard"):
+        assert rig.launcher.open() is True
+    assert len(rig.children) == 2 and rig.launcher.pid == rig.children[1].pid
+    assert first.poll() is not None                                 # the leftover was asked to end
+    assert any("shown no window" in record.getMessage() for record in caplog.records)
+    rig.clock.now += 1.0                                            # the new child gets its own grace period
+    assert rig.launcher.open() is True and len(rig.children) == 2
+
+
+def test_an_open_window_is_focused_at_any_age(launcher_rig) -> None:
+    rig = launcher_rig
+    rig.focus["window"] = True
+    rig.launcher.open()
+    rig.clock.now = 10_000.0                                        # hours later, with the window still on screen
+    assert rig.launcher.open() is True
+    assert len(rig.children) == 1 and rig.focus["calls"] == [rig.children[0].pid]
+
+
+def test_closing_the_launcher_ends_the_process_that_was_still_exiting_too(launcher_rig) -> None:
+    rig = launcher_rig
+    rig.launcher.open()
+    rig.launcher.window_closed(rig.children[0].pid)
+    rig.launcher.open()
+    assert [child.poll() for child in rig.children] == [None, None]
+    rig.launcher.close()
+    assert all(child.poll() is not None for child in rig.children)
+    assert rig.launcher.running is False
+
+
+def test_a_retired_process_that_has_exited_is_not_kept(launcher_rig) -> None:
+    rig = launcher_rig
+    rig.launcher.open()
+    rig.launcher.window_closed(rig.children[0].pid)
+    rig.launcher.open()
+    rig.children[0]._returncode = 0                                 # it finished shutting down
+    rig.launcher.window_closed(rig.children[1].pid)
+    rig.launcher.open()                                             # the second is retired in its turn
+    assert len(rig.children) == 3
+    assert rig.launcher._retired == [rig.children[1]]
+
+
+def test_the_childs_notice_travels_through_the_real_server_to_the_launcher(
+        make_server: Any, settings: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    FakePopen.instances = []
+    monkeypatch.setattr(dashboard.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(dashboard, "focus_window", lambda pid: False)
+    holder: dict[str, Any] = {}
+    server, _ = make_server(dashboard_closed_cb=lambda pid: holder["launcher"].window_closed(pid))
+    launcher = holder["launcher"] = dashboard.DashboardLauncher(server, settings)
+    launcher.open()
+    FakePopen.instances[0].pid = os.getpid()                         # the notice carries the pid of the process that posts it
+    dashboard._notify_closed(f"http://127.0.0.1:{server.port}", server.token)
+    assert launcher.open() is True
+    assert len(FakePopen.instances) == 2
+
+
+# ── POST /api/dashboard/closed ───────────────────────────────────────────────────────
+
+def test_the_closed_notice_reaches_the_callback_with_the_process_id(make_server: Any) -> None:
+    seen: list[int] = []
+    server, _ = make_server(dashboard_closed_cb=lambda pid: seen.append(pid) or pid == 4321)
+    assert post_json(server, "/api/dashboard/closed", {"pid": 4321}) == (200, {"ok": True, "known": True})
+    assert post_json(server, "/api/dashboard/closed", {"pid": 99}) == (200, {"ok": True, "known": False})
+    assert seen == [4321, 99]
+
+
+@pytest.mark.parametrize("body", [{}, {"pid": "12"}, {"pid": True}, {"pid": 0}, {"pid": -5}, {"pid": 1.5}, [], None, "x"])
+def test_the_closed_notice_needs_a_process_id(make_server: Any, body: Any) -> None:
+    server, _ = make_server(dashboard_closed_cb=lambda pid: pytest.fail("a bad notice reached the launcher"))
+    assert post_json(server, "/api/dashboard/closed", body)[0] == 400
+
+
+def test_the_closed_notice_needs_the_token_and_the_right_verb(make_server: Any) -> None:
+    server, _ = make_server(dashboard_closed_cb=lambda pid: pytest.fail("refused requests must not get through"))
+    assert request(server, "POST", "/api/dashboard/closed", body=b'{"pid": 5}', token=False)[0] == 401
+    status, headers, _ = request(server, "GET", "/api/dashboard/closed")
+    assert status == 405 and headers["allow"] == "POST"
+
+
+def test_the_closed_notice_says_so_when_nothing_manages_the_dashboard(make_server: Any) -> None:
+    server, _ = make_server()
+    assert post_json(server, "/api/dashboard/closed", {"pid": 5})[0] == 501
+
+
+def test_a_failing_launcher_callback_is_a_500_not_a_dead_server(make_server: Any) -> None:
+    def broken(pid: int) -> bool:
+        raise RuntimeError("boom")
+
+    server, _ = make_server(dashboard_closed_cb=broken)
+    assert post_json(server, "/api/dashboard/closed", {"pid": 5})[0] == 500
+    assert request(server, "GET", "/api/state")[0] == 200
+
+
 def test_launcher_reports_failure_when_the_process_cannot_start(make_server: Any, settings: Settings,
                                                                monkeypatch: pytest.MonkeyPatch) -> None:
     def refuse(*args: Any, **kwargs: Any) -> None:
@@ -3106,69 +3504,51 @@ def test_dashboard_main_falls_back_to_the_browser_without_pywebview(monkeypatch:
     opened: list[str] = []
     monkeypatch.setattr(dashboard.webbrowser, "open", lambda url: opened.append(url) or True)
     assert dashboard.dashboard_main(["--dashboard", "--port", "5123"]) == dashboard.EXIT_BROWSER_FALLBACK
-    assert opened == ["http://127.0.0.1:5123/"]
-
-
-class FakeEvent(list):
-    """Stands in for pywebview's Event: += adds a handler and returns the same object."""
-
-    def __iadd__(self, handler: Any) -> "FakeEvent":
-        self.append(handler)
-        return self
-
-
-class FakeEvents:
-    def __init__(self) -> None:
-        self.moved = FakeEvent()
-        self.resized = FakeEvent()
-        self.closing = FakeEvent()
-        self.closed = FakeEvent()
-        self.before_show = FakeEvent()
+    assert opened == ["http://127.0.0.1:5123/?k=tok"]          # the page is served to a caller that has the key
 
 
 def test_dashboard_main_falls_back_when_the_webview_will_not_start(monkeypatch: pytest.MonkeyPatch) -> None:
-    class FakeWindow:
-        def __init__(self) -> None:
-            self.events = FakeEvents()
-            self.native = None
-            self.x, self.y, self.width, self.height = 1, 2, 1200, 780
-
-    fake = types.ModuleType("webview")
-    window = FakeWindow()
-    fake.create_window = lambda *args, **kwargs: window  # type: ignore[attr-defined]
-
-    def no_webview2() -> None:
+    def no_webview2(*args: Any, **kwargs: Any) -> None:
         raise RuntimeError("WebView2 runtime missing")
 
-    fake.start = no_webview2  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "webview", fake)
-    monkeypatch.setenv(dashboard.TOKEN_ENV, "tok")
-    monkeypatch.setattr(dashboard, "_read_state", lambda base, token: _state_with_bounds({"x": 1, "y": 2, "w": 1200, "h": 780}))
+    install_fake_webview(monkeypatch, FakeWindow(), start=no_webview2,
+                         state=_state_with_bounds({"x": 1, "y": 2, "w": 1200, "h": 780}))
     opened: list[str] = []
     monkeypatch.setattr(dashboard.webbrowser, "open", lambda url: opened.append(url) or True)
     assert dashboard.dashboard_main(["--dashboard", "--port", "5124"]) == dashboard.EXIT_BROWSER_FALLBACK
-    assert opened == ["http://127.0.0.1:5124/"]
+    assert opened == ["http://127.0.0.1:5124/?k=tok"]
 
 
 def test_dashboard_main_reports_a_failing_window_call_as_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """A TypeError from our own create_window call is a bug, not a missing WebView2: the page still
     opens in the browser, but the exit code must not look like the harmless fallback."""
-    fake = types.ModuleType("webview")
+    install_fake_webview(monkeypatch, FakeWindow(),
+                         start=lambda *a, **k: pytest.fail("a window that was never created cannot be started"))
 
     def broken_call(*args: Any, **kwargs: Any) -> None:
         raise TypeError("create_window() got an unexpected keyword argument 'min_size'")
 
-    fake.create_window = broken_call  # type: ignore[attr-defined]
-    fake.start = lambda: pytest.fail("a window that was never created cannot be started")  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "webview", fake)
-    monkeypatch.setenv(dashboard.TOKEN_ENV, "tok")
-    monkeypatch.setattr(dashboard, "_read_state", lambda base, token: None)
+    sys.modules["webview"].create_window = broken_call  # type: ignore[attr-defined]
     opened: list[str] = []
     monkeypatch.setattr(dashboard.webbrowser, "open", lambda url: opened.append(url) or True)
     code = dashboard.dashboard_main(["--dashboard", "--port", "5126"])
     assert code == dashboard.EXIT_WINDOW_ERROR
     assert code not in (0, dashboard.EXIT_BROWSER_FALLBACK, dashboard.EXIT_NO_ARGS)
-    assert opened == ["http://127.0.0.1:5126/"]
+    assert opened == ["http://127.0.0.1:5126/?k=tok"]
+
+
+def test_a_window_that_cannot_take_the_bridge_functions_is_an_error_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    window = FakeWindow()
+
+    def refuse(*functions: Any) -> None:
+        raise AttributeError("this pywebview has no expose()")
+
+    window.expose = refuse  # type: ignore[method-assign]
+    install_fake_webview(monkeypatch, window, start=lambda *a, **k: pytest.fail("no page without its bridge"))
+    opened: list[str] = []
+    monkeypatch.setattr(dashboard.webbrowser, "open", lambda url: opened.append(url) or True)
+    assert dashboard.dashboard_main(["--dashboard", "--port", "5133"]) == dashboard.EXIT_WINDOW_ERROR
+    assert opened == ["http://127.0.0.1:5133/?k=tok"]
 
 
 def test_the_exit_codes_tell_the_cases_apart(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -3180,18 +3560,9 @@ def test_the_exit_codes_tell_the_cases_apart(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_dashboard_saves_bounds_once_on_close(monkeypatch: pytest.MonkeyPatch) -> None:
     saved: list[tuple[str, Any]] = []
+    window = FakeWindow(x=100, y=50, width=1300, height=800)
 
-    class Window:
-        def __init__(self) -> None:
-            self.events = FakeEvents()
-            self.native = None
-            self.x, self.y, self.width, self.height = 100, 50, 1300, 800
-
-    window = Window()
-    fake = types.ModuleType("webview")
-    fake.create_window = lambda *a, **k: window  # type: ignore[attr-defined]
-
-    def run() -> None:
+    def run(*args: Any, **kwargs: Any) -> None:
         # The user resizes, then closes: each event handler gets the window's current geometry.
         window.width, window.height = 1400, 900
         for handler in window.events.resized:
@@ -3201,13 +3572,315 @@ def test_dashboard_saves_bounds_once_on_close(monkeypatch: pytest.MonkeyPatch) -
         for handler in window.events.closed:
             handler()
 
-    fake.start = run  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "webview", fake)
-    monkeypatch.setenv(dashboard.TOKEN_ENV, "tok")
-    monkeypatch.setattr(dashboard, "_read_state", lambda base, token: None)
+    install_fake_webview(monkeypatch, window, start=run)
     monkeypatch.setattr(dashboard, "_save_bounds", lambda base, token, bounds: saved.append((token, bounds)))
     assert dashboard.dashboard_main(["--dashboard", "--port", "5125"]) == 0
     assert saved == [("tok", {"x": 100, "y": 50, "w": 1400, "h": 900})]
+
+
+def test_the_dashboard_tells_the_monitor_its_window_is_gone_after_saving_its_size(monkeypatch: pytest.MonkeyPatch) -> None:
+    order: list[str] = []
+    window = FakeWindow()
+
+    def run(*args: Any, **kwargs: Any) -> None:
+        for handler in window.events.resized:
+            handler()
+        for handler in window.events.closed:
+            handler()
+
+    install_fake_webview(monkeypatch, window, start=run)
+    monkeypatch.setattr(dashboard, "_save_bounds", lambda base, token, bounds: order.append("bounds"))
+    monkeypatch.setattr(dashboard, "_notify_closed", lambda base, token: order.append(f"closed {base} {token}"))
+    assert dashboard.dashboard_main(["--dashboard", "--port", "5134"]) == 0
+    assert order == ["bounds", "closed http://127.0.0.1:5134 tok"]
+
+
+def test_the_notice_goes_out_even_when_no_bounds_were_tracked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A window closed before it was ever moved or resized has no size to save, and still is gone."""
+    sent: list[str] = []
+    window = FakeWindow()
+
+    def run(*args: Any, **kwargs: Any) -> None:
+        for handler in window.events.closed:
+            handler()
+
+    install_fake_webview(monkeypatch, window, start=run)
+    monkeypatch.setattr(dashboard, "_save_bounds", lambda *a: pytest.fail("there was no size to save"))
+    monkeypatch.setattr(dashboard, "_notify_closed", lambda base, token: sent.append(token))
+    assert dashboard.dashboard_main(["--dashboard", "--port", "5135"]) == 0
+    assert sent == ["tok"]
+
+
+def test_the_notice_posts_the_childs_process_id_and_never_raises(make_server: Any,
+                                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    received: list[int] = []
+    server, _ = make_server(dashboard_closed_cb=lambda pid: received.append(pid) or True)
+    dashboard._notify_closed(f"http://127.0.0.1:{server.port}", server.token)
+    assert received == [os.getpid()]
+    dashboard._notify_closed(f"http://127.0.0.1:{server.port}", "the wrong token")        # a refusal is not an error
+    dashboard._notify_closed("http://127.0.0.1:1", server.token)                          # nobody listening: not either
+    assert received == [os.getpid()]
+
+
+# ── No usable WebView2: the browser, not a blank window (pywebview itself raises nothing) ──────────────────────
+
+@pytest.mark.parametrize(("registered", "expected"), [
+    ([], False),
+    (["0.0.0.0"], False),                          # registered but not installed, Microsoft's own detection rule
+    (["85.0.564.70"], False),                      # older than pywebview accepts
+    (["86.0.622.0"], True),
+    (["86.0.621.99"], False),
+    (["141.0.3537.85"], True),
+    (["0.0.0.0", "141.0.3537.85"], True),          # per-user and per-machine registrations are separate entries
+    (["", "garbage", "x.y.z"], False),
+    ([" 155.0.4283.62 "], True),
+])
+def test_the_runtime_check_follows_the_version_pywebview_requires(monkeypatch: pytest.MonkeyPatch,
+                                                                  registered: list[str], expected: bool) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(dashboard, "_registered_runtime_versions", lambda: registered)
+    assert dashboard.webview2_runtime_available(types.SimpleNamespace(settings={})) is expected
+
+
+def test_a_fixed_runtime_named_in_pywebviews_settings_counts(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(dashboard, "_registered_runtime_versions", lambda: [])
+    fixed = types.SimpleNamespace(settings={"WEBVIEW2_RUNTIME_PATH": "C:/runtimes/fixed"})
+    assert dashboard.webview2_runtime_available(fixed) is True
+    assert dashboard.webview2_runtime_available(types.SimpleNamespace(settings={"WEBVIEW2_RUNTIME_PATH": None})) is False
+
+
+def test_an_unreadable_registry_leaves_the_decision_to_pywebview_and_the_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    def broken() -> list[str]:
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(dashboard, "_registered_runtime_versions", broken)
+    assert dashboard.webview2_runtime_available(types.SimpleNamespace(settings={})) is True
+
+
+def test_the_runtime_check_is_not_ours_to_make_off_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(dashboard, "_registered_runtime_versions", lambda: pytest.fail("no registry off Windows"))
+    assert dashboard.webview2_runtime_available(types.SimpleNamespace(settings={})) is True
+
+
+class _FakeRegistryKey:
+    def __init__(self, value: str) -> None:
+        self.value = value
+
+    def __enter__(self) -> "_FakeRegistryKey":
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        return None
+
+
+def test_the_registered_versions_are_read_where_edgeupdate_keeps_them(monkeypatch: pytest.MonkeyPatch) -> None:
+    runtime = dashboard.WEBVIEW2_CLIENTS[0]
+    present = {
+        ("HKCU", rf"Software\Microsoft\EdgeUpdate\Clients\{runtime}"): "141.0.1",
+        ("HKLM", rf"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{runtime}"): "140.0.2",
+        ("HKLM", rf"SOFTWARE\Microsoft\EdgeUpdate\Clients\{dashboard.WEBVIEW2_CLIENTS[3]}"): "145.0.3",
+    }
+    fake = types.ModuleType("winreg")
+    fake.HKEY_CURRENT_USER, fake.HKEY_LOCAL_MACHINE = "HKCU", "HKLM"  # type: ignore[attr-defined]
+
+    def open_key(hive: str, path: str) -> _FakeRegistryKey:
+        if (hive, path) not in present:
+            raise FileNotFoundError(path)
+        return _FakeRegistryKey(present[(hive, path)])
+
+    fake.OpenKey = open_key  # type: ignore[attr-defined]
+    fake.QueryValueEx = lambda key, name: (key.value, 1) if name == "pv" else pytest.fail(name)  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "winreg", fake)
+    monkeypatch.setattr(dashboard, "_registered_runtime_versions", ORIGINAL_RUNTIME_VERSIONS)
+    assert sorted(dashboard._registered_runtime_versions()) == ["140.0.2", "141.0.1", "145.0.3"]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the registry is Windows only")
+def test_the_real_registry_answers_with_a_list_of_version_strings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(dashboard, "_registered_runtime_versions", ORIGINAL_RUNTIME_VERSIONS)
+    versions = dashboard._registered_runtime_versions()          # read only; what is there depends on the machine
+    assert isinstance(versions, list) and all(isinstance(v, str) for v in versions)
+
+
+def test_dashboard_main_opens_the_browser_at_once_without_a_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    created = install_fake_webview(monkeypatch, FakeWindow(),
+                                   start=lambda *a, **k: pytest.fail("pywebview would open a blank IE11 window here"))
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(dashboard, "_registered_runtime_versions", lambda: [])
+    opened: list[str] = []
+    monkeypatch.setattr(dashboard.webbrowser, "open", lambda url: opened.append(url) or True)
+    assert dashboard.dashboard_main(["--dashboard", "--port", "5136"]) == dashboard.EXIT_BROWSER_FALLBACK
+    assert opened == ["http://127.0.0.1:5136/?k=tok"] and created == []         # no window was ever made
+
+
+def _guarded_start(window: FakeWindow, before: Any = None) -> Any:
+    """A webview.start that runs the guard function as pywebview does, in a thread, and returns when it has finished."""
+    def start(func: Any = None, *args: Any, **kwargs: Any) -> None:
+        if before is not None:
+            before(window)
+        thread = threading.Thread(target=func)
+        thread.start()
+        thread.join(10)
+        assert not thread.is_alive(), "the guard did not finish"
+    return start
+
+
+def test_a_renderer_that_is_not_webview2_sends_the_page_to_the_browser(monkeypatch: pytest.MonkeyPatch,
+                                                                        caplog: pytest.LogCaptureFixture) -> None:
+    """pywebview picks the IE11 engine without a word when it finds no runtime: the window would stay blank."""
+    window = FakeWindow()
+    install_fake_webview(monkeypatch, window, renderer="mshtml", start=_guarded_start(window))
+    opened: list[str] = []
+    monkeypatch.setattr(dashboard.webbrowser, "open", lambda url: opened.append(url) or True)
+    with caplog.at_level("WARNING", logger="usage_monitor.ui.dashboard"):
+        code = dashboard.dashboard_main(["--dashboard", "--port", "5137"])
+    assert code == dashboard.EXIT_BROWSER_FALLBACK
+    assert opened == ["http://127.0.0.1:5137/?k=tok"] and window.destroyed is True
+    assert any("mshtml" in record.getMessage() for record in caplog.records)           # and the log says why
+
+
+def test_a_page_that_never_loads_is_sent_to_the_browser_after_the_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A WebView2 that fails to start leaves a window and no error: the load event never comes."""
+    monkeypatch.setattr(dashboard, "LOAD_TIMEOUT_S", 0.4)
+    window = FakeWindow()
+    install_fake_webview(monkeypatch, window, start=_guarded_start(window))
+    opened: list[str] = []
+    monkeypatch.setattr(dashboard.webbrowser, "open", lambda url: opened.append(url) or True)
+    began = time.monotonic()
+    assert dashboard.dashboard_main(["--dashboard", "--port", "5138"]) == dashboard.EXIT_BROWSER_FALLBACK
+    assert 0.3 <= time.monotonic() - began < 5
+    assert opened == ["http://127.0.0.1:5138/?k=tok"] and window.destroyed is True
+
+
+def test_a_page_that_loads_leaves_the_window_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(dashboard, "LOAD_TIMEOUT_S", 0.4)
+    window = FakeWindow()
+    install_fake_webview(monkeypatch, window, start=_guarded_start(window, before=lambda w: w.events.loaded.set()))
+    monkeypatch.setattr(dashboard.webbrowser, "open", lambda url: pytest.fail("the page loaded; no browser"))
+    assert dashboard.dashboard_main(["--dashboard", "--port", "5139"]) == 0
+    assert window.destroyed is False
+
+
+def test_a_window_the_user_closes_before_the_page_loads_does_not_open_the_browser(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(dashboard, "LOAD_TIMEOUT_S", 5.0)
+    window = FakeWindow()
+    install_fake_webview(monkeypatch, window, start=_guarded_start(window, before=lambda w: w.events.closed.set()))
+    monkeypatch.setattr(dashboard.webbrowser, "open", lambda url: pytest.fail("the user closed the window"))
+    assert dashboard.dashboard_main(["--dashboard", "--port", "5140"]) == 0
+
+
+def test_the_guard_does_not_keep_the_process_alive_after_the_loop_ends(monkeypatch: pytest.MonkeyPatch) -> None:
+    """pywebview's start(func) runs the guard in a thread that is not a daemon; it must end with the GUI loop."""
+    monkeypatch.setattr(dashboard, "LOAD_TIMEOUT_S", 30.0)
+    window = FakeWindow()
+    threads: list[threading.Thread] = []
+
+    def start(func: Any = None, *args: Any, **kwargs: Any) -> None:
+        thread = threading.Thread(target=func)
+        thread.start()
+        threads.append(thread)                 # and the loop ends at once, without the page ever loading
+
+    install_fake_webview(monkeypatch, window, start=start)
+    monkeypatch.setattr(dashboard.webbrowser, "open", lambda url: pytest.fail("the loop had ended"))
+    assert dashboard.dashboard_main(["--dashboard", "--port", "5141"]) == 0
+    threads[0].join(5)
+    assert not threads[0].is_alive()
+
+
+def test_a_window_that_will_not_close_does_not_turn_the_fallback_into_a_crash(monkeypatch: pytest.MonkeyPatch,
+                                                                              caplog: pytest.LogCaptureFixture) -> None:
+    window = FakeWindow()
+
+    def refuse() -> None:
+        raise RuntimeError("Main window failed to start")
+
+    window.destroy = refuse  # type: ignore[method-assign]
+    install_fake_webview(monkeypatch, window, renderer="mshtml", start=_guarded_start(window))
+    monkeypatch.setattr(dashboard.webbrowser, "open", lambda url: True)
+    with caplog.at_level("ERROR", logger="usage_monitor.ui.dashboard"):
+        assert dashboard.dashboard_main(["--dashboard", "--port", "5142"]) == dashboard.EXIT_BROWSER_FALLBACK
+    assert any("window check failed" in record.getMessage() for record in caplog.records)
+
+
+def test_the_guards_timeout_is_shorter_than_the_launchers_patience() -> None:
+    assert dashboard.LOAD_TIMEOUT_S < dashboard.START_GRACE_S
+
+
+# ── The bridge: the page may call four functions and nothing it can reach through them ──────────────────────
+
+def test_the_page_gets_its_functions_one_by_one_and_no_js_api_object(monkeypatch: pytest.MonkeyPatch) -> None:
+    window = FakeWindow()
+    created = install_fake_webview(monkeypatch, window)
+    assert dashboard.dashboard_main(["--dashboard", "--port", "5143"]) == 0
+    assert "js_api" not in created[0]                      # pywebview resolves a js_api call by getattr, private names included
+    assert window.exposed == list(dashboard.BRIDGE_FUNCTIONS) == ["get_token", "open_external", "save_export", "set_chrome"]
+
+
+class _BridgeOs:
+    """What a page script would love to reach: the os module that pywebview's GUI module imports."""
+    ran: list[str] = []
+
+    @classmethod
+    def system(cls, command: str) -> int:
+        cls.ran.append(command)
+        return 0
+
+
+def _bridge_window(js_api: Any = None) -> Any:
+    """The parts of a pywebview Window that expose() and js_bridge_call read, with pywebview's own expose()."""
+    window_module = pytest.importorskip("webview.window")
+
+    class Window:
+        expose = window_module.Window.expose
+
+        def __init__(self) -> None:
+            self._expose_lock = threading.Lock()
+            self._functions: dict[str, Any] = {}
+            self._js_api = js_api
+            self.events = types.SimpleNamespace(loaded=types.SimpleNamespace(is_set=lambda: False))
+            self.gui = types.SimpleNamespace(os=_BridgeOs)           # the real window's gui is the winforms module
+            self.answers: queue.Queue[str] = queue.Queue()
+
+        def evaluate_js(self, script: str, *args: Any, **kwargs: Any) -> None:
+            self.answers.put(script)
+
+        def run_js(self, script: str) -> None:
+            self.answers.put(script)
+
+    return Window()
+
+
+def test_a_page_script_cannot_walk_from_the_api_to_os_system_through_the_bridge() -> None:
+    util = pytest.importorskip("webview.util")
+    _BridgeOs.ran = []
+    window = _bridge_window()
+    api = dashboard.DashboardApi("tok")
+    api._bind(window)
+    dashboard.expose_api(window, api)
+
+    for name in ("_window.gui.os.system", "_window.gui", "_bind", "_token", "_saving",
+                 "get_token.__self__._window.gui.os.system", "no_such_call"):
+        util.js_bridge_call(window, name, ["echo pwned"], "id-attack")
+    time.sleep(0.3)                                         # js_bridge_call runs an allowed call in a thread
+    assert _BridgeOs.ran == [] and window.answers.empty()
+
+    util.js_bridge_call(window, "get_token", [], "id-control")                          # an exposed call still works
+    assert "tok" in window.answers.get(timeout=5)
+    util.js_bridge_call(window, "open_external", ["https://evil.example/"], "id-link")   # and still checks its own input
+    assert "false" in window.answers.get(timeout=5)
+
+    # The control: the same walk through a js_api object, which is how the window used to be wired.
+    old = _bridge_window(js_api=api)
+    util.js_bridge_call(old, "_window.gui.os.system", ["echo pwned"], "id-old")
+    deadline = time.monotonic() + 5
+    while not _BridgeOs.ran and time.monotonic() < deadline:
+        time.sleep(0.05)
+    if not _BridgeOs.ran:
+        pytest.skip("this pywebview no longer resolves private names through js_api; the attack cannot be shown")
+    assert _BridgeOs.ran == ["echo pwned"]
 
 
 @ui_only
@@ -3419,7 +4092,7 @@ def probe(window):
             window.resize(width, height)
             if index:
                 ask(window, "window.__shiftProbe = 1")           # a mark only the old document has: the new one is the page to measure
-                window.load_url(URL + "?size=%d#cost" % index)
+                window.load_url(URL + ("&" if "?" in URL else "?") + "size=%d#cost" % index)    # the URL carries the run's key
             if not wait_for(window, FRESH, 30):
                 raise RuntimeError("the Cost page did not draw its cards")
             pending = json.loads(ask(window, CARDS))
@@ -3552,6 +4225,32 @@ def test_the_devserver_never_touches_the_run_entry(tmp_path: Path, registry: dic
     assert registry["reads"] == 0 and registry["writes"] == [] and registry["deletes"] == 0
 
 
+def read_devserver_page(child: subprocess.Popen, port: int, timeout: float = 30.0) -> bytes:
+    """The page a dev server child serves at the address it prints (``devserver ... url=http://127.0.0.1:PORT/?k=KEY``).
+
+    Also checks that the same page is refused to a caller without the key: the token is written into it.
+    """
+    box: queue.Queue[bytes] = queue.Queue()
+    threading.Thread(target=lambda: box.put(child.stdout.readline()), daemon=True).start()
+    line = box.get(timeout=timeout).decode("utf-8", "replace")
+    found = re.search(r"\burl=(\S+)", line)
+    assert found, f"the dev server printed no address: {line!r}"
+    address = found.group(1)
+    assert f"127.0.0.1:{port}/?k=" in address
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    try:
+        conn.request("GET", "/")
+        bare = conn.getresponse()
+        bare.read()
+        assert bare.status == 401
+        conn.request("GET", address.split(f":{port}", 1)[1])
+        response = conn.getresponse()
+        assert response.status == 200
+        return response.read()
+    finally:
+        conn.close()
+
+
 @ui_only
 def test_devserver_process_answers_on_loopback(tmp_path: Path) -> None:
     """Starts the real dev server as a child process, as a reviewer would, and calls it."""
@@ -3563,17 +4262,7 @@ def test_devserver_process_answers_on_loopback(tmp_path: Path) -> None:
                               "--scenario", "warning"], env=env, cwd=str(Path(__file__).resolve().parents[1]),
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=NO_WINDOW)
     try:
-        deadline = time.monotonic() + 20
-        page = b""
-        while time.monotonic() < deadline:
-            try:
-                conn = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
-                conn.request("GET", "/")
-                page = conn.getresponse().read()
-                conn.close()
-                break
-            except OSError:
-                time.sleep(0.2)
+        page = read_devserver_page(child, port, timeout=20.0)
         assert b'name="monitor-token" content="' in page
         token = page.decode("utf-8").split('name="monitor-token" content="', 1)[1].split('"', 1)[0]
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)

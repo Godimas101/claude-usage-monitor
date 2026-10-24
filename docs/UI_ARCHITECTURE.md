@@ -292,6 +292,15 @@ Settings: `theme_id`, `theme_variant`, `theme_mode` (Gates: light / dark / syste
 - `/api/*` requires header `X-Monitor-Token` (random per run, embedded in `index.html` as
   `<meta name="monitor-token">`), else `401`. The guards run first, so a refused request never
   reaches the database. No CORS headers are ever sent.
+- **The page needs the key.** `GET /` writes the token into the page, so serving it to anyone who can reach the port
+  would hand the token to every other account or session on the PC (fast user switching, terminal servers, a shared
+  family PC): they find the port with `netstat`, read the token and have the whole API. The Host and header checks only
+  stop web pages. So `GET /` answers `401` (plain text) unless the query holds exactly one `k` equal to the token,
+  compared in constant time, and `ApiServer.url` is `http://127.0.0.1:<port>/?k=<token>`. The dashboard process
+  opens that address (it has the token in `CUM_DASHBOARD_TOKEN`, which only the same user can read), and so does the
+  browser fallback; the dev server prints it. The key stays in the address, so a reload works; `Referrer-Policy:
+  no-referrer` keeps it from leaving, and the request log drops the query. `/static/` holds only the app's own files
+  and needs no key.
 - **The shell.** `GET /` serves `index.html` with the per-run token and the active theme already in
   it: `data-theme` and `data-variant` on `<html>`, the colour tokens as inline custom properties
   (the `css_vars` of `/api/state`) with `color-scheme`, the `color-scheme` meta and the theme's own
@@ -318,7 +327,7 @@ Settings: `theme_id`, `theme_variant`, `theme_mode` (Gates: light / dark / syste
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/` | `index.html` with the token and the active theme injected (below) |
+| GET | `/?k=<token>` | `index.html` with the token and the active theme injected (below); `401` without the key |
 | GET | `/static/<path>` | webui assets (fonts cached; HTML/JS/CSS `no-store` in dev) |
 | GET | `/api/state` | MonitorState + settings subset + theme + `update` block + version (ETag) |
 | GET | `/api/themes` | themes with variants and tokens; the Gates `system-*` variants show the live Windows accent, as applied |
@@ -327,6 +336,7 @@ Settings: `theme_id`, `theme_variant`, `theme_mode` (Gates: light / dark / syste
 | GET | `/api/supporters` | supporters list (cached for an hour; failures come back as an empty list plus the reason) |
 | POST | `/api/settings` | validated partial settings update (below) |
 | POST | `/api/refresh` | `DataService.refresh_now()` |
+| POST | `/api/dashboard/closed` | `{"pid": n}`: the dashboard process says its window is gone (`dashboard_closed_cb`, wired to `DashboardLauncher.window_closed`); `400` without a pid, `501` where nothing manages the dashboard |
 | POST | `/api/update/check` · `/api/update/apply` · `/api/update/skip` | updater (see "Updates") |
 
 ### Statistics: `GET /api/analytics/<name>`
@@ -398,8 +408,13 @@ before anything is applied; a value `Settings` still refuses is a `400` too. The
   variant belonged to the old theme); posting the current theme again keeps its variant. A whole
   Gates id such as `blue-light` is split into the accent (`blue`) and the mode (`light`) that
   `themes.resolve` reads; a `theme_mode` in the same request wins over the one in the id.
-- **`launch_on_startup`** writes the HKCU Run entry. A dev server (see Dev isolation) keeps the
-  choice in memory instead and logs that the entry was left alone.
+- **`launch_on_startup`** writes the HKCU Run entry. It reads as on only while Windows has not
+  turned the entry off: Settings > Apps > Startup and Task Manager leave the Run value in place and
+  record the choice under `Explorer\StartupApproved\Run` (an odd first byte means off), and
+  `startup.is_enabled()` honours that. Switching it on removes such a record, so the switch can
+  re-enable what was turned off in Windows; switching it off, and the launch-time repair, leave
+  the record alone. A dev server (see Dev isolation) keeps the choice in memory instead and logs
+  that the entry was left alone.
 - `ApiServer.apply_settings(body)` does the same in-process (the dev server's `--theme`); it
   raises `ValueError` where the endpoint would answer `400`.
 
@@ -446,8 +461,9 @@ pywebview window titled "Claude Usage Monitor", native frame. After it's shown, 
 caption text and border colours are set from the theme via `DwmSetWindowAttribute`
 (attributes 35/36/34, dark mode 20) on `window.native.Handle`, and again whenever the page
 calls `pywebview.api.set_chrome(...)` after a theme change. Bounds persist in settings
-(`dashboard_bounds`). If WebView2 is missing, the launcher opens the same URL in the default
-browser instead.
+(`dashboard_bounds`). The window opens `ApiServer.url`, `http://127.0.0.1:<port>/?k=<token>`: see
+"Local API" for why the page needs the key. When the page cannot be shown the same address opens in the
+default browser instead, and the exit code says so (below).
 
 - **Job object.** The launcher puts the child in a kill-on-close job object that only the monitor
   holds, so the dashboard ends with the monitor however the monitor ends (End task, `taskkill /F`,
@@ -456,6 +472,28 @@ browser instead.
 - **Exit codes** of `dashboard_main`: `0` a window that was shown and closed, `1` our own window call
   failed (a bug; the page is opened in the browser), `2` no token or port, `3` pywebview or WebView2
   is missing or would not start (the page is opened in the browser).
+- **No usable WebView2.** pywebview raises nothing for either failure, so `dashboard_main` does not wait for an
+  exception. Before it makes a window it asks `webview2_runtime_available()`: the runtime must be registered under
+  `Software\Microsoft\EdgeUpdate\Clients\{...}` (`pv` of 86.0.622.0 or later, per user or per PC, Evergreen or a
+  preview channel; the installer's `WebView2Installed` and pywebview's own check use the same keys) or named in
+  pywebview's `WEBVIEW2_RUNTIME_PATH`. Without it pywebview would quietly pick its IE11 engine, which has no
+  `fetch()` and no CSS variables, and the window would stay blank; instead the browser opens and the exit code is `3`.
+  A registry that cannot be read leaves the decision to pywebview. Then `webview.start(guard)` runs `_window_guard`
+  beside the GUI loop: it falls back the same way (log line, browser, `window.destroy()`, exit code `3`) when
+  `webview.renderer` is not `edgechromium`, or when the window's `loaded` event has not fired `LOAD_TIMEOUT_S` (20 s,
+  against 2 to 3 s when healthy) after the loop started, which is what a runtime that is installed but cannot start
+  looks like. A window the user closes first, or a loop that has ended, ends the guard without a fallback. The child's
+  log (`dashboard.log`) also carries pywebview's own logger (`log.mirror_logger("pywebview")` in `main.py`), so the
+  reason is on record. The release smoke test requires the page to have asked for `/api/themes`, which only a page whose
+  script ran does, so a build whose dashboard does not start fails it.
+- **The launcher and a window that is closing.** After the user closes the window the process lingers for several
+  seconds while WebView2 shuts down. The child's `closed` handler therefore posts `POST /api/dashboard/closed
+  {"pid": <its pid>}` after saving its bounds (with or without bounds), `DashboardLauncher.window_closed(pid)` marks
+  that child as closing, and the next `open()` starts a new child at once instead of answering for the old one, which is
+  left to finish and is still ended by `close()` and by the job object. A notice from a child that was replaced already,
+  or from a stranger, changes nothing. As a safety net a child that is alive, has shown no window and is older than
+  `START_GRACE_S` (30 s, longer than the guard's wait so a child about to fall back by itself is left alone) is
+  terminated and replaced; younger than that, "the window is not visible yet" still means the child is starting.
 - **Window placement.** `keep_on_screen` runs on the `before_show` event: a saved position whose
   title bar is off every screen (an unplugged monitor) is moved fully onto the work area it overlaps
   most, or the nearest one, before the window appears. The child measures in its own coordinates, so `platform.monitors()` and
@@ -468,7 +506,12 @@ browser instead.
   the fallback when the state cannot be read or holds no `#rrggbb` (pywebview takes nothing else).
 - **`DashboardApi` (the page's `pywebview.api`).** `get_token()`, `set_chrome(caption, text,
   border, dark)`, `open_external(url)` (https links to an allow-list of hosts) and
-  `save_export(fmt)`. Names that start with `_` are not exposed.
+  `save_export(fmt)` (`dashboard.BRIDGE_FUNCTIONS`). They are registered one by one with `window.expose()`
+  (`expose_api`); the object is **not** passed as `js_api`. pywebview resolves a `js_api` call with plain `getattr`
+  over a dotted name and checks no leading underscore (only the list it advertises to the page leaves those out), and
+  the api object holds the window, whose `gui` is a module that imports `os`: a script in the page could call
+  `_window.gui.os.system`. With `expose()` only the four names resolve. A test sends that name through pywebview's own
+  `js_bridge_call` and asserts that nothing runs.
   - `save_export("csv" | "json")` fetches `/api/export?format=<fmt>` from the monitor (127.0.0.1
     only, `X-Monitor-Token` header, redirects refused, 16 MB cap), then shows the native save
     dialog (`FileDialog.SAVE`, or the older `SAVE_DIALOG` where pywebview has no `FileDialog`)
@@ -601,6 +644,34 @@ reads are custom properties the engine writes (`--fx-i` a card's order, clamped 
 heat map's column count (one write on the map's svg, from the `data-cols` attribute `charts.js` puts there; no write on its cells),
 `--gk-d` and `--gk-l` Gates' bar timing).
 
+**Hover, once per entry.** A hover effect moves what the pointer is on (Night City's glitch jitters the card 2 px and its tear
+clips slits out of it, Nostromo's settle moves it 1 px, Gates lifts a card 2 px and nudges a menu link), so one bound to `:hover`
+alone cuts its own ground away: a pointer resting at the edge of a card, or on a slit, is off the card as soon as it moves,
+`:hover` goes, the card comes back, `:hover` returns and the effect starts again, for as long as the pointer rests there (Night
+City's glitch played about 30 times a second on a fill bar by the edge of the "Cache and thinking" card). So the effects hang on
+two attributes that `motion.js` sets from the pointer's entries, and the animated ones never on `:hover`:
+
+- `data-fx-play` (the one-shots: Night City's jitter, tear, fringe and nav, Nostromo's settle) is set on a target's `pointerenter`
+  and taken off 320 ms later (`PLAY_MS`; the longest one-shot is 200 ms). The target is armed again 400 ms after the pointer
+  really left it (`REARM_MS`), so one entry plays once, whatever the effect does to the target's own hit area while it plays.
+  It is not set while the page is entering (`fx-run`) or was redrawn under a resting pointer (`fx-quiet`), under reduced motion,
+  in a hidden page, or for a touch.
+- `data-fx-hot` (the persistent looks: Gates' lift, Nostromo's brightness, glow and menu nudge) is set on `pointerenter` and kept
+  while the target moves under a pointer that has not: a `pointerleave` within 4 px of where the target is now (`HOLD_SLOP`) is
+  the target moving, not the pointer leaving. It is cleared when the pointer is really away (a later `pointermove` finds it more
+  than 4 px off, or the leave itself was far), when the pointer leaves the window, when the window loses focus and when the page
+  is hidden. The rules read it besides `:hover`, which still answers at once and puts the look back on a card a refresh redrew.
+
+The targets are `.nm-card`, `.nm-stat`, `.nm-menu a`, `.nm-refresh`, `.nm-sw button` and `.nm-btn` (`HOVER_TARGETS`). The
+listeners are capturing ones on the `document`, because `pointerenter` does not bubble, which is the point: a bar coming under the
+pointer inside a card is not a new entry of the card (a `mouseover` would be). A theme that adds a hover effect hangs it on one
+of the two attributes and adds any new kind of target to `HOVER_TARGETS`; `tests/test_motion.py` fails a `:hover` rule that
+animates, moves or clips its target on its own, and a rule that names a target `HOVER_TARGETS` lacks. `app.js` keeps both
+attributes (`patchShell` leaves every `data-fx*` attribute alone) when it patches a card in place. The hover marks do not change
+what the native widgets do: their pointer response is a handful of prepared frames played on a timer, and every frame covers (by
+one 255th, invisibly) whatever the normal frame covered, so a frame never lets the pointer through and cannot end its own hover
+(see `ui/widgets.py`).
+
 **Engine rules.** The real text of a figure is never changed while it is drawn: a decoded or rolling figure is drawn by its
 `::after` from `data-fx` while the real text sits transparent, so the theme scripts that watch the page for text see nothing
 happen and a screen reader reads the final figure. A frame only writes (a text node, an attribute, a class) and every read is
@@ -631,9 +702,9 @@ which left History at 46 to 59 of 90 frames in its first 1.5 s at a 4x CPU slowd
 speed; one wipe keeps 77 to 83 frames and starts no long task at full speed. Gates uses Fluent's durations (167, 250 and 333 ms) with its decelerate curve `cubic-bezier(0.1, 0.9, 0.2, 1)`, its accelerate
 curve `cubic-bezier(0.7, 0, 1, 0.5)` and a damped spring written as a CSS `linear()` easing (browsers without `linear()` get a
 bezier). Nostromo and Night City move in steps, never in curves. A persistent hover look keeps its look through a data refresh
-(`fx-quiet` only removes its transition); a one-shot hover animation replays once, on the first pointer movement after an
-update changed the numbers under a resting pointer, because that is when `fx-quiet` ends (a page that was redrawn never moves
-by itself).
+(`fx-quiet` only removes its transition); a one-shot hover animation never replays because of a refresh: the card that an update
+redrew under a resting pointer is not entered again (the pointer is already on it), and the pointer moving afterwards is not an
+entry either.
 
 **Reduced motion.** Everything checks `data-reduce-motion="1"` on `<html>` (the `reduce_motion` setting) and
 `prefers-reduced-motion` (which WebView2 takes from Windows' animation setting). `app.js` announces only the setting, so
@@ -646,6 +717,17 @@ transition in `motion.css`.
 hygiene `tests/test_webui.py` keeps for the other scripts) and node checks that run `motion.js` on a minimal fake DOM and each
 theme script (`themes/<id>.js`) with no `motion.js` at all (`tests/theme_scripts_checks.js`: the script has to load, start twice,
 survive its timers, a theme switch and reduced motion without throwing, because the page is complete without the engine); the node
-ones need `CUM_UI_TESTS=1`, start node with `CREATE_NO_WINDOW`, and `tests.yml` runs them with `tests/test_webui.py`. What a
-real browser does (entrances, boots, hover, reduced motion, placeholders, a failed report) is checked with Playwright against
-the dev server (`python -m usage_monitor.ui.devserver --theme <id>[/<variant>]`), which the tests do not cover.
+ones need `CUM_UI_TESTS=1`, start node with `CREATE_NO_WINDOW`, and `tests.yml` runs them with `tests/test_webui.py`. The
+hover rule above is pinned from both sides: the static checks fail a `:hover` rule that animates, moves or clips its target
+without `[data-fx-hot]` or `[data-fx-play]`, and the node scenarios drive the hover marks through a fake pointer (one entry, a
+card that moves off a resting pointer and back thirty times, the cool-down, the 4 px hold, the entrance, a quiet page, reduced
+motion, a touch, the window, a blur and a hidden page). What a real browser does (entrances, boots, reduced motion,
+placeholders, a failed report) is checked with Playwright against the dev server (`python -m usage_monitor.ui.devserver
+--theme <id>[/<variant>]`), which the tests do not cover. The hover rule is the exception: `tests/browser/hover_probe.js`
+(`NODE_PATH=<folder with node_modules/playwright> node tests/browser/hover_probe.js`, not part of pytest) starts the dev server
+on a throwaway settings folder, enters the "Cache and thinking" card from every side and 1 px inside every edge in three fast
+steps, holds 2 s, and then enters every kind of target on every page, checks replays (a sweep inside the card, a quick return,
+a return after the cool-down) and a rest across a data refresh; every hover effect must start exactly once per entry, in all
+three themes (it exits 1 and prints `VERDICT: FAIL` otherwise; `--reduced` runs the reduced-motion check the other way round:
+nothing may play, and the card must still be marked hot). Run it after any change to a hover rule or to the hover code in
+`motion.js`.

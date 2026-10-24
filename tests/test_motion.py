@@ -1,14 +1,17 @@
 """The dashboard's motion layer: motion.js, motion.css and the three themes' motion sheets and scripts.
 
 Two kinds of test. The static ones read the files: what may loop, what may animate, that every rule is scoped to its theme
-and its hover only where hover exists, that motion stops for reduced motion, the Fluent numbers of the Gates loading screen,
-the budgets, and the hygiene the rest of the dashboard's scripts keep. The node ones run motion.js on a minimal fake DOM (no
-browser) and check the engine itself: the easing, the figure formats, the roller, the typer, the decoder, the job loop,
-reduced motion (the setting and the OS preference, also switched on while something plays), the once-per-session boot flags
-and the stagger clamp. They start node, so they need CUM_UI_TESTS=1 like every test that starts a process.
+and its hover only where hover exists, that no hover rule moves, clips or animates its own target on :hover alone (it hangs
+on the marks motion.js sets once per entry of the pointer), that motion stops for reduced motion, the Fluent numbers of the
+Gates loading screen, the budgets, and the hygiene the rest of the dashboard's scripts keep. The node ones run motion.js on a
+minimal fake DOM (no browser) and check the engine itself: the easing, the figure formats, the roller, the typer, the decoder,
+the job loop, reduced motion (the setting and the OS preference, also switched on while something plays), the once-per-session
+boot flags, the stagger clamp and the hover marks (an entry, a card that moves off a resting pointer and back, the cool-down).
+They start node, so they need CUM_UI_TESTS=1 like every test that starts a process.
 
-What the motion looks like in a real browser (frames, hover, boots, performance) is checked by hand with Playwright; see
-docs/UI_ARCHITECTURE.md, "Motion".
+What the motion looks like in a real browser (frames, boots, performance) is checked by hand with Playwright; see
+docs/UI_ARCHITECTURE.md, "Motion". The hover rule has a probe of its own that drives a real Chromium against the dev server:
+tests/browser/hover_probe.js (not part of pytest).
 """
 from __future__ import annotations
 
@@ -184,9 +187,10 @@ def test_the_shared_sheet_stops_every_animation_for_reduced_motion() -> None:
 
 
 def test_nothing_in_the_layer_plays_without_the_run_class_a_placeholder_or_an_overlay() -> None:
-    """Entrance motion hangs on main.fx-run (or a landing class); the rest is a placeholder, an overlay or a hover."""
-    allowed = re.compile(r"\.fx-run|\.fx-land|data-fx-pend|data-fx\]|\.fx-t\b|\.nc-boot|\.nc-b-|\.g-boot|\.g-b-|\.g-ring|"
-                         r"\.nm-boot|:hover|:active|\.is-typing|\.fx-u|\.cum-|\.nm-od-|\.nm-cmp|\.is-")
+    """Entrance motion hangs on main.fx-run (or a landing class); the rest is a placeholder, an overlay or a hover (the one-shot
+    ones hang on [data-fx-play], which motion.js sets once per entry of the pointer, never on :hover)."""
+    allowed = re.compile(r"\.fx-run|\.fx-land|data-fx-pend|data-fx\]|data-fx-play\]|\.fx-t\b|\.nc-boot|\.nc-b-|\.g-boot|\.g-b-|"
+                         r"\.g-ring|\.nm-boot|:hover|:active|\.is-typing|\.fx-u|\.cum-|\.nm-od-|\.nm-cmp|\.is-")
     for theme_id in THEME_IDS:
         for rule in CSS[f"themes/{theme_id}.motion.css"]:
             if rule.is_style_rule and re.search(r"(?<![-\w])animation(-name)?\s*:", rule.body):
@@ -249,34 +253,116 @@ def test_every_rule_of_a_theme_sheet_is_scoped_to_its_theme(theme_id: str) -> No
             assert selector.startswith(scope), (theme_id, selector)
 
 
+HOVER_HOOK = re.compile(r":hover|\[data-fx-hot\]|\[data-fx-play\]")
+# what a rule does to the thing the pointer is on (or cuts out of it): the things a hover must not hang on :hover alone
+MOVES_ITS_TARGET = re.compile(r"(?<![-\w])(animation|animation-name|transform|translate|scale|rotate|clip-path)\s*:")
+
+
 @pytest.mark.parametrize("theme_id", THEME_IDS)
 def test_hover_effects_only_exist_where_a_pointer_can_hover(theme_id: str) -> None:
-    hovered = [r for r in CSS[f"themes/{theme_id}.motion.css"] if r.is_style_rule and ":hover" in r.header]
+    hovered = [r for r in CSS[f"themes/{theme_id}.motion.css"] if r.is_style_rule and HOVER_HOOK.search(r.header)]
     assert hovered
     for rule in hovered:
         assert any("hover: hover" in a for a in rule.ancestors), (theme_id, rule.header)
+
+
+@pytest.mark.parametrize("theme_id", THEME_IDS)
+def test_no_hover_rule_moves_cuts_or_animates_its_target_on_the_pseudo_class_alone(theme_id: str) -> None:
+    """A rule that moves what the pointer is on (a lift, a nudge, a settle), cuts it (Night City's tear clips slits out of the
+    card) or animates it takes its own ground away: the pointer rests at an edge or on a slit, the target moves off it, :hover
+    goes, the target comes back, :hover returns, and the effect starts again, as long as the pointer rests there (Night City's
+    glitch played about 30 times a second on a fill bar by the edge of the "Cache and thinking" card). So such a rule hangs on
+    what motion.js sets from the pointer's entries: [data-fx-play] (a one-shot, once per entry) or [data-fx-hot] (a state, kept
+    while the target moves under a pointer that has not)."""
+    for rule in CSS[f"themes/{theme_id}.motion.css"]:
+        if rule.is_style_rule and ":hover" in rule.header and MOVES_ITS_TARGET.search(rule.body):
+            assert re.search(r"\[data-fx-(hot|play)\]", rule.header), (theme_id, rule.header)
+
+
+def test_no_sheet_of_the_dashboard_moves_or_animates_a_target_on_hover_alone() -> None:
+    """The same rule for every other sheet: the base themes' :hover rules colour things, light a border or draw a thumb larger
+    inside a control that does not move; nothing there moves, clips or animates the element that the pointer is on."""
+    for sheet in sorted(WEBUI.rglob("*.css")):
+        if sheet.name.endswith(".motion.css"):
+            continue
+        for rule in css_rules(sheet.read_text(encoding="utf-8")):
+            if rule.is_style_rule and ":hover" in rule.header and MOVES_ITS_TARGET.search(rule.body):
+                assert False, (sheet.name, rule.header)
 
 
 @pytest.mark.parametrize("theme_id", ["night_city", "nostromo"])
 def test_a_one_shot_hover_animation_waits_for_a_quiet_page_and_for_the_entrance(theme_id: str) -> None:
     """The jitter, the tear, the fringe and the settle start only when the page is neither entering (fx-run) nor just
     redrawn under a resting pointer (fx-quiet); the menu and the buttons are not page content and are not gated."""
+    gated = 0
     for rule in CSS[f"themes/{theme_id}.motion.css"]:
-        if rule.is_style_rule and ":hover" in rule.header and re.search(r"\.nm-card:hover|\.nm-stat:hover", rule.header) \
+        if rule.is_style_rule and "[data-fx-play]" in rule.header and re.search(r"\.nm-card|\.nm-stat", rule.header) \
                 and re.search(r"(?<![-\w])animation\s*:", rule.body):
+            gated += 1
             assert ":not(.fx-run)" in rule.header and ":not(.fx-quiet)" in rule.header, (theme_id, rule.header)
+    assert gated
 
 
 def test_a_card_that_the_pointer_rests_on_keeps_its_look_when_the_page_is_redrawn() -> None:
     """fx-quiet takes the motion away, not the look: Nostromo's and Gates' hover is a state with a transition, so the
-    transition is what the quiet page switches off (a refresh of the data must not un-light the card under the pointer)."""
+    transition is what the quiet page switches off (a refresh of the data must not un-light the card under the pointer).
+    The state still answers to :hover itself, so that a card the redraw just made, under a pointer that has not moved, is lit
+    at once, before motion.js has heard of it."""
     for theme_id in ("nostromo", "gates"):
         rules = CSS[f"themes/{theme_id}.motion.css"]
-        hover = [r for r in rules if r.is_style_rule and re.search(r"\.nm-card:hover$", r.header)
+        hover = [r for r in rules if r.is_style_rule and re.search(r"\.nm-card:is\(:hover, \[data-fx-hot\]\)$", r.header)
                  and not re.search(r"(?<![-\w])animation\s*:", r.body)]
         assert hover and all(".fx-quiet" not in r.header for r in hover), theme_id
         quiet = [r for r in rules if r.is_style_rule and ".nm-main.fx-quiet" in r.header and "transition" in r.body]
         assert quiet, theme_id
+
+
+def hover_targets() -> list[str]:
+    """The selector list motion.js sets the hover marks on."""
+    match = re.search(r'var HOVER_TARGETS = "([^"]+)";', read("motion.js"))
+    assert match, "motion.js has no HOVER_TARGETS"
+    return [part.strip() for part in match.group(1).split(",")]
+
+
+def test_the_sheets_hang_hover_effects_on_marks_that_motion_js_sets_on_exactly_the_things_they_style() -> None:
+    script = strip_js_comments(read("motion.js"))
+    assert 'setAttribute("data-fx-hot"' in script and 'setAttribute("data-fx-play"' in script
+    assert 'removeAttribute("data-fx-hot")' in script and 'removeAttribute("data-fx-play")' in script
+    targets = hover_targets()
+    # the one thing in the markup that is a card, a stat tile, a menu link or a button is a target; nothing else is
+    assert targets == [".nm-card", ".nm-stat", ".nm-menu a", ".nm-refresh", ".nm-sw button", ".nm-btn"]
+    for theme_id in THEME_IDS:
+        for rule in CSS[f"themes/{theme_id}.motion.css"]:
+            if rule.is_style_rule and re.search(r"\[data-fx-(hot|play)\]", rule.header):
+                # a theme that hangs a hover on a new kind of element has to add it to HOVER_TARGETS (and to the list above)
+                assert any(target in rule.header for target in targets), (theme_id, rule.header)
+
+
+def test_every_one_shot_is_finite_and_ends_before_motion_js_takes_its_mark_off() -> None:
+    play_ms = int(re.search(r"var PLAY_MS = (\d+);", read("motion.js")).group(1))
+    seen = 0
+    for theme_id in THEME_IDS:
+        for rule in CSS[f"themes/{theme_id}.motion.css"]:
+            if not (rule.is_style_rule and "[data-fx-play]" in rule.header):
+                continue
+            value = re.search(r"(?<![-\w])animation\s*:\s*([^;]+)", rule.body)
+            assert value, (theme_id, rule.header)
+            for one in split_selectors(value.group(1)):              # the comma-separated animations of the shorthand
+                seen += 1
+                assert "infinite" not in one and one.split()[-1] == "1", (theme_id, one)
+                assert int(re.search(r"(\d+)ms", one).group(1)) <= play_ms - 100, (theme_id, one, play_ms)
+    assert seen >= 7
+
+
+def test_the_hover_marks_come_from_pointerenter_of_the_target_and_never_from_a_bubbling_mouseover() -> None:
+    """pointerenter does not bubble, which is the point: a bar coming under the pointer is not a new entry of the card. The
+    capturing listener on the document is how a non-bubbling event of every element is heard once."""
+    script = strip_js_comments(read("motion.js"))
+    assert 'document.addEventListener("pointerenter", onPointerEnter, true)' in script
+    assert 'document.addEventListener("pointerleave", onPointerLeave, true)' in script
+    assert "mouseover" not in script and "mouseenter" not in script and "pointerover" not in script
+    for theme_id in THEME_IDS:
+        assert "mouseover" not in strip_js_comments(read(f"themes/{theme_id}.js"))
 
 
 # ── The Gates loading screen: Windows 11 style, Fluent numbers ────────────────────
@@ -409,6 +495,9 @@ class El {
     this._a = {};
     this._cls = new Set();
     this._lists = {};
+    this._ls = {};
+    this.rect = null;                          // what getBoundingClientRect answers; a hover scenario moves it
+    this.gone = false;                         // a redraw took the element out of the page
     const vars = {};
     this.style = {
       setProperty(k, v) { vars[k] = String(v); },
@@ -442,16 +531,32 @@ class El {
   // a page is a list of lists: main.querySelectorAll(selector) answers from what a scenario registered, nothing else
   querySelector(sel) { return (this._lists[sel] || [])[0] || null; }
   querySelectorAll(sel) { return (this._lists[sel] || []).slice(); }
-  matches() { return false; }
+  addEventListener(type, fn) { (this._ls[type] = this._ls[type] || []).push(fn); }
+  // enough of a selector list for the hover targets: ".a", "tag" and ".a tag", separated by commas
+  matches(sel) {
+    return String(sel).split(",").some((part) => {
+      const bits = part.trim().split(/\s+/);
+      const last = bits[bits.length - 1];
+      const own = last.startsWith(".") ? this._cls.has(last.slice(1)) : this.tagName === last.toUpperCase();
+      if (!own) { return false; }
+      if (bits.length === 1) { return true; }
+      for (let n = this.parentNode; n; n = n.parentNode) { if (n._cls && n._cls.has(bits[0].slice(1))) { return true; } }
+      return false;
+    });
+  }
   closest() { return null; }
-  get isConnected() { return true; }
+  getBoundingClientRect() { return this.rect || { left: 0, top: 0, right: 0, bottom: 0 }; }
+  get isConnected() { return !this.gone; }
   get offsetWidth() { return 100; }
 }
 
 /* One page-like world per scenario, with a manual clock, a manual requestAnimationFrame and manual timers. */
 function world(opts) {
   opts = opts || {};
-  const w = { now: 0, frames: [], timers: [], timerId: 0, observers: [], mediaListeners: [], store: {}, reducedPref: !!opts.reducedPref };
+  const w = {
+    now: 0, frames: [], timers: [], timerId: 0, observers: [], mediaListeners: [], store: {}, reducedPref: !!opts.reducedPref,
+    listeners: {}, windowListeners: {}, hovering: []
+  };
   const root = new El("html");
   root.setAttribute("data-theme", opts.theme || "gates");
   const main = new El("main");
@@ -466,11 +571,14 @@ function world(opts) {
       createElement: (t) => new El(t),
       createTextNode: (t) => new TextNode(t),
       getElementById: (id) => byId[id] || null,
-      addEventListener() {}
+      addEventListener(type, fn) { (w.listeners[type] = w.listeners[type] || []).push(fn); },
+      // the only query the engine makes of the whole document: what is still marked as under the pointer
+      querySelectorAll: (sel) => (sel === "[data-fx-hot]" ? w.hovering.filter((e) => e.hasAttribute("data-fx-hot")) : [])
     },
     location: { hash: "#overview" }
   };
   sandbox.window = sandbox;
+  sandbox.addEventListener = (type, fn) => { (w.windowListeners[type] = w.windowListeners[type] || []).push(fn); };
   sandbox.performance = { now: () => w.now };
   sandbox.requestAnimationFrame = (cb) => { w.frames.push(cb); return w.frames.length; };
   sandbox.setTimeout = (fn, ms) => { const id = ++w.timerId; w.timers.push({ id, at: w.now + (ms || 0), fn }); return id; };
@@ -500,6 +608,13 @@ function world(opts) {
       run.forEach((cb) => cb(w.now));
     }
   };
+  // a pointer event as the browser delivers it to the document's listeners (capturing ones see it first, which is all there are)
+  w.fire = (type, target, x, y, extra) => {
+    const ev = Object.assign({ type, target, clientX: x, clientY: y, pointerType: "mouse" }, extra || {});
+    (w.listeners[type] || []).slice().forEach((fn) => fn(ev));
+    return ev;
+  };
+  w.fireWindow = (type) => { (w.windowListeners[type] || []).slice().forEach((fn) => fn({ type })); };
   return w;
 }
 
@@ -756,6 +871,189 @@ function director(w) {
   };
 }
 
+// hover: once per entry of the pointer (data-fx-hot while it is on the target, data-fx-play for the one-shots)
+function hoverWorld(opts) {
+  const w = world(opts);
+  const card = new El("section");
+  card.className = "nm-card";
+  card.rect = { left: 100, top: 100, right: 300, bottom: 200 };
+  const bar = new El("div");
+  bar.className = "nm-cells";
+  card.appendChild(bar);
+  w.main.appendChild(card);
+  w.hovering.push(card);
+  w.card = card;
+  w.bar = bar;
+  w.plays = [];                                // when data-fx-play was put on the card
+  const set = card.setAttribute.bind(card);
+  card.setAttribute = (k, v) => { if (k === "data-fx-play") { w.plays.push(w.now); } set(k, v); };
+  w.FX.watch(w.main);
+  return w;
+}
+const marks = (el) => ({ hot: el.hasAttribute("data-fx-hot"), play: el.hasAttribute("data-fx-play") });
+const HIGH = { left: 100, top: 98, right: 300, bottom: 198 };      // the card moved up 2 px (a lift, a jitter, a settle)
+const HOME = { left: 100, top: 100, right: 300, bottom: 200 };
+
+// one listener of each kind, however often the page is watched; an entry sets both marks, a child's entry sets none, the
+// one-shot ends by itself and the card stays hot
+{
+  const w = hoverWorld();
+  const listening = {
+    enter: (w.listeners.pointerenter || []).length, leave: (w.listeners.pointerleave || []).length,
+    move: (w.listeners.pointermove || []).length, blur: (w.windowListeners.blur || []).length
+  };
+  w.FX.watch(w.main);
+  const again = { enter: (w.listeners.pointerenter || []).length, move: (w.listeners.pointermove || []).length };
+  w.fire("pointerenter", w.card, 150, 150);
+  const entered = marks(w.card);
+  w.fire("pointerenter", w.bar, 150, 150);                  // a child coming under the pointer is not an entry
+  const child = marks(w.bar);
+  w.fire("pointerenter", w.card, 150, 150);                 // the card entered again while it is hot and playing: nothing new
+  w.advance(330);
+  out.hoverEntry = { listening, again, entered, child, settled: marks(w.card), plays: w.plays.length };
+}
+
+// the loop: the card moves off a pointer that rests at its edge and comes back, over and over; the pointer never moved
+{
+  const w = hoverWorld();
+  w.fire("pointerenter", w.card, 150, 199);                 // 1 px inside the bottom edge
+  const hot = [];
+  for (let i = 0; i < 30; i++) {
+    w.advance(w.now + 16);
+    w.card.rect = HIGH;                                     // it moved off the pointer: the browser says the pointer left
+    w.fire("pointerleave", w.card, 150, 199);
+    hot.push(marks(w.card).hot);
+    w.advance(w.now + 16);
+    w.card.rect = HOME;                                     // and it came back: the browser says the pointer entered
+    w.fire("pointerenter", w.card, 150, 199);
+    hot.push(marks(w.card).hot);
+  }
+  w.advance(w.now + 1000);
+  out.hoverLoop = { plays: w.plays.length, alwaysHot: hot.every((x) => x === true), after: marks(w.card) };
+}
+
+// the pointer really leaves: the mark goes at once, a quick return does not replay, a return after the cool-down does
+{
+  const w = hoverWorld();
+  w.fire("pointerenter", w.card, 150, 150);
+  w.advance(330);
+  w.fire("pointerleave", w.card, 450, 150);                 // 150 px from the card: gone
+  const left = marks(w.card);
+  w.advance(w.now + 100);
+  w.fire("pointerenter", w.card, 150, 150);                 // 100 ms later: inside the cool-down
+  const quick = marks(w.card);
+  const playsAfterQuick = w.plays.length;
+  w.fire("pointerleave", w.card, 450, 150);
+  w.advance(w.now + 450);
+  w.fire("pointerenter", w.card, 150, 150);                 // 450 ms after leaving: a new entry
+  const real = marks(w.card);
+  const playsAfterReal = w.plays.length;
+  w.advance(w.now + 330);
+  w.fire("pointerleave", w.card, 150, 230);                 // 30 px under the card
+  w.advance(w.now + 450);
+  w.fire("pointerenter", w.card, 150, 150);
+  out.hoverRearm = { left, quick, playsAfterQuick, real, playsAfterReal, playsAfterThird: w.plays.length, third: marks(w.card) };
+}
+
+// a card that moved off a resting pointer stays hot until the pointer is more than 4 px from where the card is now
+{
+  const w = hoverWorld();
+  w.fire("pointerenter", w.card, 150, 199);
+  w.advance(330);
+  w.card.rect = HIGH;
+  w.fire("pointerleave", w.card, 150, 199);                 // 1 px under the moved card
+  const resting = marks(w.card).hot;
+  w.fire("pointermove", w.main, 150, 201);                  // 3 px under it: still the same rest
+  const nudged = marks(w.card).hot;
+  w.fire("pointermove", w.main, 150, 205);                  // 7 px under it: the pointer is away
+  const away = marks(w.card).hot;
+  w.advance(w.now + 100);
+  w.card.rect = HOME;
+  w.fire("pointerenter", w.card, 150, 150);                 // inside the cool-down
+  const quick = marks(w.card);
+  out.hoverHold = { resting, nudged, away, quick, plays: w.plays.length };
+}
+
+// something else took the mark off a card the pointer never left: the browser's next pointerenter is not a new entry
+{
+  const w = hoverWorld();
+  w.fire("pointerenter", w.card, 150, 150);
+  w.advance(330);
+  w.card.removeAttribute("data-fx-hot");
+  w.fire("pointerenter", w.card, 150, 150);
+  out.hoverStray = { plays: w.plays.length, marks: marks(w.card) };
+}
+
+// a held card that a redraw removed from the page is let go of at the next move
+{
+  const w = hoverWorld();
+  w.fire("pointerenter", w.card, 150, 199);
+  w.card.rect = HIGH;
+  w.fire("pointerleave", w.card, 150, 199);
+  const held = marks(w.card).hot;
+  w.card.gone = true;
+  w.fire("pointermove", w.main, 150, 199);
+  out.hoverGone = { held, after: marks(w.card).hot };
+}
+
+// who plays and who does not: the entrance, a redraw under a resting pointer, reduced motion, a hidden page, a touch, a menu link
+{
+  const found = {};
+  const entry = (name, setup, who) => {
+    const w = hoverWorld();
+    const nav = new El("nav");
+    nav.className = "nm-menu";
+    const link = new El("a");
+    nav.appendChild(link);
+    w.root.appendChild(nav);
+    w.hovering.push(link);
+    const other = new El("p");
+    w.main.appendChild(other);
+    setup(w);
+    const target = who === "link" ? link : who === "other" ? other : w.card;
+    w.fire("pointerenter", target, 150, 150, who === "touch" ? { pointerType: "touch" } : {});
+    found[name] = marks(target);
+    return w;
+  };
+  entry("plain", () => {});
+  entry("entering", (w) => w.main.classList.add("fx-run"));
+  entry("quiet", (w) => w.main.classList.add("fx-quiet"));
+  entry("reduced", (w) => w.root.setAttribute("data-reduce-motion", "1"));
+  entry("hidden", (w) => { w.sandbox.document.visibilityState = "hidden"; });
+  entry("touch", () => {}, "touch");
+  entry("menuWhileEntering", (w) => w.main.classList.add("fx-run"), "link");
+  entry("notATarget", () => {}, "other");
+  const quiet = entry("quietThenMove", (w) => w.main.classList.add("fx-quiet"));
+  quiet.main.classList.remove("fx-quiet");                  // the pointer moved: the quiet page wakes
+  quiet.fire("pointermove", quiet.card, 151, 150);
+  found.quietThenMove = marks(quiet.card);
+  out.hoverWho = found;
+}
+
+// the pointer leaves the window, the window loses focus, the page is hidden: nothing stays lit
+{
+  const w = hoverWorld();
+  const stat = new El("div");
+  stat.className = "nm-stat";
+  stat.rect = { left: 400, top: 100, right: 500, bottom: 160 };
+  w.main.appendChild(stat);
+  w.hovering.push(stat);
+  w.fire("pointerenter", w.card, 150, 150);
+  w.fire("pointerenter", stat, 450, 150);
+  const both = [marks(w.card).hot, marks(stat).hot];
+  w.fire("pointerleave", w.root, 0, 0);
+  const afterWindowLeave = [marks(w.card).hot, marks(stat).hot];
+  w.advance(w.now + 450);
+  w.fire("pointerenter", w.card, 150, 150);
+  w.fireWindow("blur");
+  const afterBlur = marks(w.card).hot;
+  w.advance(w.now + 450);
+  w.fire("pointerenter", stat, 450, 150);
+  w.sandbox.document.visibilityState = "hidden";
+  w.fire("visibilitychange", w.sandbox.document);
+  out.hoverWindow = { both, afterWindowLeave, afterBlur, afterHidden: marks(stat).hot };
+}
+
 console.log(JSON.stringify(out));
 """
 
@@ -943,3 +1241,78 @@ def test_a_boot_plays_once_per_session_per_theme_and_never_under_reduced_motion(
     assert b["blocked"] == {"due": True, "threw": False}                # blocked storage: the boot plays again, nothing throws
     assert b["reduced"] is False
     assert b["curtainWhenDue"] == "night_city" and b["curtainWhenReduced"] is None
+
+
+# ── Hover: once per entry of the pointer ─────────────────────────────────────────
+
+@ui_only
+def test_an_entry_of_the_pointer_marks_the_target_hot_and_due_once_and_a_child_is_not_an_entry(engine: dict[str, Any]) -> None:
+    h = engine["hoverEntry"]
+    assert h["listening"] == {"enter": 1, "leave": 1, "move": 1, "blur": 1}     # capturing listeners on the document, once
+    assert h["again"] == {"enter": 1, "move": 1}                                 # watching the page again does not listen twice
+    assert h["entered"] == {"hot": True, "play": True}
+    assert h["child"] == {"hot": False, "play": False}                           # pointerenter of a child (a bar) is not the card's
+    assert h["settled"] == {"hot": True, "play": False}                          # the one-shot ended by itself; the card is still hot
+    assert h["plays"] == 1
+
+
+@ui_only
+def test_a_card_that_moves_off_a_resting_pointer_and_back_never_plays_again(engine: dict[str, Any]) -> None:
+    """The reported loop: the glitch moves the card, the pointer at its edge is off it, the card comes back, the pointer is on it
+    again, and the glitch starts again. Thirty such leave-and-enter pairs without the pointer moving play the glitch once."""
+    loop = engine["hoverLoop"]
+    assert loop["plays"] == 1
+    assert loop["alwaysHot"] is True                                              # and the lifted look never blinked off
+    assert loop["after"] == {"hot": True, "play": False}
+
+
+@ui_only
+def test_a_pointer_that_really_left_clears_the_mark_and_a_return_plays_again_only_after_the_cool_down(engine: dict[str, Any]) -> None:
+    r = engine["hoverRearm"]
+    assert r["left"] == {"hot": False, "play": False}
+    assert r["quick"] == {"hot": True, "play": False} and r["playsAfterQuick"] == 1      # 100 ms after leaving: lit, no replay
+    assert r["real"] == {"hot": True, "play": True} and r["playsAfterReal"] == 2         # 450 ms after leaving: a new entry
+    assert r["third"] == {"hot": True, "play": True} and r["playsAfterThird"] == 3
+
+
+@ui_only
+def test_a_card_that_moved_stays_hot_until_the_pointer_is_more_than_four_pixels_from_where_it_is_now(engine: dict[str, Any]) -> None:
+    h = engine["hoverHold"]
+    assert h["resting"] is True and h["nudged"] is True and h["away"] is False
+    assert h["quick"] == {"hot": True, "play": False} and h["plays"] == 1
+
+
+@ui_only
+def test_an_entry_the_pointer_did_not_make_after_the_mark_was_lost_does_not_replay(engine: dict[str, Any]) -> None:
+    """A target is armed again only when the pointer really leaves it, not when its mark goes missing."""
+    stray = engine["hoverStray"]
+    assert stray["plays"] == 1 and stray["marks"] == {"hot": True, "play": False}
+
+
+@ui_only
+def test_a_held_card_that_a_redraw_removed_from_the_page_is_let_go(engine: dict[str, Any]) -> None:
+    assert engine["hoverGone"] == {"held": True, "after": False}
+
+
+@ui_only
+def test_the_one_shot_waits_for_the_entrance_a_quiet_page_and_motion_and_never_comes_from_a_touch(engine: dict[str, Any]) -> None:
+    who = engine["hoverWho"]
+    lit_and_playing = {"hot": True, "play": True}
+    lit_not_playing = {"hot": True, "play": False}
+    assert who["plain"] == lit_and_playing
+    assert who["entering"] == lit_not_playing               # main.fx-run: the cards are still coming in
+    assert who["quiet"] == lit_not_playing                  # main.fx-quiet: the page was redrawn under a resting pointer
+    assert who["quietThenMove"] == lit_not_playing          # and the pointer moving inside the card afterwards is not an entry
+    assert who["reduced"] == lit_not_playing                # reduced motion keeps the look and takes the motion
+    assert who["hidden"] == lit_not_playing
+    assert who["touch"] == {"hot": False, "play": False}    # a finger is not a hover
+    assert who["notATarget"] == {"hot": False, "play": False}
+    assert who["menuWhileEntering"] == lit_and_playing      # the menu is not page content: the entrance does not hold it back
+
+
+@ui_only
+def test_nothing_stays_lit_when_the_pointer_leaves_the_window_the_window_blurs_or_the_page_is_hidden(engine: dict[str, Any]) -> None:
+    w = engine["hoverWindow"]
+    assert w["both"] == [True, True]
+    assert w["afterWindowLeave"] == [False, False]
+    assert w["afterBlur"] is False and w["afterHidden"] is False
