@@ -10,7 +10,7 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 - **Awake when it matters:** while a Claude session keeps asking, the monitor keeps polling on a locked screen, which is when unattended runs happen.
 
 ### Added
-- `state.json` in the app data folder holds the latest reading: limits, pace, burn rate and plan, never the token. The app rewrites it after every data cycle ([#24](https://github.com/Godimas101/claude-usage-monitor/issues/24)).
+- `state.json` in the app data folder holds the latest reading: limits, pace, burn rate and plan, never the token. The app rewrites it only when the reading changes ([#24](https://github.com/Godimas101/claude-usage-monitor/issues/24)).
 - `ClaudeUsageMonitor.exe --status [--json]`, `--hook`, `--gate` and `--mcp` run beside the app. With the app closed, `--status`, the MCP tool and the gate ask for the usage once and share the answer for two minutes. Setup and fields: [docs/AGENT_HOOK.md](docs/AGENT_HOOK.md) ([#24](https://github.com/Godimas101/claude-usage-monitor/issues/24)).
 
 ## [2.0.0] — 2026-10-24

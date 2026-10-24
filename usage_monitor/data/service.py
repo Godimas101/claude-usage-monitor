@@ -125,6 +125,8 @@ class DataService:
         self._pricing_checked_at: datetime | None = None
         self._progress_mono = 0.0
         self._status_written: ApiStatus | None = None  # the status of the last status file written
+        self._status_key: str | None = None            # its fingerprint (agent_status.fingerprint)
+        self._status_mono = 0.0                        # and when it was written, on time.monotonic()
         self._status_error: str | None = None
 
     # ── Public API ──
@@ -391,7 +393,8 @@ class DataService:
                 log.exception("a state subscriber raised; the others still receive the state")
 
     def _write_status(self, now: datetime, state: MonitorState) -> None:
-        """Refresh the status file for Claude sessions. Best effort: they keep the last one."""
+        """Refresh the status file for Claude sessions when its reading changed, or every
+        agent_status.REFRESH_S. Best effort: the sessions keep the last one."""
         if self._status_dir is None:
             return
         try:
@@ -401,6 +404,9 @@ class DataService:
                 plan=state.plan, burn=state.burn,
                 pacing=analytics.pacing_report(store, now=now, usage=self._live_usage(now)),
                 now=now, poll_interval_s=self._poll_interval().total_seconds(), app_version=_app_version())
+            key, mono = agent_status.fingerprint(doc), time.monotonic()
+            if key == self._status_key and mono - self._status_mono < agent_status.REFRESH_S:
+                return  # nothing a reader acts on has changed: spare the disk
             agent_status.write(doc, self._status_dir / agent_status.STATUS_NAME)
         except Exception as exc:  # logged once per kind of failure; the cycle carries on
             error = f"{type(exc).__name__}: {exc}"[:200]
@@ -409,6 +415,7 @@ class DataService:
             self._status_error = error
             return
         self._status_written, self._status_error = state.status, None
+        self._status_key, self._status_mono = key, mono
 
     def _publish_best_effort(self) -> None:
         try:

@@ -40,6 +40,8 @@ SOURCE_MONITOR = "monitor"    # written by the running app after a data cycle
 SOURCE_CLI = "cli"            # written by --status or --mcp after a request of their own
 FRESH_S = 120.0               # with the app closed, a reading this young is reused, not fetched again
 DEMAND_S = 60 * 60            # a session asked within this: the app keeps polling while the screen is locked
+DEMAND_TOUCH_S = 5 * 60       # readers renew the demand at most this often: a stat is a read, a touch a write
+REFRESH_S = 15 * 60           # the app rewrites an unchanged reading at most this often
 STALE_FLOOR_S = 30 * 60       # a reading is stale past this, or past two poll intervals when longer
 WAIT_S = 15.0                 # how long a reader waits for a monitor that a locked screen paused
 PAUSED = "paused"             # ApiStatus.PAUSED.value
@@ -54,6 +56,7 @@ _SESSION_KEYS = ("percent", "resets_at", "window_start", "verdict", "slope_pct_p
 _WINDOW_KEYS = ("percent", "resets_at", "window_start", "elapsed_pct", "pace_delta_pp", "verdict",
                 "daily_budget_pct", "projected_end_pct")
 _SCOPED_KEYS = ("label", "model", "allowance_pct", "used_pct_of_weekly")
+_CLOCK_KEYS = ("elapsed_pct", "pace_delta_pp", "daily_budget_pct", "projected_end_pct", "projected_limit_at")
 
 if sys.platform == "win32":
     _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -109,6 +112,23 @@ def write(doc: Mapping[str, Any], path: Path) -> None:
         with contextlib.suppress(OSError):
             os.unlink(tmp)
         raise
+
+
+def fingerprint(doc: Mapping[str, Any]) -> str:
+    """The reading without what moves with the clock alone, and the burn rate reduced to its velocity.
+
+    The app rewrites the file when this changes, and otherwise every REFRESH_S at most, so a quiet
+    machine writes a few small files an hour rather than one a minute.
+    """
+    def still(entry: Any) -> Any:
+        return {k: v for k, v in entry.items() if k not in _CLOCK_KEYS} if isinstance(entry, Mapping) else entry
+
+    burn = doc.get("burn")
+    view = {key: value for key, value in doc.items() if key not in ("written_at", "burn")}
+    view.update(session=still(doc.get("session")), weekly=still(doc.get("weekly")),
+                scoped=[still(entry) for entry in doc.get("scoped") or []],
+                burn=burn.get("velocity") if isinstance(burn, Mapping) else None)
+    return json.dumps(view, sort_keys=True, default=str)
 
 
 def demanded(folder: Path, now_epoch: float | None = None) -> bool:
@@ -189,9 +209,14 @@ def monitor_running(env: Mapping[str, str] | None = None) -> bool:
 
 
 def touch_demand(folder: Path) -> None:
+    """Renew the demand, at most every DEMAND_TOUCH_S (it lasts DEMAND_S)."""
+    path = folder / DEMAND_NAME
+    with contextlib.suppress(OSError):
+        if time.time() - path.stat().st_mtime < DEMAND_TOUCH_S:
+            return
     with contextlib.suppress(OSError):
         folder.mkdir(parents=True, exist_ok=True)
-        (folder / DEMAND_NAME).touch()
+        path.touch()
 
 
 def current(folder: Path, *, now: datetime, fetch: bool, wait_s: float = 0.0, app_version: str = "",

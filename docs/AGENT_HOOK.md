@@ -5,7 +5,8 @@ Code, so a long or parallel run (a multi-agent workflow, a big fan-out) can pace
 burning through the 5-hour session or the week before the reset.
 
 Every way in reads the same thing: `%APPDATA%\ClaudeUsageMonitor\state.json`, which the running app
-rewrites after every data cycle (about once a minute). All of them are read-only, cost no model
+rewrites whenever the reading changes (a new fetch, a change of status or burn rate), and at
+least every 15 minutes. All of them are read-only, cost no model
 tokens, and never show the sign-in token.
 
 | Way in | What it does | Set up with |
@@ -158,6 +159,8 @@ These modes only read. They write only small files in the app data folder:
   seven days.
 - `agent.log`, warnings only.
 
-No prompt, transcript text, file content or token goes into any of them. When the app is closed,
+No prompt, transcript text, file content or token goes into any of them. On a quiet machine they
+add a few small writes an hour: `state.json` only changes with the reading, and the demand file
+is renewed at most every 5 minutes. When the app is closed,
 the one request a reader makes is the same usage request the app makes, with the same sign-in, to
 `api.anthropic.com`.

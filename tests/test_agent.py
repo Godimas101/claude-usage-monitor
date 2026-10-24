@@ -478,3 +478,62 @@ def test_the_gate_ignores_a_limit_whose_window_has_reset_and_fails_open(folder, 
 
 def test_parse_args_reads_the_gate_caps():
     assert main.parse_args(["--gate", "--weekly", "85"]) == main.Command("gate", weekly_cap=85.0)
+
+
+# ── Sparing the disk ─────────────────────────────────────────────────────────────
+
+def test_the_fingerprint_ignores_what_moves_with_the_clock_but_not_the_reading():
+    doc = document()
+    moved = json.loads(json.dumps(doc))
+    moved["written_at"] = "2026-10-24T16:05:00Z"
+    moved["weekly"]["elapsed_pct"] += 0.5
+    moved["weekly"]["projected_limit_at"] = "2026-10-25T11:00:00Z"
+    moved["burn"]["output_tokens_per_min"] = 999.0
+    assert status.fingerprint(moved) == status.fingerprint(doc)
+    for key, value in (("status", "offline"), ("usage_fetched_at", "2026-10-24T16:15:00Z")):
+        assert status.fingerprint({**doc, key: value}) != status.fingerprint(doc)
+    assert status.fingerprint({**doc, "burn": {**doc["burn"], "velocity": "SLOW"}}) != status.fingerprint(doc)
+    assert status.fingerprint({**doc, "weekly": {**doc["weekly"], "percent": 81.0}}) != status.fingerprint(doc)
+
+
+def test_readers_renew_the_demand_at_most_every_few_minutes(folder):
+    import os
+
+    status.touch_demand(folder)
+    path = folder / status.DEMAND_NAME
+    recent = path.stat().st_mtime - 60
+    os.utime(path, (recent, recent))
+    status.touch_demand(folder)
+    assert path.stat().st_mtime == recent                  # a minute old: left alone
+    old = recent - status.DEMAND_TOUCH_S
+    os.utime(path, (old, old))
+    status.touch_demand(folder)
+    assert path.stat().st_mtime > old                      # renewed
+
+
+def test_an_unchanged_reading_is_not_rewritten_until_it_is_due(tmp_path, folder, monkeypatch):
+    from usage_monitor.settings import Settings
+
+    writes: list[str] = []
+    real_write = status.write
+    monkeypatch.setattr(status, "write", lambda doc, path: (writes.append(doc["status"]), real_write(doc, path)))
+    settings = Settings(tmp_path / "settings.json", save_delay_s=60)
+    paused = {"on": False}
+    service = svc.DataService(settings, store_path=tmp_path / "usage.db", pricing=Pricing.load(),
+                              usage_client=OneClient(), roots=[tmp_path], clock=lambda: NOW,
+                              pause_check=lambda: paused["on"], pricing_refresh=lambda _cached: False,
+                              status_dir=folder)
+    try:
+        service._safe_cycle()
+        service._safe_cycle()
+        assert writes == ["live"]                          # the same reading: one write
+        service._status_mono -= status.REFRESH_S + 1
+        service._safe_cycle()
+        assert writes == ["live", "live"]                  # due again
+        paused["on"] = True
+        service._safe_cycle()
+        service._safe_cycle()
+        assert writes == ["live", "live", "paused"]        # a change of status, once per pause
+    finally:
+        service._close_store()
+        settings.close()

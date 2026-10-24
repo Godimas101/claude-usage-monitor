@@ -311,10 +311,12 @@ After a failed fetch the next one is due at the client's `next_allowed_at`. Inte
 clamped to one day; a cycle that raises waits `ERROR_RETRY_S` (60 s).
 `pause_check()` true → status `PAUSED`, no work (the credentials file is still watched). Reprices the store when the pricing
 version changes; refreshes remote pricing at most daily.
-With `status_dir` (the app passes the app data folder), each finished cycle also writes
+With `status_dir` (the app passes the app data folder), each finished cycle also refreshes
 `state.json` there for Claude sessions (`agent/status.py`, #24): the limits with their pace from
-`pacing_report`, the burn rate and the plan, never the token. A paused cycle writes it once per
-pause. While `agent-demand` in the same folder is younger than an hour (every reader touches it),
+`pacing_report`, the burn rate and the plan, never the token. It is rewritten only when its
+`fingerprint` changes (the reading without the fields that move with the clock alone, and the burn
+rate reduced to its velocity), and otherwise every `REFRESH_S` (15 min). A paused cycle writes it
+once per pause. While `agent-demand` in the same folder is younger than an hour (readers renew it, at most every 5 min),
 `pause_check()` is overridden and the cycles run on a locked screen, which is when unattended
 runs happen. A failed write is logged once per kind of failure and never stops the cycle.
 
