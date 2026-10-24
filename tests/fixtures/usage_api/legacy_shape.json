@@ -1,0 +1,22 @@
+{
+  "five_hour": {
+    "utilization": 41.0,
+    "resets_at": "2026-10-22T02:39:59.903Z",
+    "limit_dollars": null,
+    "used_dollars": null,
+    "remaining_dollars": null,
+    "locked_reason": null
+  },
+  "seven_day": {
+    "utilization": 17.5,
+    "resets_at": "2026-10-28T19:59:59.903359+00:00",
+    "limit_dollars": null,
+    "used_dollars": null,
+    "remaining_dollars": null,
+    "locked_reason": null
+  },
+  "seven_day_opus": {
+    "utilization": 9.0,
+    "resets_at": "2026-10-28T19:59:59.903359+00:00"
+  }
+}

@@ -1,19 +1,38 @@
 name: Release
 
-# Builds the installer on a Windows runner and publishes a GitHub Release.
-# Fires on every push to main, but only cuts a release when VERSION is a new
-# version (i.e. the tag v<VERSION> doesn't exist yet). Bump VERSION to release.
+# Builds the installer on a Windows runner, runs the tests and a smoke test of the built exe, and prepares a GitHub
+# Release. Nothing is published by this workflow itself: it creates a DRAFT release, which does not count as the
+# latest release (the in-app updater reads /releases/latest), and you publish the draft after looking at it
+# (docs/RELEASING.md).
+#
+# * Push to main: builds only when VERSION is new (no release v<VERSION> exists yet, a draft included), then
+#   leaves a draft release with the installer attached.
+# * Run workflow, "publish" ticked: the same, from the branch you pick.
+# * Run workflow, "publish" left off (the default): a rehearsal. Builds, tests and smoke-tests whatever VERSION the
+#   branch holds, even one that is already released, and keeps the installer as a downloadable artifact of the run.
+#   It creates no release and no tag.
 on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Create the draft release. Leave off to rehearse: build, test, smoke-test, and keep the installer as an artifact.'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
+# Two runs must not both decide that v<VERSION> is new and race to create it. A run that has to wait for another waits.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: windows-latest
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
 
@@ -27,8 +46,13 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
         run: |
-          if gh release view "v${{ steps.ver.outputs.version }}" >/dev/null 2>&1; then
+          echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
+          if [ "$PUBLISH" != "true" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Rehearsal: building v${{ steps.ver.outputs.version }} without creating any release."
+          elif gh release view "v${{ steps.ver.outputs.version }}" >/dev/null 2>&1; then
             echo "skip=true"  >> "$GITHUB_OUTPUT"
             echo "Release v${{ steps.ver.outputs.version }} already exists — nothing to build."
           else
@@ -39,22 +63,92 @@ jobs:
         if: steps.exists.outputs.skip == 'false'
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.14'   # what the release is smoke-tested with (docs/RELEASING.md)
 
       - name: Install dependencies
         if: steps.exists.outputs.skip == 'false'
-        run: pip install -r requirements.txt pyinstaller
+        timeout-minutes: 15
+        run: pip install -r requirements.txt pyinstaller -c constraints-build.txt
+
+      # The same two test runs as tests.yml. A release is not offered to every installed copy on the strength of a
+      # separate workflow's result.
+      - name: Install the test dependencies
+        if: steps.exists.outputs.skip == 'false'
+        timeout-minutes: 15
+        run: pip install -r requirements-dev.txt -c constraints-build.txt
+
+      - name: Run the tests
+        if: steps.exists.outputs.skip == 'false'
+        timeout-minutes: 25
+        run: python -m pytest
+
+      - uses: actions/setup-node@v4
+        if: steps.exists.outputs.skip == 'false'
+        with:
+          node-version: '20'
+
+      - name: Run the dashboard script tests
+        if: steps.exists.outputs.skip == 'false'
+        timeout-minutes: 10
+        env:
+          CUM_UI_TESTS: '1'
+        run: python -m pytest tests/test_webui.py tests/test_motion.py
 
       - name: Build the exe
         if: steps.exists.outputs.skip == 'false'
+        timeout-minutes: 20
         run: pyinstaller --noconfirm ClaudeUsageMonitor.spec
+
+      - name: Check the built exe
+        if: steps.exists.outputs.skip == 'false'
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          # The exe that is about to be offered to every installed copy must start and say which version it is.
+          $exe = "dist\ClaudeUsageMonitor\ClaudeUsageMonitor.exe"
+          $p = Start-Process $exe -ArgumentList '--print-version', 'built.txt' -Wait -PassThru
+          $built = (Get-Content built.txt -Raw).Trim()
+          if ($p.ExitCode -ne 0 -or $built -ne '${{ steps.ver.outputs.version }}') {
+            throw "the built exe reports '$built' (exit code $($p.ExitCode)), but VERSION says ${{ steps.ver.outputs.version }}"
+          }
+
+      - name: Smoke-test the built exe
+        if: steps.exists.outputs.skip == 'false'
+        # Runs the real exe (widgets, dashboard, local API) for 45 seconds on empty data, and fails the release when it
+        # reports a problem: the page of its own dashboard has to start, not only be fetched. A rehearsal (Run workflow
+        # with "publish" off) is how to see this on a runner before the real thing; the report and the logs are kept
+        # as an artifact of the run either way.
+        timeout-minutes: 5
+        shell: pwsh
+        env:
+          CUM_DEV_INSTANCE: '1'
+        run: |
+          New-Item -ItemType Directory -Force smoke-data, smoke-claude | Out-Null
+          $env:CUM_APPDATA_DIR = (Resolve-Path smoke-data).Path
+          $env:CLAUDE_CONFIG_DIR = (Resolve-Path smoke-claude).Path
+          $p = Start-Process "dist\ClaudeUsageMonitor\ClaudeUsageMonitor.exe" -ArgumentList '--smoke-test', '45', 'smoke.json' -Wait -PassThru
+          $report = Get-Content smoke.json -Raw | ConvertFrom-Json
+          if ($p.ExitCode -ne 0 -or -not $report.ok) { Get-Content smoke.json -Raw; throw 'the frozen smoke test failed' }
+
+      - name: Keep the smoke report and logs
+        if: always() && steps.exists.outputs.skip == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-report
+          path: |
+            smoke.json
+            smoke-data/*.log
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Install Inno Setup
         if: steps.exists.outputs.skip == 'false'
+        timeout-minutes: 15
         run: choco install innosetup --no-progress -y
 
       - name: Build the installer
         if: steps.exists.outputs.skip == 'false'
+        timeout-minutes: 10
         shell: pwsh
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DAppVer=${{ steps.ver.outputs.version }}" installer.iss
@@ -65,9 +159,19 @@ jobs:
         run: |
           $exe = "installer/ClaudeUsageMonitorSetup-v${{ steps.ver.outputs.version }}.exe"
           if (-not (Test-Path $exe)) { throw "installer was not produced: $exe" }
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          "Installer: $exe  sha256:$hash" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
 
-      - name: Publish release
-        if: steps.exists.outputs.skip == 'false'
+      - name: Keep the installer (rehearsal)
+        if: steps.exists.outputs.skip == 'false' && steps.exists.outputs.publish != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClaudeUsageMonitorSetup-v${{ steps.ver.outputs.version }}
+          path: installer/ClaudeUsageMonitorSetup-v${{ steps.ver.outputs.version }}.exe
+          retention-days: 14
+
+      - name: Create the draft release
+        if: steps.exists.outputs.skip == 'false' && steps.exists.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -77,8 +181,16 @@ jobs:
           # fall back to auto-generated notes if it isn't there.
           awk -v v="$VER" '$0 ~ "^## \\[" v "\\]" {f=1; next} /^## \[/ {f=0} f' CHANGELOG.md > notes.md || true
           ASSET="installer/ClaudeUsageMonitorSetup-v$VER.exe"
+          # A draft is not the latest release, so no installed copy is offered it, and the Discord bot (which mirrors
+          # published releases) stays quiet. --target pins the tag, created when you publish, to the commit that was
+          # built, not to whatever main holds by then.
           if [ -s notes.md ]; then
-            gh release create "v$VER" "$ASSET" --title "Claude Usage Monitor v$VER" --notes-file notes.md
+            gh release create "v$VER" "$ASSET" --draft --target "$GITHUB_SHA" --title "Claude Usage Monitor v$VER" --notes-file notes.md
           else
-            gh release create "v$VER" "$ASSET" --title "Claude Usage Monitor v$VER" --generate-notes
+            gh release create "v$VER" "$ASSET" --draft --target "$GITHUB_SHA" --title "Claude Usage Monitor v$VER" --generate-notes
           fi
+          {
+            echo "Draft release v$VER created. It is not live: nobody is offered it until you publish it."
+            echo "Before you do: compare the asset's sha256 digest with the one printed above, run the v1.1.5 upgrade"
+            echo "check on this installer (docs/RELEASING.md), then:  gh release edit v$VER --draft=false"
+          } >> "$GITHUB_STEP_SUMMARY"

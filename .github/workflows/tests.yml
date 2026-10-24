@@ -1,0 +1,34 @@
+name: Tests
+
+# Runs the pytest suite on every push and pull request. No release side effects:
+# releases only come from release.yml on a VERSION bump that reaches main.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'   # the Python the release is built and smoke-tested with
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt -c constraints-build.txt
+      - name: Run tests
+        run: python -m pytest
+      # The dashboard scripts are tested by running them under node (tests/webui_checks.js, and motion.js on a fake DOM in
+      # tests/test_motion.py). Those tests start a process, so the plain run skips them; without this step a broken
+      # app.js passed CI.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Run the dashboard script tests
+        env:
+          CUM_UI_TESTS: '1'
+        run: python -m pytest tests/test_webui.py tests/test_motion.py

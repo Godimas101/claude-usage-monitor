@@ -1,0 +1,48 @@
+{
+  "five_hour": {
+    "utilization": "lots",
+    "resets_at": "not a date",
+    "locked_reason": 42
+  },
+  "seven_day": "a string where an object belongs",
+  "seven_day_opus": {
+    "utilization": "12.5",
+    "resets_at": 1792584000
+  },
+  "tangelo": {
+    "utilization": 1e400,
+    "resets_at": "not a date"
+  },
+  "limits": "not a list",
+  "seven_day_breakdown": {
+    "as_of": null,
+    "window_started_at": "yesterday-ish",
+    "rows": [
+      {
+        "key": "claude_code",
+        "percent": "NaN?"
+      },
+      17,
+      null,
+      {
+        "display_name": "no key here",
+        "percent": 3
+      },
+      {
+        "key": "chat",
+        "display_name": "Chats",
+        "percent": "7"
+      }
+    ]
+  },
+  "spend": {
+    "enabled": "yes",
+    "used": {
+      "amount_minor": "many",
+      "currency": "USD"
+    },
+    "limit": 5000,
+    "percent": "x"
+  },
+  "extra_usage": "nope"
+}

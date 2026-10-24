@@ -1,0 +1,891 @@
+<!doctype html>
+<html lang="en" data-variant="street-red">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Night City Iconic - Claude Usage Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Rajdhani:wght@500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+/* =====================================================================
+   NIGHT CITY / ICONIC  -  Claude Usage Monitor mockup
+   Fonts (all SIL OFL 1.1): Chakra Petch (headings), Rajdhani (labels),
+   Share Tech Mono (numbers + data noise).
+   Taskbar mock uses Segoe UI Variable / Segoe UI (Windows system fonts).
+   Layout: 1) tokens  2) shared frame parts  3) floating widget
+           4) taskbar strip + tray  5) dashboard  6) mock sheet chrome
+   ===================================================================== */
+
+/* ---------- 1. TOKENS: every colour in the theme is defined here ---------- */
+:root,
+[data-variant="street-red"] {
+  --nc-bg-0: #080405;          /* void */
+  --nc-bg-1: #120809;
+  --nc-bg-2: #1e1013;          /* panel lift */
+  --nc-track: #2b1619;         /* empty bar segments */
+  --nc-panel-top: rgba(34, 18, 21, .95);
+  --nc-panel-bot: rgba(8, 4, 5, .97);
+  --nc-fg: #ff9a82;            /* primary: off-red / salmon */
+  --nc-fg-hi: #ffd9cd;         /* emphasis text */
+  --nc-fg-dim: #b5655a;
+  --nc-fg-faint: #5d3029;      /* noise, tertiary */
+  --nc-line: #ff6a4f;          /* frames, hairlines */
+  --nc-hair: rgba(255, 106, 79, .32);
+  --nc-accent: #3ef0ff;        /* cyan: pace line, brackets, live data */
+  --nc-signal: #ffe600;        /* signature yellow: chips, warn fill */
+  --nc-danger: #ff2e3d;        /* critical */
+  --nc-hz-a: #ffe600;          /* hazard stripe: yellow */
+  --nc-hz-b: #0a0506;          /* hazard stripe: ink */
+  --nc-ink: #0a0506;           /* text on yellow / cyan */
+  --nc-glow: rgba(255, 106, 79, .6);
+  --nc-glow-accent: rgba(62, 240, 255, .7);
+  --nc-scan: rgba(0, 0, 0, .3);
+  --nc-wall-a: #3a1116;
+  --nc-wall-b: #07080b;
+  --nc-wall-c: #15060a;
+  --nc-haze: rgba(255, 106, 79, .26);  /* horizon haze behind skylines */
+  --nc-page: #060304;
+}
+[data-variant="netrunner-cyan"] {
+  --nc-bg-0: #02080a; --nc-bg-1: #04161b; --nc-bg-2: #082630; --nc-track: #0b2d37;
+  --nc-panel-top: rgba(8, 38, 48, .95); --nc-panel-bot: rgba(2, 8, 10, .97);
+  --nc-fg: #7cf4ff; --nc-fg-hi: #e2feff; --nc-fg-dim: #3d98a4; --nc-fg-faint: #1a4550;
+  --nc-line: #2fd8ea; --nc-hair: rgba(47, 216, 234, .32);
+  --nc-accent: #e2feff; --nc-signal: #ffe600; --nc-danger: #ff2e3d;
+  --nc-hz-a: #ffe600; --nc-hz-b: #02080a; --nc-ink: #02080a;
+  --nc-glow: rgba(47, 216, 234, .6); --nc-glow-accent: rgba(226, 254, 255, .6);
+  --nc-scan: rgba(0, 0, 0, .34);
+  --nc-wall-a: #063440; --nc-wall-b: #03060a; --nc-wall-c: #0a1f2a; --nc-haze: rgba(47, 216, 234, .2); --nc-page: #010507;
+}
+[data-variant="signal-yellow"] {
+  --nc-bg-0: #0a0802; --nc-bg-1: #17130a; --nc-bg-2: #241d0c; --nc-track: #35290f;
+  --nc-panel-top: rgba(36, 29, 12, .95); --nc-panel-bot: rgba(10, 8, 2, .97);
+  --nc-fg: #ffe866; --nc-fg-hi: #fff8cf; --nc-fg-dim: #a8962f; --nc-fg-faint: #4e4515;
+  --nc-line: #ffd400; --nc-hair: rgba(255, 212, 0, .32);
+  --nc-accent: #3ef0ff; --nc-signal: #ff9f1a; --nc-danger: #ff2e3d;
+  --nc-hz-a: #ffe600; --nc-hz-b: #0a0802; --nc-ink: #0a0802;
+  --nc-glow: rgba(255, 212, 0, .6); --nc-glow-accent: rgba(62, 240, 255, .65);
+  --nc-scan: rgba(0, 0, 0, .34);
+  --nc-wall-a: #2c2408; --nc-wall-b: #070703; --nc-wall-c: #15110a; --nc-haze: rgba(255, 212, 0, .18); --nc-page: #050401;
+}
+[data-variant="neon-pink"] {
+  --nc-bg-0: #09030a; --nc-bg-1: #140719; --nc-bg-2: #1f0b2a; --nc-track: #2e1139;
+  --nc-panel-top: rgba(31, 11, 42, .95); --nc-panel-bot: rgba(9, 3, 10, .97);
+  --nc-fg: #ff7ac3; --nc-fg-hi: #ffd9ef; --nc-fg-dim: #a84a84; --nc-fg-faint: #4e2141;
+  --nc-line: #ff3ea5; --nc-hair: rgba(255, 62, 165, .32);
+  --nc-accent: #3ef0ff; --nc-signal: #ffe600; --nc-danger: #ff2e3d;
+  --nc-hz-a: #ffe600; --nc-hz-b: #09030a; --nc-ink: #09030a;
+  --nc-glow: rgba(255, 62, 165, .6); --nc-glow-accent: rgba(62, 240, 255, .6);
+  --nc-scan: rgba(0, 0, 0, .32);
+  --nc-wall-a: #3a0c35; --nc-wall-b: #07030a; --nc-wall-c: #1a0820; --nc-haze: rgba(255, 62, 165, .24); --nc-page: #050107;
+}
+
+/* ---------- 2. SHARED FRAME PARTS (reused by widget, strip, dashboard) ---------- */
+/* chamfered frame: .cut > .edge (hairline) + .cut > .in (panel). --cut = chamfer size */
+.cut { position: relative; --cut: 12px; }
+.cut > .edge {
+  position: absolute; inset: 0; background: var(--nc-line); opacity: .6;
+  clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+}
+.cut > .in {
+  position: absolute; inset: 1px; overflow: hidden;
+  background: linear-gradient(170deg, var(--nc-panel-top), var(--nc-panel-bot));
+  clip-path: polygon(calc(var(--cut) - 1px) 0, 100% 0, 100% calc(100% - var(--cut) + 1px), calc(100% - var(--cut) + 1px) 100%, 0 100%, 0 calc(var(--cut) - 1px));
+}
+/* scanlines: every 3px, 1px dark */
+.scan::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(0deg, var(--nc-scan) 0 1px, transparent 1px 3px);
+}
+/* corner brackets: top-right and bottom-left, L-shaped */
+.br { position: absolute; width: 9px; height: 9px; border: 0 solid var(--nc-accent); }
+.br.tr { top: 4px; right: 4px; border-top-width: 2px; border-right-width: 2px; }
+.br.bl { bottom: 4px; left: 4px; border-bottom-width: 2px; border-left-width: 2px; }
+/* chamfered status chips */
+.chip {
+  display: inline-block; font: 700 11px/16px "Rajdhani", sans-serif; letter-spacing: .16em; text-transform: uppercase;
+  padding: 0 8px 0 9px; background: var(--nc-signal); color: var(--nc-ink);
+  clip-path: polygon(6px 0, 100% 0, 100% 100%, 0 100%, 0 6px);
+}
+.chip.out { background: none; color: var(--nc-accent); box-shadow: inset 0 0 0 1px var(--nc-accent); clip-path: none; }
+.chip.dim { background: none; color: var(--nc-fg-dim); box-shadow: inset 0 0 0 1px var(--nc-fg-dim); clip-path: none; }
+.chip.off { background: var(--nc-fg-faint); color: var(--nc-fg-hi); clip-path: none; }
+/* segmented bar track: 7px cells, 2px gaps (mask); fill is an absolutely placed <i> */
+.seg {
+  position: relative; background: var(--nc-track);
+  -webkit-mask: repeating-linear-gradient(90deg, #000 0 7px, transparent 7px 9px);
+          mask: repeating-linear-gradient(90deg, #000 0 7px, transparent 7px 9px);
+}
+.seg > i { position: absolute; left: 0; top: 0; bottom: 0; width: var(--p, 0%); background: var(--nc-fg); }
+/* time-elapsed hairline: cyan up to --t, tick at the end */
+.tline { position: relative; height: 2px; background: linear-gradient(90deg, var(--nc-accent) var(--t, 0%), var(--nc-track) var(--t, 0%)); }
+.tline::after { content: ""; position: absolute; top: -2px; left: calc(var(--t, 0%) - 1px); width: 2px; height: 6px; background: var(--nc-accent); }
+/* hazard stripes (yellow / ink, 45 degrees) */
+.hz { background: repeating-linear-gradient(-45deg, var(--nc-hz-a) 0 6px, var(--nc-hz-b) 6px 12px); }
+/* data-noise label */
+.noise { font: 400 10px/1.25 "Share Tech Mono", monospace; color: var(--nc-fg-faint); letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
+/* slanted section tab: skew the box, counter-skew the text */
+.tab {
+  display: inline-block; transform: skewX(-12deg); background: var(--nc-signal); color: var(--nc-ink);
+  font: 700 13px/1 "Rajdhani", sans-serif; letter-spacing: .18em; text-transform: uppercase; padding: 6px 14px 5px;
+}
+.tab > span { display: inline-block; transform: skewX(12deg); }
+
+@keyframes nc-pip { 0%, 49% { opacity: 1; } 50%, 100% { opacity: .35; } }
+@keyframes nc-hit {
+  0%   { transform: translate(-3px, 0); text-shadow: 3px 0 0 var(--nc-danger), -3px 0 0 var(--nc-accent); }
+  1.2% { transform: translate(2px, 0);  text-shadow: -2px 0 0 var(--nc-danger), 2px 0 0 var(--nc-accent); }
+  2.4% { transform: none;               text-shadow: 0 0 14px var(--nc-glow); }
+  100% { transform: none;               text-shadow: 0 0 14px var(--nc-glow); }
+}
+
+/* ---------- 3. PAGE + MOCK SHEET CHROME (not part of the widget) ---------- */
+html, body { margin: 0; }
+body {
+  background: var(--nc-page); color: var(--nc-fg);
+  font: 500 14px/1.35 "Rajdhani", system-ui, sans-serif; -webkit-font-smoothing: antialiased;
+}
+.sheet-wrap { width: 1344px; margin: 0 auto; padding: 28px 0 40px; }
+.masthead { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; border-bottom: 1px solid var(--nc-hair); padding-bottom: 14px; margin-bottom: 22px; }
+.masthead h1 { margin: 0; font: 700 34px/1 "Chakra Petch", sans-serif; letter-spacing: .06em; text-transform: uppercase; color: var(--nc-fg-hi); text-shadow: 0 0 18px var(--nc-glow); }
+.masthead .sub { font: 400 11px/1.4 "Share Tech Mono", monospace; color: var(--nc-fg-dim); letter-spacing: .08em; text-align: right; }
+.index { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 24px; }
+.index a { font: 700 12px/1 "Rajdhani", sans-serif; letter-spacing: .14em; text-transform: uppercase; color: var(--nc-fg); text-decoration: none; padding: 6px 10px; box-shadow: inset 0 0 0 1px var(--nc-hair); }
+.index a b { color: var(--nc-signal); font-weight: 700; margin-right: 6px; }
+.sheet { position: relative; margin: 0 0 30px; padding: 22px 26px 28px; background: linear-gradient(180deg, var(--nc-bg-1), var(--nc-bg-0)); box-shadow: inset 0 0 0 1px var(--nc-hair); }
+.sheet-h { display: flex; align-items: center; gap: 16px; margin: 0 0 18px; }
+.sheet-h h2 { margin: 0; font: 600 20px/1 "Chakra Petch", sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--nc-fg-hi); }
+.sheet-h .noise { margin-left: auto; }
+.cap { font: 400 11px/1.4 "Share Tech Mono", monospace; color: var(--nc-fg-faint); letter-spacing: .06em; text-transform: uppercase; margin: 0 0 8px; }
+.cap b { color: var(--nc-fg-dim); font-weight: 400; }
+.row-flex { display: flex; align-items: flex-start; gap: 24px; flex-wrap: wrap; }
+.stack { display: flex; flex-direction: column; gap: 6px; }
+.label-under { font: 700 12px/1 "Rajdhani", sans-serif; letter-spacing: .16em; text-transform: uppercase; color: var(--nc-fg-dim); margin-top: 10px; }
+
+/* desktop wallpaper: gradient + skyline silhouette (polygons, no photos) */
+.wall {
+  position: relative; overflow: hidden; background:
+    radial-gradient(40% 55% at 84% 14%, var(--nc-wall-c) 0%, transparent 70%),
+    radial-gradient(80% 62% at 50% 92%, var(--nc-haze) 0%, transparent 72%),
+    linear-gradient(180deg, var(--nc-wall-b) 0%, var(--nc-wall-c) 100%);
+  box-shadow: inset 0 0 0 1px var(--nc-hair);
+}
+.wall > svg.sky { position: absolute; left: 0; bottom: 0; width: 100%; height: 100%; }
+.sky .b { fill: var(--nc-bg-0); stroke: var(--nc-hair); stroke-width: 1; }
+.sky .w { fill: var(--nc-signal); opacity: .35; }
+.sky .n { fill: var(--nc-accent); opacity: .85; }
+.sky .m { fill: var(--nc-line); opacity: .9; }
+
+/* ---------- 4. FLOATING WIDGET  (Pillow map: chamfer polygon, rects, 1px lines, TTF text, blur glow, alpha) ---------- */
+.nc-w {
+  position: relative; width: 288px; height: 124px; color: var(--nc-fg);
+  font-family: "Rajdhani", sans-serif;
+}
+.nc-w.is-2row { height: 96px; }
+.nc-w .hd {
+  position: absolute; left: 12px; right: 12px; top: 6px; height: 18px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.nc-w .brand {
+  display: flex; align-items: center; gap: 7px;
+  font: 700 12px/1 "Rajdhani", sans-serif; letter-spacing: .16em; text-transform: uppercase; color: var(--nc-fg-hi);
+}
+.nc-w .pip { width: 6px; height: 6px; background: var(--nc-accent); box-shadow: 0 0 6px var(--nc-glow-accent); animation: nc-pip 1.4s steps(1) infinite; }
+.nc-w .hex { font: 400 9px/1 "Share Tech Mono", monospace; color: var(--nc-fg-faint); letter-spacing: .08em; }
+.nc-w .rows { position: absolute; left: 12px; right: 12px; top: 30px; display: flex; flex-direction: column; gap: 3px; }
+.nc-w .row { position: relative; height: 28px; }
+.nc-w .rt { display: flex; align-items: center; justify-content: space-between; height: 14px; }
+.nc-w .lbl { font: 700 13px/14px "Rajdhani", sans-serif; letter-spacing: .12em; text-transform: uppercase; color: var(--nc-fg); white-space: nowrap; }
+.nc-w .lbl em { font-style: normal; font-weight: 600; font-size: 10px; letter-spacing: .08em; color: var(--nc-fg-dim); margin-left: 6px; }
+.nc-w .end { display: flex; align-items: baseline; gap: 8px; }
+.nc-w .rs { font: 400 10px/14px "Share Tech Mono", monospace; color: var(--nc-fg-dim); letter-spacing: .04em; white-space: nowrap; }
+.nc-w .val { font: 400 15px/14px "Share Tech Mono", monospace; color: var(--nc-fg-hi); text-shadow: 0 0 6px var(--nc-glow); }
+.nc-w .val small { font-size: 10px; color: var(--nc-fg-dim); margin-left: 1px; text-shadow: none; }
+.nc-w .tline { margin-top: 2px; }
+.nc-w .seg { margin-top: 2px; height: 8px; }
+.nc-w .seg > i { background: var(--nc-fg); box-shadow: 0 0 8px var(--nc-glow); }
+/* state: warning (yellow fill) */
+.nc-w .row.warn .seg > i { background: var(--nc-signal); box-shadow: 0 0 8px var(--nc-signal); }
+.nc-w .row.warn .lbl em { color: var(--nc-signal); }
+.nc-w .row.warn .val { color: var(--nc-signal); text-shadow: 0 0 6px var(--nc-signal); }
+/* state: critical (hazard stripes on the fill, danger tag) */
+.nc-w .row.crit .seg > i { background: repeating-linear-gradient(-45deg, var(--nc-hz-a) 0 4px, var(--nc-hz-b) 4px 8px); box-shadow: 0 0 10px var(--nc-danger); }
+.nc-w .row.crit .lbl em { color: var(--nc-danger); }
+.nc-w .row.crit .val { color: var(--nc-signal); text-shadow: 0 0 6px var(--nc-danger); }
+/* state: stale (tokens swapped to dim, data frozen, message band) */
+.nc-w.is-stale { --nc-fg: var(--nc-fg-dim); --nc-fg-hi: var(--nc-fg-dim); }
+.nc-w.is-stale .rows { opacity: .5; }
+.nc-w.is-stale .seg > i { box-shadow: none; }
+.nc-w.is-stale .val { text-shadow: none; }
+.nc-w .msg {
+  position: absolute; left: 10px; right: 10px; top: 45px; height: 32px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--nc-ink); box-shadow: inset 0 0 0 1px var(--nc-signal);
+  color: var(--nc-signal); font: 700 11px/1 "Rajdhani", sans-serif; letter-spacing: .12em; text-transform: uppercase;
+}
+.nc-w .msg::before, .nc-w .msg::after { content: ""; position: absolute; left: 0; right: 0; height: 4px; background: repeating-linear-gradient(-45deg, var(--nc-hz-a) 0 4px, var(--nc-hz-b) 4px 8px); }
+.nc-w .msg::before { top: 0; }
+.nc-w .msg::after { bottom: 0; }
+/* refresh hit demo: three frames (settled / RGB split / slice shift) */
+.frames { display: flex; gap: 14px; align-items: flex-start; }
+.frame-hd { position: relative; width: 288px; height: 30px; background: linear-gradient(170deg, var(--nc-panel-top), var(--nc-panel-bot)); box-shadow: inset 0 0 0 1px var(--nc-hair); }
+.frame-hd .brand { position: absolute; left: 12px; top: 9px; }
+.frame-hd .chip { position: absolute; right: 12px; top: 7px; }
+.frame-hd.split .brand { text-shadow: 3px 0 0 var(--nc-danger), -2px 0 0 var(--nc-accent); }
+.frame-hd.slice .brand { left: 16px; }
+.frame-hd.slice .chip { right: 8px; }
+
+/* ---------- 5. TASKBAR STRIP (Pillow map: rect bars, chamfer polygon, 1 tick, 1 dot) ---------- */
+.nc-strip { position: relative; width: 236px; height: 38px; color: var(--nc-fg); font-family: "Rajdhani", sans-serif; }
+.nc-strip > .edge { position: absolute; inset: 0; background: var(--nc-line); opacity: .6; clip-path: polygon(8px 0, 100% 0, 100% 100%, 0 100%, 0 8px); }
+.nc-strip > .in { position: absolute; inset: 1px; background: linear-gradient(170deg, var(--nc-panel-top), var(--nc-panel-bot)); clip-path: polygon(7px 0, 100% 0, 100% 100%, 0 100%, 0 7px); }
+.nc-strip .r { position: absolute; left: 12px; right: 40px; height: 12px; display: flex; align-items: center; gap: 7px; z-index: 1; }
+.nc-strip .r1 { top: 5px; }
+.nc-strip .r2 { top: 21px; }
+.nc-strip .k { font: 700 11px/12px "Rajdhani", sans-serif; letter-spacing: .12em; color: var(--nc-fg-hi); width: 18px; }
+.nc-strip .seg { flex: 1; height: 6px; }
+.nc-strip .seg > i { background: var(--nc-fg); box-shadow: 0 0 6px var(--nc-glow); }
+.nc-strip .seg .tk { position: absolute; top: -3px; bottom: -3px; width: 2px; left: var(--t, 0%); background: var(--nc-accent); }
+.nc-strip .r.warn .seg > i { background: var(--nc-signal); }
+.nc-strip .p { width: 30px; text-align: right; font: 400 11px/12px "Share Tech Mono", monospace; color: var(--nc-fg-hi); }
+.nc-strip .dot { position: absolute; right: 13px; top: 50%; width: 8px; height: 8px; margin-top: -4px; background: var(--nc-accent); box-shadow: 0 0 6px var(--nc-glow-accent); animation: nc-pip 1.4s steps(1) infinite; z-index: 1; }
+.nc-strip.is-stale .seg > i { background: var(--nc-fg-faint); box-shadow: none; }
+.nc-strip.is-stale .dot { background: var(--nc-signal); box-shadow: none; animation: none; }
+
+/* ---------- 6. TRAY ICON (16 / 24 / 32 px; JS draws the SVG; 16px drops the badge) ---------- */
+.tray-ico { display: inline-flex; line-height: 0; }
+.tray-ico svg { display: block; }
+
+/* ---------- 7. WINDOWS 11 TASKBAR MOCK (host colours, kept as tokens too) ---------- */
+:root {
+  --win-tb: #1c1c21;
+  --win-tb-line: #34343b;
+  --win-glyph: #ececf1;
+  --win-muted: #a4a4ad;
+  --win-pill: #2c2c33;
+  --win-run: #7aa7ff;
+  --win-hover: #33333c;
+}
+.win-tb {
+  position: relative; height: 48px; width: 1344px; background: var(--win-tb);
+  box-shadow: inset 0 1px 0 var(--win-tb-line);
+  font-family: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif; color: var(--win-glyph);
+}
+.win-tb .grp { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; }
+.win-tb .l { left: 12px; gap: 4px; }
+.win-tb .c { left: 50%; transform: translateX(-50%); gap: 4px; }
+.win-tb .grp-r { right: 8px; gap: 2px; }
+.win-tb .btn { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: 4px; }
+.win-tb .btn svg, .win-tb .glyph svg { width: 16px; height: 16px; stroke: var(--win-glyph); fill: none; stroke-width: 1.3; }
+.win-tb .search { width: 132px; height: 30px; border-radius: 15px; background: var(--win-pill); display: flex; align-items: center; gap: 8px; padding: 0 12px; color: var(--win-muted); font-size: 12px; margin-left: 6px; }
+.win-tb .search svg { width: 13px; height: 13px; stroke: var(--win-muted); fill: none; stroke-width: 1.4; }
+.win-tb .app { position: relative; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: 4px; }
+.win-tb .app svg { width: 18px; height: 18px; stroke: var(--win-glyph); fill: none; stroke-width: 1.3; }
+.win-tb .app.run::after { content: ""; position: absolute; bottom: 2px; left: 50%; width: 10px; height: 3px; margin-left: -5px; border-radius: 2px; background: var(--win-run); }
+.win-tb .app.on { background: var(--win-hover); }
+.win-tb .glyph { width: 28px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: 4px; }
+.win-tb .clock { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; padding: 0 10px 0 8px; height: 40px; font-size: 12px; line-height: 1.2; color: var(--win-glyph); }
+.win-tb .clock small { font-size: 12px; color: var(--win-glyph); }
+.win-tb .strip-slot { margin: 0 10px 0 0; }
+.win-tb .tray-slot { display: flex; align-items: center; gap: 6px; padding: 0 6px; height: 40px; }
+
+/* ---------- 8. DASHBOARD OVERVIEW  (1200 x 760 window; free to use any modern CSS) ---------- */
+.nc-dash {
+  position: relative; width: 1200px; height: 760px; overflow: hidden; color: var(--nc-fg);
+  font-family: "Rajdhani", sans-serif; font-size: 14px; background: var(--nc-bg-0);
+  box-shadow: 0 0 0 1px var(--nc-hair), 0 0 46px -14px var(--nc-glow);
+}
+.nc-dash::before {
+  content: ""; position: absolute; inset: 0;
+  background:
+    radial-gradient(900px 520px at 80% -8%, var(--nc-wall-a) 0%, transparent 70%),
+    radial-gradient(640px 460px at -4% 112%, var(--nc-wall-c) 0%, transparent 72%),
+    linear-gradient(180deg, var(--nc-bg-2) 0%, var(--nc-bg-0) 62%);
+}
+.nc-dash .scanov { position: absolute; inset: 0; z-index: 60; pointer-events: none; background: repeating-linear-gradient(0deg, var(--nc-scan) 0 1px, transparent 1px 3px); }
+.nc-dash .frame-x { position: absolute; inset: 0; z-index: 2; }
+/* title bar */
+.dash-tb {
+  position: relative; z-index: 2; height: 34px; display: flex; align-items: center; justify-content: space-between;
+  padding-left: 12px; background: linear-gradient(90deg, var(--nc-bg-0), var(--nc-bg-2));
+  box-shadow: inset 0 -1px 0 var(--nc-line);
+}
+.dash-tb .t { display: flex; align-items: center; gap: 12px; font: 700 12px/1 "Chakra Petch", sans-serif; letter-spacing: .22em; text-transform: uppercase; color: var(--nc-fg-hi); }
+.dash-tb .tag { display: inline-block; transform: skewX(-12deg); background: var(--nc-signal); color: var(--nc-ink); padding: 4px 9px 3px; letter-spacing: .14em; }
+.dash-tb .tag > span { display: inline-block; transform: skewX(12deg); }
+.dash-tb .wb { display: flex; height: 34px; }
+.dash-tb .wb i { position: relative; width: 46px; height: 34px; display: block; }
+.dash-tb .wb i::before { content: ""; position: absolute; }
+.wb-min::before { left: 18px; top: 17px; width: 11px; height: 2px; background: var(--nc-fg); }
+.wb-max::before { left: 18px; top: 12px; width: 10px; height: 10px; border: 2px solid var(--nc-fg); }
+.wb-x::before, .wb-x::after { left: 14px; top: 16px; width: 18px; height: 2px; background: var(--nc-danger); }
+.wb-x::before { transform: rotate(45deg); }
+.wb-x::after { transform: rotate(-45deg); }
+/* body grid */
+.dash-body { position: relative; z-index: 1; display: grid; grid-template-columns: 200px 1000px; grid-template-rows: 726px; height: 726px; }
+/* nav */
+.dash-nav {
+  position: relative; padding: 18px 0 16px; display: flex; flex-direction: column;
+  background: linear-gradient(180deg, var(--nc-bg-2), var(--nc-bg-0)); box-shadow: inset -1px 0 0 var(--nc-hair);
+}
+.brand-blk { padding: 0 18px; }
+.brand-blk h1 { margin: 0; font: 700 23px/1.02 "Chakra Petch", sans-serif; letter-spacing: .05em; text-transform: uppercase; color: var(--nc-fg-hi); text-shadow: 0 0 14px var(--nc-glow); }
+.brand-blk h1 span { color: var(--nc-signal); text-shadow: none; }
+.brand-blk .noise { display: block; margin-top: 8px; }
+.nav-list { list-style: none; margin: 24px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.nav-list li { margin-left: 10px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px; height: 34px; width: 186px; padding: 0 16px 0 22px;
+  font: 600 15px/1 "Rajdhani", sans-serif; letter-spacing: .14em; text-transform: uppercase; text-decoration: none;
+  color: var(--nc-fg-dim); background: var(--nc-bg-1);
+  clip-path: polygon(12px 0, 100% 0, calc(100% - 12px) 100%, 0 100%);
+}
+.nav-list .ix { font: 400 10px/1 "Share Tech Mono", monospace; color: var(--nc-fg-faint); letter-spacing: .04em; width: 16px; }
+.nav-list li.on a { background: var(--nc-signal); color: var(--nc-ink); }
+.nav-list li.on .ix { color: var(--nc-ink); }
+.sync-blk { margin: auto 18px 0; padding-top: 12px; box-shadow: inset 0 1px 0 var(--nc-hair); display: flex; flex-direction: column; gap: 8px; }
+.sync-blk .live { display: flex; align-items: center; gap: 8px; }
+.sync-blk .pip { width: 8px; height: 8px; background: var(--nc-accent); box-shadow: 0 0 8px var(--nc-glow-accent); animation: nc-pip 1.4s steps(1) infinite; }
+.sync-blk .upd { font: 700 13px/1 "Rajdhani", sans-serif; letter-spacing: .14em; text-transform: uppercase; color: var(--nc-fg-hi); }
+/* main */
+.dash-main { position: relative; min-width: 0; padding: 18px 22px 14px; display: flex; flex-direction: column; gap: 14px; }
+.ph { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; padding-bottom: 10px; box-shadow: inset 0 -1px 0 var(--nc-hair); }
+.ph h2 { margin: 0; font: 700 30px/1 "Chakra Petch", sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--nc-fg-hi); text-shadow: 0 0 16px var(--nc-glow); }
+.ph .meta { text-align: right; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+.ph .note { margin: 0; font: 500 13px/1.25 "Rajdhani", sans-serif; color: var(--nc-fg-dim); max-width: 360px; text-align: right; }
+.cut { --cut: 14px; }
+.cut > .in { padding: 14px 16px; }
+.k { font: 700 13px/1 "Rajdhani", sans-serif; letter-spacing: .16em; text-transform: uppercase; color: var(--nc-fg-hi); }
+.k em { font-style: normal; font-weight: 600; color: var(--nc-fg-dim); letter-spacing: .08em; margin-left: 6px; }
+.kh { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.big { display: inline-block; margin-top: 6px; font: 700 48px/1 "Chakra Petch", sans-serif; color: var(--nc-fg-hi); text-shadow: 0 0 14px var(--nc-glow); animation: nc-hit 7s steps(1, end) infinite; }
+.big small { font-size: 22px; color: var(--nc-fg-dim); margin-left: 4px; text-shadow: none; animation: none; }
+.resets { margin-top: 6px; font: 400 11px/1 "Share Tech Mono", monospace; color: var(--nc-fg-dim); letter-spacing: .06em; }
+.bar-lim { margin-top: 10px; }
+.bar-lim .tline { height: 3px; }
+.bar-lim .seg { margin-top: 6px; height: 10px; }
+.bar-lim .seg > i { box-shadow: 0 0 10px var(--nc-glow); }
+.pace { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font: 400 11px/16px "Share Tech Mono", monospace; color: var(--nc-fg-dim); letter-spacing: .04em; }
+.pace .chip { font-size: 11px; }
+.legend-t { display: flex; gap: 14px; margin-top: 8px; font: 400 10px/1 "Share Tech Mono", monospace; color: var(--nc-fg-faint); letter-spacing: .06em; text-transform: uppercase; }
+.legend-t i { display: inline-block; width: 12px; height: 2px; background: var(--nc-accent); vertical-align: middle; margin-right: 6px; }
+.legend-t b { display: inline-block; width: 8px; height: 6px; background: var(--nc-fg); vertical-align: middle; margin-right: 6px; }
+/* limit cards */
+.limits { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.limits .cut { height: 170px; }
+/* cost row */
+.cost-row { display: grid; grid-template-columns: 1.3fr 1.2fr 1fr; gap: 14px; }
+.cost-row .cut { height: 180px; }
+.hero .hzt { position: absolute; left: 0; right: 0; top: 0; height: 4px; }
+.hero .big-money { margin-top: 8px; font: 700 52px/1 "Chakra Petch", sans-serif; color: var(--nc-fg-hi); letter-spacing: .01em; text-shadow: 0 0 16px var(--nc-glow); animation: nc-hit 7s steps(1, end) infinite; display: inline-block; }
+.stamp { display: inline-block; margin-top: 8px; transform: skewX(-12deg); background: var(--nc-signal); color: var(--nc-ink); padding: 5px 12px 4px; font: 700 15px/1 "Rajdhani", sans-serif; letter-spacing: .12em; text-transform: uppercase; }
+.stamp > span { display: inline-block; transform: skewX(12deg); }
+.hero p { margin: 8px 0 0; font: 500 13px/1.3 "Rajdhani", sans-serif; color: var(--nc-fg); max-width: 300px; }
+.hero .foot { position: absolute; left: 16px; right: 16px; bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
+.minis { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.minis .cut { height: 83px; }
+.minis .cut > .in { padding: 12px 14px; }
+.mini .big-s { margin-top: 6px; font: 700 24px/1 "Chakra Petch", sans-serif; color: var(--nc-fg-hi); text-shadow: 0 0 10px var(--nc-glow); }
+.mini .sub { margin-top: 4px; white-space: nowrap; font: 400 10px/1 "Share Tech Mono", monospace; color: var(--nc-fg-dim); letter-spacing: .06em; text-transform: uppercase; }
+.burn .big-b { margin-top: 10px; font: 700 40px/1 "Chakra Petch", sans-serif; color: var(--nc-fg-hi); text-shadow: 0 0 12px var(--nc-glow); }
+.burn .big-b small { font-size: 14px; color: var(--nc-fg-dim); margin-left: 6px; text-shadow: none; }
+.scale { position: relative; margin-top: 16px; }
+.scale .seg { height: 8px; }
+.scale .seg > i { background: var(--nc-accent); box-shadow: 0 0 8px var(--nc-glow-accent); }
+.scale .ticks { display: flex; justify-content: space-between; margin-top: 6px; font: 400 10px/1 "Share Tech Mono", monospace; color: var(--nc-fg-faint); letter-spacing: .06em; text-transform: uppercase; }
+.scale .ticks b { font-weight: 400; color: var(--nc-accent); }
+/* row 3 */
+.row3 { display: grid; grid-template-columns: 1.05fr 0.9fr 1.35fr; gap: 14px; }
+.row3 .cut { height: 200px; }
+.stackbar { display: flex; height: 18px; margin-top: 14px; box-shadow: inset 0 0 0 1px var(--nc-hair); }
+.stackbar i { display: block; height: 100%; }
+.mix-list { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
+.mix-list li { display: grid; grid-template-columns: 12px 1fr auto; align-items: center; gap: 8px; font: 700 13px/1 "Rajdhani", sans-serif; letter-spacing: .1em; text-transform: uppercase; color: var(--nc-fg); }
+.mix-list li i { width: 10px; height: 10px; display: block; }
+.mix-list li em { font: 400 12px/1 "Share Tech Mono", monospace; font-style: normal; color: var(--nc-fg-hi); letter-spacing: .02em; }
+.week-list { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.week-list .wr { display: flex; justify-content: space-between; font: 700 13px/1 "Rajdhani", sans-serif; letter-spacing: .1em; text-transform: uppercase; color: var(--nc-fg); }
+.week-list .wr em { font: 400 12px/1 "Share Tech Mono", monospace; font-style: normal; color: var(--nc-fg-hi); }
+.week-list .seg { margin-top: 7px; height: 10px; }
+.week-list .seg > i { box-shadow: 0 0 8px var(--nc-glow); }
+.week-list .off .seg > i { width: 0; }
+.spark-wrap { margin-top: 10px; }
+.spark-wrap svg { display: block; width: 100%; height: 132px; }
+.spark-wrap .bar-d { fill: var(--nc-fg); opacity: .55; }
+.spark-wrap .bar-t { fill: var(--nc-accent); }
+.spark-wrap .bar-p { fill: var(--nc-signal); }
+.spark-wrap .base { stroke: var(--nc-hair); stroke-width: 1; }
+/* footer */
+.dash-foot { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding-top: 10px; box-shadow: inset 0 1px 0 var(--nc-hair); }
+.dash-foot .noise { font-size: 10px; }
+.dash-foot .chip { font-size: 10px; }
+.nc-dash .noise { color: var(--nc-fg-dim); }
+.big .sm { font: 700 12px/1 "Rajdhani", sans-serif; letter-spacing: .12em; text-transform: uppercase; color: var(--nc-fg-dim); margin-left: 10px; text-shadow: none; animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  .big, .big-money, .nc-w .pip, .nc-strip .dot, .sync-blk .pip { animation: none !important; }
+}
+.tray-wrap { display: flex; gap: 48px; align-items: flex-start; }
+.tray-notes { font: 400 11px/1.9 "Share Tech Mono", monospace; color: var(--nc-fg-dim); letter-spacing: .04em; padding-top: 4px; }
+.tray-notes b { font-weight: 400; color: var(--nc-signal); display: inline-block; width: 64px; }
+
+/* ---------- 9. MOCK-SHEET EXTRAS ---------- */
+.nc-w.cut { --cut: 12px; }
+.pal { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 22px; }
+.pal .sw { width: 112px; height: 50px; display: flex; flex-direction: column; justify-content: flex-end; box-shadow: inset 0 0 0 1px var(--nc-hair); }
+.pal .sw span { font: 400 10px/1 "Share Tech Mono", monospace; color: var(--nc-fg-hi); background: var(--nc-bg-0); padding: 4px 5px; }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.state-row { display: flex; gap: 24px; align-items: flex-start; }
+.zoomtb { position: relative; width: 560px; height: 48px; background: var(--win-tb); font-family: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif; color: var(--win-glyph); }
+.fillg { fill: var(--win-glyph) !important; stroke: none !important; }
+.tile-row { display: flex; gap: 8px; align-items: center; padding: 10px; background: var(--win-tb); box-shadow: inset 0 0 0 1px var(--win-tb-line); width: max-content; }
+.tile { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; width: 92px; height: 66px; background: var(--win-tb); box-shadow: inset 0 0 0 1px var(--win-tb-line); }
+.tile .tcap { font: 400 10px/1 "Share Tech Mono", monospace; color: var(--win-muted); letter-spacing: .06em; }
+.trow { display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }
+.trow .lbl2 { width: 150px; font: 700 13px/1 "Rajdhani", sans-serif; letter-spacing: .14em; text-transform: uppercase; color: var(--nc-fg); }
+.trow .lbl2 em { font-style: normal; font-weight: 600; font-size: 11px; color: var(--nc-fg-dim); margin-left: 6px; letter-spacing: .06em; }
+.var-row { display: grid; grid-template-columns: repeat(4, 288px); gap: 24px; }
+.var-row .wall { width: 288px; height: 150px; }
+.var-row .nc-w { position: absolute; left: 0; top: 13px; }
+.label-under { font: 700 12px/1 "Rajdhani", sans-serif; letter-spacing: .16em; text-transform: uppercase; color: var(--nc-fg-dim); margin-top: 10px; }
+.label-under b { color: var(--nc-signal); font-weight: 700; margin-right: 6px; }
+.cap-sm { font: 400 10px/1.3 "Share Tech Mono", monospace; color: var(--nc-fg-faint); letter-spacing: .06em; text-transform: uppercase; }
+.masthead-tag { font: 400 11px/1.4 "Share Tech Mono", monospace; color: var(--nc-fg-dim); letter-spacing: .08em; text-transform: uppercase; }
+</style>
+</head>
+<body>
+<div class="sheet-wrap">
+
+<header class="masthead">
+  <div>
+    <div class="noise" style="margin-bottom: 10px;">NIGHT CITY // ICONIC // MOCKUP 0x01 // REV 4A // DATA NOISE ON</div>
+    <h1>Claude Usage Monitor</h1>
+  </div>
+  <div class="masthead-tag" style="text-align:right;">
+    Tokens at :root - variants via data-variant<br>
+    Widgets: Pillow-safe (polygons, rects, lines, TTF, blur glow, alpha)<br>
+    Fonts: Chakra Petch, Rajdhani, Share Tech Mono (SIL OFL 1.1)
+  </div>
+</header>
+
+<nav class="index">
+  <a href="#s-widget"><b>01</b>Floating widget</a>
+  <a href="#s-taskbar"><b>02</b>Taskbar strip</a>
+  <a href="#s-tray"><b>03</b>Tray icon</a>
+  <a href="#s-dash"><b>04</b>Dashboard overview</a>
+  <a href="#s-variants"><b>05</b>Colour variants</a>
+</nav>
+
+<div class="pal">
+  <div class="sw" style="background: var(--nc-bg-0);"><span>BG-0 #080405</span></div>
+  <div class="sw" style="background: var(--nc-bg-2);"><span>BG-2 #1E1013</span></div>
+  <div class="sw" style="background: var(--nc-fg);"><span>FG #FF9A82</span></div>
+  <div class="sw" style="background: var(--nc-fg-hi);"><span>FG-HI #FFD9CD</span></div>
+  <div class="sw" style="background: var(--nc-fg-dim);"><span>FG-DIM #B5655A</span></div>
+  <div class="sw" style="background: var(--nc-line);"><span>LINE #FF6A4F</span></div>
+  <div class="sw" style="background: var(--nc-accent);"><span>ACCENT #3EF0FF</span></div>
+  <div class="sw" style="background: var(--nc-signal);"><span>SIGNAL #FFE600</span></div>
+  <div class="sw" style="background: var(--nc-danger);"><span>DANGER #FF2E3D</span></div>
+  <div class="sw" style="background: var(--nc-wall-a);"><span>WALL-A #3A1116</span></div>
+</div>
+
+<!-- ============ 01 FLOATING WIDGET ============ -->
+<section class="sheet" id="s-widget">
+  <div class="sheet-h">
+    <span class="tab"><span>01 &middot; Floating widget</span></span>
+    <span class="noise">288 x 124 @1x &middot; 3 rows &middot; chamfer 12 &middot; scan 1/3 &middot; blur glow 6-8</span>
+  </div>
+
+  <div class="row-flex" style="gap: 28px;">
+    <div class="stack">
+      <div class="cap">1x &middot; real size on desktop</div>
+      <div class="wall" data-sky style="width: 700px; height: 250px;">
+        <div class="nc-w" data-widget="normal" id="float-1x" style="position:absolute; right: 30px; bottom: 26px;"></div>
+      </div>
+    </div>
+    <div class="stack" style="width: 520px;">
+      <div class="cap">states legend</div>
+      <div class="chips">
+        <span class="chip">LIVE</span>
+        <span class="chip dim">STALE</span>
+        <span class="chip off">OFFLINE</span>
+        <span class="chip out">PAUSED</span>
+      </div>
+      <div class="cap" style="margin-top: 16px;">2-row layout &middot; FABLE row hidden when the share is unused</div>
+      <div class="nc-w" data-widget="two" id="float-2row" style="margin-top: 4px;"></div>
+    </div>
+  </div>
+
+  <div class="cap" style="margin-top: 26px;">3x zoom &middot; CSS zoom, crisp vector &middot; check frame, chip, segment cells, time hairline tick</div>
+  <div class="wall" data-sky style="width: 300px; height: 140px; zoom: 3; transform-origin: 0 0;">
+    <div class="nc-w" data-widget="normal" id="float-zoom" style="position:absolute; left: 6px; top: 8px;"></div>
+  </div>
+
+  <div class="cap" style="margin-top: 14px;">state set &middot; 1x &middot; normal / warning 72% / critical 93% / stale</div>
+  <div class="state-row">
+    <div class="stack"><div class="wall" data-sky style="width:288px;height:150px;"><div class="nc-w" data-widget="normal" style="position:absolute;left:0;top:13px;"></div></div><div class="label-under"><b>A</b>Normal</div></div>
+    <div class="stack"><div class="wall" data-sky style="width:288px;height:150px;"><div class="nc-w" data-widget="warn" style="position:absolute;left:0;top:13px;"></div></div><div class="label-under"><b>B</b>Warning 72%</div></div>
+    <div class="stack"><div class="wall" data-sky style="width:288px;height:150px;"><div class="nc-w" data-widget="crit" style="position:absolute;left:0;top:13px;"></div></div><div class="label-under"><b>C</b>Critical 93%</div></div>
+    <div class="stack"><div class="wall" data-sky style="width:288px;height:150px;"><div class="nc-w" data-widget="stale" style="position:absolute;left:0;top:13px;"></div></div><div class="label-under"><b>D</b>Stale</div></div>
+  </div>
+
+  <div class="cap" style="margin-top: 26px;">refresh hit &middot; 3 frames over 60-90 ms &middot; A settled &middot; B RGB split (red +3 px, cyan -2 px) &middot; C slice shift 4 px</div>
+  <div class="frames">
+    <div class="stack"><div class="frame-hd"><span class="brand"><span class="pip"></span>Claude//Usage</span><span class="chip">LIVE</span></div><div class="cap-sm">A &middot; settled</div></div>
+    <div class="stack"><div class="frame-hd split"><span class="brand"><span class="pip"></span>Claude//Usage</span><span class="chip">LIVE</span></div><div class="cap-sm">B &middot; RGB split</div></div>
+    <div class="stack"><div class="frame-hd slice"><span class="brand"><span class="pip"></span>Claude//Usage</span><span class="chip">LIVE</span></div><div class="cap-sm">C &middot; slice shift</div></div>
+  </div>
+</section>
+
+<!-- ============ 02 TASKBAR STRIP ============ -->
+<section class="sheet" id="s-taskbar">
+  <div class="sheet-h">
+    <span class="tab"><span>02 &middot; Taskbar strip</span></span>
+    <span class="noise">48 px bar &middot; strip 236 x 38 &middot; sits left of tray clock &middot; 5H + 7D</span>
+  </div>
+  <div class="wall" data-sky style="width: 1292px; height: 170px;"></div>
+  <div class="win-tb" id="taskbar" style="width: 1292px;">
+    <div class="grp l">
+      <div class="btn" title="Start"><svg viewBox="0 0 16 16" class="fillg"><rect x="2" y="2" width="5" height="5" rx="0.6"/><rect x="9" y="2" width="5" height="5" rx="0.6"/><rect x="2" y="9" width="5" height="5" rx="0.6"/><rect x="9" y="9" width="5" height="5" rx="0.6"/></svg></div>
+      <div class="search"><svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg>Search</div>
+      <div class="btn" title="Task view"><svg viewBox="0 0 16 16"><rect x="2" y="3.5" width="12" height="9" rx="1.5"/></svg></div>
+    </div>
+    <div class="grp c">
+      <div class="app run on"><svg viewBox="0 0 18 18"><path d="M2.5 5.5h4l1.5 1.5h7.5v6.5h-13z"/></svg></div>
+      <div class="app run"><svg viewBox="0 0 18 18"><rect x="2.5" y="3.5" width="13" height="11" rx="1.5"/><path d="M5.5 7l2 1.8-2 1.8M9.5 11.5h3"/></svg></div>
+      <div class="app run"><svg viewBox="0 0 18 18"><path d="M3 4.5h12v7H8.5L5 14v-2.5H3z"/></svg></div>
+      <div class="app"><svg viewBox="0 0 18 18"><path d="M6.5 5L3 9l3.5 4M11.5 5L15 9l-3.5 4"/></svg></div>
+      <div class="app"><svg viewBox="0 0 18 18"><rect x="2.5" y="3.5" width="13" height="11" rx="1.5"/><circle cx="6.5" cy="7" r="1.2"/><path d="M3 13l4-3.5 3 2.5 2-1.5 3 2.5"/></svg></div>
+      <div class="app"><svg viewBox="0 0 18 18"><rect x="2.5" y="4" width="13" height="10" rx="1.5"/><path d="M3 5l6 4.5L15 5"/></svg></div>
+    </div>
+    <div class="grp grp-r" id="tb-right">
+      <div class="nc-strip strip-slot" id="tb-strip">
+        <div class="edge"></div><div class="in"></div>
+        <div class="r r1"><span class="k">5H</span><span class="seg" style="--p:13%;"><i></i></span><span class="p">13%</span></div>
+        <div class="r r2"><span class="k">7D</span><span class="seg" style="--p:2%;"><i></i></span><span class="p">2%</span></div>
+        <span class="dot"></span>
+      </div>
+      <div class="glyph" title="Hidden icons"><svg viewBox="0 0 16 16"><path d="M4 10l4-4 4 4"/></svg></div>
+      <span class="tray-ico" data-ring="16" data-pct="13" data-state="normal" data-tip="Claude usage 13%"></span>
+      <div class="glyph"><svg viewBox="0 0 16 16"><path d="M2 6.5a9 9 0 0 1 12 0"/><path d="M4.5 9a5.5 5.5 0 0 1 7 0"/><circle cx="8" cy="12" r="1" class="fillg"/></svg></div>
+      <div class="glyph"><svg viewBox="0 0 16 16"><path d="M2 6h2.5L8 3v10L4.5 10H2z"/><path d="M10.5 5.5a3.5 3.5 0 0 1 0 5"/></svg></div>
+      <div class="glyph"><svg viewBox="0 0 16 16"><rect x="1.5" y="5" width="12" height="6" rx="1.2"/><rect x="3" y="6.5" width="7" height="3" class="fillg"/><path d="M14.5 7.2v1.6"/></svg></div>
+      <div class="clock"><span>4:12 PM</span><small>2026-10-21</small></div>
+    </div>
+  </div>
+
+  <div class="cap" style="margin-top: 22px;">2x zoom &middot; strip + tray ring + clock &middot; rendered at device scale 2</div>
+  <div class="win-tb zoomtb" id="tb-zoom" style="zoom: 2;"></div>
+</section>
+
+<!-- ============ 03 TRAY ICON ============ -->
+<section class="sheet" id="s-tray">
+  <div class="sheet-h">
+    <span class="tab"><span>03 &middot; Tray icon</span></span>
+    <span class="noise">16 / 24 / 32 px &middot; ring = session % &middot; 16 px drops the badge, thickens the ring, keeps the centre cell</span>
+  </div>
+  <div class="tray-wrap">
+    <div id="tray-grid"></div>
+    <div class="tray-notes">
+      <b>16 px</b>ring r 5.2 &middot; stroke 3 &middot; no badge, no centre cell<br>
+      <b>24 px</b>chamfer badge 8/32 units &middot; ring r 9.6 &middot; stroke 3.4<br>
+      <b>32 px</b>same geometry as 24, stroke scales with size<br>
+      <b>arc</b>starts 12 o'clock, clockwise, length = pct x circumference<br>
+      <b>track</b>fg-dim at 50 pct alpha, drawn under the arc<br>
+      <b>centre</b>3-unit cell in accent (normal), signal (warn), danger (crit)<br>
+      <b>Pillow</b>arc = polygon sampled every 2 deg; badge = octagon polygon
+    </div>
+  </div>
+  <div class="cap" style="margin-top: 18px;">4x zoom &middot; the 16 px master, enlarged for inspection (CSS zoom)</div>
+  <div class="tile-row" id="tray-z4" style="zoom: 4;"></div>
+</section>
+
+<!-- ============ 04 DASHBOARD OVERVIEW ============ -->
+<section class="sheet" id="s-dash">
+  <div class="sheet-h">
+    <span class="tab"><span>04 &middot; Dashboard overview</span></span>
+    <span class="noise">1200 x 760 &middot; WebView2 window &middot; modern CSS allowed &middot; refresh hit every 7 s</span>
+  </div>
+
+  <div class="nc-dash" id="dash">
+    <i class="scanov"></i>
+
+    <div class="dash-tb">
+      <div class="t"><span class="tag"><span>NC//USAGE</span></span>Claude Usage Monitor <span class="noise" style="color: var(--nc-fg-faint);">0x3F2A &middot; build 0.9.4</span></div>
+      <div class="wb"><i class="wb-min"></i><i class="wb-max"></i><i class="wb-x"></i></div>
+    </div>
+
+    <div class="dash-body">
+      <aside class="dash-nav">
+        <div class="brand-blk">
+          <h1>Usage<br><span>//</span> Monitor</h1>
+          <span class="noise">Sector 07 &middot; 33.4N 112.0W<br>Plan Max 5x</span>
+        </div>
+        <ul class="nav-list">
+          <li class="on"><a href="#"><span class="ix">01</span>Overview</a></li>
+          <li><a href="#"><span class="ix">02</span>Limits</a></li>
+          <li><a href="#"><span class="ix">03</span>Cost &amp; Value</a></li>
+          <li><a href="#"><span class="ix">04</span>Efficiency</a></li>
+          <li><a href="#"><span class="ix">05</span>History</a></li>
+          <li><a href="#"><span class="ix">06</span>Settings</a></li>
+          <li><a href="#"><span class="ix">07</span>About</a></li>
+        </ul>
+        <div class="sync-blk">
+          <div class="live"><span class="pip"></span><span class="upd">Live &middot; 12 s ago</span></div>
+          <span class="noise">Source local logs<br>Sync 0x3F2A &middot; parse ok</span>
+        </div>
+      </aside>
+
+      <main class="dash-main">
+        <header class="ph">
+          <h2>Overview</h2>
+          <div class="meta">
+            <span class="noise">Session 13% &middot; Weekly 2% &middot; Fable 0% of 50%</span>
+            <p class="note">Money is API-equivalent at list prices. Your plan absorbed the difference.</p>
+          </div>
+        </header>
+
+        <section class="limits">
+          <article class="cut"><i class="edge"></i><div class="in scan"><i class="br tr"></i><i class="br bl"></i>
+            <div class="kh"><span class="k">Session<em>5h window</em></span><span class="noise">0x01</span></div>
+            <div class="big">13<small>%</small></div>
+            <div class="resets">Resets 10:39 PM</div>
+            <div class="bar-lim"><div class="tline" style="--t: 58%;"></div><div class="seg" style="--p: 13%;"><i></i></div></div>
+            <div class="pace"><span>Used 13% &middot; elapsed 58%</span><span class="chip out">Under pace</span></div>
+          </div></article>
+
+          <article class="cut"><i class="edge"></i><div class="in scan"><i class="br tr"></i><i class="br bl"></i>
+            <div class="kh"><span class="k">Weekly<em>7d window</em></span><span class="noise">0x02</span></div>
+            <div class="big">2<small>%</small></div>
+            <div class="resets">Resets Wed 4:00 PM</div>
+            <div class="bar-lim"><div class="tline" style="--t: 27%;"></div><div class="seg" style="--p: 2%;"><i></i></div></div>
+            <div class="pace"><span>Used 2% &middot; elapsed 27%</span><span class="chip out">Under pace</span></div>
+          </div></article>
+
+          <article class="cut"><i class="edge"></i><div class="in scan"><i class="br tr"></i><i class="br bl"></i>
+            <div class="kh"><span class="k">Fable weekly<em>own share</em></span><span class="noise">0x03</span></div>
+            <div class="big">0<small>%</small><span class="sm">of 50% share</span></div>
+            <div class="resets">Resets Wed 4:00 PM</div>
+            <div class="bar-lim"><div class="tline" style="--t: 27%;"></div><div class="seg" style="--p: 0%;"><i></i></div></div>
+            <div class="pace"><span>No Fable draw this week</span><span class="chip off">Idle</span></div>
+          </div></article>
+        </section>
+
+        <section class="cost-row">
+          <article class="cut hero"><i class="edge"></i><div class="in scan"><i class="br tr"></i><i class="br bl"></i>
+            <div class="hzt hz"></div>
+            <div class="kh" style="margin-top: 6px;"><span class="k">Cost<em>this month</em></span><span class="noise">api-equivalent</span></div>
+            <div class="big-money">$1,659</div>
+            <div><span class="stamp"><span>16.6x your plan</span></span></div>
+            <p>Plan Max 5x costs $100 a month. The same work at list API prices would have billed $1,659.</p>
+          </div></article>
+
+          <div class="minis">
+            <article class="cut mini"><i class="edge"></i><div class="in scan"><i class="br tr"></i>
+              <div class="k" style="font-size: 12px;">Caching saved</div>
+              <div class="big-s">$14.1K</div>
+              <div class="sub">this month</div>
+            </div></article>
+            <article class="cut mini"><i class="edge"></i><div class="in scan"><i class="br tr"></i>
+              <div class="k" style="font-size: 12px;">Cache hit rate</div>
+              <div class="big-s">96.4%</div>
+              <div class="sub">input served warm</div>
+            </div></article>
+            <article class="cut mini"><i class="edge"></i><div class="in scan"><i class="br tr"></i>
+              <div class="k" style="font-size: 12px;">Thinking share</div>
+              <div class="big-s">38%</div>
+              <div class="sub">Of output tokens</div>
+            </div></article>
+            <article class="cut mini"><i class="edge"></i><div class="in scan"><i class="br tr"></i>
+              <div class="k" style="font-size: 12px;">Today</div>
+              <div class="big-s">$84.20</div>
+              <div class="sub">00:00 to now</div>
+            </div></article>
+          </div>
+
+          <article class="cut burn"><i class="edge"></i><div class="in scan"><i class="br tr"></i><i class="br bl"></i>
+            <div class="kh"><span class="k">Burn rate</span><span class="chip out">Normal</span></div>
+            <div class="big-b">1,240<small>tok / min</small></div>
+            <div class="resets">$6.10 / h &middot; api-equiv</div>
+            <div class="scale">
+              <div class="seg" style="--p: 41%;"><i></i></div>
+              <div class="ticks"><span>Idle</span><b>Normal</b><span>Hot</span><span>Runaway</span></div>
+            </div>
+          </div></article>
+        </section>
+
+        <section class="row3">
+          <article class="cut"><i class="edge"></i><div class="in scan"><i class="br tr"></i><i class="br bl"></i>
+            <div class="kh"><span class="k">Model mix<em>tokens, 30d</em></span><span class="noise">0x5A</span></div>
+            <div class="stackbar">
+              <i style="width: 86%; background: var(--nc-fg);"></i><i style="width: 7%; background: var(--nc-accent);"></i><i style="width: 6%; background: var(--nc-signal);"></i><i style="width: 1%; background: var(--nc-danger);"></i>
+            </div>
+            <ul class="mix-list">
+              <li><i style="background: var(--nc-fg);"></i>Opus 5.5<em>86%</em></li>
+              <li><i style="background: var(--nc-accent);"></i>Sonnet 5.5<em>7%</em></li>
+              <li><i style="background: var(--nc-signal);"></i>Haiku 4.5<em>6%</em></li>
+              <li><i style="background: var(--nc-danger);"></i>Haiku 5.5<em>1%</em></li>
+            </ul>
+          </div></article>
+
+          <article class="cut"><i class="edge"></i><div class="in scan"><i class="br tr"></i><i class="br bl"></i>
+            <div class="kh"><span class="k">Where the week went</span><span class="noise">0x6B</span></div>
+            <ul class="week-list">
+              <li><div class="wr"><span>Claude Code</span><em>100%</em></div><div class="seg" style="--p: 100%;"><i></i></div></li>
+              <li class="off"><div class="wr"><span>Chats</span><em>0%</em></div><div class="seg" style="--p: 0%;"><i></i></div></li>
+              <li class="off"><div class="wr"><span>Cowork</span><em>0%</em></div><div class="seg" style="--p: 0%;"><i></i></div></li>
+            </ul>
+          </div></article>
+
+          <article class="cut"><i class="edge"></i><div class="in scan"><i class="br tr"></i><i class="br bl"></i>
+            <div class="kh"><span class="k">Daily cost<em>last 30 days</em></span><span class="noise">api-equiv</span></div>
+            <div class="spark-wrap"><svg id="spark" viewBox="0 0 300 118" preserveAspectRatio="none"></svg></div>
+            <div class="legend-t"><span><b style="background: var(--nc-signal);"></b>Peak $141</span><span><i></i>Today $84.20</span></div>
+          </div></article>
+        </section>
+
+        <footer class="dash-foot">
+          <span class="noise"><span style="display:inline-block;width:6px;height:6px;background:var(--nc-accent);margin-right:8px;vertical-align:middle;"></span>Live &middot; updated 12 s ago &middot; source local logs</span>
+          <span class="noise">All money figures are API-equivalent at list prices &middot; not a bill</span>
+          <span class="chip out">Sync ok</span>
+        </footer>
+      </main>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 05 VARIANTS ============ -->
+<section class="sheet" id="s-variants">
+  <div class="sheet-h">
+    <span class="tab"><span>05 &middot; Colour variants</span></span>
+    <span class="noise">same widget, same geometry &middot; data-variant swap only &middot; every variant defines the full token set</span>
+  </div>
+  <div class="var-row">
+    <div class="stack">
+      <div class="wall" data-sky data-variant="street-red"><div class="nc-w" data-widget="normal" data-variant="street-red"></div></div>
+      <div class="label-under"><b>01</b>Street Red &middot; default</div>
+    </div>
+    <div class="stack">
+      <div class="wall" data-sky data-variant="netrunner-cyan"><div class="nc-w" data-widget="normal" data-variant="netrunner-cyan"></div></div>
+      <div class="label-under"><b>02</b>Netrunner Cyan</div>
+    </div>
+    <div class="stack">
+      <div class="wall" data-sky data-variant="signal-yellow"><div class="nc-w" data-widget="normal" data-variant="signal-yellow"></div></div>
+      <div class="label-under"><b>03</b>Signal Yellow</div>
+    </div>
+    <div class="stack">
+      <div class="wall" data-sky data-variant="neon-pink"><div class="nc-w" data-widget="normal" data-variant="neon-pink"></div></div>
+      <div class="label-under"><b>04</b>Neon Pink</div>
+    </div>
+  </div>
+  <div class="cap" style="margin-top: 16px;">swap the variant on html, a wall or a single widget &middot; the dashboard takes the same attribute on .nc-dash</div>
+</section>
+
+</div>
+
+<script>
+(function () {
+  const q = (s, r = document) => r.querySelector(s);
+  const qa = (s, r = document) => Array.from(r.querySelectorAll(s));
+
+  /* ---------- 1. FLOATING WIDGET: data -> markup (mock values; t = window elapsed %) ---------- */
+  const SESSION = (v, t, cls, em) => ({ k: 'Session', em: em || '5H', rst: 'RST 22:39', v, p: v, t, cls: cls || '' });
+  const WEEK = (v, t, cls) => ({ k: 'Weekly', em: '7D', rst: 'RST WED 16:00', v, p: v, t, cls: cls || '' });
+  const FABLE = (v) => ({ k: 'Fable', em: '7D · 50% SHARE', rst: '', v, p: v, t: 27, cls: '' });
+  const WIDGETS = {
+    normal: { hex: '0x7F3A', chip: 'LIVE', rows: [SESSION(13, 58), WEEK(2, 27), FABLE(0)] },
+    two:    { hex: '0x7F3A', chip: 'LIVE', two: true, rows: [SESSION(13, 58), WEEK(2, 27)] },
+    warn:   { hex: '0x9C1E', chip: 'LIVE', rows: [SESSION(72, 58, 'warn', '5H · WARN'), WEEK(41, 27), FABLE(0)] },
+    crit:   { hex: '0xE2F7', chip: 'LIVE', rows: [SESSION(93, 58, 'crit', '5H · CRIT'), WEEK(58, 27), FABLE(0)] },
+    stale:  { hex: '0x7F3A', chip: 'STALE', chipCls: 'dim', stale: true, msg: 'LOGIN EXPIRED // OPEN CLAUDE CODE', rows: [SESSION(13, 58), WEEK(2, 27), FABLE(0)] }
+  };
+  function rowHTML(r) {
+    return '<div class="row ' + r.cls + '" style="--t:' + r.t + '%;--p:' + r.p + '%">' +
+      '<div class="rt"><span class="lbl">' + r.k + '<em>' + r.em + '</em></span>' +
+      '<span class="end">' + (r.rst ? '<span class="rs">' + r.rst + '</span>' : '') +
+      '<span class="val">' + r.v + '<small>%</small></span></span></div>' +
+      '<div class="tline"></div><div class="seg"><i></i></div></div>';
+  }
+  function widgetHTML(o) {
+    return '<div class="edge"></div><div class="in scan"><i class="br tr"></i><i class="br bl"></i>' +
+      '<div class="hd"><div class="brand"><span class="pip"></span>Claude//Usage<span class="hex">' + o.hex + '</span></div>' +
+      '<span class="chip ' + (o.chipCls || '') + '">' + o.chip + '</span></div>' +
+      '<div class="rows">' + o.rows.map(rowHTML).join('') + '</div>' +
+      (o.msg ? '<div class="msg">' + o.msg + '</div>' : '') + '</div>';
+  }
+  qa('[data-widget]').forEach(function (el) {
+    const o = WIDGETS[el.dataset.widget];
+    el.classList.add('cut');
+    if (o.two) el.classList.add('is-2row');
+    if (o.stale) el.classList.add('is-stale');
+    el.innerHTML = widgetHTML(o);
+  });
+
+  /* ---------- 2. WALLPAPER SKYLINE (generic polygons, no franchise art) ---------- */
+  const SKY = '<svg class="sky" viewBox="0 0 600 200" preserveAspectRatio="xMidYMax meet" aria-hidden="true">' +
+    '<rect class="b" x="0" y="120" width="46" height="80"/><rect class="b" x="40" y="86" width="54" height="114"/>' +
+    '<polygon class="b" points="94,130 94,200 130,200 130,70 112,52 94,70"/><rect class="b" x="128" y="104" width="66" height="96"/>' +
+    '<rect class="b" x="190" y="60" width="40" height="140"/><polygon class="b" points="228,122 228,200 282,200 282,96 268,80 250,96 250,122"/>' +
+    '<rect class="b" x="280" y="140" width="50" height="60"/><rect class="b" x="326" y="34" width="58" height="166"/>' +
+    '<rect class="b" x="382" y="96" width="44" height="104"/><rect class="b" x="424" y="70" width="70" height="130"/>' +
+    '<polygon class="b" points="492,140 492,200 540,200 540,50 530,40 520,50 510,50 500,120"/><rect class="b" x="536" y="110" width="64" height="90"/>' +
+    '<rect class="w" x="338" y="50" width="4" height="6"/><rect class="w" x="348" y="50" width="4" height="6"/><rect class="w" x="338" y="66" width="4" height="6"/>' +
+    '<rect class="w" x="358" y="82" width="4" height="6"/><rect class="w" x="394" y="110" width="4" height="6"/><rect class="w" x="434" y="90" width="4" height="6"/>' +
+    '<rect class="w" x="448" y="90" width="4" height="6"/><rect class="w" x="434" y="112" width="4" height="6"/><rect class="w" x="104" y="120" width="4" height="6"/>' +
+    '<rect class="w" x="14" y="130" width="4" height="6"/><rect class="w" x="552" y="128" width="4" height="6"/>' +
+    '<rect class="n" x="332" y="70" width="34" height="3"/><rect class="n" x="440" y="100" width="26" height="3"/>' +
+    '<polygon class="m" points="230,104 266,104 260,110 236,110"/><rect class="m" x="136" y="144" width="22" height="2"/>' +
+    '<rect class="n" x="40" y="104" width="3" height="3"/></svg>';
+  qa('[data-sky]').forEach(function (w) { w.insertAdjacentHTML('afterbegin', SKY); });
+
+  /* ---------- 3. TRAY RING: session % as a ring + wedge; 16 px drops the badge ---------- */
+  function ring(size, pct, state) {
+    const small = size <= 16;
+    const R = small ? 5.2 : 9.6;
+    const SW = small ? 3 : 3.4;
+    const C = 2 * Math.PI * R;
+    const arc = Math.max(0, Math.min(100, pct)) / 100 * C;
+    const col = state === 'crit' ? 'var(--nc-danger)' : state === 'warn' ? 'var(--nc-signal)' : state === 'stale' ? 'var(--nc-fg-faint)' : 'var(--nc-fg)';
+    const cell = state === 'crit' ? 'var(--nc-danger)' : state === 'warn' ? 'var(--nc-signal)' : state === 'stale' ? 'none' : 'var(--nc-accent)';
+    const badge = small ? '' : '<path d="M10 2h12l8 8v12l-8 8H10l-8-8V10z" fill="var(--nc-bg-0)" stroke="var(--nc-line)" stroke-width="1.4"/>';
+    const centre = small ? '' : '<rect x="14.5" y="14.5" width="3" height="3" fill="' + cell + '"/>';
+    return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 32 32" aria-hidden="true">' + badge +
+      '<circle cx="16" cy="16" r="' + R + '" fill="none" stroke="var(--nc-fg-dim)" stroke-opacity=".5" stroke-width="' + SW + '"/>' +
+      '<circle cx="16" cy="16" r="' + R + '" fill="none" stroke="' + col + '" stroke-width="' + SW + '" stroke-dasharray="' +
+      arc.toFixed(2) + ' ' + C.toFixed(2) + '" transform="rotate(-90 16 16)"/>' + centre + '</svg>';
+  }
+  qa('.tray-ico[data-ring]').forEach(function (el) {
+    el.innerHTML = ring(+el.dataset.ring, +el.dataset.pct, el.dataset.state);
+  });
+  const STATES = [['normal', 13, 'Normal'], ['warn', 72, 'Warning'], ['crit', 93, 'Critical'], ['stale', 13, 'Stale']];
+  q('#tray-grid').innerHTML = STATES.map(function (s) {
+    return '<div class="trow"><div class="lbl2">' + s[2] + '<em>' + s[1] + '%</em></div><div class="tile-row">' +
+      [16, 24, 32].map(function (sz) {
+        return '<div class="tile"><span class="tray-ico">' + ring(sz, s[1], s[0]) + '</span><span class="tcap">' + sz + ' px</span></div>';
+      }).join('') + '</div></div>';
+  }).join('');
+  q('#tray-z4').innerHTML = STATES.map(function (s) {
+    return '<span class="tray-ico">' + ring(16, s[1], s[0]) + '</span>';
+  }).join('');
+
+  /* ---------- 4. TASKBAR 2x ZOOM COPY: clone the right-hand group ---------- */
+  q('#tb-zoom').innerHTML = q('#tb-right').outerHTML.replace(/ id="[^"]*"/g, '');
+
+  /* ---------- 5. 30-DAY SPARKLINE (deterministic mock data) ---------- */
+  let seed = 7;
+  const rnd = function () { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+  const vals = [];
+  for (let i = 0; i < 30; i++) vals.push(20 + rnd() * 70);
+  vals[11] = 141;
+  vals[29] = 84.2;
+  let svg = '<line class="base" x1="0" x2="300" y1="112.5" y2="112.5"/>';
+  vals.forEach(function (v, i) {
+    const h = v / 150 * 100;
+    const cls = i === 29 ? 'bar-t' : (i === 11 ? 'bar-p' : 'bar-d');
+    svg += '<rect class="' + cls + '" x="' + (i * 10 + 1) + '" y="' + (112 - h).toFixed(2) + '" width="6" height="' + h.toFixed(2) + '"/>';
+  });
+  q('#spark').innerHTML = svg;
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+# The versions this release was built and smoke-tested with (docs/RELEASING.md). Both workflows pass this file to pip
+# with -c, so CI builds what was tested instead of whatever is newest that day. It pins these four only; their own
+# dependencies still float. Change it on purpose: bump the versions, run build.bat and the frozen smoke test, commit.
+Pillow==11.3.0
+pywebview==6.2.1
+pyinstaller==6.19.0
+pythonnet==3.1.0

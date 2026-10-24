@@ -1,0 +1,544 @@
+{
+  "id": "nostromo",
+  "name": "Nostromo",
+  "tagline": "Amber P3 phosphor on CRT black: segmented pip bars, chamfered panels and a typed boot log.",
+  "fonts": {
+    "display": {
+      "family": "Michroma",
+      "file_hint": "Michroma-Regular.ttf",
+      "licence": "SIL Open Font License 1.1"
+    },
+    "body": {
+      "family": "IBM Plex Mono",
+      "file_hint": "IBMPlexMono-SemiBold.ttf (600) and IBMPlexMono-Regular.ttf (400)",
+      "licence": "SIL Open Font License 1.1"
+    },
+    "mono": {
+      "family": "VT323",
+      "file_hint": "VT323-Regular.ttf",
+      "licence": "SIL Open Font License 1.1"
+    }
+  },
+  "shape": {
+    "radius": 0,
+    "control_radius": 0,
+    "chamfer": 10,
+    "stroke": 1
+  },
+  "effects": {
+    "glow_radius": 3,
+    "glow_strength": 0.6,
+    "scanlines": 0.3,
+    "scanline_spacing": 3,
+    "flicker": true,
+    "vignette": 0.46,
+    "glitch": false,
+    "curvature": 0.5
+  },
+  "bar": {
+    "style": "segments",
+    "segments": 16,
+    "gap": 4,
+    "height": 8
+  },
+  "widget": {
+    "floating": {
+      "width": 280,
+      "height": 94,
+      "height_with_scoped": 126
+    },
+    "taskbar": {
+      "width": 264
+    }
+  },
+  "variants": [
+    {
+      "id": "amber",
+      "name": "AMBER P3",
+      "default": true,
+      "mode": "dark",
+      "colors": {
+        "bg": "#090909",
+        "surface": "#110e09",
+        "surface_alt": "#100e09",
+        "border": "#4b3412",
+        "border_dim": "#e8a02040",
+        "text": "#e8a020",
+        "text_bright": "#ffe6a8",
+        "text_dim": "#c98c2a",
+        "accent": "#ffb300",
+        "accent_alt": "#e8a020",
+        "ok": "#e8a020",
+        "warn": "#ffb300",
+        "alert": "#ffe6a8",
+        "track": "#2a1c08",
+        "glow": "#ffb30099",
+        "stale": "#9f7434"
+      }
+    },
+    {
+      "id": "green",
+      "name": "TERMINAL GREEN P1",
+      "default": false,
+      "mode": "dark",
+      "colors": {
+        "bg": "#060b07",
+        "surface": "#0a140d",
+        "surface_alt": "#09110b",
+        "border": "#16412a",
+        "border_dim": "#36e07a40",
+        "text": "#36e07a",
+        "text_bright": "#dcffe9",
+        "text_dim": "#2aa762",
+        "accent": "#6dffa4",
+        "accent_alt": "#36e07a",
+        "ok": "#36e07a",
+        "warn": "#6dffa4",
+        "alert": "#dcffe9",
+        "track": "#0e2f1b",
+        "glow": "#50ff9699",
+        "stale": "#4e8a66"
+      }
+    },
+    {
+      "id": "white",
+      "name": "WHITE P4",
+      "default": false,
+      "mode": "dark",
+      "colors": {
+        "bg": "#080808",
+        "surface": "#0e0f0e",
+        "surface_alt": "#0e0e0e",
+        "border": "#3d4138",
+        "border_dim": "#d5dde23d",
+        "text": "#d5dde2",
+        "text_bright": "#ffffff",
+        "text_dim": "#aab4bb",
+        "accent": "#f4f8fa",
+        "accent_alt": "#d5dde2",
+        "ok": "#d5dde2",
+        "warn": "#f4f8fa",
+        "alert": "#ffffff",
+        "track": "#2b2c2d",
+        "glow": "#ebf5ff75",
+        "stale": "#7d848a"
+      }
+    },
+    {
+      "id": "red",
+      "name": "RED ALERT",
+      "default": false,
+      "mode": "dark",
+      "colors": {
+        "bg": "#0a0505",
+        "surface": "#110807",
+        "surface_alt": "#120707",
+        "border": "#4a140e",
+        "border_dim": "#ff3d2a45",
+        "text": "#ff3d2a",
+        "text_bright": "#ffd9cf",
+        "text_dim": "#dc5240",
+        "accent": "#ff5a3c",
+        "accent_alt": "#ff3d2a",
+        "ok": "#ff3d2a",
+        "warn": "#ff5a3c",
+        "alert": "#ffd9cf",
+        "track": "#2a0b08",
+        "glow": "#ff3c2899",
+        "stale": "#ae665c"
+      }
+    },
+    {
+      "id": "blue",
+      "name": "BLUE BRIDGE",
+      "default": false,
+      "mode": "dark",
+      "colors": {
+        "bg": "#05080b",
+        "surface": "#08101a",
+        "surface_alt": "#0a1119",
+        "border": "#18394f",
+        "border_dim": "#4fc3ff40",
+        "text": "#4fc3ff",
+        "text_bright": "#e6f8ff",
+        "text_dim": "#4aa6d9",
+        "accent": "#8fdcff",
+        "accent_alt": "#4fc3ff",
+        "ok": "#4fc3ff",
+        "warn": "#8fdcff",
+        "alert": "#e6f8ff",
+        "track": "#122834",
+        "glow": "#5ac8ff8f",
+        "stale": "#5c8196"
+      }
+    },
+    {
+      "id": "cyan",
+      "name": "CYAN",
+      "default": false,
+      "mode": "dark",
+      "colors": {
+        "bg": "#05090a",
+        "surface": "#081214",
+        "surface_alt": "#0a1213",
+        "border": "#174a50",
+        "border_dim": "#3fd9e040",
+        "text": "#3fd9e0",
+        "text_bright": "#e8ffff",
+        "text_dim": "#35b5bd",
+        "accent": "#9ff5ff",
+        "accent_alt": "#3fd9e0",
+        "ok": "#3fd9e0",
+        "warn": "#9ff5ff",
+        "alert": "#e8ffff",
+        "track": "#0e2a2e",
+        "glow": "#46e6f099",
+        "stale": "#46868b"
+      }
+    },
+    {
+      "id": "orange",
+      "name": "ORANGE",
+      "default": false,
+      "mode": "dark",
+      "colors": {
+        "bg": "#0a0704",
+        "surface": "#120b06",
+        "surface_alt": "#120c07",
+        "border": "#4f2c12",
+        "border_dim": "#ff8c2b40",
+        "text": "#ff8c2b",
+        "text_bright": "#ffe0c4",
+        "text_dim": "#d9702a",
+        "accent": "#ffb070",
+        "accent_alt": "#ff8c2b",
+        "ok": "#ff8c2b",
+        "warn": "#ffb070",
+        "alert": "#ffe0c4",
+        "track": "#2e1808",
+        "glow": "#ff8c3299",
+        "stale": "#9e7151"
+      }
+    },
+    {
+      "id": "purple",
+      "name": "PURPLE",
+      "default": false,
+      "mode": "dark",
+      "colors": {
+        "bg": "#08060b",
+        "surface": "#0d0914",
+        "surface_alt": "#0e0a13",
+        "border": "#3a2459",
+        "border_dim": "#b57bff40",
+        "text": "#b57bff",
+        "text_bright": "#f2e8ff",
+        "text_dim": "#9a6fd6",
+        "accent": "#d7b4ff",
+        "accent_alt": "#b57bff",
+        "ok": "#b57bff",
+        "warn": "#d7b4ff",
+        "alert": "#f2e8ff",
+        "track": "#1f1530",
+        "glow": "#b478ff94",
+        "stale": "#8570a7"
+      }
+    }
+  ],
+  "extras": {
+    "codename": "nostromo",
+    "codename_visible": false,
+    "accent_map": {
+      "amber": "Default",
+      "green": "Green",
+      "white": "White",
+      "red": "Red",
+      "blue": "Blue",
+      "cyan": "Cyan",
+      "orange": "Orange",
+      "purple": "Purple"
+    },
+    "light_mode": "none. Every variant is a dark CRT plate. A light Windows taskbar is handled by the tray plate and the strip's own dark plate, not by a light variant.",
+    "variant_tokens": {
+      "amber": {
+        "ghost": "#2a1c08",
+        "dim": "#7a5010",
+        "ink": "#0b0805",
+        "glow_soft": "#ffb30038",
+        "rule_strong": "#e8a02085",
+        "edge_hi": "#ffcd7838",
+        "tray_track": "#e8a02085",
+        "crt_deep": "#030303"
+      },
+      "green": {
+        "ghost": "#0e2f1b",
+        "dim": "#1b6b3d",
+        "ink": "#030a05",
+        "glow_soft": "#50ff9638",
+        "rule_strong": "#36e07a85",
+        "edge_hi": "#aaffc838",
+        "tray_track": "#36e07a85",
+        "crt_deep": "#030504"
+      },
+      "white": {
+        "ghost": "#2b2c2d",
+        "dim": "#5d676e",
+        "ink": "#0a0b09",
+        "glow_soft": "#ebf5ff29",
+        "rule_strong": "#d5dde27a",
+        "edge_hi": "#ffffff33",
+        "tray_track": "#d5dde27a",
+        "crt_deep": "#040404"
+      },
+      "red": {
+        "ghost": "#2a0b08",
+        "dim": "#7a1e14",
+        "ink": "#0b0302",
+        "glow_soft": "#ff3c2838",
+        "rule_strong": "#ff3d2a8a",
+        "edge_hi": "#ff968233",
+        "tray_track": "#ff3d2a8a",
+        "crt_deep": "#050202"
+      },
+      "blue": {
+        "ghost": "#122834",
+        "dim": "#1d5676",
+        "ink": "#03080c",
+        "glow_soft": "#5ac8ff33",
+        "rule_strong": "#4fc3ff85",
+        "edge_hi": "#b4ebff33",
+        "tray_track": "#4fc3ff85",
+        "crt_deep": "#030507"
+      },
+      "cyan": {
+        "ghost": "#0e2a2e",
+        "dim": "#1c5f66",
+        "ink": "#030a0b",
+        "glow_soft": "#46e6f038",
+        "rule_strong": "#3fd9e085",
+        "edge_hi": "#b4ffff33",
+        "tray_track": "#3fd9e085",
+        "crt_deep": "#030506"
+      },
+      "orange": {
+        "ghost": "#2e1808",
+        "dim": "#7a3c14",
+        "ink": "#0b0502",
+        "glow_soft": "#ff8c3238",
+        "rule_strong": "#ff8c2b85",
+        "edge_hi": "#ffc08a33",
+        "tray_track": "#ff8c2b85",
+        "crt_deep": "#050302"
+      },
+      "purple": {
+        "ghost": "#1f1530",
+        "dim": "#4a2f78",
+        "ink": "#07040b",
+        "glow_soft": "#b478ff38",
+        "rule_strong": "#b57bff85",
+        "edge_hi": "#dcc4ff33",
+        "tray_track": "#b57bff85",
+        "crt_deep": "#040306"
+      }
+    },
+    "scanlines_widget": 0.3,
+    "scanlines_dashboard": 0.22,
+    "chamfer": {
+      "widget_outer": 10,
+      "widget_inner": 9.4,
+      "strip_outer": 8,
+      "strip_inner": 7.4,
+      "card_outer": 14,
+      "card_inner": 13.4,
+      "tray_plate": {
+        "16": 3,
+        "24": 4,
+        "32": 5
+      }
+    },
+    "hardware": {
+      "hw_1": "#2b2822",
+      "hw_2": "#1a1813",
+      "hw_3": "#12110d",
+      "rivet_a": "#9b927f",
+      "rivet_b": "#4c463a",
+      "rivet_c": "#171510",
+      "bezel_1": "#050403",
+      "bezel_2": "#3b352b",
+      "led_off": "#2a2519",
+      "led_warn": "#ff6a2a"
+    },
+    "hazard": {
+      "stripe_token": "bright",
+      "gap_token": "crt",
+      "angle_deg": -45,
+      "stripe_px": 4,
+      "period_px": 8,
+      "band_height_px": 4,
+      "shown_when": "critical"
+    },
+    "widget_layout": {
+      "content_x": 14,
+      "content_width": 252,
+      "header_y": 6,
+      "header_h": 12,
+      "rule_y": 21,
+      "row_y": [
+        28,
+        60,
+        92
+      ],
+      "row_pitch": 32,
+      "rail_offset": 17,
+      "pips_offset": 21,
+      "pip_h": 8,
+      "pip_w": 12,
+      "pip_gap": 4,
+      "pip_count": 16,
+      "value_right_x": 266,
+      "value_top_offset": -4,
+      "message_y": 92,
+      "message_h": 28
+    },
+    "strip_layout": {
+      "size": [
+        264,
+        34
+      ],
+      "dot": [
+        10,
+        14
+      ],
+      "label5_x": 22,
+      "bar5_x": [
+        44,
+        102
+      ],
+      "value5_right_x": 126,
+      "divider_x": 134,
+      "label7_x": 144,
+      "bar7_x": [
+        166,
+        224
+      ],
+      "value7_right_x": 256,
+      "bar_cells": 10,
+      "bar_cell_w": 4,
+      "bar_gap": 2,
+      "bar_y": 13,
+      "bar_h": 8
+    },
+    "tray": {
+      "sizes": [
+        16,
+        24,
+        32
+      ],
+      "ring_outer": {
+        "16": 6.0,
+        "24": 9.5,
+        "32": 14.0
+      },
+      "ring_thickness": {
+        "16": 3.0,
+        "24": 3.5,
+        "32": 4.0
+      },
+      "centre": {
+        "16": "2x2 square at pixels 7..8",
+        "24": "4x4 square at pixels 10..13",
+        "32": "VT323 18 px percent"
+      },
+      "start": "12 o'clock, clockwise",
+      "stale": "dashed track, 2 px on and 2 px off along mid radius, no arc, centre dashes at 32 px",
+      "plate_fill_token": "crt",
+      "plate_border_token": "edge"
+    },
+    "glow": {
+      "lit_cell_blur_px": 3,
+      "lit_cell_alpha": 0.22,
+      "value_blur_small_px": 2,
+      "value_alpha_small": 0.6,
+      "value_blur_large_px": 7,
+      "value_alpha_large": 0.22
+    },
+    "type_px": {
+      "widget_label": 10,
+      "widget_qualifier": 10,
+      "widget_value": 22,
+      "widget_pill": 10,
+      "widget_message": 10,
+      "strip_label": 11,
+      "strip_value": 18,
+      "dashboard_ladder": [
+        22,
+        44,
+        66,
+        88
+      ],
+      "dashboard_title": 26,
+      "dashboard_nav": 12,
+      "dashboard_body": 12
+    },
+    "states": {
+      "connection": [
+        "LIVE",
+        "STALE",
+        "OFFLINE",
+        "PAUSED"
+      ],
+      "severity": [
+        "NOMINAL",
+        "ADVISORY",
+        "CRITICAL"
+      ],
+      "advisory_from_pct": 75,
+      "critical_from_pct": 90,
+      "note": "Thresholds are placeholders. The app decides them."
+    },
+    "motion": {
+      "alive_blink": "2.4 s steps(1), on 85 percent of the cycle",
+      "cursor_blink": "1 s steps(1)",
+      "flicker": "9 s, one 6 percent dip",
+      "reduced_motion": "all animation off, static ON frame",
+      "critical_value": "static inverted chip, never blinks"
+    },
+    "boot": {
+      "policy": "once_per_session",
+      "store": "sessionStorage nm-boot-session, wrapped in try/catch",
+      "setting_hint": "boot_sequence on or off",
+      "skip": "click",
+      "reduced_motion": "full text shown at once"
+    },
+    "clock_sample": {
+      "now": "2026-10-21T16:12",
+      "weekday": "Wednesday",
+      "session_window": [
+        "2026-10-21T14:39",
+        "2026-10-21T19:39"
+      ],
+      "session_elapsed_pct": 31,
+      "weekly_reset": "2026-10-24T16:00",
+      "weekly_elapsed_pct": 57
+    },
+    "money": {
+      "label": "API-equivalent at list prices",
+      "disclaimer": "API-equivalent at list prices, not amounts billed to your plan.",
+      "cost_scale": "1 pip = $10, nearest pip"
+    },
+    "contrast_label_tier_on_crt_approx": {
+      "amber": 6.9,
+      "green": 6.4,
+      "white": 9.5,
+      "red": 5.1,
+      "blue": 7.4,
+      "cyan": 7.6,
+      "orange": 6.0,
+      "purple": 5.3
+    },
+    "gates": {
+      "variants_cover_app_accents": true,
+      "all_variants_mode": "dark"
+    }
+  }
+}

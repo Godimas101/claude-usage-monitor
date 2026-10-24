@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en" data-theme="nostromo">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="monitor-token" content="">
+<title>Claude Usage Monitor</title>
+<link rel="icon" href="data:,">
+<link id="theme-css" rel="stylesheet" href="/static/themes/nostromo.css">
+<link rel="stylesheet" href="/static/motion.css">
+<link rel="stylesheet" href="/static/themes/nostromo.motion.css">
+<link rel="stylesheet" href="/static/themes/night_city.motion.css">
+<link rel="stylesheet" href="/static/themes/gates.motion.css">
+<script src="/static/motion.js"></script>
+</head>
+<body>
+<div class="nm-screen" id="screen">
+  <div class="nm-content">
+    <header class="nm-bar">
+      <div class="nm-brand">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5"/><circle cx="8" cy="8" r="3.5" stroke-dasharray="2 2"/><path d="M8 8 13 4.5"/><path d="M1.5 8h2M12.5 8h2M8 1.5v2M8 12.5v2"/></svg>
+        CLAUDE USAGE MONITOR<em>// ONBOARD COMPUTER</em>
+      </div>
+      <div class="nm-bar-r">
+        <span class="nm-uplink" id="uplink"><i class="nm-alive" id="uplink-dot"></i><span id="uplink-text">ACQUIRING</span></span>
+        <span id="data-age">DATA AGE --</span>
+        <button class="nm-refresh" id="refresh" type="button" title="Fetch the latest usage now">REFRESH</button>
+      </div>
+    </header>
+
+    <div class="nm-app">
+      <nav class="nm-nav" aria-label="Modules">
+        <div class="nm-kick">MODULES</div>
+        <ol class="nm-menu" id="menu">
+          <li><a href="#overview" data-page="overview"><i>01</i>OVERVIEW</a></li>
+          <li><a href="#limits" data-page="limits"><i>02</i>LIMITS</a></li>
+          <li><a href="#cost" data-page="cost"><i>03</i>COST &amp; VALUE</a></li>
+          <li><a href="#efficiency" data-page="efficiency"><i>04</i>EFFICIENCY</a></li>
+          <li><a href="#history" data-page="history"><i>05</i>HISTORY</a></li>
+          <li><a href="#settings" data-page="settings"><i>06</i>SETTINGS</a></li>
+          <li><a href="#about" data-page="about"><i>07</i>ABOUT</a></li>
+        </ol>
+        <div class="nm-health" id="health" aria-live="polite"></div>
+        <div class="nm-phos">
+          <div class="nm-kick" id="phos-label">PHOSPHOR</div>
+          <div class="nm-sw" id="variants"></div>
+        </div>
+      </nav>
+
+      <main class="nm-main" id="main" tabindex="-1"></main>
+    </div>
+  </div>
+
+  <div class="nm-boot" id="boot" aria-live="polite"><span id="boot-text"></span></div>
+  <div class="nm-tip" id="tip" role="tooltip" hidden></div>
+  <div class="nm-scan" aria-hidden="true"></div>
+  <div class="nm-vig" aria-hidden="true"></div>
+</div>
+<noscript><p style="position:fixed;left:16px;top:16px;color:#e8a020;font-family:monospace">The dashboard needs JavaScript.</p></noscript>
+<script src="/static/charts.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

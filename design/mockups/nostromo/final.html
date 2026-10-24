@@ -1,0 +1,1048 @@
+<!doctype html>
+<html lang="en" data-variant="amber">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nostromo - Usage Monitor Mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Michroma&family=VT323&display=swap" rel="stylesheet">
+<style>
+/* =====================================================================
+   1. TOKENS  (theme id: nostromo, visible name: Nostromo)
+   Every product colour is a custom property. A variant is one
+   data-variant attribute; components contain no per-variant rules.
+   Alpha colours are #rrggbbaa so Pillow can use the same values.
+   ===================================================================== */
+
+/* amber P3 is the default; the explicit selector keeps the block liftable */
+:root, [data-variant="amber"]{
+  --crt:#090909; --crt-deep:#030303; --plate:#110e09; --crt-2:#100e09;
+  --hot:#ffe6a8; --bright:#ffb300; --main:#e8a020; --label:#c98c2a; --dim:#7a5010; --stale:#8c6220;
+  --ghost:#2a1c08; --ink:#0b0805; --edge:#4b3412; --edge-hi:#ffcd7838;
+  --rule:#e8a02040; --rule-strong:#e8a02085; --glow:#ffb30099; --glow-soft:#ffb30038;
+  --tray-track:#e8a02085;
+}
+[data-variant="green"]{
+  --crt:#060b07; --crt-deep:#030504; --plate:#0a140d; --crt-2:#09110b;
+  --hot:#dcffe9; --bright:#6dffa4; --main:#36e07a; --label:#2aa762; --dim:#1b6b3d; --stale:#3f7a57;
+  --ghost:#0e2f1b; --ink:#030a05; --edge:#16412a; --edge-hi:#aaffc838;
+  --rule:#36e07a40; --rule-strong:#36e07a85; --glow:#50ff9699; --glow-soft:#50ff9638;
+  --tray-track:#36e07a85;
+}
+[data-variant="white"]{
+  --crt:#080808; --crt-deep:#040404; --plate:#0e0f0e; --crt-2:#0e0e0e;
+  --hot:#ffffff; --bright:#f4f8fa; --main:#d5dde2; --label:#aab4bb; --dim:#5d676e; --stale:#7d848a;
+  --ghost:#2b2c2d; --ink:#0a0b09; --edge:#3d4138; --edge-hi:#ffffff33;
+  --rule:#d5dde23d; --rule-strong:#d5dde27a; --glow:#ebf5ff75; --glow-soft:#ebf5ff29;
+  --tray-track:#d5dde27a;
+}
+[data-variant="red"]{
+  --crt:#0a0505; --crt-deep:#050202; --plate:#110807; --crt-2:#120707;
+  --hot:#ffd9cf; --bright:#ff5a3c; --main:#ff3d2a; --label:#dc5240; --dim:#7a1e14; --stale:#7d3a32;
+  --ghost:#2a0b08; --ink:#0b0302; --edge:#4a140e; --edge-hi:#ff968233;
+  --rule:#ff3d2a45; --rule-strong:#ff3d2a8a; --glow:#ff3c2899; --glow-soft:#ff3c2838;
+  --tray-track:#ff3d2a8a;
+}
+[data-variant="blue"]{
+  --crt:#05080b; --crt-deep:#030507; --plate:#08101a; --crt-2:#0a1119;
+  --hot:#e6f8ff; --bright:#8fdcff; --main:#4fc3ff; --label:#4aa6d9; --dim:#1d5676; --stale:#4f7388;
+  --ghost:#122834; --ink:#03080c; --edge:#18394f; --edge-hi:#b4ebff33;
+  --rule:#4fc3ff40; --rule-strong:#4fc3ff85; --glow:#5ac8ff8f; --glow-soft:#5ac8ff33;
+  --tray-track:#4fc3ff85;
+}
+[data-variant="cyan"]{
+  --crt:#05090a; --crt-deep:#030506; --plate:#081214; --crt-2:#0a1213;
+  --hot:#e8ffff; --bright:#9ff5ff; --main:#3fd9e0; --label:#35b5bd; --dim:#1c5f66; --stale:#3f7f84;
+  --ghost:#0e2a2e; --ink:#030a0b; --edge:#174a50; --edge-hi:#b4ffff33;
+  --rule:#3fd9e040; --rule-strong:#3fd9e085; --glow:#46e6f099; --glow-soft:#46e6f038;
+  --tray-track:#3fd9e085;
+}
+[data-variant="orange"]{
+  --crt:#0a0704; --crt-deep:#050302; --plate:#120b06; --crt-2:#120c07;
+  --hot:#ffe0c4; --bright:#ffb070; --main:#ff8c2b; --label:#d9702a; --dim:#7a3c14; --stale:#7d5233;
+  --ghost:#2e1808; --ink:#0b0502; --edge:#4f2c12; --edge-hi:#ffc08a33;
+  --rule:#ff8c2b40; --rule-strong:#ff8c2b85; --glow:#ff8c3299; --glow-soft:#ff8c3238;
+  --tray-track:#ff8c2b85;
+}
+[data-variant="purple"]{
+  --crt:#08060b; --crt-deep:#040306; --plate:#0d0914; --crt-2:#0e0a13;
+  --hot:#f2e8ff; --bright:#d7b4ff; --main:#b57bff; --label:#9a6fd6; --dim:#4a2f78; --stale:#6f5a8f;
+  --ghost:#1f1530; --ink:#07040b; --edge:#3a2459; --edge-hi:#dcc4ff33;
+  --rule:#b57bff40; --rule-strong:#b57bff85; --glow:#b478ff94; --glow-soft:#b478ff38;
+  --tray-track:#b57bff85;
+}
+
+/* shared (not per variant): scanline weights, vignette, hardware, fonts */
+:root{
+  color-scheme:dark;
+  --scan-w:#0000004d;          /* widgets and tray: 1 px every 3 px at 30 % black */
+  --scan-d:#00000038;          /* dashboard only: 22 % */
+  --vig:#00000075; --shade:#000000b3;
+  --f-display:"Michroma","Segoe UI",system-ui,sans-serif;
+  --f-body:"IBM Plex Mono",Consolas,monospace;
+  --f-read:"VT323",Consolas,monospace;
+  --f-ui:"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+  --hw-1:#2b2822; --hw-2:#1a1813; --hw-3:#12110d;
+  --rivet-a:#9b927f; --rivet-b:#4c463a; --rivet-c:#171510;
+  --bezel-1:#050403; --bezel-2:#3b352b; --led-off:#2a2519; --led-warn:#ff6a2a;
+  --hazard-y:#ffb300; --hazard-k:#12110d;
+  /* mock page chrome: never themed, never part of the product */
+  --m-page:#0b0b0b; --m-ink:#dcd9d2; --m-mute:#77736b; --m-line:#26241f; --m-card:#0e0e0e;
+  --win-tb:#1f1f1f; --win-tb-line:#303030; --win-ink:#f3f3f3; --win-sub:#a9a9a9; --win-btn:#2c2c2c;
+  --win-tb-light:#f3f3f3; --win-tb-light-line:#d6d6d6; --win-ink-light:#1a1a1a;
+  --wall-a:#1e2a3a; --wall-b:#0c1119; --wall-c:#3a2b18; --wall-d:#04060a;
+}
+
+/* =====================================================================
+   2. MOCK PAGE CHROME (sheet only)
+   ===================================================================== */
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--m-page);color:var(--m-ink);font-family:var(--f-body)}
+body{min-width:1320px;padding-bottom:90px}
+a{color:inherit}
+.page{width:1280px;margin:0 auto}
+.kicker{font:600 12px var(--f-body);letter-spacing:.2em;color:var(--m-mute);padding-top:44px}
+.masthead h1{font:400 40px/1 var(--f-display);letter-spacing:.12em;margin-top:18px;color:var(--m-ink)}
+.masthead h1 span{color:var(--m-mute)}
+.lede{max-width:940px;margin-top:16px;font:400 14px/1.6 var(--f-body);color:var(--m-mute)}
+.index{display:flex;gap:10px;flex-wrap:wrap;margin-top:22px}
+.index a{font:600 12px var(--f-body);letter-spacing:.12em;text-decoration:none;border:1px solid var(--m-line);padding:8px 12px}
+.index a:hover{border-color:var(--m-ink)}
+.tokens{display:flex;gap:18px;flex-wrap:wrap;margin-top:20px;font:400 11px var(--f-body);color:var(--m-mute)}
+.tokens span{display:flex;align-items:center;gap:8px}
+.tokens i{width:18px;height:18px;display:inline-block;border:1px solid var(--m-line)}
+.sec{margin-top:64px}
+.sec-h{display:flex;align-items:baseline;gap:16px;border-bottom:1px solid var(--m-line);padding-bottom:12px;margin-bottom:22px}
+.sec-h .n{font:600 12px var(--f-body);letter-spacing:.2em;color:var(--m-mute)}
+.sec-h h2{font:400 17px/1 var(--f-display);letter-spacing:.14em;color:var(--m-ink)}
+.sec-h p{margin-left:auto;font:400 12px var(--f-body);letter-spacing:.02em;color:var(--m-mute);text-align:right}
+.zrow{display:flex;gap:30px;align-items:flex-start;margin-top:28px}
+.spec{width:380px;font:400 12px/1.55 var(--f-body);color:var(--m-mute)}
+.spec dt{font-weight:600;color:var(--m-ink);letter-spacing:.12em;margin-top:9px}
+.spec dd{margin:0}
+.zframe{position:relative;flex:none;width:840px;height:378px;overflow:hidden;background:var(--crt);outline:1px solid var(--m-line)}
+.zscale{position:absolute;left:0;top:0;transform:scale(3);transform-origin:0 0}
+.zframe-s{width:900px;height:118px}
+.zscale-s{transform:scale(3)}
+
+/* wallpaper stand-in (dark, photo-like). Widgets are drawn over this. */
+.wall{position:relative;padding:34px 32px 30px;overflow:hidden;
+  background:
+    radial-gradient(60% 70% at 18% 18%,var(--wall-a) 0%,transparent 70%),
+    radial-gradient(45% 55% at 86% 88%,var(--wall-c) 0%,transparent 70%),
+    linear-gradient(165deg,var(--wall-a) 0%,var(--wall-b) 55%,var(--wall-d) 100%)}
+.wall>*{position:relative;z-index:1}
+.fw-grid{display:flex;flex-wrap:wrap;gap:34px 28px;align-items:flex-end}
+.fw-grid figure{display:flex;flex-direction:column;gap:10px}
+.fw-grid figcaption{font:600 11px var(--f-body);letter-spacing:.12em;color:var(--m-ink);opacity:.8}
+
+/* =====================================================================
+   3. COMPONENT: FLOATING WIDGET  (Pillow-safe, flat)
+   Frame 280 x 126 (3 rows) or 280 x 94 (2 rows). Origin top-left.
+   All content is positioned in FRAME coordinates (no inset wrapper), so
+   x = 14 is the content edge everywhere. Chamfer 10 px outer, 9.4 px
+   inner, on top-left and bottom-right only. Border 1 px --edge.
+   ===================================================================== */
+@keyframes nm-blink{0%,84%{opacity:1}85%,100%{opacity:.18}}
+@keyframes nm-pulse{0%,70%{opacity:1}71%,100%{opacity:.14}}
+
+.nm-fw{position:relative;width:280px;height:126px;flex:none;background:var(--edge);
+  clip-path:polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px)}
+.nm-fw.is-two{height:94px}
+.nm-fw-body{position:absolute;inset:1px;
+  clip-path:polygon(9.4px 0,100% 0,100% calc(100% - 9.4px),calc(100% - 9.4px) 100%,0 100%,0 9.4px);
+  background:linear-gradient(180deg,var(--plate) 0%,var(--crt) 40%,var(--crt) 100%)}
+.nm-fw-scan{position:absolute;inset:1px;z-index:5;pointer-events:none;
+  clip-path:polygon(9.4px 0,100% 0,100% calc(100% - 9.4px),calc(100% - 9.4px) 100%,0 100%,0 9.4px);
+  background:repeating-linear-gradient(180deg,transparent 0 2px,var(--scan-w) 2px 3px)}
+.nm-fw-hi{position:absolute;left:10px;right:10px;top:1px;height:1px;background:var(--edge-hi);z-index:4}
+
+/* header: 12 px band at y 6. Left: alive mark, status pill, age. Right: severity word */
+.nm-fw-head{position:absolute;left:14px;right:14px;top:6px;height:12px;z-index:4;
+  display:flex;align-items:center;justify-content:space-between}
+.nm-fw-hl{display:flex;align-items:center;gap:6px}
+.nm-alive{display:block;flex:none;width:6px;height:6px;border-radius:50%;background:var(--bright);
+  box-shadow:0 0 4px var(--glow);animation:nm-blink 2.4s steps(1) infinite}
+.nm-pill{display:inline-flex;align-items:center;height:12px;padding:0 4px;border:1px solid var(--rule-strong);
+  font:600 10px/1 var(--f-body);letter-spacing:.12em;color:var(--bright)}
+.nm-age{font:400 10px/1 var(--f-body);letter-spacing:.06em;color:var(--label)}
+.nm-state{font:600 10px/12px var(--f-body);letter-spacing:.12em;color:var(--label)}
+.nm-fw-rule{position:absolute;left:14px;right:14px;top:21px;height:1px;background:var(--rule);z-index:4}
+
+/* rows: pitch 32 px, row tops at y 28 / 60 / 92 */
+.nm-row{position:absolute;left:14px;width:252px;height:30px;z-index:4}
+.nm-row[data-r="1"]{top:28px}
+.nm-row[data-r="2"]{top:60px}
+.nm-row[data-r="3"]{top:92px}
+.nm-lbl{position:absolute;left:0;top:0;height:12px;white-space:nowrap;
+  font:600 10px/12px var(--f-body);letter-spacing:.12em;color:var(--main)}
+.nm-lbl em{font-style:normal;font-weight:400;margin-left:6px;letter-spacing:.06em;color:var(--label)}
+.nm-val{position:absolute;right:0;top:-4px;height:22px;font:400 22px/22px var(--f-read);color:var(--bright);
+  text-shadow:0 0 2px var(--glow),0 0 7px var(--glow-soft)}
+
+/* time rail: y row+17, 1 px. Dotted = whole window, solid = elapsed, 2 x 5 px tick = now */
+.nm-time{position:absolute;left:0;right:0;top:17px;height:1px;
+  background:repeating-linear-gradient(90deg,var(--ghost) 0 2px,transparent 2px 4px)}
+.nm-time i{position:absolute;left:0;top:0;height:1px;width:var(--t);background:var(--label)}
+.nm-time b{position:absolute;left:calc(var(--t) - 1px);top:-2px;width:2px;height:5px;background:var(--hot)}
+
+/* pip bar: y row+21, 8 px high, 16 cells of 12 px with 4 px gaps (252 px) */
+.nm-pips{position:absolute;left:0;top:21px;display:flex;gap:4px;height:8px}
+.nm-pip{display:block;flex:none;width:12px;height:8px;background:var(--ghost)}
+.nm-pip.on{background:var(--main);box-shadow:0 0 3px var(--glow-soft)}
+.nm-pip.part{background:linear-gradient(90deg,var(--main) var(--f,0%),var(--ghost) var(--f,0%))}
+
+/* states */
+.nm-fw.is-warn .nm-row[data-r="1"] .nm-val{color:var(--hot)}
+.nm-fw.is-warn .nm-row[data-r="1"] .nm-pip.on{background:var(--bright)}
+.nm-fw.is-warn .nm-state{color:var(--bright)}
+/* critical: static inverted chip for the session value and state word; hot pips; hazard band */
+.nm-fw.is-crit .nm-row[data-r="1"] .nm-val{padding:0 3px;background:var(--bright);color:var(--ink);text-shadow:none}
+.nm-fw.is-crit .nm-row[data-r="1"] .nm-pip.on{background:var(--hot);box-shadow:0 0 4px var(--glow)}
+.nm-fw.is-crit .nm-state{padding:0 4px;background:var(--bright);color:var(--ink)}
+.nm-hazard{display:none;position:absolute;left:0;right:0;top:0;height:4px;z-index:6;
+  background:repeating-linear-gradient(-45deg,var(--bright) 0 4px,var(--crt) 4px 8px)}
+.nm-fw.is-crit .nm-hazard{display:block}
+
+/* stale and offline: every tone drops to --stale, the dashed auth box replaces row 3 */
+.nm-fw.is-stale{--main:var(--stale);--bright:var(--stale);--hot:var(--stale);--glow:transparent;--glow-soft:transparent}
+.nm-fw.is-stale .nm-lbl em,.nm-fw.is-stale .nm-age,.nm-fw.is-stale .nm-state,.nm-fw.is-stale .nm-pill{color:var(--stale)}
+.nm-fw.is-stale .nm-time i{background:var(--stale)}
+.nm-fw.is-stale .nm-row[data-r="3"]{display:none}
+.nm-fw.is-stale .nm-alive{background:none;border:1px solid var(--stale);box-shadow:none;animation:none}
+.nm-msg{display:none;position:absolute;left:14px;right:14px;top:92px;height:28px;z-index:4;
+  align-items:center;padding:0 8px;background:var(--crt);border:1px dashed var(--label);
+  font:600 10px/12px var(--f-body);letter-spacing:.08em;color:var(--label);white-space:nowrap}
+.nm-fw.is-auth .nm-msg{display:flex}
+
+/* paused: the alive mark becomes a pause glyph (two 2 x 6 bars), not a blink */
+.nm-fw.is-paused .nm-alive{animation:none;border-radius:0;box-shadow:none;
+  background:linear-gradient(90deg,var(--label) 0 2px,transparent 2px 4px,var(--label) 4px 6px)}
+.nm-fw.is-paused .nm-state{color:var(--label)}
+
+/* =====================================================================
+   4. COMPONENT: TASKBAR STRIP  264 x 34 frame, chamfer 8 outer / 7.4 inner
+   Coordinates (strip origin top-left):
+     status dot x 10 y 14 (6 px)      5H label x 22, baseline box y 11
+     5H pip bar x 44..102, y 13, 8 px, 10 cells of 4 px, 2 px gaps
+     5H value right edge x 126 (VT323 18 px)
+     divider x 134, y 9, 1 x 16 px
+     7D label x 144      7D pip bar x 166..224      7D value right edge x 256
+   Labels are 11 px (not 10 px) for 1x legibility.
+   ===================================================================== */
+.nm-strip{position:relative;width:264px;height:34px;flex:none;background:var(--edge);
+  clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px)}
+.nm-strip-body{position:absolute;inset:1px;
+  clip-path:polygon(7.4px 0,100% 0,100% calc(100% - 7.4px),calc(100% - 7.4px) 100%,0 100%,0 7.4px);
+  background:linear-gradient(180deg,var(--plate) 0%,var(--crt) 100%)}
+.nm-strip-scan{position:absolute;inset:1px;pointer-events:none;
+  clip-path:polygon(7.4px 0,100% 0,100% calc(100% - 7.4px),calc(100% - 7.4px) 100%,0 100%,0 7.4px);
+  background:repeating-linear-gradient(180deg,transparent 0 2px,var(--scan-w) 2px 3px)}
+.nm-strip>*{position:absolute}
+.nm-strip .nm-alive{left:10px;top:14px}
+.nm-strip .nm-alive.is-stale{background:none}
+.nm-s-lbl{left:22px;top:10px;height:12px;font:600 11px/12px var(--f-body);letter-spacing:.1em;color:var(--label)}
+.nm-s-lbl.r2{left:144px}
+.nm-sbar{top:13px;left:44px;display:flex;gap:2px;height:8px}
+.nm-sbar.r2{left:166px}
+.nm-sbar i{display:block;width:4px;height:8px;background:var(--ghost)}
+.nm-sbar i.on{background:var(--main);box-shadow:0 0 2px var(--glow-soft)}
+.nm-sbar i.part{background:linear-gradient(90deg,var(--main) var(--f,0%),var(--ghost) var(--f,0%))}
+.nm-s-val{top:7px;height:20px;font:400 18px/20px var(--f-read);color:var(--hot);white-space:nowrap;
+  text-shadow:0 0 2px var(--glow),0 0 5px var(--glow-soft)}
+.nm-s-val.r1{right:138px}
+.nm-s-val.r2{right:8px}
+.nm-s-sep{left:134px;top:9px;width:1px;height:16px;background:var(--rule-strong)}
+.nm-strip.is-crit .nm-s-val.r1{color:var(--ink);background:var(--bright);padding:0 2px;text-shadow:none}
+
+/* =====================================================================
+   5. COMPONENT: TRAY ICON  (canvas, one pixel per cell, no AA)
+   Each icon carries its own CRT plate, so it reads on dark AND light
+   taskbars. Geometry is in the widget spec (notes), not here.
+   ===================================================================== */
+canvas.nm-tray{display:block;image-rendering:pixelated}
+
+/* =====================================================================
+   6. MOCK: WINDOWS 11 TASKBAR (sheet only, not product)
+   ===================================================================== */
+.mk-tb{position:relative;width:1280px;height:48px;background:var(--win-tb);border-top:1px solid var(--win-tb-line);color:var(--win-ink);font-family:var(--f-ui)}
+.mk-tb.is-light{background:var(--win-tb-light);color:var(--win-ink-light);border-top-color:var(--win-tb-light-line)}
+.mk-stage{position:relative;width:1280px;height:200px;overflow:hidden;border:1px solid var(--m-line)}
+.mk-wall{position:absolute;left:0;right:0;top:0;height:152px;
+  background:radial-gradient(60% 80% at 22% 30%,var(--wall-a) 0%,transparent 70%),
+  radial-gradient(45% 70% at 88% 100%,var(--wall-c) 0%,transparent 70%),
+  linear-gradient(165deg,var(--wall-a) 0%,var(--wall-b) 60%,var(--wall-d) 100%)}
+.mk-tb-wrap{position:absolute;left:0;right:0;bottom:0}
+.mk-apps{position:absolute;left:50%;top:4px;transform:translateX(-50%);display:flex;align-items:center;gap:4px}
+.mk-app{position:relative;width:40px;height:40px;border-radius:6px;display:grid;place-items:center}
+.mk-app svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
+.mk-app.on::after{content:"";position:absolute;left:50%;bottom:2px;width:14px;height:3px;margin-left:-7px;border-radius:2px;background:currentColor}
+.mk-app.sel{background:var(--win-btn)}
+.mk-start{position:absolute;left:10px;top:6px;width:40px;height:36px;border-radius:6px;display:grid;place-items:center;background:var(--win-btn)}
+.mk-start svg{width:16px;height:16px;fill:currentColor}
+.mk-right{position:absolute;right:8px;top:0;height:48px;display:flex;align-items:center;gap:4px}
+.mk-ic{width:28px;height:36px;display:grid;place-items:center;border-radius:4px}
+.mk-ic svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.3;stroke-linecap:round;stroke-linejoin:round}
+.mk-clock{margin-left:8px;padding:0 6px 0 4px;text-align:right;font:400 12px/16px var(--f-ui);white-space:nowrap}
+.mk-clock span{display:block}
+.mk-strip-slot{display:flex;align-items:center;height:48px;margin:0 2px}
+.mk-tray-ring{width:36px;height:36px;display:grid;place-items:center;border-radius:4px}
+
+/* strip states: stale drops every tone to --stale; warn lights 5H cells in --bright; crit lights them in --hot */
+.nm-strip.is-stale{--main:var(--stale);--hot:var(--stale);--label:var(--stale);--glow:transparent;--glow-soft:transparent}
+.nm-strip.is-warn .nm-sbar:not(.r2) i.on{background:var(--bright)}
+.nm-strip.is-crit .nm-sbar:not(.r2) i.on{background:var(--hot)}
+
+/* =====================================================================
+   7. COMPONENT: DASHBOARD  (1200 x 760 window; liftable block)
+   Ladder for numerals (VT323): 22 px small readouts, 44 px secondary,
+   66 px limit values, 88 px hero. Percent signs are the same size.
+   Dashboard scanlines use --scan-d (22 %); widgets keep --scan-w (30 %).
+   ===================================================================== */
+:root{--hw-hi:#ffecc81a}
+.mk-console{position:relative;width:1280px;margin:0 auto;padding:44px 40px 30px;border-radius:54px;
+  background:linear-gradient(180deg,var(--hw-1) 0%,var(--hw-2) 24%,var(--hw-3) 100%);
+  box-shadow:inset 0 1px 0 var(--hw-hi),inset 0 0 0 2px var(--bezel-1),0 40px 80px var(--shade)}
+.mk-rivet{position:absolute;width:12px;height:12px;border-radius:50%;
+  background:radial-gradient(circle at 35% 35%,var(--rivet-a) 0,var(--rivet-b) 45%,var(--rivet-c) 100%);box-shadow:0 1px 0 var(--bezel-1)}
+.mk-rv1{left:18px;top:18px}.mk-rv2{right:18px;top:18px}.mk-rv3{left:18px;bottom:16px}.mk-rv4{right:18px;bottom:16px}
+.mk-foot{position:relative;margin-top:16px;height:20px;display:flex;align-items:center;justify-content:space-between;
+  font:600 11px/1 var(--f-body);letter-spacing:.18em;color:var(--rivet-a)}
+.mk-plate{padding:3px 12px;background:var(--rivet-a);color:var(--hw-3)}
+.mk-hz{width:120px;height:8px;background:repeating-linear-gradient(-45deg,var(--hazard-y) 0 6px,var(--hazard-k) 6px 12px)}
+.mk-leds{display:flex;gap:10px;align-items:center}
+.mk-led{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--led-off);box-shadow:inset 0 0 0 1px var(--bezel-1)}
+.mk-led.on{background:var(--bright);box-shadow:0 0 6px var(--glow);animation:nm-blink 3s steps(1) infinite}
+.mk-led.warn{background:var(--led-warn);box-shadow:0 0 6px var(--led-warn)}
+
+.nm-screen{position:relative;width:1200px;height:760px;margin:0 auto;overflow:hidden;border-radius:38px/30px;
+  background:radial-gradient(120% 95% at 50% 42%,var(--plate) 0%,var(--crt) 58%,var(--crt-deep) 100%);
+  box-shadow:0 0 0 3px var(--bezel-1),0 0 0 5px var(--bezel-2),0 0 46px var(--shade)}
+.nm-content{position:absolute;inset:0;display:flex;flex-direction:column;animation:nm-flick 9s steps(1) infinite}
+@keyframes nm-flick{0%,93%,100%{opacity:1}94%{opacity:.965}96%{opacity:1}}
+.nm-scan{position:absolute;inset:0;z-index:71;pointer-events:none;background:repeating-linear-gradient(180deg,transparent 0 2px,var(--scan-d) 2px 3px)}
+.nm-vig{position:absolute;inset:0;z-index:72;pointer-events:none;border-radius:inherit;
+  background:radial-gradient(ellipse 96% 90% at 50% 48%,transparent 70%,var(--shade) 100%);box-shadow:inset 0 0 28px 0 var(--shade)}
+
+.nm-bar{flex:none;height:36px;display:flex;align-items:center;justify-content:space-between;padding:0 12px 0 16px;
+  border-bottom:1px solid var(--edge);font:400 12px/1 var(--f-body);letter-spacing:.12em;color:var(--label)}
+.nm-brand{display:flex;align-items:center;gap:10px;font:400 11px/1 var(--f-display);letter-spacing:.18em;color:var(--main);text-shadow:0 0 6px var(--glow-soft)}
+.nm-brand em{font:400 11px/1 var(--f-body);font-style:normal;letter-spacing:.12em;color:var(--label)}
+.nm-brand svg{width:16px;height:16px;flex:none;fill:none;stroke-width:1}
+.nm-bar-r{display:flex;align-items:center;gap:18px}
+.nm-uplink{display:flex;align-items:center;gap:8px;font-weight:600;color:var(--bright)}
+.nm-wb{display:flex;gap:6px}
+.nm-wb b{width:22px;height:18px;display:grid;place-items:center;font:400 13px/1 var(--f-body);color:var(--label);border:1px solid var(--edge)}
+
+.nm-app{flex:1;min-height:0;display:grid;grid-template-columns:208px minmax(0,1fr)}
+.nm-nav{display:flex;flex-direction:column;gap:4px;padding:16px 14px 14px;border-right:1px solid var(--edge)}
+.nm-kick{font:600 11px/1 var(--f-body);letter-spacing:.2em;color:var(--label);margin:0 0 10px 6px}
+.nm-menu{list-style:none;display:flex;flex-direction:column;gap:3px}
+.nm-menu a{display:flex;align-items:center;gap:10px;height:34px;padding:0 10px;border-left:2px solid transparent;text-decoration:none;
+  font:600 12px/1 var(--f-body);letter-spacing:.12em;color:var(--label)}
+.nm-menu a i{font-style:normal;font-weight:400;width:20px;color:var(--label)}
+.nm-menu a:hover{color:var(--main)}
+.nm-menu a.on{background:var(--main);color:var(--ink);border-left-color:var(--hot)}
+.nm-menu a.on i{color:var(--ink)}
+.nm-health{margin-top:auto;padding:10px;border:1px solid var(--edge);background:var(--crt-2)}
+.nm-kv{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:5px 0;border-bottom:1px dotted var(--ghost);
+  font:600 11px/1 var(--f-body);letter-spacing:.1em;color:var(--label)}
+.nm-kv b{font:400 22px/18px var(--f-read);letter-spacing:.02em;color:var(--bright)}
+.nm-kv b.ok{display:flex;align-items:center;gap:6px}
+.nm-phos{margin-top:14px}
+.nm-sw{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}
+.nm-sw button{font:600 11px/1 var(--f-body);letter-spacing:.06em;padding:6px 0;cursor:pointer;color:var(--label);background:var(--crt);border:1px solid var(--edge)}
+.nm-sw button.on{background:var(--main);color:var(--ink);border-color:var(--main)}
+
+.nm-main{min-width:0;display:flex;flex-direction:column;gap:14px;padding:18px 22px 16px;
+  background-image:linear-gradient(var(--ghost) 1px,transparent 1px),linear-gradient(90deg,var(--ghost) 1px,transparent 1px);
+  background-size:48px 48px;background-position:-1px -1px}
+.nm-head{flex:none;display:flex;align-items:flex-end;justify-content:space-between;gap:24px}
+.nm-h1{font:400 26px/1 var(--f-display);letter-spacing:.16em;color:var(--main);text-shadow:0 0 12px var(--glow-soft),0 0 2px var(--glow)}
+.nm-cur{display:inline-block;width:.55em;height:.85em;margin-left:10px;vertical-align:-.08em;background:var(--hot);box-shadow:0 0 8px var(--glow);animation:nm-blink 1s steps(1) infinite}
+.nm-sub{max-width:470px;text-align:right;font:400 12px/1.5 var(--f-body);letter-spacing:.04em;color:var(--label)}
+
+.nm-grid{flex:none;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:180px 276px 146px;gap:14px}
+.nm-card{position:relative;min-width:0;background:var(--edge);padding:1px;
+  clip-path:polygon(14px 0,100% 0,100% calc(100% - 14px),calc(100% - 14px) 100%,0 100%,0 14px)}
+.nm-card.wide{grid-column:span 2}
+.nm-card-in{position:relative;height:100%;display:flex;flex-direction:column;gap:8px;padding:12px 16px 12px;overflow:hidden;
+  clip-path:polygon(13.4px 0,100% 0,100% calc(100% - 13.4px),calc(100% - 13.4px) 100%,0 100%,0 13.4px);
+  background:linear-gradient(180deg,var(--plate) 0%,var(--crt) 100%)}
+.nm-card-t{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:16px}
+.nm-tag{background:var(--main);color:var(--ink);font:600 11px/16px var(--f-body);letter-spacing:.14em;padding:0 8px;text-transform:uppercase;white-space:nowrap}
+.nm-ttl{font:600 11px/16px var(--f-body);letter-spacing:.14em;text-transform:uppercase;color:var(--main);white-space:nowrap}
+.nm-meta-t{font:400 11px/16px var(--f-body);letter-spacing:.1em;text-transform:uppercase;color:var(--label);white-space:nowrap}
+.nm-row2{display:flex;justify-content:space-between;align-items:flex-end;gap:12px}
+.nm-big{font:400 66px/.8 var(--f-read);color:var(--bright);white-space:nowrap;text-shadow:0 0 2px var(--glow),0 0 14px var(--glow-soft)}
+.nm-big.h{font-size:88px;color:var(--hot)}
+.nm-big.m{font-size:44px;line-height:.9;color:var(--hot)}
+.nm-big.s{font-size:22px;line-height:1;color:var(--hot);text-shadow:0 0 2px var(--glow),0 0 6px var(--glow-soft)}
+.nm-big small{font-size:inherit}
+.nm-facts{display:flex;flex-direction:column;align-items:flex-end;gap:5px;text-align:right;white-space:nowrap;
+  font:600 11px/1.2 var(--f-body);letter-spacing:.1em;text-transform:uppercase;color:var(--label)}
+.nm-facts b{font:400 22px/1 var(--f-read);letter-spacing:.02em;color:var(--main)}
+.nm-chip{display:inline-block;border:1px solid var(--rule-strong);padding:2px 6px;font:600 11px/1.2 var(--f-body);letter-spacing:.12em;color:var(--bright);text-transform:uppercase;white-space:nowrap}
+.nm-chip.solid{background:var(--bright);border-color:var(--bright);color:var(--ink)}
+.nm-pace{display:flex;flex-direction:column;gap:3px;font:400 11px/1.2 var(--f-body);letter-spacing:.08em;text-transform:uppercase;color:var(--label);white-space:nowrap}
+.nm-pace b{font-weight:600;color:var(--main)}
+.nm-cells{display:flex;gap:2px;height:10px}
+.nm-cells i{flex:1 1 0;display:block;background:var(--ghost)}
+.nm-cells i.on{background:var(--main);box-shadow:0 0 3px var(--glow-soft)}
+.nm-cells i.part{background:linear-gradient(90deg,var(--main) var(--f,0%),var(--ghost) var(--f,0%))}
+.nm-cells.hot i.on{background:var(--hot)}
+.nm-rail{position:relative;height:9px}
+.nm-rail::before{content:"";position:absolute;left:0;right:0;top:4px;height:1px;background:repeating-linear-gradient(90deg,var(--ghost) 0 2px,transparent 2px 4px)}
+.nm-rail i{position:absolute;left:0;top:4px;height:1px;width:var(--t);background:var(--label)}
+.nm-rail b{position:absolute;left:calc(var(--t) - 1px);top:0;width:2px;height:9px;background:var(--hot);box-shadow:0 0 4px var(--glow)}
+.nm-note{font:400 11px/1.3 var(--f-body);letter-spacing:.06em;color:var(--label);text-transform:uppercase}
+
+/* cost card */
+.nm-cost{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.12fr) minmax(0,1fr);gap:18px}
+.nm-cost-l{display:flex;flex-direction:column;gap:6px;min-width:0}
+.nm-hero{display:flex;align-items:flex-end;gap:20px}
+.nm-plan{display:flex;flex-direction:column;gap:6px;padding-bottom:4px}
+.nm-plan .nm-big.m{font-size:44px}
+.nm-ratio{display:flex;gap:3px;height:12px}
+.nm-ratio i{flex:1 1 0;display:block;background:var(--ghost)}
+.nm-ratio i.on{background:var(--main);box-shadow:0 0 3px var(--glow-soft)}
+.nm-ratio i.part{background:linear-gradient(90deg,var(--main) var(--f,0%),var(--ghost) var(--f,0%))}
+.nm-tiles{margin-top:auto;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;padding-top:10px;border-top:1px solid var(--ghost)}
+.nm-tile small{display:block;font:600 10px/1.3 var(--f-body);letter-spacing:.12em;text-transform:uppercase;color:var(--label)}
+.nm-tile .nm-big{margin-top:6px}
+.nm-cost-r{display:flex;flex-direction:column;gap:6px;min-width:0;border-left:1px solid var(--ghost);padding-left:18px}
+.nm-chart{position:relative;flex:1;min-height:130px}
+.nm-days{position:absolute;left:0;right:66px;top:0;bottom:16px;display:grid;grid-template-columns:repeat(30,minmax(0,1fr));align-items:end}
+.nm-col{display:flex;flex-direction:column-reverse;gap:2px;align-items:center;height:100%;justify-content:flex-start}
+.nm-col i{display:block;width:8px;height:5px;background:var(--ghost)}
+.nm-col i.on{background:var(--main)}
+.nm-col.today i.on{background:var(--hot);box-shadow:0 0 4px var(--glow)}
+.nm-avg{position:absolute;left:0;right:66px;border-top:1px dashed var(--label);height:0}
+.nm-avg b{position:absolute;left:100%;top:-6px;margin-left:6px;font:600 10px/1 var(--f-body);letter-spacing:.08em;color:var(--label);white-space:nowrap}
+.nm-axis{position:absolute;left:0;right:66px;bottom:0;display:flex;justify-content:space-between;font:600 10px/1 var(--f-body);letter-spacing:.1em;color:var(--label)}
+
+.nm-disc{text-transform:none;letter-spacing:.02em;font-size:10px;line-height:1.35;margin-top:2px}
+/* cache, mix, week, burn */
+.nm-kpi{display:flex;flex-direction:column;gap:5px}
+.nm-kpi .nm-kl{font:600 10px/1.2 var(--f-body);letter-spacing:.12em;text-transform:uppercase;color:var(--label)}
+.nm-mix{display:flex;flex-direction:column;gap:7px}
+.nm-mrow{display:grid;grid-template-columns:104px minmax(0,1fr) 46px;align-items:center;gap:10px;height:18px}
+.nm-mrow .k{font:600 11px/1 var(--f-body);letter-spacing:.08em;color:var(--label);white-space:nowrap}
+.nm-mrow .v{font:400 22px/1 var(--f-read);color:var(--hot);text-align:right}
+.nm-mrow .nm-cells{height:9px}
+.nm-burn-sv{display:block;width:100%;height:58px;overflow:visible}
+.nm-burn-sv line,.nm-burn-sv polyline,.nm-burn-sv circle{vector-effect:non-scaling-stroke}
+
+/* wireframe brand mark: line only, no fill */
+.nm-mark{fill:none;stroke:var(--main);stroke-width:1}
+
+/* boot: typed log once per session, click to skip, tube collapses */
+.nm-boot{position:absolute;inset:0;z-index:70;padding:44px 52px;background:var(--crt-deep);cursor:pointer;white-space:pre;
+  font:400 22px/1.32 var(--f-read);color:var(--bright);text-shadow:0 0 6px var(--glow),0 0 16px var(--glow-soft);
+  transform-origin:50% 50%;transition:transform .6s cubic-bezier(.6,0,.9,.4),opacity .5s .25s}
+.nm-boot.is-done{transform:scaleY(.004);opacity:0;pointer-events:none}
+.nm-boot-cur{display:inline-block;width:.55em;height:.9em;margin-left:2px;vertical-align:-.08em;background:var(--bright);animation:nm-blink 1s steps(1) infinite}
+
+/* reduced motion: every animation is off; static art shows the ON frame */
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important}}
+html[data-capture] *,html[data-capture] *::before,html[data-capture] *::after{animation:none!important}
+
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="masthead">
+    <div class="kicker">CLAUDE USAGE MONITOR // THEME MOCKUP // THEME ID nostromo (INTERNAL) // FINAL</div>
+    <h1>PHOSPHOR CONSOLE</h1>
+    <p class="lede">Default theme. Amber P3 phosphor on CRT black, segmented pip bars, chamfered hardware panels and a dashboard that types its boot log once per session. Widgets are flat and Pillow-safe. Only the dashboard uses bloom, scanlines and tube curvature. Every colour is a token; variants swap them with one data-variant attribute.</p>
+    <nav class="index">
+      <a href="#s1">01 FLOATING WIDGET</a>
+      <a href="#s2">02 TASKBAR STRIP</a>
+      <a href="#s3">03 TRAY ICON</a>
+      <a href="#s4">04 DASHBOARD</a>
+      <a href="#s5">05 VARIANTS</a>
+    </nav>
+    <div class="tokens">
+      <span><i style="background:var(--crt)"></i>--crt</span>
+      <span><i style="background:var(--bright)"></i>--bright (key values)</span>
+      <span><i style="background:var(--main)"></i>--main (pips, text)</span>
+      <span><i style="background:var(--label)"></i>--label (secondary, 6.9:1)</span>
+      <span><i style="background:var(--dim)"></i>--dim (rails)</span>
+      <span><i style="background:var(--ghost)"></i>--ghost (unlit)</span>
+      <span><i style="background:var(--hot)"></i>--hot (peaks, ticks)</span>
+      <span><i style="background:var(--stale)"></i>--stale</span>
+    </div>
+  </header>
+
+  <!-- ============ 01 FLOATING WIDGET ============ -->
+  <section class="sec" id="s1">
+    <div class="sec-h"><span class="n">01</span><h2>FLOATING WIDGET</h2><p>280 px wide &middot; 126 px with the FABLE row, 94 px without &middot; 100 percent scale &middot; desktop wallpaper behind</p></div>
+    <div class="wall">
+      <div class="fw-grid">
+        <figure><div data-fw="normal3"></div><figcaption>NORMAL &middot; FABLE ROW SHOWN</figcaption></figure>
+        <figure><div data-fw="normal2"></div><figcaption>NORMAL &middot; FABLE ROW HIDDEN</figcaption></figure>
+        <figure><div data-fw="warn3"></div><figcaption>WARNING &middot; SESSION 72%</figcaption></figure>
+        <figure><div data-fw="crit3"></div><figcaption>CRITICAL &middot; SESSION 93%</figcaption></figure>
+        <figure><div data-fw="stale3"></div><figcaption>STALE &middot; LAST KNOWN VALUES</figcaption></figure>
+        <figure><div data-fw="offline2"></div><figcaption>OFFLINE &middot; NO CARRIER</figcaption></figure>
+        <figure><div data-fw="paused2"></div><figcaption>PAUSED &middot; HOLD</figcaption></figure>
+      </div>
+    </div>
+
+    <div class="zrow">
+      <div class="zframe"><div class="zscale"><div data-fw="normal3"></div></div></div>
+      <dl class="spec">
+        <dt>FRAME</dt><dd>280 x 126 (3 rows) or 280 x 94 (2 rows). Origin top-left, every Y below is frame-relative. Chamfer 10 px outer, 9.4 px inner, top-left and bottom-right. 1 px --edge border.</dd>
+        <dt>HEADER (y 6 to 18)</dt><dd>Alive dot 6 px at x 14. Status pill 12 px high at x 26, 1 px --rule-strong outline, 10 px SemiBold. Age after the pill, 10 px. Severity word right-aligned at x 266.</dd>
+        <dt>ROWS (y 28 / 60 / 92)</dt><dd>Name at x 14, 10 px SemiBold, --main. Qualifier 6 px after it, 10 px Regular, --label. Value in VT323 22 px, right edge x 266, cap top y row-2, always a full-size percent sign.</dd>
+        <dt>TIME RAIL (row + 17)</dt><dd>1 px. Dotted (2 on, 2 off) --ghost across x 14 to 266 is the whole window. Solid --label to the elapsed fraction. 2 x 5 px --hot tick at row + 15 to row + 20, centred on the elapsed x.</dd>
+        <dt>PIP BAR (row + 21 to row + 29)</dt><dd>16 cells, 12 px wide, 4 px gaps, x 14 to 266, 8 px high. Lit --main, unlit --ghost. The boundary cell fills from the left by its fraction.</dd>
+        <dt>PACE</dt><dd>Lit cells past the tick are ahead of pace. Lit cells short of the tick are under pace. The dashboard prints the numbers.</dd>
+        <dt>GLOW</dt><dd>Lit cells get a 3 px blur at 22 percent. Values get a 2 px blur at 60 percent and a 7 px blur at 22 percent. Crisp layer on top. Scanlines: 1 px every 3 px at 30 percent black.</dd>
+        <dt>STATES</dt><dd>WARN: lit cells and state word to --bright, value to --hot. CRIT: session value is a static inverted chip (--bright plate, --ink text), session cells --hot, 4 px hazard band, no blink. STALE: all tones to --stale, dashed auth box in row 3, dot becomes a hollow ring. OFFLINE and PAUSED: two-row frame, PAUSED shows a pause glyph instead of a dot.</dd>
+      </dl>
+    </div>
+  </section>
+
+  <!-- ============ 02 TASKBAR STRIP ============ -->
+  <section class="sec" id="s2">
+    <div class="sec-h"><span class="n">02</span><h2>TASKBAR STRIP</h2><p>264 x 34 px inside a 48 px Windows 11 taskbar &middot; left of the tray icon and clock &middot; labels 11 px</p></div>
+    <div class="mk-stage">
+      <div class="mk-wall"></div>
+      <div class="mk-tb-wrap">
+        <div class="mk-tb" id="tb-dark">
+          <div class="mk-start"><svg viewBox="0 0 16 16"><circle cx="3" cy="3" r="1.3"/><circle cx="8" cy="3" r="1.3"/><circle cx="13" cy="3" r="1.3"/><circle cx="3" cy="8" r="1.3"/><circle cx="8" cy="8" r="1.3"/><circle cx="13" cy="8" r="1.3"/><circle cx="3" cy="13" r="1.3"/><circle cx="8" cy="13" r="1.3"/><circle cx="13" cy="13" r="1.3"/></svg></div>
+          <div class="mk-apps">
+            <span class="mk-app sel"><svg viewBox="0 0 24 24"><path d="M3 7h6l2 2h10v9H3z"/></svg></span>
+            <span class="mk-app"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 10l3 2-3 2M12 15h5"/></svg></span>
+            <span class="mk-app"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c3 3 3 13 0 16M12 4c-3 3-3 13 0 16"/></svg></span>
+            <span class="mk-app"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="1.5"/><path d="M3.5 7l8.5 6 8.5-6"/></svg></span>
+            <span class="mk-app on"><svg viewBox="0 0 24 24"><path d="M4 6h16v10H9l-5 4z"/></svg></span>
+          </div>
+          <div class="mk-right">
+            <span class="mk-ic"><svg viewBox="0 0 16 16"><path d="M4 9.5 8 5.5l4 4"/></svg></span>
+            <span class="mk-tray-ring" data-tray-slot="16"></span>
+            <span class="mk-ic"><svg viewBox="0 0 16 16"><path d="M2 6.2a8.5 8.5 0 0 1 12 0M4.2 8.6a5.2 5.2 0 0 1 7.6 0M6.4 10.9a2 2 0 0 1 3.2 0"/></svg></span>
+            <span class="mk-ic"><svg viewBox="0 0 16 16"><path d="M2.5 6.5h2.2L8 3.8v8.4L4.7 9.5H2.5zM10.5 6a3 3 0 0 1 0 4"/></svg></span>
+            <span class="mk-ic"><svg viewBox="0 0 16 16"><rect x="2.5" y="5" width="10" height="6" rx="1"/><path d="M14 7v2"/></svg></span>
+            <span class="mk-strip-slot" data-strip="normal"></span>
+            <div class="mk-clock"><span>4:12 PM</span><span>2026-10-21</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="wall" id="strip-states">
+      <figure class="st-fig"><div data-strip="normal"></div><figcaption>NORMAL 13 / 2</figcaption></figure>
+      <figure class="st-fig"><div data-strip="warn"></div><figcaption>WARNING 72</figcaption></figure>
+      <figure class="st-fig"><div data-strip="crit"></div><figcaption>CRITICAL 93</figcaption></figure>
+      <figure class="st-fig"><div data-strip="stale"></div><figcaption>STALE, HOLLOW DOT</figcaption></figure>
+    </div>
+
+    <div class="zrow">
+      <div class="zframe zframe-s"><div class="zscale zscale-s"><div data-strip="normal"></div></div></div>
+      <dl class="spec">
+        <dt>STRIP</dt><dd>264 x 34 px. Chamfer 8 px outer and 7.4 px inner, top-left and bottom-right. Background plate to CRT gradient, 30 percent scanlines. Shown on the taskbar at the same height.</dd>
+        <dt>ROW ORDER</dt><dd>Dot x 10, y 14. 5H label x 22. 5H bar x 44 to 102. 5H value right edge x 126. Divider x 134. 7D label x 144. 7D bar x 166 to 224. 7D value right edge x 256. All on one line, y 7 to 27.</dd>
+        <dt>BARS</dt><dd>10 cells, 4 px wide, 2 px gaps, 8 px high, at y 13. Same fill rule as the widget: lit cells --main, unlit --ghost, boundary cell filled by fraction.</dd>
+        <dt>TYPE</dt><dd>Labels: IBM Plex Mono SemiBold 11 px, --label. Percentages: VT323 18 px, --hot with a 2 px and 5 px glow.</dd>
+        <dt>DOT</dt><dd>6 px circle at x 10, y 14, --bright, blinks at 2.4 s while LIVE. STALE: hollow ring in --stale. Reduced motion: dot stays solid.</dd>
+      </dl>
+    </div>
+  </section>
+
+
+<style>
+/* mock-only layout for sections 03 to 05 (not product CSS) */
+.st-fig{display:flex;flex-direction:column-reverse;gap:10px}
+#strip-states{display:grid;grid-template-columns:repeat(2,auto);gap:24px 56px;justify-content:start}
+.st-fig figcaption{font:600 11px var(--f-body);letter-spacing:.12em;color:var(--m-ink);opacity:.8}
+.tr-grid{display:grid;grid-template-columns:repeat(4,auto);gap:26px 34px;justify-content:start;align-items:end}
+.tr-cell{display:flex;flex-direction:column;gap:12px}
+.tr-set{display:flex;align-items:flex-end;gap:22px}
+.tr-set figure{display:flex;flex-direction:column;align-items:center;gap:6px}
+.tr-set figcaption{font:600 10px var(--f-body);letter-spacing:.1em;color:var(--m-ink);opacity:.85}
+.tr-lbl{font:600 11px var(--f-body);letter-spacing:.14em;color:var(--m-ink)}
+.tr-lbl em{font-style:normal;color:var(--m-mute);font-weight:400}
+.tr-light{display:flex;align-items:center;gap:16px;padding:14px 16px;background:var(--win-tb-light);color:var(--win-ink-light);font:400 12px var(--f-ui)}
+.tr-light .mk-strip-slot{margin-left:auto}
+.loupe{display:flex;flex-direction:column;align-items:center;gap:8px;font:600 11px var(--f-body);letter-spacing:.12em;color:var(--m-mute)}
+.loupe canvas{width:128px;height:128px}
+.dash-wrap{display:flex;flex-direction:column;align-items:center;gap:14px}
+.dash-cap{width:1280px;display:flex;justify-content:space-between;font:400 12px var(--f-body);color:var(--m-mute)}
+.var-grid{display:grid;grid-template-columns:repeat(4,310px);gap:12px;justify-content:start}
+.vcell{display:flex;flex-direction:column;gap:12px;padding:16px 14px 14px;background:var(--m-card);border:1px solid var(--m-line)}
+.vlab{font:400 11px var(--f-body);letter-spacing:.08em;color:var(--m-mute)}
+.vlab b{display:block;font:400 13px var(--f-display);letter-spacing:.12em;color:var(--m-ink);margin-bottom:6px}
+.vchips{display:flex;gap:5px}
+.vchips i{display:block;width:26px;height:14px;border:1px solid var(--m-line)}
+.vkey{font:400 12px/1.55 var(--f-body);color:var(--m-mute);max-width:1100px}
+.foot-sheet{display:grid;gap:10px;margin-top:44px;padding-top:18px;border-top:1px solid var(--m-line);font:400 12px/1.6 var(--f-body);color:var(--m-mute)}
+.foot-sheet p{display:grid;grid-template-columns:90px minmax(0,1fr);gap:8px}
+.foot-sheet b{font-weight:600;color:var(--m-ink);letter-spacing:.12em}
+</style>
+
+  <!-- ============ 03 TRAY ICON ============ -->
+  <section class="sec" id="s3">
+    <div class="sec-h"><span class="n">03</span><h2>TRAY ICON</h2><p>16 / 24 / 32 px &middot; ring = session percent, clockwise from 12 o'clock &middot; each icon carries its own dark plate</p></div>
+    <div class="wall" style="padding:30px 32px">
+      <div class="tr-grid" id="tray-grid"></div>
+      <div class="loupe" style="margin-top:24px"><canvas class="nm-tray" data-tray="16" data-pct="72" data-state="warn" width="16" height="16"></canvas><span>16 PX AT 8x</span></div>
+    </div>
+
+    <div class="wall" style="margin-top:14px;padding:22px 32px">
+      <div class="tr-light">
+        <span>LIGHT TASKBAR, 16 PX</span>
+        <span class="mk-tray-ring" data-tray-slot="16" style="width:28px;height:28px;display:grid;place-items:center"></span>
+        <span class="mk-tray-ring" data-tray-slot="24" style="width:34px;height:34px;display:grid;place-items:center"></span>
+        <span class="mk-tray-ring" data-tray-slot="32" style="width:42px;height:42px;display:grid;place-items:center"></span>
+        <span class="mk-strip-slot" data-strip="normal"></span>
+      </div>
+    </div>
+
+    <dl class="spec" style="margin-top:24px;width:auto;display:grid;grid-template-columns:190px minmax(0,1fr);column-gap:24px">
+      <dt>PLATE</dt><dd>Square of 16, 24 or 32 px, fill --crt, 1 px --edge border, chamfer 3 / 4 / 5 px top-left and bottom-right (inner 2.4 / 3.4 / 4.4 px). The plate makes the icon legible on a light taskbar too.</dd>
+      <dt>GEOMETRY</dt><dd>Centre at (S/2, S/2). Pixel centres decide ink, so no anti-aliasing at 16 or 24 px. Ring outer radius 6.0 / 9.5 / 14.0 px. Ring thickness 3.0 / 3.5 / 4.0 px. Track is --tray-track.</dd>
+      <dt>ARC</dt><dd>From 12 o'clock, clockwise, to percent x 360 degrees. Colour: --main normal, --bright warning, --hot critical.</dd>
+      <dt>CENTRE</dt><dd>16 px: 2 x 2 square at pixels 7 to 8. 24 px: 4 x 4 square at pixels 10 to 13. Both in the arc colour. 32 px: the percent in VT323 18 px, centred, in --hot.</dd>
+      <dt>STALE</dt><dd>No arc. The track is dashed (2 px on, 2 px off, measured along the mid radius) in --stale. No centre mark. At 32 px the centre reads "--". This gives stale its own silhouette without relying on tone.</dd>
+      <dt>CHECK</dt><dd>At 16 px the 13 percent arc is about 47 degrees, roughly 4 px of arc at mid radius. It is visible on both the dark and light test rows. Confirm once on a real 100 percent taskbar before the Pillow reference is frozen.</dd>
+    </dl>
+  </section>
+
+  <!-- ============ 04 DASHBOARD ============ -->
+  <section class="sec" id="s4">
+    <div class="sec-h"><span class="n">04</span><h2>DASHBOARD &middot; OVERVIEW</h2><p>1200 x 760 window &middot; boot log types once per session, click to skip &middot; capture mode freezes motion to the ON frame</p></div>
+    <div class="dash-wrap">
+      <div class="mk-console">
+        <i class="mk-rivet mk-rv1"></i><i class="mk-rivet mk-rv2"></i><i class="mk-rivet mk-rv3"></i><i class="mk-rivet mk-rv4"></i>
+        <div class="nm-screen" id="screen">
+          <div class="nm-content">
+            <header class="nm-bar">
+              <div class="nm-brand">
+                <svg viewBox="0 0 16 16" class="nm-mark" aria-hidden="true"><circle cx="8" cy="8" r="6.5"/><circle cx="8" cy="8" r="3.5" stroke-dasharray="2 2"/><path d="M8 8 13 4.5"/><path d="M1.5 8h2M12.5 8h2M8 1.5v2M8 12.5v2"/></svg>
+                CLAUDE USAGE MONITOR<em>// ONBOARD COMPUTER</em>
+              </div>
+              <div class="nm-bar-r">
+                <span class="nm-uplink"><i class="nm-alive"></i>UPLINK LIVE</span>
+                <span>DATA AGE 12 S</span>
+                <span class="nm-wb"><b>_</b><b>&#9633;</b><b>&times;</b></span>
+              </div>
+            </header>
+
+            <div class="nm-app">
+              <nav class="nm-nav">
+                <div class="nm-kick">MODULES</div>
+                <ol class="nm-menu">
+                  <li><a href="#overview" class="on"><i>01</i>OVERVIEW</a></li>
+                  <li><a href="#limits"><i>02</i>LIMITS</a></li>
+                  <li><a href="#cost"><i>03</i>COST &amp; VALUE</a></li>
+                  <li><a href="#efficiency"><i>04</i>EFFICIENCY</a></li>
+                  <li><a href="#history"><i>05</i>HISTORY</a></li>
+                  <li><a href="#settings"><i>06</i>SETTINGS</a></li>
+                  <li><a href="#about"><i>07</i>ABOUT</a></li>
+                </ol>
+                <div class="nm-health">
+                  <div class="nm-kick" style="margin-bottom:6px">DATA HEALTH</div>
+                  <div class="nm-kv"><span>LINK</span><b class="ok"><i class="nm-alive"></i>LIVE</b></div>
+                  <div class="nm-kv"><span>UPDATED</span><b>12 S AGO</b></div>
+                  <div class="nm-kv"><span>SOURCES</span><b>3 / 3 OK</b></div>
+                </div>
+                <div class="nm-phos">
+                  <div class="nm-kick">PHOSPHOR</div>
+                  <div class="nm-sw">
+                    <button data-set="amber" class="on">AMB</button><button data-set="green">GRN</button><button data-set="white">WHT</button><button data-set="red">RED</button>
+                    <button data-set="blue">BLU</button><button data-set="cyan">CYN</button><button data-set="orange">ORG</button><button data-set="purple">PUR</button>
+                  </div>
+                </div>
+              </nav>
+
+              <main class="nm-main">
+                <div class="nm-head">
+                  <h1 class="nm-h1">OVERVIEW<span class="nm-cur" aria-hidden="true"></span></h1>
+                  <p class="nm-sub">SESSION TELEMETRY FOR THE CURRENT WINDOW. PACE IS USAGE AGAINST ELAPSED TIME.</p>
+                </div>
+
+                <div class="nm-grid">
+                  <section class="nm-card" id="limits"><div class="nm-card-in">
+                    <div class="nm-card-t"><span class="nm-tag">SESSION</span><span class="nm-meta-t">5-HOUR WINDOW</span></div>
+                    <div class="nm-row2">
+                      <div class="nm-big">13%</div>
+                      <div class="nm-facts"><span>RESETS <b>7:39 PM</b></span><span>IN 3 H 27 M</span><span class="nm-chip">UNDER PACE</span></div>
+                    </div>
+                    <div class="nm-pace"><span>USAGE 13% / TIME 31%</span><b>-18 PTS, UNDER PACE</b></div>
+                    <div class="nm-cells" data-cells="32" data-v="13"></div>
+                    <div class="nm-rail" style="--t:31%"><i></i><b></b></div>
+                  </div></section>
+
+                  <section class="nm-card"><div class="nm-card-in">
+                    <div class="nm-card-t"><span class="nm-tag">WEEKLY</span><span class="nm-meta-t">7-DAY WINDOW</span></div>
+                    <div class="nm-row2">
+                      <div class="nm-big">2%</div>
+                      <div class="nm-facts"><span>RESETS <b>SAT 4:00 PM</b></span><span>IN 2 D 23 H</span><span class="nm-chip">WELL UNDER</span></div>
+                    </div>
+                    <div class="nm-pace"><span>USAGE 2% / TIME 57%</span><b>-55 PTS, UNDER PACE</b></div>
+                    <div class="nm-cells" data-cells="32" data-v="2"></div>
+                    <div class="nm-rail" style="--t:57%"><i></i><b></b></div>
+                  </div></section>
+
+                  <section class="nm-card"><div class="nm-card-in">
+                    <div class="nm-card-t"><span class="nm-tag">FABLE WEEKLY</span><span class="nm-meta-t">7-DAY WINDOW</span></div>
+                    <div class="nm-row2">
+                      <div class="nm-big">0%</div>
+                      <div class="nm-facts"><span>OF 50% SHARE</span><span>RESETS <b>SAT 4:00 PM</b></span><span class="nm-chip">NO DRAW</span></div>
+                    </div>
+                    <div class="nm-pace"><span>USAGE 0% / TIME 57%</span><b>-57 PTS, NO DRAW</b></div>
+                    <div class="nm-cells" data-cells="32" data-v="0"></div>
+                    <div class="nm-rail" style="--t:57%"><i></i><b></b></div>
+                  </div></section>
+
+                  <section class="nm-card wide" id="cost"><div class="nm-card-in">
+                    <div class="nm-card-t"><span class="nm-ttl">API-equivalent cost, month to date</span><span class="nm-meta-t">AT LIST PRICES</span></div>
+                    <div class="nm-cost">
+                      <div class="nm-cost-l">
+                        <div class="nm-hero">
+                          <div class="nm-big h">$1,659</div>
+                          <div class="nm-plan"><div class="nm-big m">16.6&times;</div><div class="nm-facts" style="align-items:flex-start;text-align:left"><span>YOUR PLAN</span><span>MAX 5X &middot; $100 / MONTH</span></div></div>
+                        </div>
+                        <div class="nm-ratio" data-ratio="16.6" role="img" aria-label="16.6 months of the Max 5x plan"></div>
+                        <div class="nm-note">1 cell = 1 month of Max 5x plan</div>
+                        <div class="nm-note nm-disc">API-equivalent at list prices, not amounts billed to your plan.</div>
+                        <div class="nm-tiles">
+                          <div class="nm-tile"><small>Today</small><div class="nm-big m" style="font-size:44px">$84.20</div></div>
+                          
+                          <div class="nm-tile"><small>Caching saved, MTD</small><div class="nm-big m" style="font-size:44px">$14.1K</div></div>
+                        </div>
+                      </div>
+                      <div class="nm-cost-r" id="history">
+                        <div class="nm-card-t" style="padding:0"><span class="nm-ttl" style="font-size:11px">DAILY &middot; LAST 30 DAYS</span><span class="nm-meta-t">1 PIP = $10</span></div>
+                        <div class="nm-chart" id="daily" role="img" aria-label="Daily API-equivalent cost, last 30 days">
+                          <div class="nm-days" id="days"></div>
+                          <div class="nm-avg" id="avg"><b>MTD AVG $79</b></div>
+                          <div class="nm-axis"><span>SEP 22</span><span>OCT 1</span><span>TODAY</span></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div></section>
+
+                  <section class="nm-card" id="efficiency"><div class="nm-card-in">
+                    <div class="nm-card-t"><span class="nm-ttl">Cache &amp; thinking</span><span class="nm-meta-t">this month</span></div>
+                    <div class="nm-kpi"><div class="nm-kl">Cache hit rate</div><div class="nm-big m">96.4%</div><div class="nm-cells" data-cells="20" data-v="96.4"></div></div>
+                    <div class="nm-kpi"><div class="nm-kl">Thinking share of output</div><div class="nm-big m">38%</div><div class="nm-cells" data-cells="20" data-v="38"></div></div>
+                  </div></section>
+
+                  <section class="nm-card" id="models"><div class="nm-card-in">
+                    <div class="nm-card-t"><span class="nm-ttl">Model mix</span><span class="nm-meta-t">share, MTD</span></div>
+                    <div class="nm-mix">
+                      <div class="nm-mrow"><span class="k">OPUS 5.5</span><div class="nm-cells" data-cells="20" data-v="86"></div><span class="v">86%</span></div>
+                      <div class="nm-mrow"><span class="k">SONNET 5.5</span><div class="nm-cells" data-cells="20" data-v="7"></div><span class="v">7%</span></div>
+                      <div class="nm-mrow"><span class="k">HAIKU 4.5</span><div class="nm-cells" data-cells="20" data-v="6"></div><span class="v">6%</span></div>
+                      <div class="nm-mrow"><span class="k">HAIKU 5.5</span><div class="nm-cells" data-cells="20" data-v="1"></div><span class="v">1%</span></div>
+                    </div>
+                  </div></section>
+
+                  <section class="nm-card"><div class="nm-card-in">
+                    <div class="nm-card-t"><span class="nm-ttl">Where the week went</span><span class="nm-meta-t">share, 7 days</span></div>
+                    <div class="nm-mix">
+                      <div class="nm-mrow"><span class="k">CLAUDE CODE</span><div class="nm-cells" data-cells="20" data-v="100"></div><span class="v">100%</span></div>
+                      <div class="nm-mrow"><span class="k">CHATS</span><div class="nm-cells" data-cells="20" data-v="0"></div><span class="v">0%</span></div>
+                      <div class="nm-mrow"><span class="k">COWORK</span><div class="nm-cells" data-cells="20" data-v="0"></div><span class="v">0%</span></div>
+                    </div>
+                  </div></section>
+
+                  <section class="nm-card" id="burn"><div class="nm-card-in">
+                    <div class="nm-card-t"><span class="nm-ttl">Burn rate</span><span class="nm-chip">NORMAL</span></div>
+                    <div class="nm-row2" style="align-items:baseline">
+                      <div class="nm-big m">1,240</div>
+                      <div class="nm-facts" style="align-items:flex-end"><span>TOK / MIN</span><span>$6.10 / HOUR</span></div>
+                    </div>
+                    <svg id="spark" class="nm-burn-sv" viewBox="0 0 300 58" preserveAspectRatio="none" aria-label="Burn rate, last 24 samples"></svg>
+                  </div></section>
+                </div>
+              </main>
+            </div>
+          </div>
+
+          <div class="nm-boot" id="boot" aria-live="polite"><span id="boot-text"></span></div>
+          <div class="nm-scan"></div>
+          <div class="nm-vig"></div>
+        </div>
+        <div class="mk-foot">
+          <span class="mk-plate">CU-MON REV 5.5 &middot; PHOSPHOR P3 &middot; 1200 X 760</span>
+          <span class="mk-hz"></span>
+          <span class="mk-leds"><i class="mk-led on"></i><i class="mk-led on"></i><i class="mk-led"></i><i class="mk-led warn"></i></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 05 VARIANTS ============ -->
+  <section class="sec" id="s5">
+    <div class="sec-h"><span class="n">05</span><h2>VARIANTS</h2><p>eight variants cover the eight app accents &middot; one data-variant attribute swaps every token &middot; no component has a per-variant rule</p></div>
+    <div class="var-grid">
+      <div class="vcell" data-variant="amber"><div class="vlab"><b>AMBER P3</b>Default. The current app colour, refined.</div><div data-fw="normal3"></div><div class="vchips"><i style="background:var(--hot)"></i><i style="background:var(--bright)"></i><i style="background:var(--main)"></i><i style="background:var(--label)"></i><i style="background:var(--dim)"></i><i style="background:var(--ghost)"></i><i style="background:var(--stale)"></i><i style="background:var(--crt)"></i></div></div>
+      <div class="vcell" data-variant="green"><div class="vlab"><b>TERMINAL GREEN P1</b>Green phosphor, terminal grade.</div><div data-fw="normal3"></div><div class="vchips"><i style="background:var(--hot)"></i><i style="background:var(--bright)"></i><i style="background:var(--main)"></i><i style="background:var(--label)"></i><i style="background:var(--dim)"></i><i style="background:var(--ghost)"></i><i style="background:var(--stale)"></i><i style="background:var(--crt)"></i></div></div>
+      <div class="vcell" data-variant="white"><div class="vlab"><b>WHITE P4</b>Neutral white, low glare.</div><div data-fw="normal3"></div><div class="vchips"><i style="background:var(--hot)"></i><i style="background:var(--bright)"></i><i style="background:var(--main)"></i><i style="background:var(--label)"></i><i style="background:var(--dim)"></i><i style="background:var(--ghost)"></i><i style="background:var(--stale)"></i><i style="background:var(--crt)"></i></div></div>
+      <div class="vcell" data-variant="red"><div class="vlab"><b>RED ALERT</b>Alert palette for hot runs.</div><div data-fw="normal3"></div><div class="vchips"><i style="background:var(--hot)"></i><i style="background:var(--bright)"></i><i style="background:var(--main)"></i><i style="background:var(--label)"></i><i style="background:var(--dim)"></i><i style="background:var(--ghost)"></i><i style="background:var(--stale)"></i><i style="background:var(--crt)"></i></div></div>
+      <div class="vcell" data-variant="blue"><div class="vlab"><b>BLUE BRIDGE</b>Cool blue for bridge-style displays.</div><div data-fw="normal3"></div><div class="vchips"><i style="background:var(--hot)"></i><i style="background:var(--bright)"></i><i style="background:var(--main)"></i><i style="background:var(--label)"></i><i style="background:var(--dim)"></i><i style="background:var(--ghost)"></i><i style="background:var(--stale)"></i><i style="background:var(--crt)"></i></div></div>
+      <div class="vcell" data-variant="cyan"><div class="vlab"><b>CYAN</b>Cyan phosphor, cool and clinical.</div><div data-fw="normal3"></div><div class="vchips"><i style="background:var(--hot)"></i><i style="background:var(--bright)"></i><i style="background:var(--main)"></i><i style="background:var(--label)"></i><i style="background:var(--dim)"></i><i style="background:var(--ghost)"></i><i style="background:var(--stale)"></i><i style="background:var(--crt)"></i></div></div>
+      <div class="vcell" data-variant="orange"><div class="vlab"><b>ORANGE</b>Warm orange, close to amber.</div><div data-fw="normal3"></div><div class="vchips"><i style="background:var(--hot)"></i><i style="background:var(--bright)"></i><i style="background:var(--main)"></i><i style="background:var(--label)"></i><i style="background:var(--dim)"></i><i style="background:var(--ghost)"></i><i style="background:var(--stale)"></i><i style="background:var(--crt)"></i></div></div>
+      <div class="vcell" data-variant="purple"><div class="vlab"><b>PURPLE</b>Violet phosphor, low glare.</div><div data-fw="normal3"></div><div class="vchips"><i style="background:var(--hot)"></i><i style="background:var(--bright)"></i><i style="background:var(--main)"></i><i style="background:var(--label)"></i><i style="background:var(--dim)"></i><i style="background:var(--ghost)"></i><i style="background:var(--stale)"></i><i style="background:var(--crt)"></i></div></div>
+    </div>
+    <p class="vkey" style="margin-top:22px">Token set per variant: --plate --crt-2 --hot --bright --main --label --dim --stale --ghost --ink --edge --edge-hi --rule --rule-strong --glow --glow-soft --tray-track. Chip order: hot, bright, main, label, dim, ghost, stale, crt. The app accent names map as Default to amber, Green to green, White to white, Red to red, Blue to blue, Cyan to cyan, Orange to orange, Purple to purple.</p>
+  </section>
+
+  <footer class="foot-sheet">
+    <p><b>FONTS</b>Michroma, IBM Plex Mono (SemiBold 600 and Regular 400) and VT323 are SIL Open Font License 1.1, free to bundle as static TTF. The taskbar clock uses Segoe UI Variable Text, a Windows system font that is not bundled.</p>
+    <p><b>CLOCK</b>One sample clock for the whole sheet: Wednesday 2026-10-21, 4:12 PM. Session window 2:39 PM to 7:39 PM, 31 percent elapsed. Weekly and FABLE window ends Saturday 4:00 PM, 57 percent elapsed.</p>
+    <p><b>SCOPE</b>Mock only. No logos, marks, franchise names or film assets. All copy is original. The theme codename is internal and not shown in product copy.</p>
+    <p><b>CAPTURE</b>When the page is driven by automation it sets data-capture on the html element. Motion is then frozen to the ON frame, so static art shows the lit state. Product CSS does not depend on it.</p>
+  </footer>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var reduce = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  if (navigator.webdriver) document.documentElement.setAttribute('data-capture', '');
+
+  /* cells: n cells, v percent. The boundary cell fills by its fraction. */
+  function cellsHTML(n, v, base) {
+    var x = Math.max(0, Math.min(100, v)) / 100 * n, full = Math.floor(x), frac = x - full, out = '';
+    var b = base ? base + ' ' : '';
+    for (var i = 0; i < n; i++) {
+      if (i < full) out += '<i class="' + b + 'on"></i>';
+      else if (i === full && frac > 0.02) out += '<i class="' + b + 'part" style="--f:' + (frac * 100).toFixed(1) + '%"></i>';
+      else out += '<i class="' + b.trim() + '"></i>';
+    }
+    return out;
+  }
+
+  /* ---------- floating widget ---------- */
+  var SESSION = { t: 31, s: 13 }, WEEK = { t: 57 };
+  function row(r, name, qual, v, t) {
+    return '<div class="nm-row" data-r="' + r + '">' +
+      '<div class="nm-lbl">' + name + '<em>' + qual + '</em></div>' +
+      '<div class="nm-val">' + v + '%</div>' +
+      '<div class="nm-time" style="--t:' + t + '%"><i></i><b></b></div>' +
+      '<div class="nm-pips">' + cellsHTML(16, v, 'nm-pip') + '</div></div>';
+  }
+  function fw(o) {
+    var head = '<div class="nm-fw-head"><span class="nm-fw-hl"><i class="nm-alive"></i>' +
+      '<span class="nm-pill">' + o.live + '</span>' + (o.age ? '<span class="nm-age">' + o.age + '</span>' : '') + '</span>' +
+      '<span class="nm-state">' + o.state + '</span></div>';
+    var rows = o.rows.map(function (r, i) { return row(i + 1, r[0], r[1], r[2], r[3]); }).join('');
+    var msg = o.msg ? '<div class="nm-msg">' + o.msg + '</div>' : '';
+    return '<div class="nm-fw ' + (o.cls || '') + '"><div class="nm-fw-body"></div><div class="nm-fw-scan"></div>' +
+      '<div class="nm-fw-hi"></div>' + head + '<div class="nm-fw-rule"></div>' + rows + msg +
+      '<div class="nm-hazard"></div></div>';
+  }
+  var SPEC = {
+    normal3: { live: 'LIVE', age: '12 S', state: 'NOMINAL', rows: [
+      ['SESSION', '5H', 13, 31], ['WEEKLY', '7D', 2, 57], ['FABLE WEEKLY', 'OF 50% SHARE', 0, 57]] },
+    normal2: { cls: 'is-two', live: 'LIVE', age: '12 S', state: 'NOMINAL', rows: [
+      ['SESSION', '5H', 13, 31], ['WEEKLY', '7D', 2, 57]] },
+    warn3: { cls: 'is-warn', live: 'LIVE', age: '12 S', state: 'ADVISORY', rows: [
+      ['SESSION', '5H', 72, 31], ['WEEKLY', '7D', 21, 57], ['FABLE WEEKLY', 'OF 50% SHARE', 4, 57]] },
+    crit3: { cls: 'is-crit', live: 'LIVE', age: '3 S', state: 'CRITICAL', rows: [
+      ['SESSION', '5H', 93, 31], ['WEEKLY', '7D', 58, 57], ['FABLE WEEKLY', 'OF 50% SHARE', 12, 57]] },
+    stale3: { cls: 'is-stale is-auth', live: 'STALE', age: '41 M', state: 'LAST KNOWN',
+      msg: 'AUTH LINK LOST.<br>OPEN CLAUDE CODE TO RESTORE.', rows: [
+      ['SESSION', '5H', 13, 31], ['WEEKLY', '7D', 2, 57]] },
+    offline2: { cls: 'is-stale is-two is-offline', live: 'OFFLINE', age: '', state: 'NO CARRIER', rows: [
+      ['SESSION', '5H', 13, 31], ['WEEKLY', '7D', 2, 57]] },
+    paused2: { cls: 'is-paused is-two', live: 'PAUSED', age: '', state: 'HOLD', rows: [
+      ['SESSION', '5H', 13, 31], ['WEEKLY', '7D', 2, 57]] }
+  };
+  $$('[data-fw]').forEach(function (el) { el.innerHTML = fw(SPEC[el.getAttribute('data-fw')]); });
+
+  /* ---------- taskbar strip ---------- */
+  var STRIP = {
+    normal: { c: '', a: 13, b: 2, live: true },
+    warn:   { c: 'is-warn', a: 72, b: 21, live: true },
+    crit:   { c: 'is-crit', a: 93, b: 58, live: true },
+    stale:  { c: 'is-stale', a: 13, b: 2, live: false }
+  };
+  function bar(v, cls) { return '<div class="nm-sbar ' + cls + '" style="--p:' + v + '%">' + cellsHTML(10, v) + '</div>'; }
+  function strip(k) {
+    var s = STRIP[k];
+    return '<div class="nm-strip ' + s.c + '"><div class="nm-strip-body"></div><div class="nm-strip-scan"></div>' +
+      '<i class="nm-alive"' + (s.live ? '' : ' style="background:none;border:1px solid var(--stale)"') + '></i>' +
+      '<span class="nm-s-lbl">5H</span>' + bar(s.a, '') +
+      '<span class="nm-s-val r1">' + s.a + '%</span><span class="nm-s-sep"></span>' +
+      '<span class="nm-s-lbl r2">7D</span>' + bar(s.b, 'r2') +
+      '<span class="nm-s-val r2">' + s.b + '%</span></div>';
+  }
+  $$('[data-strip]').forEach(function (el) { el.innerHTML = strip(el.getAttribute('data-strip')); });
+
+  /* ---------- pip bars on the dashboard ---------- */
+  $$('[data-cells]').forEach(function (el) {
+    el.innerHTML = cellsHTML(+el.getAttribute('data-cells'), parseFloat(el.getAttribute('data-v')));
+  });
+  var ratio = $('[data-ratio]');
+  if (ratio) {
+    var rv = parseFloat(ratio.getAttribute('data-ratio')), whole = Math.floor(rv), rf = rv - whole, cells = '';
+    for (var k = 0; k < 17; k++) {
+      if (k < whole) cells += '<i class="on"></i>';
+      else if (k === whole && rf > 0.02) cells += '<i class="part" style="--f:' + Math.round(rf * 100) + '%"></i>';
+      else cells += '<i></i>';
+    }
+    ratio.innerHTML = cells;
+  }
+
+  /* ---------- daily cost: one pip = $10, nearest pip, 14 pips = full scale ---------- */
+  var DAILY = [55.20, 63.40, 71.90, 28.60, 49.75, 88.10, 76.30, 69.85, 60.45,
+               74.60, 106.10, 41.35, 38.90, 110.20, 138.20, 77.75, 85.30, 91.60, 33.15, 44.80,
+               97.25, 129.90, 71.40, 80.05, 64.70, 52.10, 58.85, 92.40, 86.20, 84.20];
+  var days = $('#days');
+  if (days) {
+    days.innerHTML = DAILY.map(function (v, i) {
+      var lit = Math.round(v / 10), pips = '';
+      for (var p = 0; p < 14; p++) pips += '<i class="' + (p < lit ? 'on' : '') + '"></i>';
+      return '<div class="nm-col' + (i === DAILY.length - 1 ? ' today' : '') + '" title="$' + v.toFixed(2) + '">' + pips + '</div>';
+    }).join('');
+    var avg = $('#avg');
+    if (avg) avg.style.bottom = (16 + 7.9 * 7 - 2) + 'px';   /* $79 = 7.9 pips, pip pitch 7 px, axis 16 px */
+  }
+
+  /* ---------- burn-rate trace: line only ---------- */
+  var spark = $('#spark');
+  if (spark) {
+    var V = [0.42,0.47,0.44,0.51,0.58,0.55,0.49,0.62,0.66,0.61,0.57,0.64,0.70,0.68,0.60,0.52,0.55,0.59,0.63,0.58,0.50,0.53,0.56,0.52];
+    var W = 300, H = 58, x0 = 4, x1 = W - 4, base = H - 4;
+    var pts = V.map(function (v, i) { return [x0 + i * (x1 - x0) / (V.length - 1), base - v * (H - 12)]; });
+    var g = '';
+    [14, 32, base].forEach(function (yy) {
+      g += '<line x1="0" x2="' + W + '" y1="' + yy + '" y2="' + yy + '" style="stroke:var(--ghost)" stroke-width="1" stroke-dasharray="1 3"/>';
+    });
+    g += '<polyline points="' + pts.map(function (p) { return p[0].toFixed(1) + ',' + p[1].toFixed(1); }).join(' ') +
+      '" fill="none" style="stroke:var(--bright)" stroke-width="1.2"/>';
+    g += pts.map(function (p) { return '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="1.6" style="fill:var(--hot)"/>'; }).join('');
+    spark.innerHTML = g;
+  }
+
+  /* ---------- tray icons: one pixel per cell, plate, ring, centre ---------- */
+  var TRAY_GEO = { 16: { R: 6.0, T: 3.0, C: 3 }, 24: { R: 9.5, T: 3.5, C: 4 }, 32: { R: 14.0, T: 4.0, C: 5 } };
+  function drawTray(cv, size, pct, state) {
+    var geo = TRAY_GEO[size], cs = getComputedStyle(cv);
+    var tok = function (n) { return cs.getPropertyValue(n).trim(); };
+    var lit = { normal: tok('--main'), warn: tok('--bright'), crit: tok('--hot'), stale: tok('--stale') }[state];
+    var track = tok('--tray-track'), plate = tok('--crt'), edge = tok('--edge'), hot = tok('--hot');
+    var S = size, C = geo.C, c = S / 2, ctx;
+    cv.width = S; cv.height = S;
+    ctx = cv.getContext('2d');
+    ctx.clearRect(0, 0, S, S);
+    for (var y = 0; y < S; y++) {
+      for (var x = 0; x < S; x++) {
+        var px = x + 0.5, py = y + 0.5;
+        if (px + py < C || (S - px) + (S - py) < C) continue;             /* chamfer: outside */
+        var col = plate;
+        var edgeHit = x === 0 || y === 0 || x === S - 1 || y === S - 1 ||
+          (px + py - C) < 1.42 || ((S - px) + (S - py) - C) < 1.42;
+        if (edgeHit) col = edge;
+        var dx = px - c, dy = py - c, r = Math.sqrt(dx * dx + dy * dy);
+        var a = Math.atan2(dx, -dy); if (a < 0) a += Math.PI * 2;
+        var inRing = r <= geo.R && r >= geo.R - geo.T;
+        if (S === 16 && x >= 7 && x <= 8 && y >= 7 && y <= 8 && state !== 'stale') col = lit;
+        else if (S === 24 && x >= 10 && x <= 13 && y >= 10 && y <= 13 && state !== 'stale') col = lit;
+        else if (inRing) {
+          if (state === 'stale') {
+            var s = a * (geo.R - geo.T / 2);
+            col = (Math.floor(s / 2) % 2 === 0) ? lit : plate;         /* dashed track, no arc */
+          } else {
+            col = (pct > 0 && a <= pct / 100 * Math.PI * 2) ? lit : track;
+          }
+        }
+        ctx.fillStyle = col; ctx.fillRect(x, y, 1, 1);
+      }
+    }
+    if (S === 32) {
+      ctx.fillStyle = state === 'stale' ? lit : hot;
+      ctx.font = '18px VT323, Consolas, monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(state === 'stale' ? '--' : String(pct), c, c + 1);
+    }
+  }
+  function trayAll() {
+    var grid = $('#tray-grid');
+    if (grid) {
+      var states = [[13, 'normal', 'NORMAL'], [72, 'warn', 'ADVISORY'], [93, 'crit', 'CRITICAL'], [13, 'stale', 'STALE']];
+      grid.innerHTML = states.map(function (s) {
+        var figs = [16, 24, 32].map(function (z) {
+          return '<figure><canvas class="nm-tray" width="' + z + '" height="' + z + '" data-tray="' + z + '" data-pct="' + s[0] +
+            '" data-state="' + s[1] + '" style="width:' + z + 'px;height:' + z + 'px"></canvas><figcaption>' + z + '</figcaption></figure>';
+        }).join('');
+        return '<div class="tr-cell"><div class="tr-set">' + figs + '</div><div class="tr-lbl">' + s[0] + '% <em>' + s[2] + '</em></div></div>';
+      }).join('');
+    }
+    $$('[data-tray-slot]').forEach(function (slot) {
+      var z = +slot.getAttribute('data-tray-slot');
+      slot.innerHTML = '<canvas class="nm-tray" width="' + z + '" height="' + z + '" data-tray="' + z + '" data-pct="13" data-state="normal" style="width:' + z + 'px;height:' + z + 'px"></canvas>';
+    });
+    $$('canvas[data-tray]').forEach(function (cv) {
+      drawTray(cv, +cv.getAttribute('data-tray'), +cv.getAttribute('data-pct'), cv.getAttribute('data-state'));
+    });
+  }
+  trayAll();
+  if (document.fonts && document.fonts.load) {
+    document.fonts.load('18px VT323').then(trayAll, function () {});
+  }
+
+  /* ---------- boot log: typed once per session, click to skip, tube collapses ---------- */
+  var boot = $('#boot'), bootTxt = $('#boot-text');
+  var BOOT = [
+    'CLAUDE USAGE MONITOR  //  ONBOARD COMPUTER  REV 5.5',
+    '',
+    '> LINK ESTABLISHED ................. OK',
+    '> READING SESSION LOG .............. 14,209 RECORDS',
+    '> PACE CURVES CALIBRATED ........... OK',
+    '> MONEY FIGURES ARE API-EQUIVALENT AT LIST PRICES',
+    '',
+    '> ALL SYSTEMS NOMINAL. HAVE A PRODUCTIVE SHIFT.'
+  ].join('\n');
+  var seen = false;
+  try { seen = sessionStorage.getItem('nm-boot-session') === '1'; } catch (e) { seen = false; }
+  var n = 0, timer = null;
+  function setText(k) {
+    bootTxt.innerHTML = '';
+    bootTxt.appendChild(document.createTextNode(BOOT.slice(0, k)));
+    var cur = document.createElement('span'); cur.className = 'nm-boot-cur'; bootTxt.appendChild(cur);
+  }
+  function endBoot() {
+    if (timer) { clearTimeout(timer); timer = null; }
+    if (boot) boot.classList.add('is-done');
+    try { sessionStorage.setItem('nm-boot-session', '1'); } catch (e) { /* private window: boot simply plays again */ }
+  }
+  function typeStep() {
+    n = Math.min(BOOT.length, n + 2);
+    setText(n);
+    timer = setTimeout(n < BOOT.length ? typeStep : function () { timer = setTimeout(endBoot, 900); }, 14);
+  }
+  if (boot) {
+    boot.addEventListener('click', endBoot);
+    if (seen || reduce) { setText(BOOT.length); endBoot(); }
+    else typeStep();
+  }
+
+  /* ---------- nav and phosphor switch (dashboard only) ---------- */
+  $$('.nm-menu a').forEach(function (a) {
+    a.addEventListener('click', function (e) {
+      e.preventDefault();
+      $$('.nm-menu a').forEach(function (x) { x.classList.toggle('on', x === a); });
+    });
+  });
+  var screen = $('#screen');
+  $$('[data-set]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      screen.setAttribute('data-variant', b.getAttribute('data-set'));
+      $$('[data-set]').forEach(function (x) { x.classList.toggle('on', x === b); });
+    });
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,60 @@
+/* motion.css: the part of the motion layer every theme shares (motion.js drives it; each theme draws its own look in
+   themes/<id>.motion.css, scoped to html[data-theme="<id>"]). It holds no colour and no timing of its own.
+
+   The contract with the script (docs/UI_ARCHITECTURE.md "Motion"):
+     main.fx-run         an entrance is playing. Every entrance rule hangs on it and fills `backwards`, so taking the class
+                         away (or never adding it) leaves exactly the markup app.js wrote.
+     main.fx-quiet       app.js: the page was just redrawn and the pointer has not moved since. It takes the one-shot hover
+                         animations and the hover transitions away, never the hover look itself (a card the pointer rests
+                         on stays lit through a data refresh).
+     .fx-land            a bar, rail or chart whose data just arrived: its fill plays on its own, from 0 and without the
+                         page stagger (--fx-c0 and --fx-i are 0 on it).
+     --fx-i              on .nm-head and each .nm-card: its order on the page (0, 1, 2 ...), the stagger
+     --fx-k              on each lit cell of a bar (.nm-cells, .nm-ratio): its order in the bar
+     --fx-c, --fx-p      on each chart column and each pip of it (0 at the bottom)
+     --fx-d, --fx-dn     on each dot of a line chart, and the number of dots
+     --fx-r              on each hbars row and each of the first rows of a table
+     --fx-gc, --fx-gs    on a figure with a ghost text: its resting colour and text-shadow
+     --gk-d, --gk-l      Gates only: when a cell of a bar starts to show, and for how long (ms)
+     data-fx             a figure whose characters the script draws (decode, roll): the ghost text
+     data-fx-d           the ghost still has characters that are not locked
+     data-fx-pend        a placeholder slot (num | bar | rail | chart) whose data has not arrived: the themes style it
+     html[data-fx-boot]  a boot is due and the theme's script has not taken over yet: the page is not drawn
+   Everything that moves is transform, opacity, clip-path or a registered custom property on a tiny element. */
+
+/* the ghost text: the real text stays in the DOM (transparent), so a screen reader reads it and the scripts that watch
+   the page for text changes see nothing change; only an attribute moves */
+[data-fx] { position: relative; color: transparent !important; text-shadow: none !important; }
+[data-fx]::after {
+  content: attr(data-fx); content: attr(data-fx) / "";
+  position: absolute; inset: 0; padding: inherit; text-align: inherit; white-space: pre; pointer-events: none;
+  color: var(--fx-gc); text-shadow: var(--fx-gs, none);
+}
+[data-fx] > *:not(.nm-cur) { opacity: 0; }       /* (a figure's small unit is not drawn; the heading's own mark stays) */
+
+/* teletype: the text is split in two spans, the typed part and the rest, which still takes its room but is not drawn,
+   so nothing moves while it types; the block cursor sits where the next character will land */
+.fx-u { visibility: hidden; }
+.fx-t.is-typing::after {
+  content: ""; display: inline-block; width: .46em; height: .62em; margin: 0 -.46em 0 .04em; vertical-align: baseline;
+  background: var(--fx-cur, currentColor); box-shadow: 0 0 8px var(--fx-glow, transparent);
+}
+
+/* lets the pace rail animate from 0 */
+@property --t { syntax: "<percentage>"; inherits: true; initial-value: 0%; }
+
+/* a slot that landed plays from its own start: no page stagger */
+.fx-land { --fx-c0: 0ms; --fx-i: 0; }
+
+/* placeholder slots: the themes draw them; this is only what they all need (a box for the sweeps to sit in) */
+[data-fx-pend] { position: relative; }
+
+/* a boot is due: the window shows only the theme's own empty surface until the script that plays the boot has loaded
+   (it arrives after the first state). Without this the dashboard would show for a few frames and then vanish under
+   the overlay. motion.js lifts it when the script takes over, and after 3.5 s whatever happens. */
+html[data-fx-boot] .nm-content { visibility: hidden; }
+
+/* reduced motion: nothing moves, a placeholder is a static one (the theme sheets say the same; this keeps the layer
+   safe on its own) */
+html[data-reduce-motion="1"] *, html[data-reduce-motion="1"] *::before, html[data-reduce-motion="1"] *::after { animation: none !important; transition: none !important; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }

@@ -1,0 +1,544 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Usage Monitor · Theme board</title>
+<style>
+  /* Board chrome tokens only. Each theme keeps its own tokens in its own file. */
+  :root {
+    color-scheme: light;
+    --board: #eef0f3;
+    --panel: #ffffff;
+    --ink: #171a1f;
+    --ink-2: #434a55;
+    --ink-3: #5f6672;
+    --rule: #dde1e7;
+    --rule-2: #c3c9d2;
+    --chip: #e3e7ed;
+    --link: #2b4f8c;
+    --wrap: 1480px;
+    --gutter: 40px;
+    --radius: 10px;
+    --sans: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+    --mono: "Cascadia Mono", Consolas, ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--board); }
+  body {
+    margin: 0;
+    color: var(--ink);
+    font: 15px/1.5 var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: var(--wrap); margin: 0 auto; padding: 0 var(--gutter); }
+  a { color: var(--link); }
+  h1, h2, h3, h4, p, ul, ol { margin: 0; }
+  ul, ol { padding-left: 20px; }
+
+  /* masthead */
+  .masthead { padding: 52px 0 26px; border-bottom: 1px solid var(--rule-2); }
+  .kicker { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+  .masthead h1 { margin-top: 8px; font-size: 34px; line-height: 1.18; font-weight: 600; letter-spacing: -.01em; max-width: 1200px; }
+  .lede { margin-top: 12px; max-width: 1000px; font-size: 16px; color: var(--ink-2); }
+  .toc { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 8px; }
+  .toc a { font-size: 13px; text-decoration: none; color: var(--ink); background: var(--chip); border-radius: 999px; padding: 5px 12px; }
+  .toc a:hover { background: var(--rule-2); }
+
+  /* blocks */
+  .block { margin-top: 44px; }
+  .h-sec { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 12px; font-weight: 600; }
+  .panel { background: var(--panel); border: 1px solid var(--rule); border-radius: var(--radius); padding: 20px 24px; }
+
+  /* side-by-side matrix */
+  table.matrix { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  table.matrix th, table.matrix td { text-align: left; vertical-align: top; padding: 10px 16px 10px 0; border-top: 1px solid var(--rule); font-size: 14px; line-height: 1.45; }
+  table.matrix thead th { border-top: 0; padding-top: 0; font-size: 17px; font-weight: 600; }
+  table.matrix thead small { display: block; margin-top: 2px; font: 400 12px var(--mono); color: var(--ink-3); }
+  table.matrix tbody th { font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--ink-3); padding-top: 12px; }
+  table.matrix img { display: block; height: auto; border: 1px solid var(--rule-2); border-radius: 6px; }
+
+  /* decisions */
+  .decisions { font-size: 15px; color: var(--ink-2); padding-left: 22px; }
+  .decisions li + li { margin-top: 10px; }
+  .decisions strong { color: var(--ink); font-weight: 600; }
+
+  /* theme sections */
+  .theme { margin-top: 60px; }
+  .theme-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 24px; padding-bottom: 14px; border-bottom: 1px solid var(--rule-2); }
+  .chip-id { display: inline-block; font: 400 12px var(--mono); color: var(--ink-3); background: var(--chip); border-radius: 4px; padding: 3px 8px; margin-bottom: 10px; }
+  .theme-head h2 { font-size: 30px; font-weight: 600; letter-spacing: -.01em; line-height: 1.15; }
+  .tagline { margin-top: 4px; font-size: 16px; color: var(--ink-2); }
+  .theme-links a { margin-left: 18px; font-size: 14px; white-space: nowrap; }
+  .concept { margin-top: 16px; max-width: 1040px; font-size: 16px; color: var(--ink-2); }
+  .notes { margin-top: 18px; display: grid; grid-template-columns: 1fr 1.25fr; gap: 28px; }
+  .notes h4 { font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 8px; font-weight: 600; }
+  .notes ul { font-size: 14px; color: var(--ink-2); }
+  .notes li + li { margin-top: 4px; }
+  .sub { margin: 34px 0 12px; font-size: 15px; font-weight: 600; color: var(--ink); }
+  .row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 24px 20px; }
+  figure { margin: 0; width: fit-content; max-width: 100%; }
+  figure img { display: block; height: auto; max-width: 100%; border-radius: 8px; border: 1px solid var(--rule-2); }
+  figcaption { margin-top: 8px; font-size: 13px; line-height: 1.45; color: var(--ink-3); max-width: 76ch; }
+
+  /* colophon */
+  .colophon { margin-top: 60px; padding: 18px 0 64px; border-top: 1px solid var(--rule-2); font-size: 13px; color: var(--ink-3); }
+  .colophon p + p { margin-top: 6px; }
+
+  @media (max-width: 1100px) {
+    :root { --gutter: 20px; }
+    .notes { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="wrap">
+    <p class="kicker">Claude Usage Monitor · design board</p>
+    <h1>Three themes for the floating widget, taskbar strip, tray icon and dashboard</h1>
+    <p class="lede">Each theme opens with its concept and notes, then shows real-size captures (1x) followed by zooms. Sample values follow the brief: session 13% (resets 7:39 PM, 31% of the 5 h window gone), weekly 2%, and $1,659 API-equivalent against a $100 Max 5x plan, 16.6x. Money figures are labelled API-equivalent at list prices.</p>
+    <nav class="toc" aria-label="Sections">
+      <a href="#compare">Side by side</a>
+      <a href="#decisions">Decisions</a>
+      <a href="#nostromo">Nostromo</a>
+      <a href="#night_city">Night City</a>
+      <a href="#gates">Gates</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<section class="block" id="compare">
+  <div class="wrap">
+    <p class="h-sec">Side by side</p>
+    <div class="panel">
+      <table class="matrix">
+        <colgroup><col style="width:132px"><col><col><col></colgroup>
+        <thead>
+          <tr>
+            <th scope="col"></th>
+            <th scope="col">Nostromo<small>nostromo</small></th>
+            <th scope="col">Night City<small>night_city</small></th>
+            <th scope="col">Gates<small>gates</small></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row">Tagline</th>
+            <td>The shipped amber-on-CRT identity, sharpened.</td>
+            <td>A chamfered in-game HUD in salmon, cyan and signal yellow.</td>
+            <td>A Windows Quick Settings card in the accent you pick.</td>
+          </tr>
+          <tr>
+            <th scope="row">Widget, 1x</th>
+            <td><img src="shots/nostromo-normal-1x.png" width="288" height="136" alt="Nostromo normal widget at 1x"></td>
+            <td><img src="shots/night-city-normal-1x.png" width="284" height="156" alt="Night City normal widget at 1x"></td>
+            <td><img src="shots/gates-normal-1x.png" width="336" height="176" alt="Gates normal card at 1x"></td>
+          </tr>
+          <tr>
+            <th scope="row">Widget size</th>
+            <td>280 × 126 with the Fable row, 280 × 94 without.</td>
+            <td>264 × 126 with the Fable row, 264 × 96 without.</td>
+            <td>288 × 128 card on a 336 × 176 canvas, the same in every state.</td>
+          </tr>
+          <tr>
+            <th scope="row">Surface</th>
+            <td>Chamfered CRT panel, 16-cell pip bars, 30% scanlines in the widget, glow on lit pips.</td>
+            <td>Chamfered HUD frame with corner brackets, solid salmon bar with a slanted leading edge, 15% scanlines.</td>
+            <td>Rounded card with a time rail above a 4 px usage bar and a tinted status pill.</td>
+          </tr>
+          <tr>
+            <th scope="row">Type</th>
+            <td>Michroma, IBM Plex Mono and VT323, all SIL OFL 1.1.</td>
+            <td>Chakra Petch, Rajdhani and Share Tech Mono, all SIL OFL 1.1.</td>
+            <td>Segoe UI Variable and Segoe Fluent Icons (Windows, not bundled), Cascadia Mono (SIL OFL 1.1).</td>
+          </tr>
+          <tr>
+            <th scope="row">Modes and variants</th>
+            <td>Dark only. Eight variants, amber is the default.</td>
+            <td>Dark only, no light pair. Four variants, Blackwall is the default.</td>
+            <td>Dark and light. Seven accents each, 14 variants. System accent is the default.</td>
+          </tr>
+          <tr>
+            <th scope="row">Tray icon</th>
+            <td>16, 24 and 32 px. Ring on a dark plate, so it reads on light taskbars.</td>
+            <td>16, 20, 24 and 32 px. Octagon ring with integer edges.</td>
+            <td>16, 24 and 32 px. Arc ring; stale is a dashed ring.</td>
+          </tr>
+          <tr>
+            <th scope="row">Stale</th>
+            <td>Dashed box: AUTH LINK LOST. OPEN CLAUDE CODE TO RESTORE.</td>
+            <td>Band: RELINK // OPEN CLAUDE CODE, with 2 px hazard strips.</td>
+            <td>Grey STALE pill with its age, and the footer “Hmm, we lost touch.”</td>
+          </tr>
+          <tr>
+            <th scope="row">Critical</th>
+            <td>Static inverted chip and a hazard stripe on the top edge. No blink.</td>
+            <td>Hazard-filled bar, red value with glow, CRIT chip with a hazard cap.</td>
+            <td>Red bar and value with the footer “Nearly out.” No hazard stripes.</td>
+          </tr>
+          <tr>
+            <th scope="row">Dashboard</th>
+            <td>1200 × 760 CRT console: bloom, 22% scanlines, typed boot once per session.</td>
+            <td>1200 × 760 HUD: 31-cell segmented bars, daily cost chart, RGB-split refresh.</td>
+            <td>1200 × 760 Settings-style shell with pace lanes, in dark and light.</td>
+          </tr>
+          <tr>
+            <th scope="row">Open risk</th>
+            <td>Not checked on a real 100% taskbar. Pillow baselines still need a check.</td>
+            <td>No notification-area test yet at 100, 125 or 150% DPI.</td>
+            <td>The dashed 16 px stale ring can read as dotted. WebView2 font names unverified.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="decisions">
+  <div class="wrap">
+    <p class="h-sec">Decisions for the owner</p>
+    <div class="panel">
+      <ol class="decisions">
+        <li><strong>Pick one weekly reset.</strong> The brief's Wed 4:00 PM had already passed by the 4:12 PM sample clock, so each mock chose a different day: Sat 4:00 PM (nostromo), Mon 9:00 AM (night city) and Sun 4:00 PM (gates). The session reset is 7:39 PM in each normal state.</li>
+        <li><strong>Check the names.</strong> The ids nostromo and night_city, and the display name Night City, borrow film and game titles. The brief allowed homage through style, colour, type and copy only, so confirm these or rename them before the theme files are used.</li>
+        <li><strong>Choose the reference theme</strong> for the Pillow widgets. The other two specs stay in usage_monitor/themes/ as alternates.</li>
+        <li><strong>Verify on hardware before shipping:</strong> a real 100% taskbar, the notification area at 100, 125 and 150% DPI, and the WebView2 font names for gates. The 70% and 90% severity thresholds are placeholders in the nostromo spec.</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<section class="theme" id="nostromo">
+  <div class="wrap">
+    <header class="theme-head">
+      <div>
+        <span class="chip-id">nostromo · dark only · 8 variants</span>
+        <h2>Nostromo</h2>
+        <p class="tagline">The shipped amber-on-CRT identity, sharpened.</p>
+      </div>
+      <div class="theme-links">
+        <a href="nostromo/final.html">Open live mock</a>
+        <a href="../../usage_monitor/themes/nostromo.json">Theme spec (JSON)</a>
+      </div>
+    </header>
+    <p class="concept">Nostromo keeps the amber-on-CRT look the app already ships and makes it exact. Widgets are flat and chamfered, with 16-cell pip bars and a time rail under each bar, so pace reads straight off the widget. Status is carried by shape and word (a boxed pill, a severity word and a static inverted chip for critical), never by blinking or colour alone.</p>
+    <div class="notes">
+      <div>
+        <h4>Fonts and licences</h4>
+        <ul>
+          <li>Michroma: display, SIL OFL 1.1</li>
+          <li>IBM Plex Mono SemiBold 600 and Regular 400: labels, SIL OFL 1.1</li>
+          <li>VT323: readouts, percentages and the tray centre, SIL OFL 1.1</li>
+          <li>Segoe UI Variable Text: taskbar clock only, Windows system font, not bundled</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Open items</h4>
+        <ul>
+          <li>Not checked on a real 100% taskbar. The light-taskbar row is a mock only.</li>
+          <li>Baselines marked “verify” come from CSS measurement and need a check against the Pillow render.</li>
+          <li>Weekly reset is Sat 4:00 PM, so 57% of the 7-day window is gone. Severity thresholds at 70% and 90% are placeholders.</li>
+          <li>Settings, History and About are nav entries only. No pages are designed.</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3 class="sub">Floating widget</h3>
+    <div class="row">
+      <figure>
+        <img src="shots/nostromo-widget-states-1x.png" width="1280" height="399" alt="Nostromo widget states at 1x">
+        <figcaption>1x, real size. Normal with the Fable row, normal with it hidden, warning 72%, critical 93%, stale, offline and paused.</figcaption>
+      </figure>
+    </div>
+    <div class="row">
+      <figure>
+        <img src="shots/nostromo-widget-zoom-3x.png" width="840" height="379" alt="Nostromo normal widget at 3x zoom">
+        <figcaption>3x zoom of the normal widget: pip cells, time rail and pace tick.</figcaption>
+      </figure>
+    </div>
+
+    <h3 class="sub">Taskbar strip</h3>
+    <div class="row">
+      <figure>
+        <img src="shots/nostromo-taskbar-1x.png" width="1280" height="201" alt="Nostromo strip on a Windows 11 taskbar mock at 1x">
+        <figcaption>1x Windows 11 taskbar mock, 4:12 PM, 2026-10-21. The strip sits left of the tray clock.</figcaption>
+      </figure>
+    </div>
+    <div class="row">
+      <figure>
+        <img src="shots/nostromo-strip-states-1x.png" width="1280" height="205" alt="Nostromo strip states at 1x">
+        <figcaption>Strip at 1x: normal, warning, critical (inverted 93% cell) and stale (hollow dot).</figcaption>
+      </figure>
+    </div>
+    <div class="row">
+      <figure>
+        <img src="shots/nostromo-strip-zoom-3x.png" width="900" height="119" alt="Nostromo strip at 3x zoom">
+        <figcaption>3x zoom of the normal strip.</figcaption>
+      </figure>
+    </div>
+
+    <h3 class="sub">Tray icon</h3>
+    <div class="row">
+      <figure>
+        <img src="shots/nostromo-tray-1x.png" width="1280" height="312" alt="Nostromo tray icons at 1x">
+        <figcaption>16, 24 and 32 px at 1x for normal, advisory (72), critical (93) and stale. The lower loupe shows the 16 px icon at 8x.</figcaption>
+      </figure>
+    </div>
+
+    <h3 class="sub">Dashboard, 1200 × 760</h3>
+    <div class="row">
+      <figure>
+        <img src="shots/nostromo-dashboard-1x.png" width="1200" height="761" alt="Nostromo dashboard overview at 1x">
+        <figcaption>1x Overview: limit cards, the $1,659 cost hero at 16.6x, cache and thinking, daily chart, model mix, week split, burn rate and data health.</figcaption>
+      </figure>
+    </div>
+    <div class="row">
+      <figure>
+        <img src="shots/nostromo-boot-1x.png" width="1200" height="761" alt="Nostromo typed boot frame at 1x">
+        <figcaption>Typed boot frame. Plays once per session. A click skips it, and reduced motion shows the text at once.</figcaption>
+      </figure>
+    </div>
+
+    <h3 class="sub">Colour variants</h3>
+    <div class="row">
+      <figure>
+        <img src="shots/nostromo-variants-1x.png" width="1280" height="495" alt="Nostromo eight colour variants at 1x">
+        <figcaption>All eight variants at 1x with swatches: amber (default), terminal green, white, red alert, blue bridge, cyan, orange and purple.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section class="theme" id="night_city">
+  <div class="wrap">
+    <header class="theme-head">
+      <div>
+        <span class="chip-id">night_city · dark only · 4 variants</span>
+        <h2>Night City</h2>
+        <p class="tagline">A chamfered in-game HUD in salmon, cyan and signal yellow.</p>
+      </div>
+      <div class="theme-links">
+        <a href="night_city/final.html">Open live mock</a>
+        <a href="../../usage_monitor/themes/night_city.json">Theme spec (JSON)</a>
+      </div>
+    </header>
+    <p class="concept">Every frame is a chamfered polygon with a hairline edge and corner brackets, so the widget reads as an in-game HUD. Salmon carries usage, cyan carries LIVE and the pace line, and signal yellow is kept for WARN, CRIT, STALE and stamps. Hazard stripes appear only on the critical fill, the stale band and the CRIT cap. The LIVE pip breathes on a 2.4 s pulse instead of blinking, and numerals refresh with a short RGB split once per data refresh.</p>
+    <div class="notes">
+      <div>
+        <h4>Fonts and licences</h4>
+        <ul>
+          <li>Chakra Petch Bold and SemiBold: numerals and headings, SIL OFL 1.1</li>
+          <li>Rajdhani Bold and SemiBold: labels, chips and nav, SIL OFL 1.1</li>
+          <li>Share Tech Mono: values, reset times and data text, SIL OFL 1.1</li>
+          <li>Segoe UI Variable: taskbar mock only, Windows system font, not bundled</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Open items</h4>
+        <ul>
+          <li>No real notification-area test at 100, 125 or 150% DPI. The tray octagon is a generic placeholder shape.</li>
+          <li>The refresh hit plays once on load in the mock so it is visible. The app should add it only on real refreshes.</li>
+          <li>In edgerun, WARN moves to red-orange (#ff7a1a) so the yellow stays the signature colour.</li>
+          <li>Weekly reset is Mon 9:00 AM, so 33% of the 7-day window is gone.</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3 class="sub">Floating widget</h3>
+    <div class="row">
+      <figure>
+        <img src="shots/night-city-widget-states-1x.png" width="1292" height="179" alt="Night City widget states at 1x">
+        <figcaption>1x, real size. Normal, warning 72% with the outline WARN chip, critical 93% with the CRIT chip and hazard cap, and the stale RELINK band. At 1x the band text sits tight against the 14 M OLD tag; judge it on the 3x zoom below.</figcaption>
+      </figure>
+    </div>
+    <div class="row">
+      <figure>
+        <img src="shots/night-city-widget-zoom-3x.png" width="900" height="421" alt="Night City normal widget at 3x zoom">
+        <figcaption>3x zoom of the normal widget with the Fable row. Time-rail ticks are cyan, usage is salmon.</figcaption>
+      </figure>
+    </div>
+
+    <h3 class="sub">Stale state and taskbar strip</h3>
+    <div class="row">
+      <figure>
+        <img src="shots/night-city-stale-zoom-3x.png" width="864" height="453" alt="Night City stale widget at 3x zoom">
+        <figcaption>3x zoom of the stale state: a band with 2 px hazard strips. The rows drop to a dimmed salmon, with no opacity change.</figcaption>
+      </figure>
+    </div>
+    <div class="row">
+      <figure>
+        <img src="shots/night-city-taskbar-1x.png" width="1292" height="49" alt="Night City strip on a taskbar at 1x">
+        <figcaption>1x taskbar mock, 4:12 PM, 2026-10-21. The strip is 240 × 38 and sits left of the tray.</figcaption>
+      </figure>
+    </div>
+    <div class="row">
+      <figure>
+        <img src="shots/night-city-taskbar-zoom-2x.png" width="1120" height="97" alt="Night City strip beside the tray at 2x zoom">
+        <figcaption>2x zoom of the strip beside the tray icon and clock.</figcaption>
+      </figure>
+    </div>
+
+    <h3 class="sub">Tray icon</h3>
+    <div class="row">
+      <figure>
+        <img src="shots/night-city-tray-1x.png" width="576" height="375" alt="Night City tray icons at 1x">
+        <figcaption>Octagon ring at 16, 20, 24 and 32 px for normal, warning, critical and stale (dashed), at 1x.</figcaption>
+      </figure>
+    </div>
+
+    <h3 class="sub">Dashboard, 1200 × 760</h3>
+    <div class="row">
+      <figure>
+        <img src="shots/night-city-dashboard-1x.png" width="1200" height="761" alt="Night City dashboard overview at 1x">
+        <figcaption>1x HUD Overview: limit cards, the cost hero with the 16.6× plan bar, caching, burn rate, daily chart, model mix, week split and footer status.</figcaption>
+      </figure>
+    </div>
+
+    <h3 class="sub">Colour variants</h3>
+    <div class="row">
+      <figure>
+        <img src="shots/night-city-variants-1x.png" width="1292" height="204" alt="Night City widget in four colour variants at 1x">
+        <figcaption>Widget in all four variants with the colour legend: 01 Blackwall (default), 02 Relic, 03 Edgerun and 04 Mox.</figcaption>
+      </figure>
+    </div>
+    <div class="row">
+      <figure>
+        <img src="shots/night-city-variant-cards-1x.png" width="1292" height="825" alt="Night City limit cards in four colour variants at 1x">
+        <figcaption>Limit cards in all four variants at 1x.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section class="theme" id="gates">
+  <div class="wrap">
+    <header class="theme-head">
+      <div>
+        <span class="chip-id">gates · dark and light · 7 accents</span>
+        <h2>Gates</h2>
+        <p class="tagline">A Windows Quick Settings card in the accent you pick.</p>
+      </div>
+      <div class="theme-links">
+        <a href="gates/final.html">Open live mock</a>
+        <a href="../../usage_monitor/themes/gates.json">Theme spec (JSON)</a>
+      </div>
+    </header>
+    <p class="concept">Each limit row is a 288 × 128 Quick Settings card. A thin time rail, showing the share of the window already gone with an index tick at its end, sits above the usage bar, so pace is the gap between the two. Status is a tinted pill with its age, such as LIVE · 12 s. Severity colours only the bar and the value. The dashboard follows the Settings shell, with search, profile, an icon nav with a 3 px accent indicator, and pace lanes.</p>
+    <div class="notes">
+      <div>
+        <h4>Fonts and licences</h4>
+        <ul>
+          <li>Segoe UI Variable Display and Text: Windows 11 system font, Microsoft terms, read from C:\Windows\Fonts, not bundled</li>
+          <li>Segoe Fluent Icons: Windows 11 system font, same terms, not bundled</li>
+          <li>Cascadia Mono (variable 200–700): SIL OFL 1.1, bundled</li>
+          <li>Consolas and system-ui: mock-only fallbacks</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Open items</h4>
+        <ul>
+          <li>The dashed stale ring reads as dotted at 16 px and can resemble a loading ring at 24 and 32 px. Solid grey is the fallback if users confuse it.</li>
+          <li>Not verified: whether WebView2 resolves the Segoe UI Variable Display and Text family names, or needs Segoe UI Variable. The named-instance mapping is in gates.json.</li>
+          <li>System accent and Blue are both blue by design. The mock uses the Windows default; the app reads the live accent.</li>
+          <li>Light and dark are separate variants. System mode picks the dark or light entry of the chosen accent.</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3 class="sub">Floating widget</h3>
+    <div class="row">
+      <figure>
+        <img src="shots/gates-widget-1x.png" width="1392" height="176" alt="Gates normal card at 1x, with and without the Fable row">
+        <figcaption>1x, real size. Normal, with the Fable row and without it.</figcaption>
+      </figure>
+    </div>
+    <div class="row">
+      <figure>
+        <img src="shots/gates-widget-states-1x.png" width="1392" height="412" alt="Gates widget states at 1x">
+        <figcaption>1x, real size. Normal, warning 72%, critical 93%, stale, offline and paused.</figcaption>
+      </figure>
+    </div>
+    <div class="row">
+      <figure>
+        <img src="shots/gates-widget-zoom-3x.png" width="960" height="480" alt="Gates normal card at 3x zoom">
+        <figcaption>3x zoom of the normal card.</figcaption>
+      </figure>
+    </div>
+
+    <h3 class="sub">Taskbar strip</h3>
+    <div class="row">
+      <figure>
+        <img src="shots/gates-taskbar-dark-2x.png" width="1200" height="48" alt="Gates strip on a dark taskbar mock at 1x">
+        <figcaption>Dark taskbar mock at 1x (captured at 2x), 4:12 PM, 2026-10-21.</figcaption>
+      </figure>
+    </div>
+    <div class="row">
+      <figure>
+        <img src="shots/gates-taskbar-light-2x.png" width="1200" height="48" alt="Gates strip on a light taskbar mock at 1x">
+        <figcaption>Light taskbar mock at 1x (captured at 2x). Warn uses the darker amber here.</figcaption>
+      </figure>
+    </div>
+    <div class="row">
+      <figure>
+        <img src="shots/gates-strip-zoom-3x.png" width="760" height="160" alt="Gates strip at 3x zoom">
+        <figcaption>3x zoom of the dark strip: 5H and 7D bars with time ticks, values and the status dot.</figcaption>
+      </figure>
+    </div>
+
+    <h3 class="sub">Tray icon</h3>
+    <div class="row">
+      <figure>
+        <img src="shots/gates-tray-dark-2x.png" width="688" height="226" alt="Gates tray icons on a dark taskbar at 1x">
+        <figcaption>Dark taskbar at 1x (captured at 2x): 16, 24 and 32 px for normal, warning, critical and stale.</figcaption>
+      </figure>
+      <figure>
+        <img src="shots/gates-tray-light-2x.png" width="688" height="226" alt="Gates tray icons on a light taskbar at 1x">
+        <figcaption>Light taskbar at 1x (captured at 2x). Same sizes and states.</figcaption>
+      </figure>
+    </div>
+
+    <h3 class="sub">Dashboard, 1200 × 760</h3>
+    <div class="row">
+      <figure>
+        <img src="shots/gates-dashboard-dark-1x.png" width="1200" height="760" alt="Gates dashboard overview, dark, at 1x">
+        <figcaption>1x dark Overview: Settings shell with search, profile, icon nav and pace lanes.</figcaption>
+      </figure>
+    </div>
+    <div class="row">
+      <figure>
+        <img src="shots/gates-dashboard-light-1x.png" width="1200" height="760" alt="Gates dashboard overview, light, at 1x">
+        <figcaption>1x light Overview, same layout. System mode shows this set when Windows is in light mode.</figcaption>
+      </figure>
+    </div>
+
+    <h3 class="sub">Colour variants</h3>
+    <div class="row">
+      <figure>
+        <img src="shots/gates-variants-dark-1x.png" width="1392" height="410" alt="Gates dark accent variants at 1x">
+        <figcaption>Dark accents at 1x: system accent (#60CDFF), blue, teal, purple, rose, orange and green, with the shared colours in the legend card.</figcaption>
+      </figure>
+    </div>
+    <div class="row">
+      <figure>
+        <img src="shots/gates-variants-light-1x.png" width="1392" height="410" alt="Gates light accent variants at 1x">
+        <figcaption>Light accents at 1x: system accent (#0067C0), blue, teal, purple, rose, orange and green.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="colophon">
+  <div class="wrap">
+    <p>Board styling uses Segoe UI Variable, a Windows 11 system font that is not bundled. The nostromo and night_city mocks load Google Fonts for preview, and the gates mock uses installed Windows fonts. The app bundles the OFL fonts listed above.</p>
+    <p>shots/ holds copies of the designers' final captures under short names. The three normal-widget crops in the side-by-side table are cut from their 1x captures.</p>
+    <p>Checked: every 1x capture was viewed at real size. Widget and dashboard text is readable at 1x, and the strip labels are the smallest text. The weakest elements are the stale tray ring at 16 px and the night_city stale band text at 1x.</p>
+  </div>
+</footer>
+
+</body>
+</html>
