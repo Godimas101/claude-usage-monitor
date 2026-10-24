@@ -4,26 +4,23 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
-- Theme: Gates (Windows 11) ([#21](https://github.com/Godimas101/claude-usage-monitor/issues/21)) — closed 2026-10-24 by @Godimas101
-- Ship: packaging, verified self-update and v2.0 release prep ([#23](https://github.com/Godimas101/claude-usage-monitor/issues/23)) — closed 2026-10-24 by @Godimas101
-- Theme: Night City (Cyberpunk 2077) ([#20](https://github.com/Godimas101/claude-usage-monitor/issues/20)) — closed 2026-10-24 by @Godimas101
-- UI: theme system + clickable mockups of Nostromo, Night City and Gates ([#16](https://github.com/Godimas101/claude-usage-monitor/issues/16)) — closed 2026-10-24 by @Godimas101
-- Theme: Nostromo (Alien) — the CRT look, polished ([#19](https://github.com/Godimas101/claude-usage-monitor/issues/19)) — closed 2026-10-24 by @Godimas101
-- UI: new dashboard window replacing the Tk options panel ([#18](https://github.com/Godimas101/claude-usage-monitor/issues/18)) — closed 2026-10-24 by @Godimas101
-- UI: new widget renderer — anti-aliased, glowing, truly transparent widgets ([#17](https://github.com/Godimas101/claude-usage-monitor/issues/17)) — closed 2026-10-24 by @Godimas101
-- UI: decide the stack for the v2 facelift (needs Chris) ([#15](https://github.com/Godimas101/claude-usage-monitor/issues/15)) — closed 2026-10-24 by @Godimas101
-- Stats: pacing, forecasts and alerts ([#13](https://github.com/Godimas101/claude-usage-monitor/issues/13)) — closed 2026-10-24 by @Godimas101
-- Stats: history & fun — calendar heatmap, streaks, odometer, export ([#14](https://github.com/Godimas101/claude-usage-monitor/issues/14)) — closed 2026-10-24 by @Godimas101
-- Stats: efficiency — cache savings, thinking share, context size, cost per PR / line ([#12](https://github.com/Godimas101/claude-usage-monitor/issues/12)) — closed 2026-10-24 by @Godimas101
-- Stats: cost & value — per model / project / session, and what the plan is worth ([#11](https://github.com/Godimas101/claude-usage-monitor/issues/11)) — closed 2026-10-24 by @Godimas101
-- Data: robustness pass — threading, settings persistence, offline paths, Win32 nits ([#10](https://github.com/Godimas101/claude-usage-monitor/issues/10)) — closed 2026-10-24 by @Godimas101
-- Data: fix time windows — local "today", the real 5-hour session, week / month / billing cycle ([#9](https://github.com/Godimas101/claude-usage-monitor/issues/9)) — closed 2026-10-24 by @Godimas101
-- Data: read the new usage API shape — Fable weekly limit, severity, surface breakdown, credits ([#6](https://github.com/Godimas101/claude-usage-monitor/issues/6)) — closed 2026-10-24 by @Godimas101
-- Data: one shared poller + incremental transcript ingest + local history store ([#8](https://github.com/Godimas101/claude-usage-monitor/issues/8)) — closed 2026-10-24 by @Godimas101
-- Data: stop running `claude -p .` to refresh the token — show stale data instead ([#7](https://github.com/Godimas101/claude-usage-monitor/issues/7)) — closed 2026-10-24 by @Godimas101
-- Setup: branches + a pytest harness for the usage math ([#3](https://github.com/Godimas101/claude-usage-monitor/issues/3)) — closed 2026-10-24 by @Godimas101
-- Data: stale price table — add Fable + current models, fix model matching, price 1h cache writes ([#5](https://github.com/Godimas101/claude-usage-monitor/issues/5)) — closed 2026-10-24 by @Godimas101
-- Data: usage is overcounted ~2.5× — dedupe transcript lines by message.id + requestId ([#4](https://github.com/Godimas101/claude-usage-monitor/issues/4)) — closed 2026-10-24 by @Godimas101
+
+## [2.1.0] — 2026-10-24
+
+Claude Usage Monitor 2.1 lets your Claude Code sessions see how much of your plan is left, so long runs can pace themselves. It is also the first update that v2 installs on its own.
+
+### Highlights
+- **Claude can see your plan:** a new MCP tool, `get_plan_usage`, gives Claude Code the session, weekly and Fable limits with their reset times, pace and projected time to the limit, so long runs can pace themselves.
+- **Hooks for Claude Code:** `--hook` adds a one-line usage summary to Claude's context at session start and when a limit passes a threshold. `--gate` refuses new agents and workflows once a limit reaches a cap you set.
+- **Awake when it matters:** while a Claude session keeps asking, the monitor keeps polling on a locked screen, which is when unattended runs happen.
+
+### Added
+- `state.json` in the app data folder holds the latest reading: limits, pace, burn rate and plan, never the token. The app rewrites it only when the reading changes ([#24](https://github.com/Godimas101/claude-usage-monitor/issues/24)).
+- `ClaudeUsageMonitor.exe --status [--json]`, `--hook`, `--gate` and `--mcp` run beside the app. With the app closed, `--status`, the MCP tool and the gate ask for the usage once and share the answer for two minutes. Setup and fields: [docs/AGENT_HOOK.md](docs/AGENT_HOOK.md) ([#24](https://github.com/Godimas101/claude-usage-monitor/issues/24)).
+
+### Changed
+- The installer now also closes the monitor's windowless helpers, such as the MCP server a Claude session keeps open, before it replaces the files. A silent update no longer stops while one runs ([#24](https://github.com/Godimas101/claude-usage-monitor/issues/24)).
+- While a Claude session has asked for the usage in the last hour, the monitor keeps polling on a locked screen ([#24](https://github.com/Godimas101/claude-usage-monitor/issues/24)).
 
 ## [2.0.0] — 2026-10-24
 

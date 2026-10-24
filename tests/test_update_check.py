@@ -1332,7 +1332,7 @@ def test_setup_stops_while_the_monitor_runs() -> None:
 
 
 def test_restart_manager_closes_what_is_using_the_files_and_restarts_nothing() -> None:
-    assert iss_setup("CloseApplications") == "yes"
+    assert iss_setup("CloseApplications") == "force"  # also ends the windowless --mcp, --hook and --gate readers
     assert iss_setup("RestartApplications") == "no"
     assert "*.exe" in iss_setup("CloseApplicationsFilter")
 

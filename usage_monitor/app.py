@@ -516,7 +516,9 @@ class MonitorApp:
         self.dev = is_dev_instance() if dev is None else dev
         self._settings_arg = settings
         pause = pause_check or platform_api.should_pause    # locked or screensaver: the data service waits
-        self._service_factory = service_factory or (lambda s: DataService(s, pause_check=pause))
+        # The data service also writes the status file Claude sessions read (#24).
+        self._service_factory = service_factory or (
+            lambda s: DataService(s, pause_check=pause, status_dir=paths.app_data_dir()))
         self._update_check_fn = update_check_fn
         self._open_url = open_url_fn or open_url
         self._plat = platform_api

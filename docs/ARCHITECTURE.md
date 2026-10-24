@@ -293,7 +293,8 @@ at the first request and at any request at or past the open block's end, floored
 ```python
 class DataService:
     def __init__(self, settings: Settings, *, store_path=None, pricing=None, usage_client=None,
-                 roots=None, pause_check=lambda: False, clock=None): ...
+                 roots=None, pause_check=lambda: False, clock=None, pricing_refresh=None,
+                 status_dir=None): ...
     def start(self) -> None
     def stop(self, timeout: float = 5.0) -> None
     def subscribe(self, cb: Callable[[MonitorState], None]) -> Callable[[], None]
@@ -310,6 +311,26 @@ After a failed fetch the next one is due at the client's `next_allowed_at`. Inte
 clamped to one day; a cycle that raises waits `ERROR_RETRY_S` (60 s).
 `pause_check()` true → status `PAUSED`, no work (the credentials file is still watched). Reprices the store when the pricing
 version changes; refreshes remote pricing at most daily.
+With `status_dir` (the app passes the app data folder), each finished cycle also refreshes
+`state.json` there for Claude sessions (`agent/status.py`, #24): the limits with their pace from
+`pacing_report`, the burn rate and the plan, never the token. It is rewritten only when its
+`fingerprint` changes (the reading without the fields that move with the clock alone, and the burn
+rate reduced to its velocity), and otherwise every `REFRESH_S` (15 min). A paused cycle writes it
+once per pause. While `agent-demand` in the same folder is younger than an hour (readers renew it, at most every 5 min),
+`pause_check()` is overridden and the cycles run on a locked screen, which is when unattended
+runs happen. A failed write is logged once per kind of failure and never stops the cycle.
+
+### `agent/` (#24)
+`status.py` builds, writes and reads `state.json` (schema 1) and makes the one-line summary.
+`cli.py` holds `--status [--json]`, `--hook` and `--gate`, and `mcp.py` a stdio MCP server whose one tool,
+`get_plan_usage`, returns the summary and the reading. They run as light processes beside the app:
+no UI imports, no single-instance mutex, logs in `agent.log`. The app is the only poller; a
+reader asks the usage API itself only when the reading is missing or stale (the app is closed,
+or an older version writes no file), and keeps that answer in `state.json` for two minutes so
+the readers in that time share it. A reader that must ask
+first takes a byte-range lock on `state.lock` (Windows frees it when its holder is killed), re-reads
+the file under it, and never writes a reading older than the one on disk. `--hook` never fetches
+except at `SessionStart`, and `--hook` and `--gate` exit 0 on every path. How to wire it into Claude Code: [`AGENT_HOOK.md`](AGENT_HOOK.md).
 
 ## Phase 2 — stats (#11–#14)
 

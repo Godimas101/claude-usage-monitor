@@ -19,6 +19,8 @@ from pathlib import Path
 from typing import Any
 
 from usage_monitor import paths
+from usage_monitor.agent import status as agent_status
+from usage_monitor.data import analytics
 from usage_monitor.data import windows as win
 from usage_monitor.data.ingest import Ingestor
 from usage_monitor.data.models import (
@@ -64,6 +66,10 @@ class DataService:
     Nothing runs before start(). The store, the pricing table and the remote refresh are used
     only on the service thread. refresh_now() runs a full cycle at once (ingest and a usage
     fetch); the usage client's own backoff still applies.
+
+    With ``status_dir`` set, every cycle also writes the status file Claude sessions read
+    (agent/status.py), and a session that asked within agent_status.DEMAND_S keeps the cycles
+    running while the screen is locked.
     """
 
     def __init__(
@@ -77,6 +83,7 @@ class DataService:
         pause_check: Callable[[], bool] = lambda: False,
         clock: Callable[[], datetime] | None = None,
         pricing_refresh: Callable[[Path], bool] | None = None,
+        status_dir: Path | None = None,
     ) -> None:
         self._settings = settings
         self._store_path = store_path
@@ -88,6 +95,7 @@ class DataService:
         self._clock = clock if clock is not None else _utc_now
         # Callable(cached_path) -> bool: True when a newer table was written. None uses PRICING_URL.
         self._pricing_refresh = pricing_refresh
+        self._status_dir = status_dir
         self.state: MonitorState | None = None
 
         self._lock = threading.Lock()  # guards the fields down to _unsubscribe_settings
@@ -116,6 +124,11 @@ class DataService:
         self._unpriced: list[str] = []
         self._pricing_checked_at: datetime | None = None
         self._progress_mono = 0.0
+        self._status_written: ApiStatus | None = None  # the status of the last status file written
+        self._status_key: str | None = None            # its fingerprint (agent_status.fingerprint)
+        self._status_mono = 0.0                        # and when it was written, on time.monotonic()
+        self._status_file: tuple[int, int, int] | None = None  # that file's identity: a reader or a person may replace it
+        self._status_error: str | None = None
 
     # ── Public API ──
 
@@ -226,7 +239,10 @@ class DataService:
         if self._is_paused():
             if self._check_credentials():
                 self._creds_pending = True  # the change is acted on by the first cycle that is not paused
-            self._publish(self._build_state(now, status=ApiStatus.PAUSED, detail=PAUSED_DETAIL))
+            state = self._build_state(now, status=ApiStatus.PAUSED, detail=PAUSED_DETAIL)
+            self._publish(state)
+            if self._status_written != ApiStatus.PAUSED:  # once per pause: the reading does not change
+                self._write_status(now, state)
             return PAUSED_RECHECK_S
         forced = self._take_force()
         ingest_every = self._ingest_interval()
@@ -238,16 +254,20 @@ class DataService:
             self._ingest_once(now)
         self._refresh_store_values(now)
         self._cycle_error = None
-        self._publish(self._build_state(now))
+        state = self._build_state(now)
+        self._publish(state)
+        self._write_status(now, state)
         self._maybe_refresh_pricing(now)
         return ingest_every.total_seconds()
 
     def _is_paused(self) -> bool:
+        """The workstation is locked and no Claude session asked for the usage lately."""
         try:
-            return bool(self._pause_check())
+            paused = bool(self._pause_check())
         except Exception:  # a broken check must not stop the data; treat the desktop as active
             log.exception("pause check failed; treating the workstation as active")
             return False
+        return paused and not (self._status_dir is not None and agent_status.demanded(self._status_dir))
 
     def _take_force(self) -> bool:
         with self._lock:
@@ -373,6 +393,35 @@ class DataService:
             except Exception:  # a broken subscriber must not stop the others or the loop
                 log.exception("a state subscriber raised; the others still receive the state")
 
+    def _write_status(self, now: datetime, state: MonitorState) -> None:
+        """Refresh the status file for Claude sessions when its reading changed, or every
+        agent_status.REFRESH_S. Best effort: the sessions keep the last one."""
+        if self._status_dir is None:
+            return
+        try:
+            store, _pricing = self._open()
+            doc = agent_status.build(
+                status=state.status.value, status_detail=state.status_detail, usage=state.usage,
+                plan=state.plan, burn=state.burn,
+                pacing=analytics.pacing_report(store, now=now, usage=self._live_usage(now)),
+                now=now, poll_interval_s=self._poll_interval().total_seconds(), app_version=_app_version())
+            path = self._status_dir / agent_status.STATUS_NAME
+            key, mono = agent_status.fingerprint(doc), time.monotonic()
+            if (key == self._status_key and mono - self._status_mono < agent_status.REFRESH_S
+                    and _file_mark(path) == self._status_file):
+                return  # nothing a reader acts on has changed, and the file is still ours: spare the disk
+            agent_status.write(doc, path)
+            file_mark = _file_mark(path)
+        except Exception as exc:  # logged once per kind of failure; the cycle carries on
+            # The kind, not the message: an OSError names a new temporary file every time.
+            error = f"{type(exc).__name__} {getattr(exc, 'winerror', None) or getattr(exc, 'errno', None) or ''}"
+            if error != self._status_error:
+                log.exception("could not write the status file for Claude sessions")
+            self._status_error = error
+            return
+        self._status_written, self._status_error = state.status, None
+        self._status_key, self._status_mono, self._status_file = key, mono, file_mark
+
     def _publish_best_effort(self) -> None:
         try:
             self._publish(self._build_state(self._now()))
@@ -483,6 +532,16 @@ def _positive(value: Any, default: float) -> float:
     except OverflowError:  # an integer too large for a float
         return float(default)
     return number if math.isfinite(number) and number > 0 else float(default)
+
+
+def _file_mark(path: Path) -> tuple[int, int, int] | None:
+    """(file ID, mtime, size). Every replace makes a new file, so the ID changes even when two writes
+    land within one tick of the file clock."""
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return stat.st_ino, stat.st_mtime_ns, stat.st_size
 
 
 def _mtime(path: Path) -> float | None:
