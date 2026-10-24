@@ -4,6 +4,7 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
+- Stats: cost & value — per model / project / session, and what the plan is worth ([#11](https://github.com/Godimas101/claude-usage-monitor/issues/11)) — closed 2026-10-24 by @Godimas101
 - Data: robustness pass — threading, settings persistence, offline paths, Win32 nits ([#10](https://github.com/Godimas101/claude-usage-monitor/issues/10)) — closed 2026-10-24 by @Godimas101
 - Data: fix time windows — local "today", the real 5-hour session, week / month / billing cycle ([#9](https://github.com/Godimas101/claude-usage-monitor/issues/9)) — closed 2026-10-24 by @Godimas101
 - Data: read the new usage API shape — Fable weekly limit, severity, surface breakdown, credits ([#6](https://github.com/Godimas101/claude-usage-monitor/issues/6)) — closed 2026-10-24 by @Godimas101
