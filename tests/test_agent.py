@@ -196,6 +196,15 @@ def test_a_running_app_that_writes_no_file_is_covered_by_a_fetch(folder, fetches
     assert running and doc["session"]["percent"] == 55.0 and len(fetches) == 1
 
 
+def test_a_running_app_that_reports_a_failure_is_left_to_its_own_retries(folder, fetches):
+    save(folder, document(at=NOW - timedelta(hours=2), state="rate_limited"))
+    doc, _running = status.current(folder, now=NOW, fetch=True, running=True)
+    assert doc["status"] == "rate_limited" and fetches == []  # a request of ours would add to the 429
+    save(folder, document(at=NOW - timedelta(hours=2), state="live"))  # live but not writing: it hung
+    status.current(folder, now=NOW, fetch=True, running=True)
+    assert len(fetches) == 1
+
+
 def test_without_fetch_a_missing_or_old_reading_is_returned_as_it_is(folder, fetches):
     assert status.current(folder, now=NOW, fetch=False, running=False) == (None, False)
     save(folder, document(at=NOW - timedelta(hours=3)))

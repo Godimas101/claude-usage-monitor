@@ -43,6 +43,7 @@ DEMAND_S = 60 * 60            # a session asked within this: the app keeps polli
 STALE_FLOOR_S = 30 * 60       # a reading is stale past this, or past two poll intervals when longer
 WAIT_S = 15.0                 # how long a reader waits for a monitor that a locked screen paused
 PAUSED = "paused"             # ApiStatus.PAUSED.value
+_HEALTHY = frozenset({"live", PAUSED})  # the app's statuses that mean it is not failing to fetch
 MUTEX_NAME = "Global\\ClaudeUsageMonitor"   # app.MUTEX_NAME (app.py is too heavy to import here)
 DEV_ENV = "CUM_DEV_INSTANCE"                 # app.DEV_ENV
 _SYNCHRONIZE = 0x00100000
@@ -201,7 +202,9 @@ def current(folder: Path, *, now: datetime, fetch: bool, wait_s: float = 0.0, ap
     "paused" (the screen is locked) is first waited on for up to ``wait_s``: the demand touched here
     wakes the app within its pause recheck. With ``fetch`` set, no reading, or a stale one (the app
     is closed, or is an older version that writes no file), is replaced by one request of our own,
-    which the callers within FRESH_S share.
+    which the callers within FRESH_S share. A stale reading from a running app that reports a
+    failure (offline, rate-limited, signed out) is left to the app's own retries: a request of ours
+    would fail the same way, and would add to a 429.
     """
     running = monitor_running() if running is None else running
     touch_demand(folder)
@@ -209,7 +212,7 @@ def current(folder: Path, *, now: datetime, fetch: bool, wait_s: float = 0.0, ap
     doc = read(path)
     if running and wait_s > 0 and doc is not None and doc.get("status") == PAUSED:
         doc = _await_cycle(path, doc, wait_s)
-    if running and doc is not None and not is_stale(doc, now):
+    if running and doc is not None and (not is_stale(doc, now) or _app_is_retrying(doc)):
         return doc, True
     if not fetch or _reusable(doc, now):
         return doc, running
@@ -273,6 +276,10 @@ def _reusable(doc: Mapping[str, Any] | None, now: datetime) -> bool:
     stamp = doc.get("written_at") if doc.get("source") == SOURCE_CLI else doc.get("usage_fetched_at")
     age = _age_s(stamp, now)
     return age is not None and 0 <= age < FRESH_S
+
+
+def _app_is_retrying(doc: Mapping[str, Any]) -> bool:
+    return doc.get("source") == SOURCE_MONITOR and doc.get("status") not in _HEALTHY
 
 
 def _await_cycle(path: Path, doc: dict, wait_s: float) -> dict:
