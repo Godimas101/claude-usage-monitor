@@ -1906,8 +1906,9 @@ def test_the_data_service_pauses_on_a_locked_desktop_unless_the_caller_says_othe
     made: list[Any] = []
 
     class CapturingService:
-        def __init__(self, settings, *, pause_check):
+        def __init__(self, settings, *, pause_check, status_dir):
             made.append(pause_check)
+            assert status_dir == app_mod.paths.app_data_dir()  # it writes the status file Claude sessions read
 
     monkeypatch.setattr(app_mod, "DataService", CapturingService)
     fake_plat = FakePlatform()

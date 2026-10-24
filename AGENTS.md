@@ -16,12 +16,13 @@ Privacy, everywhere: never print, store or log message text, prompts, file conte
 
 | Path | What |
 |---|---|
-| `main.py` | Entry point: the monitor, `--dashboard`, `--print-version`, `--dump-frames`, `--smoke-test` |
+| `main.py` | Entry point: the monitor, `--dashboard`, `--print-version`, `--dump-frames`, `--smoke-test`, and the agent modes `--status`, `--hook`, `--mcp` |
 | `usage_monitor/app.py` | `MonitorApp`: wires settings, data service, UI host, widgets, tray, local API |
 | `usage_monitor/data/` | Data layer, no UI imports: transcripts, SQLite store, usage API, windows, `DataService` |
 | `usage_monitor/ui/` | Win32 layer (ctypes, no Tk): host, layered windows, widgets, tray, menu, server, dashboard |
 | `usage_monitor/render/` | Pillow renderers: view model, drawing engine, one skin per theme |
 | `usage_monitor/themes/` | Theme tokens (`<id>.json`) and their loader |
+| `usage_monitor/agent/` | Plan-usage awareness for Claude sessions (#24): `state.json`, `--status`, `--hook`, the MCP server. Setup: [`docs/AGENT_HOOK.md`](docs/AGENT_HOOK.md) |
 | `usage_monitor/webui/` | Dashboard HTML/CSS/JS, the motion layer (`motion.js`, `motion.css`, `themes/<id>.motion.css`) and the bundled OFL fonts (the Pillow skins read them too) |
 | `update_check.py`, `version.py` | GitHub release check and self-update; version read from `VERSION` |
 | `tests/` | pytest, offline, synthetic fixtures only |
@@ -62,10 +63,12 @@ Windows' own animation switch. A new effect that does not is a bug.
 
 ## Branches and releases
 
-- `main` is what ships. v2 is built on the `v2` branch. Never push to `main` without Chris's say-so.
-- **Releases are Chris's call.** `release.yml` runs on every push to `main`, but only builds and
-  publishes a public GitHub Release (and a Discord post) when `VERSION` names a tag that does not
-  exist yet. A `VERSION` bump that reaches `main` *is* a release.
+- `main` is what ships. Work happens on a branch off `main` and reaches it by pull request. Never
+  push to `main` without Chris's say-so.
+- **Releases are Chris's call.** `release.yml` runs on every push to `main`. When `VERSION` names a
+  tag that does not exist yet, it builds, tests and leaves a **draft** release; Chris publishes it
+  (`gh release edit vX --draft=false`, after the checks in `docs/RELEASING.md`), and publishing is
+  what fires the public Discord post.
 - Add the change to `CHANGELOG.md` under `[Unreleased]`. When Chris releases, that section becomes
   `## [VERSION]`, and `release.yml` publishes it as the release notes.
 - Never bump `VERSION` yourself, and never run `gh release create`. Ask first (see Publishing below).
@@ -137,6 +140,15 @@ Keep these local (not committed):
 - `CLAUDE.md` (delegating stub) + `AGENTS.md` (this file, if the parent
   gitignore hasn't caught it — check)
 - `NOTES.md` / `*NOTES*.md`
+
+## Plan usage for Claude sessions (#24)
+
+A session that runs long or parallel work should check the plan before each phase: call the
+`get_plan_usage` MCP tool, or run `ClaudeUsageMonitor.exe --status` (`--json` for the full
+reading). Both read `%APPDATA%\ClaudeUsageMonitor\state.json`, which the running app refreshes every
+cycle. Wiring, the hook recipe and the JSON fields: [`docs/AGENT_HOOK.md`](docs/AGENT_HOOK.md).
+The modes are read-only and must stay that way: never put the token, transcript text or anything
+from the credentials file in `state.json`, a summary or a log.
 
 ## Release policy
 

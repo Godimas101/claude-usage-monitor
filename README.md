@@ -36,6 +36,7 @@ A free Windows tray utility that keeps your **Claude Code plan usage** where you
 | 🗓️ | **History that lasts:** a year of use as a heatmap, streaks, an all-time token odometer and CSV or JSON export. It outlives Claude Code's transcript cleanup. |
 | 🔔 | **Alerts** as Windows notifications at the levels you choose (80, 90 and 100% by default), when a limit resets, and when usage credits start being used. Quiet hours included. |
 | 🎨 | **Three themes**, switched live: Nostromo, Night City and Gates, each with motion of its own. |
+| 🤖 | **Claude can check it too:** an MCP tool, `get_plan_usage`, and optional Claude Code hooks let a long run see how much of the plan is left, and stop launching agents past a cap you set. [Set it up](docs/AGENT_HOOK.md). |
 | 🔒 | **All local.** No account, no telemetry, no server of ours. The only network calls are listed [below](#-privacy). |
 | 😴 | **Polite:** it pauses while your screen is locked, hides the strip while a fullscreen app runs, and only redraws when something changes. **Reduce motion** stops every animation, and the dashboard and the widgets' pointer response also follow Windows' own animation setting. |
 
@@ -147,6 +148,20 @@ Open it from the tray icon, a widget click, or by starting the app again. It is 
 
 There is also an **About** page with the version, credits and links. An older `#nerds` link or bookmark (the page's old name) still opens Efficiency. Every page draws all its cards at once, with placeholders in the theme's own style, and the numbers arrive into them; a page you have already seen shows its last numbers straight away while it refreshes.
 
+## 🤖 For Claude sessions
+
+Long runs, such as multi-agent workflows, can burn through a session or a week before anyone
+notices. The monitor shares what it knows with Claude Code, read-only and at no model-token cost:
+
+- **`get_plan_usage`**, an MCP tool Claude can call between steps. It returns each limit's
+  percent, reset time and pace, the projected time to the limit and the burn rate.
+- **`--hook`** adds a one-line summary to Claude's context at session start, and when a limit
+  passes a threshold.
+- **`--gate`** refuses new agents and workflows once a limit reaches a cap you choose.
+- **`--status --json`** prints the same reading for your own scripts.
+
+The setup, the settings snippet and the fields are in [docs/AGENT_HOOK.md](docs/AGENT_HOOK.md).
+
 ## 📡 Data Sources
 
 | Data | Where it comes from |
@@ -172,7 +187,7 @@ Real money is only two things: your plan's monthly price, and **usage credits** 
 Everything stays on your PC. There is no account, no telemetry and no server of ours.
 
 - **What it reads:** your Claude Code transcripts and sign-in file. To group the Cost page by repository, it also looks for a `.git` entry in each session's working folder and the folders above it (when that entry is a file, as in a linked worktree or a submodule, it reads only its first line, the `gitdir:` pointer). It never prints, logs or stores message text, prompts, tool inputs or outputs, or file contents, and never stores your token.
-- **What it keeps** in `usage.db`, on your PC only: IDs, model names, token counts, timestamps, each session's folder and git branch, the session titles Claude Code gives them, tool names, lines added and removed, pull-request links, and whether a shell command ran `git commit`, `git push` or `gh pr create` (never the command itself). It also keeps the full path of each transcript file it has read (your Windows user name is in those paths), 180 days of your limit readings, and the newest usage-API response, including your credit balance when usage credits are on. **Do not attach `usage.db` to a bug report:** it holds your folder names, session titles and those paths. If you need to share numbers, use **Export** on the History page (CSV or JSON, daily totals only).
+- **What it keeps** in `usage.db`, on your PC only: IDs, model names, token counts, timestamps, each session's folder and git branch, the session titles Claude Code gives them, tool names, lines added and removed, pull-request links, and whether a shell command ran `git commit`, `git push` or `gh pr create` (never the command itself). It also keeps the full path of each transcript file it has read (your Windows user name is in those paths), 180 days of your limit readings, and the newest usage-API response, including your credit balance when usage credits are on. **Do not attach `usage.db` to a bug report:** it holds your folder names, session titles and those paths. If you need to share numbers, use **Export** on the History page (CSV or JSON, daily totals only). Beside it, `state.json` holds the latest limits, pace and burn rate for Claude sessions (never the token), and `agent-demand`, `hook-seen.json` and `agent.log` support the [Claude session tools](docs/AGENT_HOOK.md#privacy).
 - **What leaves your PC:** only these requests, and they carry no prompts, no code and no usage numbers.
 
 | When | To | What |
@@ -181,6 +196,7 @@ Everything stays on your PC. There is no account, no telemetry and no server of 
 | At start-up, every six hours after that, and on **Check for updates now** (switch it off in Settings → System) | `api.github.com` | An anonymous request for this repository's latest release. |
 | Only when you click **Install update** | `github.com` and GitHub's download servers | The download of the installer. |
 | Only when you open the **About** page | `raw.githubusercontent.com` | An anonymous request for the supporters list, cached for an hour. |
+| Only when the app is closed and a Claude session asks for the usage (the MCP tool, `--status`, the gate) | `api.anthropic.com` | The same usage request, at most once every two minutes. While the app runs, sessions read its last reading instead. |
 
 The **installer** (not the app) has one more optional download: Microsoft's small WebView2 runtime installer, from `go.microsoft.com`, and only if you accept its offer. It is run only after Windows confirms that Microsoft Corporation signed it. Prices ship inside the app, so there is no price download. The dashboard is served by a tiny local web server on `127.0.0.1` (a random port and a per-run token), so nothing listens on your network, and the page loads no outside fonts or scripts.
 

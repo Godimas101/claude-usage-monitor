@@ -6,9 +6,14 @@
                                          exit code 1 when it cannot be written or the build has no VERSION)
     main.py --dump-frames DIR            render every theme, variant, state and scale to PNGs
     main.py --smoke-test SECONDS FILE    run the real app for SECONDS, exercise it, write a report
+    main.py --status [--json]            print the plan usage for a Claude session (see docs/AGENT_HOOK.md)
+    main.py --hook [--threshold N] [--always]   a Claude Code hook that adds the usage to the context
+    main.py --gate [--session N] [--weekly N]   a PreToolUse hook that refuses new agents past a cap
+    main.py --mcp                        an MCP server on stdio with the tool get_plan_usage
 
 The build is windowed, so there is no console: results go to files, and an unhandled exception is
-written to the log. Dev isolation: CUM_APPDATA_DIR puts settings, database and log in another
+written to the log. --status, --hook, --gate and --mcp answer on stdout, which exists when the caller
+gives the process a pipe, as Claude Code does. Dev isolation: CUM_APPDATA_DIR puts settings, database and log in another
 folder, and CUM_DEV_INSTANCE=1 uses its own single-instance mutex and tags the tray tooltip.
 """
 from __future__ import annotations
@@ -25,6 +30,7 @@ from typing import IO
 import version
 
 DASHBOARD_LOG = "dashboard.log"
+AGENT_LOG = "agent.log"             # --status, --hook, --gate and --mcp: many can run at once, beside the app
 FAULT_LOG = "faults.log"
 UNKNOWN_VERSION = "0.0.0"           # what version.py reports when it cannot read the VERSION file
 _fault_file: IO[str] | None = None  # faulthandler needs its file open for the life of the process
@@ -33,13 +39,18 @@ _fault_file: IO[str] | None = None  # faulthandler needs its file open for the l
 @dataclass(frozen=True)
 class Command:
     """What the command line asks for. ``kind`` is "app", "dashboard", "print_version",
-    "dump_frames", "smoke_test" or "error" (then ``error`` says why)."""
+    "dump_frames", "smoke_test", "status", "hook", "gate", "mcp" or "error" (then ``error`` says why)."""
 
     kind: str = "app"
     port: int = 0
     path: str | None = None
     seconds: float = 0.0
     error: str | None = None
+    as_json: bool = False
+    threshold: float | None = None   # --hook --threshold N; None is the hook's default
+    always: bool = False
+    session_cap: float | None = None  # --gate --session N / --weekly N; None is the gate's default
+    weekly_cap: float | None = None
 
 
 def _values(args: list[str], flag: str, count: int) -> list[str] | None:
@@ -61,9 +72,23 @@ def _port(args: list[str]) -> tuple[int, str | None]:
     return int(words[0]), None
 
 
+def _percent(args: list[str], flag: str) -> float | None:
+    """``flag N`` as a percent, or None. A bad value is ignored rather than refused: a hook that
+    exits with code 2 blocks the user's prompt or the tool call."""
+    if flag not in args:
+        return None
+    words = _values(args, flag, 1)
+    try:
+        value = float(words[0]) if words else math.nan
+    except ValueError:
+        return None
+    return value if math.isfinite(value) and 0 <= value <= 1000 else None
+
+
 def parse_args(argv: Sequence[str]) -> Command:
     """Read the command line. Unknown words are ignored (a windowed app must not die on them), and
-    when several modes are given the first of print-version, dashboard, dump-frames, smoke-test wins."""
+    when several modes are given the first of print-version, dashboard, dump-frames, smoke-test,
+    status, hook, gate, mcp wins."""
     args = list(argv)
     if "--print-version" in args:
         words = _values(args, "--print-version", 1)
@@ -85,6 +110,14 @@ def parse_args(argv: Sequence[str]) -> Command:
         if words is None or not math.isfinite(seconds) or seconds <= 0:
             return Command("error", error="--smoke-test needs SECONDS (a positive number) and a report file")
         return Command("smoke_test", path=words[1], seconds=seconds)
+    if "--status" in args:
+        return Command("status", as_json="--json" in args)
+    if "--hook" in args:
+        return Command("hook", threshold=_percent(args, "--threshold"), always="--always" in args)
+    if "--gate" in args:
+        return Command("gate", session_cap=_percent(args, "--session"), weekly_cap=_percent(args, "--weekly"))
+    if "--mcp" in args:
+        return Command("mcp")
     return Command("app")
 
 
@@ -159,6 +192,41 @@ def _smoke_test(seconds: float, report: str) -> int:
     return run_smoke_test(seconds, report)
 
 
+def _agent(command: Command) -> int:
+    """--status, --hook, --gate and --mcp. No UI and no single-instance mutex, so they run beside the app."""
+    from datetime import datetime, timezone
+
+    from usage_monitor import paths
+    from usage_monitor.agent import cli
+    from usage_monitor.log import setup_logging
+
+    setup_logging("WARNING", path=paths.app_data_dir() / AGENT_LOG)
+    if sys.stdout is None:  # a windowed build started without a pipe has nowhere to answer
+        return 1
+    out = sys.stdout.buffer
+    stdin = sys.stdin.buffer if sys.stdin is not None else None
+    folder = paths.app_data_dir()
+
+    def clock() -> datetime:
+        return datetime.now(timezone.utc)
+
+    if command.kind == "status":
+        return cli.run_status(as_json=command.as_json, folder=folder, clock=clock,
+                              app_version=version.APP_VERSION, out=out)
+    if command.kind == "hook":
+        threshold = cli.HOOK_THRESHOLD if command.threshold is None else command.threshold
+        return cli.run_hook(threshold=threshold, always=command.always, folder=folder, clock=clock,
+                            app_version=version.APP_VERSION, stdin=stdin, out=out)
+    if command.kind == "gate":
+        return cli.run_gate(
+            session_cap=cli.GATE_SESSION_CAP if command.session_cap is None else command.session_cap,
+            weekly_cap=cli.GATE_WEEKLY_CAP if command.weekly_cap is None else command.weekly_cap,
+            folder=folder, clock=clock, app_version=version.APP_VERSION, stdin=stdin, out=out)
+    if stdin is None:
+        return 1
+    return cli.run_mcp(folder=folder, clock=clock, app_version=version.APP_VERSION, stdin=stdin, out=out)
+
+
 def run_command(command: Command, argv: Sequence[str]) -> int:
     if command.kind == "print_version":
         return _print_version(command.path)
@@ -168,6 +236,8 @@ def run_command(command: Command, argv: Sequence[str]) -> int:
         return _dump_frames(command.path or "")
     if command.kind == "smoke_test":
         return _smoke_test(command.seconds, command.path or "")
+    if command.kind in ("status", "hook", "gate", "mcp"):
+        return _agent(command)
     return _app()
 
 
