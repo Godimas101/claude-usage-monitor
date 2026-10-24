@@ -4,6 +4,8 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
+- UI: new dashboard window replacing the Tk options panel ([#18](https://github.com/Godimas101/claude-usage-monitor/issues/18)) — closed 2026-10-24 by @Godimas101
+- UI: new widget renderer — anti-aliased, glowing, truly transparent widgets ([#17](https://github.com/Godimas101/claude-usage-monitor/issues/17)) — closed 2026-10-24 by @Godimas101
 - UI: decide the stack for the v2 facelift (needs Chris) ([#15](https://github.com/Godimas101/claude-usage-monitor/issues/15)) — closed 2026-10-24 by @Godimas101
 - Stats: pacing, forecasts and alerts ([#13](https://github.com/Godimas101/claude-usage-monitor/issues/13)) — closed 2026-10-24 by @Godimas101
 - Stats: history & fun — calendar heatmap, streaks, odometer, export ([#14](https://github.com/Godimas101/claude-usage-monitor/issues/14)) — closed 2026-10-24 by @Godimas101
