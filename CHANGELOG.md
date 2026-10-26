@@ -4,6 +4,8 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
+- Docs: MCP setup command fails in PowerShell (bare -- swallowed) and leaves a <you> placeholder ([#30](https://github.com/Godimas101/claude-usage-monitor/issues/30)) — closed 2026-10-26 by @Godimas101
+
 
 ## [2.1.0] — 2026-10-24
 
