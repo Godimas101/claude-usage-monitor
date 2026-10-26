@@ -16,7 +16,7 @@ Claude Usage Monitor 2.1 lets your Claude Code sessions see how much of your pla
 
 ### Added
 - `state.json` in the app data folder holds the latest reading: limits, pace, burn rate and plan, never the token. The app rewrites it only when the reading changes ([#24](https://github.com/Godimas101/claude-usage-monitor/issues/24)).
-- `ClaudeUsageMonitor.exe --status [--json]`, `--hook`, `--gate` and `--mcp` run beside the app. With the app closed, `--status`, the MCP tool and the gate ask for the usage once and share the answer for two minutes. Setup and fields: [docs/AGENT_HOOK.md](docs/AGENT_HOOK.md) ([#24](https://github.com/Godimas101/claude-usage-monitor/issues/24)).
+- `ClaudeUsageMonitor.exe --status [--json]`, `--hook`, `--gate` and `--mcp` run beside the app. With the app closed, `--status`, the MCP tool and the gate ask for the usage once and share the answer for two minutes. Setup and fields: [docs/AGENT_HOOK.md](https://github.com/Godimas101/claude-usage-monitor/blob/main/docs/AGENT_HOOK.md) ([#24](https://github.com/Godimas101/claude-usage-monitor/issues/24)).
 
 ### Changed
 - The installer now also closes the monitor's windowless helpers, such as the MCP server a Claude session keeps open, before it replaces the files. A silent update no longer stops while one runs ([#24](https://github.com/Godimas101/claude-usage-monitor/issues/24)).
