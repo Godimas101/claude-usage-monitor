@@ -17,19 +17,33 @@ and none of them shows the sign-in token.
 | `--gate` | Refuses new agents and workflows once the session or weekly limit reaches a cap you set | `hooks` in `settings.json` |
 | `--status [--json]` | Prints the summary line, or the full reading as JSON, for scripts | a terminal or a script |
 
-The examples use the default install folder,
-`C:\Users\<you>\AppData\Local\ClaudeUsageMonitor\ClaudeUsageMonitor.exe`. Put your own user name in.
+The app installs to `%LOCALAPPDATA%\ClaudeUsageMonitor\ClaudeUsageMonitor.exe`. The commands below
+are for PowerShell, the default Windows terminal, and find that folder by themselves.
 
 ## The MCP tool
 
-Run this once in a terminal. `--scope user` makes the tool available in every project:
+Run this once in PowerShell. `--scope user` makes the tool available in every project:
 
 ```
-claude mcp add --transport stdio --scope user claude-usage -- "C:\Users\<you>\AppData\Local\ClaudeUsageMonitor\ClaudeUsageMonitor.exe" --mcp
+claude mcp add --transport stdio --scope user claude-usage '--' "$env:LOCALAPPDATA\ClaudeUsageMonitor\ClaudeUsageMonitor.exe" --mcp
 ```
 
-Then `/mcp` in Claude Code should list `claude-usage` as connected, with one tool, `get_plan_usage`.
-It takes no arguments and returns a summary line and the reading as JSON:
+Keep the quotes around `'--'`. When Claude Code was installed with npm, PowerShell runs `claude` as a
+script and swallows a bare `--`, and `claude mcp add` then rejects `--mcp`. In cmd.exe or Git Bash a
+bare `--` works.
+
+Check it:
+
+```
+claude mcp get claude-usage
+```
+
+It should say `Status: ✓ Connected` and `Args: --mcp`. *Failed to connect* with empty `Args`, or a
+path that does not exist, means it was added wrongly: remove it with
+`claude mcp remove claude-usage -s user` and run the add command again. In a Claude Code window that
+was already open, `/mcp` reconnects it.
+
+The tool, `get_plan_usage`, takes no arguments and returns a summary line and the reading as JSON:
 
 ```
 Claude plan usage (Max 5x, reading from 2m ago): session 30%, resets in 1h 50m (14:30), safe at this rate | weekly 80%, resets in 4d 3h (Wed 16:00), 39 pts ahead of an even pace, at its average pace so far 100% is reached in 17h 10m (Sun 05:49) | Fable weekly 0%, resets in 4d 3h (Wed 16:00), 41 pts under an even pace | burn 1.2k output tokens/min (fast).
@@ -44,14 +58,25 @@ update closes the server; reconnect it with `/mcp`, or start a new session.
 
 ## Hooks
 
-Hooks go in your user settings, `C:\Users\<you>\.claude\settings.json`, under `"hooks"`. Each entry
-below starts the exe directly with its arguments (the `args` form), so no shell is involved and the
-spaces in the path need no quoting.
+Hooks go in your user settings file, `%USERPROFILE%\.claude\settings.json`, under `"hooks"`. To open
+it from PowerShell, run `notepad "$env:USERPROFILE\.claude\settings.json"`. Each entry below starts
+the exe directly with its arguments (the `args` form), so no shell is involved and the spaces in the
+path need no quoting.
 
 The `args` form needs **Claude Code 2.1.139 or newer** (check with `claude --version`, update with
 `claude update`). An older build ignores `args` and starts the bare exe, which opens the dashboard on
 every hook call. The VS Code extension and the `claude` in your terminal can be different versions,
 and both read this file, so check both.
+
+JSON can't look up your folder, so each `command` needs the exe's full path. This PowerShell line
+prints it, with the forward slashes JSON wants:
+
+```
+"$env:LOCALAPPDATA\ClaudeUsageMonitor\ClaudeUsageMonitor.exe".Replace('\','/')
+```
+
+Paste what it prints over `PASTE-THE-PATH-HERE` in each entry (three places). A placeholder left in
+place makes the hook fail with an error you can see, rather than run the wrong thing.
 
 ```json
 {
@@ -61,7 +86,7 @@ and both read this file, so check both.
         "hooks": [
           {
             "type": "command",
-            "command": "C:/Users/<you>/AppData/Local/ClaudeUsageMonitor/ClaudeUsageMonitor.exe",
+            "command": "PASTE-THE-PATH-HERE",
             "args": ["--hook", "--always"],
             "timeout": 30
           }
@@ -73,7 +98,7 @@ and both read this file, so check both.
         "hooks": [
           {
             "type": "command",
-            "command": "C:/Users/<you>/AppData/Local/ClaudeUsageMonitor/ClaudeUsageMonitor.exe",
+            "command": "PASTE-THE-PATH-HERE",
             "args": ["--hook", "--threshold", "80"],
             "timeout": 10
           }
@@ -86,7 +111,7 @@ and both read this file, so check both.
         "hooks": [
           {
             "type": "command",
-            "command": "C:/Users/<you>/AppData/Local/ClaudeUsageMonitor/ClaudeUsageMonitor.exe",
+            "command": "PASTE-THE-PATH-HERE",
             "args": ["--gate", "--session", "95", "--weekly", "85"],
             "timeout": 45
           }
@@ -117,14 +142,17 @@ Use any of the three on its own. If you already have a `"hooks"` block, add thes
 
 ## From a script or a terminal
 
+In PowerShell:
+
 ```
-ClaudeUsageMonitor.exe --status          one line
-ClaudeUsageMonitor.exe --status --json   the whole reading, plus monitor_running, usage_age_s, stale and summary
+& "$env:LOCALAPPDATA\ClaudeUsageMonitor\ClaudeUsageMonitor.exe" --status | Out-String
+& "$env:LOCALAPPDATA\ClaudeUsageMonitor\ClaudeUsageMonitor.exe" --status --json | Out-String
 ```
 
-The app is a windowed program, so it only answers into a pipe. In PowerShell, end the line with
-`| Out-String`; in Git Bash, `| cat`. Claude Code always uses a pipe, so this only matters by hand.
-The exit code is 1 when there is no reading at all.
+The first prints one line. The second prints the whole reading, plus `monitor_running`,
+`usage_age_s`, `stale` and `summary`. The app is a windowed program, so it only answers into a pipe:
+that is what `| Out-String` is for (in Git Bash, use `| cat`). Claude Code always uses a pipe. The
+exit code is 1 when there is no reading at all.
 
 ## How fresh the numbers are
 
