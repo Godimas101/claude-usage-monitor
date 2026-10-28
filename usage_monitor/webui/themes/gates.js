@@ -46,7 +46,7 @@
     "LIMITED": "alert", "CRITICAL": "alert", "FAST": "acc"
   };
   var ICON_PROBE = String.fromCharCode(0xE916);   // Segoe Fluent Icons: the stopwatch glyph
-  var PHRASES = { "NONE": "None", "TOK / MIN": "Tokens / min" };
+  var PHRASES = { "NONE": "None", "TOK / MIN": "Tokens / min", "CLAUDE CODE": "Claude Code" };
   var SVG_WORDS = { TODAY: "Today", NOW: "Now", LESS: "Less", MORE: "More", AVG: "Avg" };
 
   var FX = window.CUM_FX || null;
