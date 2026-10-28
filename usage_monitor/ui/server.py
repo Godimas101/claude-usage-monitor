@@ -75,7 +75,8 @@ MAX_SUPPORTERS_BYTES = 512 * 1024
 THEME_ORDER = ("nostromo", "night_city", "gates")
 UPDATE_OPERATIONS = ("check", "apply", "skip")
 GUARD_SETUP_ACTIONS = ("install", "remove")
-SETUP_STATUS_TTL_S = 60.0       # the setup status runs `claude` twice, so /api/guard keeps it this long (a click clears it)
+SETUP_STATUS_TTL_S = 600.0      # the setup status starts `claude` twice, so /api/guard keeps it this long; a setup click
+                                # and a closed dashboard window clear it, so each window and each click look afresh
 
 _MISSING = object()
 _SECURITY_HEADERS = {
@@ -1217,6 +1218,7 @@ class ApiServer:
         except Exception:
             log.exception("dashboard-closed notice failed")
             raise _HttpError(500, "could not record the notice") from None
+        self._setup_status.clear()  # the next dashboard window looks at the setup afresh (`claude update` since?)
         self._send_json(req, 200, {"ok": True, "known": known})
 
     def _post_update(self, req: _Handler, operation: str) -> None:

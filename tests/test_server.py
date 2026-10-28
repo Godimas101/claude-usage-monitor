@@ -2336,7 +2336,7 @@ def test_the_guard_files_are_read_from_the_app_data_folder_unless_told_otherwise
 
 # ── The setup status is slow to compute, so it is kept ────────────────────────────────
 
-def test_the_setup_status_is_kept_for_a_minute_and_looked_at_again_after(guard_rig: Any) -> None:
+def test_the_setup_status_is_kept_for_a_while_and_looked_at_again_after(guard_rig: Any) -> None:
     get_guard(guard_rig.server)
     get_guard(guard_rig.server)
     assert guard_rig.setup.calls == ["status"]                                    # the second poll did not run claude again
@@ -2346,6 +2346,16 @@ def test_the_setup_status_is_kept_for_a_minute_and_looked_at_again_after(guard_r
     guard_rig.clock.now += 2
     get_guard(guard_rig.server)
     assert guard_rig.setup.calls == ["status", "status"]
+
+
+def test_a_closed_dashboard_window_makes_the_next_look_a_fresh_one(make_server: Any, tmp_path: Path) -> None:
+    fake = FakeSetup()
+    server, _rec = make_server(guard_dir=tmp_path / "guard", setup_cb=fake.callbacks(), clock=FakeClock(),
+                               dashboard_closed_cb=lambda pid: True)
+    get_guard(server)
+    assert post_json(server, "/api/dashboard/closed", {"pid": 4321})[0] == 200
+    get_guard(server)
+    assert fake.calls == ["status", "status"]
 
 
 @pytest.mark.parametrize("action", ["install", "remove"])

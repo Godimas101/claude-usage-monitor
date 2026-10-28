@@ -383,7 +383,10 @@ def backup_settings(path: Path, now: datetime) -> Path:
 
 def write_settings(path: Path, doc: Mapping[str, Any]) -> None:
     """Write ``doc`` as UTF-8 JSON, 2-space indent and a trailing newline, through a temp file in the same folder and
-    os.replace, so a failure leaves the old file as it was."""
+    os.replace, so a failure leaves the old file as it was. A settings file that is a link (a dotfiles folder) stays
+    one: the file it points at is the one replaced."""
+    if path.is_symlink():
+        path = path.resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
     handle, temp = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)

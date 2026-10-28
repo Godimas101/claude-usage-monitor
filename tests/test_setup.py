@@ -875,3 +875,18 @@ def test_an_install_waits_for_another_one_that_is_still_writing(tmp_path: Path) 
         assert not finished.is_set() and rig.claude.calls == [] and not rig.settings.exists()
     assert finished.wait(10)
     assert rig.load() == {"hooks": ours()}
+
+
+def test_a_linked_settings_file_stays_linked(tmp_path: Path) -> None:
+    rig = make_rig(tmp_path)
+    real = tmp_path / "dotfiles" / "claude-settings.json"
+    real.parent.mkdir(parents=True)
+    real.write_text(json.dumps({"model": "opus"}), encoding="utf-8")
+    rig.folder.mkdir(parents=True, exist_ok=True)
+    try:
+        rig.settings.symlink_to(real)
+    except OSError:
+        pytest.skip("this account cannot make symbolic links (Windows needs Developer Mode or an admin)")
+    assert setup.install(rig.ctx)["ok"] is True
+    assert rig.settings.is_symlink()
+    assert json.loads(real.read_text(encoding="utf-8")) == {"model": "opus", "hooks": ours()}
