@@ -904,6 +904,24 @@ def test_a_strip_made_before_the_taskbar_existed_moves_onto_it():
     assert windows.windows[-1].visible
 
 
+def test_a_taskbar_that_refuses_the_strip_leaves_it_floating_until_a_live_one_turns_up():
+    host, plat, windows = FakeHost(), FakePlatform(), WindowFactory()
+    dead = plat.info.hwnd
+
+    def refusing(host_: Any, *, draggable: bool, topmost: bool = True, parent: int | None = None) -> FakeWindow:
+        if parent == dead:  # Explorer died between the lookup and the window
+            raise OSError("CreateWindowExW('ClaudeUsageMonitor.Layered') failed: [WinError 1400] Invalid window handle.")
+        return windows(host_, draggable=draggable, topmost=topmost, parent=parent)
+
+    widget = TaskbarWidget(host, on_open=lambda: None, on_menu=lambda x, y: None, platform=plat, window_factory=refusing)
+    assert windows.windows[0].parent is None
+    widget.render(context())
+    assert len(windows.windows) == 1 and windows.windows[0].visible   # the dead taskbar is not asked again
+    plat.info = dataclasses.replace(plat.info, hwnd=dead + 1)           # Explorer is back
+    widget.render(context())
+    assert windows.windows[0].destroyed and windows.windows[-1].parent == dead + 1
+
+
 def test_a_top_taskbar_is_supported():
     top = taskbar(96, edge="top")
     assert strip_supported(top) is True

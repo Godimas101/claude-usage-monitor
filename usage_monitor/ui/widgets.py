@@ -859,9 +859,22 @@ class TaskbarWidget(_Surface):
 
     # The window: a child of the taskbar (#29)
 
+    _dead_parent: int | None = None  # a taskbar that refused the strip window: not asked again
+
     def _new_window(self, draggable: bool) -> Any:
         info = self._plat.taskbar_info()
-        return self._window_factory(self._host, draggable=draggable, parent=info.hwnd if info else None)
+        return self._make_window(draggable, info.hwnd if info else None)
+
+    def _make_window(self, draggable: bool, parent: int | None) -> Any:
+        """A strip window in the taskbar ``parent``. A taskbar that died since it was looked up (Explorer
+        restarting) refuses children: the strip is then a top-level window until a re-place finds a live one."""
+        if parent:
+            try:
+                return self._window_factory(self._host, draggable=draggable, parent=parent)
+            except OSError:
+                log.warning("the taskbar refused the strip window; it floats over the taskbar for now", exc_info=True)
+                self._dead_parent = parent
+        return self._window_factory(self._host, draggable=draggable, parent=None)
 
     def _wire(self, window: Any) -> None:
         super()._wire(window)
@@ -878,11 +891,11 @@ class TaskbarWidget(_Surface):
         taskbar (Explorer restarted), or a strip window that died with the old one, gets a new window.
         """
         window = self._window
-        if window is not None and window.parent == info.hwnd and window.alive:
+        if window is not None and window.alive and info.hwnd in (window.parent, self._dead_parent):
             return
         self._response.stop()
         self.hide_tooltip()
-        self._window = self._window_factory(self._host, draggable=False, parent=info.hwnd)
+        self._window = self._make_window(False, info.hwnd)
         self._wire(self._window)
         self._shown = None
         if window is not None:
