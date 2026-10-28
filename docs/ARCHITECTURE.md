@@ -319,10 +319,20 @@ rate reduced to its velocity), and otherwise every `REFRESH_S` (15 min). A pause
 once per pause. While `agent-demand` in the same folder is younger than an hour (readers renew it, at most every 5 min),
 `pause_check()` is overridden and the cycles run on a locked screen, which is when unattended
 runs happen. A failed write is logged once per kind of failure and never stops the cycle.
+Each cycle also evaluates the usage guard (`agent/guard.py`, #27) into `MonitorState.guard`, and
+`state.json` carries it with the policy it was evaluated against. A limit whose window reset after
+the last reading brings the next fetch forward to `RESET_FETCH_DELAY` (30 s) after the reset, so
+sessions waiting on the guard are released on fresh numbers.
 
-### `agent/` (#24)
+### `agent/` (#24, #27)
 `status.py` builds, writes and reads `state.json` (schema 1) and makes the one-line summary.
-`cli.py` holds `--status [--json]`, `--hook` and `--gate`, and `mcp.py` a stdio MCP server whose one tool,
+`guard.py` is the usage guard's verdict (off, armed or holding, the limits over their caps and when
+work can resume), pure and evaluated again by each reader, because a window may have reset since
+the reading. `sessions.py` owns the files the guard's processes share: who was told
+(`hook-seen.json`), who waits (`waiting/<pid>.json`) and the `resume-now` marker.
+`cli.py` holds `--status [--json]`, `--hook` (which on PostToolUse also tells a working session once
+per holding episode that a cap was reached), `--gate` and `--wait` (a background command that ends
+when the guard lets work resume, which wakes its session), and `mcp.py` a stdio MCP server whose one tool,
 `get_plan_usage`, returns the summary and the reading. They run as light processes beside the app:
 no UI imports, no single-instance mutex, logs in `agent.log`. The app is the only poller; a
 reader asks the usage API itself only when the reading is missing or stale (the app is closed,
@@ -330,7 +340,8 @@ or an older version writes no file), and keeps that answer in `state.json` for t
 the readers in that time share it. A reader that must ask
 first takes a byte-range lock on `state.lock` (Windows frees it when its holder is killed), re-reads
 the file under it, and never writes a reading older than the one on disk. `--hook` never fetches
-except at `SessionStart`, and `--hook` and `--gate` exit 0 on every path. How to wire it into Claude Code: [`AGENT_HOOK.md`](AGENT_HOOK.md).
+except at `SessionStart`, and `--hook` and `--gate` exit 0 on every path. The guard only informs:
+nothing in it blocks a tool or stops a session. How to wire it into Claude Code: [`AGENT_HOOK.md`](AGENT_HOOK.md).
 
 ## Phase 2 — stats (#11–#14)
 

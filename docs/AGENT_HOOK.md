@@ -15,6 +15,7 @@ and none of them shows the sign-in token.
 | MCP tool `get_plan_usage` | Claude calls it when it wants the numbers, for example between workflow phases | `claude mcp add` (below) |
 | `--hook` | Adds a one-line summary to Claude's context at session start, and when a limit passes a threshold | `hooks` in `settings.json` |
 | `--gate` | Refuses new agents and workflows once the session or weekly limit reaches a cap you set | `hooks` in `settings.json` |
+| The usage guard (v2.2) | Tells working sessions to wrap up when usage reaches a cap you set, and wakes the ones that wait when the limits allow work again | Settings → Usage guard, one click |
 | `--status [--json]` | Prints the summary line, or the full reading as JSON, for scripts | a terminal or a script |
 
 The app installs to `%LOCALAPPDATA%\ClaudeUsageMonitor\ClaudeUsageMonitor.exe`. The commands below
@@ -75,7 +76,7 @@ prints it, with the forward slashes JSON wants:
 "$env:LOCALAPPDATA\ClaudeUsageMonitor\ClaudeUsageMonitor.exe".Replace('\','/')
 ```
 
-Paste what it prints over `PASTE-THE-PATH-HERE` in each entry (three places). A placeholder left in
+Paste what it prints over `PASTE-THE-PATH-HERE` in each entry (four places). A placeholder left in
 place makes the hook fail with an error you can see, rather than run the wrong thing.
 
 ```json
@@ -105,6 +106,19 @@ place makes the hook fail with an error you can see, rather than run the wrong t
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PASTE-THE-PATH-HERE",
+            "args": ["--hook"],
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Agent|Workflow",
@@ -122,7 +136,8 @@ place makes the hook fail with an error you can see, rather than run the wrong t
 }
 ```
 
-Use any of the three on its own. If you already have a `"hooks"` block, add these events to it.
+Use any of them on its own. If you already have a `"hooks"` block, add these events to it. The usage
+guard's **Install** button adds the first three for you (below).
 
 **`--hook`** adds the summary line to Claude's context.
 - With `--always` (the SessionStart entry), it does so every time. SessionStart also runs after
@@ -130,8 +145,11 @@ Use any of the three on its own. If you already have a `"hooks"` block, add thes
 - Without `--always`, it stays silent until a limit reaches `--threshold` (default 80). It then
   speaks once, and again each time a limit climbs another 5 points. That is counted per session,
   and a new window starts from nothing.
-- It always exits 0, so it can never block a prompt.
-- On UserPromptSubmit it only reads the file and never calls the network.
+- On PostToolUse (after every tool call) it adds nothing unless the usage guard holds or a limit
+  passes the threshold. It starts the exe each time, which adds about a quarter of a second per tool
+  call.
+- It always exits 0, so it can never block a prompt or a tool.
+- On UserPromptSubmit and PostToolUse it only reads the file and never calls the network.
 
 **`--gate`** runs before every `Agent` or `Workflow` call.
 - When the session or weekly limit is at or past its cap (defaults 95 and 90), the call is denied,
@@ -139,6 +157,57 @@ Use any of the three on its own. If you already have a `"hooks"` block, add thes
 - Calls that are already running are left alone.
 - A limit whose window has reset no longer counts.
 - If anything goes wrong (no reading, a damaged file), the gate lets the call run.
+
+## The usage guard
+
+The guard lets a long run wind down by itself before it uses up the plan, and pick up again when the
+limits allow. It only informs: it never blocks a tool, stops a session or decides how Claude wraps
+up. Claude Code's own handling of a limit that is actually reached is unchanged.
+
+**Turning it on.** Open Settings → Usage guard, or tick **Usage guard** in the tray menu. Set a cap
+for each limit you want watched: the 5-hour session (95% by default), the week (90%) and the
+model-limited week such as Fable (off by default). Then press **Install** on the same card, once.
+
+**When usage reaches a cap:**
+- Each Claude session that is working hears it after its next tool call. It is told which limits
+  are over their caps, that nothing is blocked, to wrap up at a safe point, and when work can
+  resume. Each subagent hears it once too. Idle sessions are not disturbed.
+- Each session hears it once per holding episode. A new window over a cap is a new episode. A
+  session that starts, resumes or is compacted while the guard holds hears it again.
+- The widgets show the guard holding, with the time left until work can resume.
+
+**When work can resume:** only when every watched limit is under its cap again. The guard holds
+until the latest reset among the limits that are over their caps, so a fresh 5-hour window while
+the week is still over its cap wakes nobody. After a window resets, the app fetches the new numbers
+30 seconds later.
+
+**Waking up.** The notice offers the session a command to run as a background command:
+
+```
+"C:/Users/you/AppData/Local/ClaudeUsageMonitor/ClaudeUsageMonitor.exe" --wait --session <id>
+```
+
+- `--wait` ends when work can resume, and Claude Code wakes a session when one of its background
+  commands ends. That works in the terminal and in VS Code.
+- When several sessions wait, they are woken one after another, two minutes apart by default
+  (**Stagger** on the card), oldest first, so they don't all start at once.
+- **Resume now** on the card, or **Resume waiting sessions** in the tray menu, wakes them all at once,
+  whatever the limits say. Turning the guard off wakes them too.
+- `--wait` reads `state.json` every 30 seconds. With the app closed, it asks the usage API itself at
+  most every 15 minutes. With no reading at all, it keeps waiting.
+
+**What Install does:**
+- It backs up your Claude Code user settings (`%USERPROFILE%\.claude\settings.json`, or the folder in
+  `CLAUDE_CONFIG_DIR`) to `settings.json.cum-backup-<date>-<time>` beside the file.
+- It adds the SessionStart, UserPromptSubmit and PostToolUse entries shown under [Hooks](#hooks), and
+  leaves your other hooks alone, including a `--gate` you added yourself.
+- It registers the `get_plan_usage` MCP tool.
+
+**Remove** takes out only what Install added. Install needs Claude Code 2.1.139 or newer. The VS Code
+extension has its own version, and needs it too.
+
+The guard and `--gate` are separate. The gate refuses new agents and workflows past the caps in its
+own arguments. The guard refuses nothing.
 
 ## From a script or a terminal
 
@@ -188,6 +257,7 @@ can read over 100.
 | `scoped` | The model-scoped weekly limits, such as Fable: the `weekly` fields plus `label`, `model`, `allowance_pct` and `used_pct_of_weekly` |
 | `burn` | `output_tokens_per_min`, `usd_per_hour` (API-equivalent), `velocity` and `window_minutes`; null when a reader fetched the numbers itself |
 | `extra_usage` | Usage credits: `enabled`, `used`, `limit`, `percent` and `currency`, or null |
+| `guard` | The usage guard: `state` (`off`, `armed` or `holding`), `over` (each watched limit at or past its cap: `name`, `label`, `percent`, `cap`, `resets_at`), `resume_at` (the latest of their resets) and `policy` (the caps and the stagger set in Settings). Null when a reader wrote the file; readers then use the settings file |
 
 `--status --json` and the MCP tool add `monitor_running`, `usage_age_s`, `stale` and `summary`.
 
@@ -196,8 +266,11 @@ can read over 100.
 These modes only read. They write only small files in the app data folder:
 - `state.json`, the reading above.
 - `agent-demand`, an empty file whose date says when a session last asked.
-- `hook-seen.json`, which records which steps the hook has already reported, per session ID, for
-  seven days.
+- `hook-seen.json`, which records which steps the hook has already reported, and which usage-guard
+  episode each session and subagent was told of, per session ID, for seven days.
+- `waiting\<process ID>.json`, one per running `--wait`: its session ID, when it started and its
+  folder. It is removed when the wait ends.
+- `resume-now`, an empty file whose date tells the running waits that Resume now was pressed.
 - `state.lock`, an empty file that lets one reader at a time ask the usage API.
 - `agent.log`, warnings only.
 
