@@ -223,6 +223,7 @@ html[data-g-icons] .nm-card-t:not(.nm-chart-t) > .nm-ttl::before, html[data-g-ic
 .nm-card[aria-label="Widgets and display"], .nm-card[aria-label="Widgets & display"] { --g-ico: "\E7F4"; }
 .nm-card[aria-label="Data & plan"] { --g-ico: "\E8F1"; }
 .nm-card[aria-label="Alerts"] { --g-ico: "\EA8F"; }
+.nm-card[aria-label="Usage guard"] { --g-ico: "\EA18"; }
 .nm-card[aria-label="System"] { --g-ico: "\E713"; }
 .nm-card[aria-label="Claude Usage Monitor"] { --g-ico: "\E946"; }
 .nm-card[aria-label="Links"] { --g-ico: "\E71B"; }
@@ -238,6 +239,9 @@ html[data-g-icons] .nm-card-t:not(.nm-chart-t) > .nm-ttl::before, html[data-g-ic
 .nm-chip[data-g-tone="acc"] { color: var(--text); background: var(--accent-soft); }
 .nm-chip[data-g-tone="acc"]::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--g-fill-accent); }
 .nm-chip[data-g-tone="neutral"] { color: var(--text-dim); background: var(--g-hover); }
+/* the guard's ARMED and HOLDING chips carry their tone as a class; the tone script has no word for them and calls them neutral */
+#guard-live .nm-chip.is-ok[data-g-tone="neutral"] { color: var(--ok); background: color-mix(in srgb, var(--ok) 16%, transparent); }
+#guard-live .nm-chip.is-crit[data-g-tone="neutral"] { color: var(--alert); background: color-mix(in srgb, var(--alert) 16%, transparent); }
 .nm-pill { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 10px; font: 600 12px/20px var(--g-font); color: var(--text); background: var(--accent-soft); }
 
 /* ── values: figures, facts, notes ──────────────────────────────────────────────────────────────────────── */
