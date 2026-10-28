@@ -5,16 +5,19 @@ so none of these tests needs CUM_UI_TESTS=1 and all of them run in CI.
 """
 from __future__ import annotations
 
+import dataclasses
 import time
 from dataclasses import replace
 from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from PIL import Image
 
+from usage_monitor.agent import guard as guard_mod
 from usage_monitor.data.models import (
     ApiStatus,
     BurnRate,
@@ -31,9 +34,12 @@ from usage_monitor.render.model import (
     SEVERITY_WARNING,
     STALE_MESSAGE_EXPIRED,
     STALE_MESSAGE_NO_LOGIN,
+    GuardMark,
+    WidgetModel,
     build_model,
     elapsed_fraction,
     format_age,
+    format_countdown,
     format_resets,
     pace_for,
     severity_for,
@@ -398,6 +404,190 @@ def test_elapsed_time_is_never_negative_for_future_fetch():
     assert model.age_text == "0 S AGO"
 
 
+# ── View model: the usage guard (#27) ─────────────────────────────────────────
+
+GUARD_POLICY = {"enabled": True, "session_cap": 95, "weekly_cap": 90, "scoped_cap": None, "stagger_s": 120}
+
+
+def guarded(*limits: Limit, policy: dict[str, Any] | None = None, **kwargs: Any) -> MonitorState:
+    """A state carrying the verdict the real guard (agent/guard.py) gives its limits, so the model is tested on the
+    shape the app publishes."""
+    plain = state(*limits, **kwargs)
+    verdict = guard_mod.evaluate(guard_mod.limits_doc(plain.usage), {**GUARD_POLICY, **(policy or {})}, NOW)
+    return replace(plain, guard=verdict)
+
+
+FABLE = dict(label="FABLE WEEKLY", scope="Fable", allowance=50.0, resets_in=timedelta(days=3))
+
+
+@pytest.mark.parametrize("block", [
+    {},
+    None,
+    {"state": "off", "over": [], "resume_at": None, "policy": GUARD_POLICY},
+    {"state": "sideways"},
+    {"state": ""},
+    "holding",
+    ["armed"],
+])
+def test_a_guard_that_is_off_missing_or_empty_gives_no_mark(block):
+    assert build_model(replace(state(limit("session", 99), limit("weekly_all", 99)), guard=block), NOW).guard is None
+
+
+def test_no_state_a_state_without_the_field_and_a_directly_built_model_have_no_guard():
+    assert build_model(None, NOW).guard is None
+    plain = state(limit("session", 10))
+    old = SimpleNamespace(status=plain.status, usage=plain.usage, usage_fetched_at=plain.usage_fetched_at,
+                          updated_at=plain.updated_at)            # a state from before the guard: no such field
+    assert build_model(old, NOW).guard is None                    # type: ignore[arg-type]
+    by_hand = WidgetModel(status=ApiStatus.LIVE, status_text="LIVE", age_text=None, rows=[], stale=False,
+                          stale_message=None, blink_on=True, updated_at=NOW)
+    assert by_hand.guard is None                                  # callers and tests that predate it keep working
+
+
+def test_a_guard_under_every_cap_is_armed_and_names_the_caps_it_watches():
+    model = build_model(guarded(limit("session", 40), limit("weekly_all", 50)), NOW)
+    mark = model.guard
+    assert isinstance(mark, GuardMark) and mark.state == "armed" and not mark.holding
+    assert mark.over_keys == () and mark.over_limits() == []
+    assert mark.caps == {"session": 95, "weekly": 90}
+    assert mark.watched() == [("session", 95), ("weekly", 90)]
+    assert (mark.resume_at, mark.resume_text, mark.resume_in, mark.resume_clock) == (None, None, None, None)
+
+
+def test_a_limit_without_a_cap_is_not_watched():
+    model = build_model(guarded(limit("session", 40), limit("weekly_all", 50), policy={"session_cap": None}), NOW)
+    assert model.guard.caps == {"weekly": 90}
+
+
+def test_a_limit_at_its_cap_is_held_and_its_row_is_named_by_key():
+    model = build_model(guarded(limit("session", 96, resets_in=timedelta(hours=2, minutes=14)),
+                                limit("weekly_all", 50)), NOW)
+    mark = model.guard
+    assert mark.state == "holding" and mark.holding
+    assert mark.over_keys == ("session",) == (model.rows[0].key,)
+    assert mark.readings == {"session": 96.0} and mark.labels["session"] == "session"
+    assert mark.over_limits() == [("session", 96.0, 95)]
+    weekly = build_model(guarded(limit("session", 10), limit("weekly_all", 91)), NOW)
+    assert weekly.guard.over_keys == ("weekly",) == (weekly.rows[1].key,)
+
+
+def test_with_two_limits_over_their_caps_the_guard_resumes_when_the_last_of_them_resets():
+    model = build_model(guarded(limit("session", 97, resets_in=timedelta(hours=1)),
+                                limit("weekly_all", 92, resets_in=timedelta(days=1, hours=9))), NOW)
+    mark = model.guard
+    assert mark.over_keys == ("session", "weekly")
+    assert mark.over_limits() == [("session", 97.0, 95), ("weekly", 92.0, 90)]
+    assert mark.resume_at == NOW + timedelta(days=1, hours=9) and mark.resume_in == "1D 9H"
+
+
+def test_a_scoped_limit_over_its_cap_is_keyed_as_its_row_is():
+    model = build_model(guarded(limit("session", 10), limit("weekly_all", 10), limit("weekly_scoped", 92, **FABLE),
+                                policy={"scoped_cap": 90}), NOW)
+    mark = model.guard
+    assert model.rows[2].key == "scoped:fable"
+    assert mark.over_keys == ("scoped:fable",) == (model.rows[2].key,)
+    assert mark.caps == {"session": 95, "weekly": 90, "scoped:fable": 90}
+    assert mark.labels["scoped:fable"] == "Fable weekly" and mark.readings == {"scoped:fable": 92.0}
+
+
+def test_a_scoped_limit_with_no_model_is_keyed_by_its_label_as_its_row_is():
+    odd = limit("weekly_scoped", 95, label="OPUS WEEKLY", scope=None, allowance=50.0)
+    model = build_model(guarded(limit("session", 10), limit("weekly_all", 10), odd, policy={"scoped_cap": 90}), NOW)
+    assert model.rows[2].key == "scoped:opus weekly"
+    assert model.guard.over_keys == (model.rows[2].key,)
+    assert model.guard.labels[model.rows[2].key] == "opus weekly"
+
+
+def test_a_scoped_limit_the_widget_hides_is_still_watched_and_named():
+    held = guarded(limit("session", 10), limit("weekly_all", 10), limit("weekly_scoped", 92, **FABLE),
+                   policy={"scoped_cap": 90})
+    model = build_model(held, NOW, show_scoped="never")
+    assert [row.key for row in model.rows] == ["session", "weekly"]
+    assert model.guard.over_keys == ("scoped:fable",)
+    assert model.guard.over_limits() == [("Fable weekly", 92.0, 90)]
+    assert model.guard.watched()[-1] == ("Fable weekly", 90)
+
+
+def test_the_guard_keys_line_up_with_the_row_keys_whatever_the_scoped_labels_are():
+    """The guard names a scoped limit by its label and for people by "<model> weekly"; the widgets key a row by its
+    model, else its label. Both ways of naming the same limit have to end on the same key."""
+    for scope, label in (("Fable", "FABLE WEEKLY"), ("Sonnet 4.5", "CLAUDE SONNET 4.5 WEEKLY"), (None, "DESIGN WEEKLY")):
+        scoped = limit("weekly_scoped", 99, label=label, scope=scope, allowance=25.0)
+        model = build_model(guarded(limit("session", 1), limit("weekly_all", 1), scoped, policy={"scoped_cap": 90}), NOW)
+        assert model.guard.over_keys == (model.rows[2].key,), (scope, label)
+
+
+@pytest.mark.parametrize(("resets_in", "text"), [
+    (timedelta(hours=23, minutes=59), "23H 59M"),
+    (timedelta(hours=2, minutes=14), "2H 14M"),
+    (timedelta(minutes=9), "9M"),
+    (timedelta(seconds=30), "<1M"),
+    (timedelta(days=1) - timedelta(seconds=1), "23H 59M"),
+])
+def test_the_resume_text_is_a_countdown_under_a_day(resets_in, text):
+    mark = build_model(guarded(limit("session", 96, resets_in=resets_in), limit("weekly_all", 50)), NOW).guard
+    assert mark.resume_text == text == mark.resume_in
+    assert mark.resume_at == NOW + resets_in
+    assert mark.resume_clock == format_resets(NOW + resets_in, NOW)
+
+
+def test_the_resume_text_a_day_or_more_away_is_the_reset_time_the_rows_give():
+    for resets_in, countdown in ((timedelta(days=2, hours=3), "2D 3H"), (timedelta(days=1), "1D")):
+        mark = build_model(guarded(limit("session", 10), limit("weekly_all", 91, resets_in=resets_in)), NOW).guard
+        assert mark.resume_text == format_resets(NOW + resets_in, NOW) == mark.resume_clock
+        assert mark.resume_in == countdown
+
+
+def test_a_limit_with_no_reset_time_holds_with_no_resume_time():
+    mark = build_model(guarded(limit("session", 99, resets_in=None), limit("weekly_all", 10)), NOW).guard
+    assert mark.holding and mark.over_keys == ("session",)
+    assert (mark.resume_at, mark.resume_text, mark.resume_in, mark.resume_clock) == (None, None, None, None)
+
+
+def test_a_resume_time_that_has_passed_since_the_reading_reads_as_under_a_minute():
+    """The guard judges a reading once a cycle and the model is built every minute: in between, the countdown runs out."""
+    held = guarded(limit("session", 96, resets_in=timedelta(minutes=5)), limit("weekly_all", 10))
+    assert build_model(held, NOW + timedelta(minutes=5, seconds=40)).guard.resume_text == "<1M"
+    assert build_model(held, NOW + timedelta(minutes=2)).guard.resume_text == "3M"
+
+
+@pytest.mark.parametrize(("seconds", "text"), [
+    (-5, "<1M"), (0, "<1M"), (30, "<1M"), (59, "<1M"), (60, "1M"), (540, "9M"), (3599, "59M"), (3600, "1H"),
+    (3660, "1H 1M"), (8040, "2H 14M"), (86340, "23H 59M"), (86399, "23H 59M"), (86400, "1D"), (90000, "1D 1H"),
+    (183600, "2D 3H"), (172800, "2D"),
+])
+def test_countdown_text(seconds, text):
+    assert format_countdown(seconds) == text
+
+
+def test_the_countdown_counts_down_and_the_frame_cache_sees_it():
+    """The widgets keep a frame while the model is unchanged (ui/widgets.steady): a countdown that moved is a model that
+    differs, so the frame is drawn again."""
+    held = guarded(limit("session", 96, resets_in=timedelta(hours=2, minutes=14)), limit("weekly_all", 10))
+    now = build_model(held, NOW)
+    later = build_model(held, NOW + timedelta(minutes=1))
+    assert (now.guard.resume_text, later.guard.resume_text) == ("2H 14M", "2H 13M")
+    assert now != later and now == build_model(held, NOW)
+    assert now != build_model(replace(held, guard={}), NOW)
+
+
+def test_a_malformed_guard_block_is_read_as_far_as_it_makes_sense():
+    block = {"state": "holding", "resume_at": "not a time", "policy": {"session_cap": "95", "weekly_cap": True},
+             "over": [None, "session", 7, {"name": "session", "label": "session", "percent": "96", "cap": 95,
+                                           "resets_at": "no"}, {"name": "session"}, {}]}
+    mark = build_model(replace(state(limit("session", 96), limit("weekly_all", 10)), guard=block), NOW).guard
+    assert mark.holding and mark.over_keys == ("session",)
+    assert mark.caps == {"session": 95} and mark.readings == {}
+    assert mark.resume_at is None and mark.resume_text is None
+
+
+def test_a_guard_mark_is_plain_frozen_data():
+    mark = build_model(guarded(limit("session", 96), limit("weekly_all", 10)), NOW).guard
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        mark.state = "armed"                                      # type: ignore[misc]
+    assert GuardMark("armed") == GuardMark("armed", (), {}, None, None)
+
+
 # ── Engine ────────────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize(("text", "rgba"), [
@@ -519,6 +709,29 @@ def test_hazard_stripes_stay_inside_the_polygon():
     assert buffer.getpixel((0, 0))[3] == 0       # the chamfer corner stays clear
     assert buffer.getpixel((60, 2))[3] == 255    # the band is opaque inside the outline
     assert buffer.getpixel((60, 12))[3] == 0     # and stops at its 4 px height
+
+
+def test_glue_makes_every_space_unbreakable():
+    glued = engine.glue("FRI 1:12 AM")
+    assert " " not in glued and glued.count(engine.NO_BREAK) == 2
+
+
+def test_wrap_words_breaks_at_plain_spaces_up_to_the_limit():
+    assert engine.wrap_words("aaa bbb ccc ddd", len, 7) == ["aaa bbb", "ccc ddd"]
+    assert engine.wrap_words("aaa bbb", len, 99) == ["aaa bbb"]
+    assert engine.wrap_words("", len, 7) == []
+    assert engine.wrap_words("  aaa   bbb ", len, 7) == ["aaa bbb"]
+
+
+def test_wrap_words_keeps_a_glued_group_together_and_gives_plain_spaces_back():
+    text = f"aaa {engine.glue('bbb ccc')} ddd"
+    assert engine.wrap_words(text, len, 8) == ["aaa", "bbb ccc", "ddd"]
+    assert engine.wrap_words(text, len, 99) == ["aaa bbb ccc ddd"]
+
+
+def test_wrap_words_gives_the_first_line_its_own_limit_and_never_splits_a_word():
+    assert engine.wrap_words("aaa bbb ccc", len, 7, first_limit=3) == ["aaa", "bbb ccc"]
+    assert engine.wrap_words("aaaaaaaaa bbb", len, 4) == ["aaaaaaaaa", "bbb"]
 
 
 # ── Options ───────────────────────────────────────────────────────────────────
@@ -1113,7 +1326,7 @@ def test_dump_frames_rejects_unknown_states(tmp_path: Path):
 def test_the_scoped_sample_states_are_the_not_live_states_with_a_third_row():
     """What a widget shows on an account that has the Fable row while the sign-in is lost or the network is down."""
     assert dump.SCOPED_STATE_NAMES == ("stale3", "offline3", "paused3", "rate_limited3")
-    assert dump.DUMP_STATE_NAMES == dump.STATE_NAMES + dump.SCOPED_STATE_NAMES
+    assert dump.DUMP_STATE_NAMES == dump.STATE_NAMES + dump.SCOPED_STATE_NAMES + dump.GUARD_STATE_NAMES
     assert len(dump.STATE_NAMES) == 10, "the contact sheet and the existing sweeps keep their ten states"
     for name in dump.SCOPED_STATE_NAMES:
         plain, scoped = dump.sample_model(name[:-1]), dump.sample_model(name)
@@ -1129,6 +1342,39 @@ def test_dump_frames_renders_the_scoped_states_too(tmp_path: Path):
     variant_dir = tmp_path / "nostromo" / "amber"
     assert report.files == 2 * (1 + len(dump.TASKBAR_HEIGHTS_AT_1X) + 1) + 2 * 4
     assert (variant_dir / "floating_offline3_x1.png").is_file() and (variant_dir / "tray_rate_limited3_16.png").is_file()
+
+
+def test_the_guard_sample_states_are_armed_and_held_by_each_window_in_turn():
+    """The usage guard on a live account with the Fable row: armed with the default caps, held by the session with the
+    reset hours away, held by the week with it days away. The verdict is the real guard's."""
+    assert dump.GUARD_STATE_NAMES == ("guard_armed", "guard_hold_session", "guard_hold_weekly")
+    armed, by_session, by_week = (dump.sample_model(name) for name in dump.GUARD_STATE_NAMES)
+    for model in (armed, by_session, by_week):
+        assert model.status is ApiStatus.LIVE and not model.stale and len(model.rows) == 3
+    assert armed.guard.state == "armed" and armed.guard.caps == {"session": 95, "weekly": 90}
+    assert by_session.guard.over_keys == ("session",) and by_session.rows[0].severity == SEVERITY_CRITICAL
+    assert by_session.guard.resume_text == by_session.guard.resume_in == "2H 14M"
+    assert by_week.guard.over_keys == ("weekly",) and by_week.guard.resume_in == "2D 3H"
+    assert by_week.guard.resume_text == by_week.guard.resume_clock != by_week.guard.resume_in
+    state_ = dump.sample_state("guard_hold_weekly")
+    assert state_.guard == guard_mod.evaluate(guard_mod.limits_doc(state_.usage), dump.GUARD_SAMPLE_POLICY, dump.SAMPLE_NOW)
+
+
+def test_the_other_sample_states_carry_no_guard():
+    for name in dump.STATE_NAMES + dump.SCOPED_STATE_NAMES:
+        state_ = dump.sample_state(name)
+        assert state_ is None or state_.guard == {}, name
+        assert dump.sample_model(name).guard is None, name
+
+
+def test_dump_frames_renders_the_guard_states_too(tmp_path: Path):
+    report = dump.dump_frames(tmp_path, themes=["nostromo"], variants=["amber"],
+                              states=["guard_armed", "guard_hold_weekly"], scales=[1.0])
+    variant_dir = tmp_path / "nostromo" / "amber"
+    assert report.files == 2 * (1 + len(dump.TASKBAR_HEIGHTS_AT_1X) + 1) + 2 * 4
+    for name in ("floating_guard_armed_x1.png", "taskbar_guard_hold_weekly_h48_x1.png",
+                 "tooltip_guard_hold_weekly_x1.png", "tray_guard_armed_16.png"):
+        assert (variant_dir / name).is_file(), name
 
 
 def test_unknown_theme_is_reported(tmp_path: Path):

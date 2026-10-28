@@ -133,6 +133,10 @@ STRIP_MARGIN = 1                # least air above and below the strip in a short
 
 PULSE_MIN = 0.3
 HIT_SPLITS = (0.0, 2.0, 1.0)    # refresh hit: x offset of the two copies per frame (index 0 is no hit)
+HOLD_SPLIT = 0.75               # the hold chip's standing glitch: logical px each copy of its word sits off the word
+GUARD_GAP = 8                   # air round the armed guard's chip in the header, and above the hover card's guard block
+GUARD_LINE_H = 13               # a line of the hover card's guard block
+GUARD_BLOCK_PAD = 12            # what the block adds to the card besides its lines: the gap round its rule
 GLOW_SIGMA = 3.0                # the 6 px CSS blur of the numerals and the live pip; Canvas.glow takes blur / 2
 
 # ── Fonts and text styles ─────────────────────────────────────────────────────
@@ -565,6 +569,43 @@ def _emphasis(model: WidgetModel, row: Row) -> str:
     return SEVERITY_NORMAL if model.stale else row.severity
 
 
+def _over_cap(model: WidgetModel, row: Row) -> bool:
+    """Whether the usage guard (#27) holds because of this row: it is at or past the cap the guard watches for it."""
+    guard = model.guard
+    return guard is not None and guard.holding and row.key in guard.over_keys and row.percent is not None
+
+
+def _row_emphasis(model: WidgetModel, row: Row) -> str:
+    """_emphasis, raised to critical for a row the guard holds on, whatever its severity: a cap set at 60 % is as
+    final to the user as the API's critical, so its numerals, bar and chip read as the state they are."""
+    if not model.stale and _over_cap(model, row):
+        return SEVERITY_CRITICAL
+    return _emphasis(model, row)
+
+
+def _chip_word(model: WidgetModel, row: Row) -> str:
+    """The word of a row's critical chip: CRIT, or the cap ("CAP 95") for a row the guard holds on."""
+    guard = model.guard
+    if model.stale or not _over_cap(model, row) or guard is None:
+        return "CRIT"
+    cap = guard.caps.get(row.key)
+    return "HOLD" if cap is None else f"CAP {_number(cap)}"
+
+
+def _number(value: float) -> str:
+    """A cap as people write it: 95, not 95.0."""
+    return str(int(value)) if float(value).is_integer() else f"{value:g}"
+
+
+def _hold_word(model: WidgetModel) -> str | None:
+    """The hold chip's text while the guard holds: "HOLD 2H 14M", or "HOLD" when no reset time is known. None while
+    the guard is off or only armed. The countdown is always the time left ("HOLD 2D 3H"); the hover card has the clock."""
+    guard = model.guard
+    if guard is None or not guard.holding:
+        return None
+    return f"HOLD {guard.resume_in}" if guard.resume_in else "HOLD"
+
+
 def _digits(percent: float | None) -> str:
     return "--" if percent is None else str(max(0, int(percent + 0.5)))
 
@@ -682,20 +723,52 @@ def _chip_out(ink: _Ink, x: float, y: float, text: str, outline: Color, color: C
     return width
 
 
-def _chip_crit(ink: _Ink, x: float, y: float) -> float:
-    """CRIT: an ink box with a 7 px hazard cap and a 5 px top-right chamfer. Returns its width."""
+def _chip_crit(ink: _Ink, x: float, y: float, word: str = "CRIT") -> float:
+    """CRIT: an ink box with a 7 px hazard cap and a 5 px top-right chamfer. Returns its width. The usage guard
+    puts its own word in it: the cap a row is held on ("CAP 95")."""
     pal = ink.pal
-    width = ink.width("CRIT", CHIP) + 17
+    width = ink.width(word, CHIP) + 17
     x0, x1 = ink.snap(x), ink.snap(x + width)
     ink.polygon([(x0, y), (x1 - CHIP_CUT, y), (x1, y + CHIP_CUT), (x1, y + CHIP_H), (x0, y + CHIP_H)], pal.ink)
     ink.hazard((x0, y, x0 + 7, y + CHIP_H), *pal.crit_fill)
-    ink.text("CRIT", CHIP, x + 11, y + 10, pal.hz_a)
+    ink.text(word, CHIP, x + 11, y + 10, pal.hz_a)
     return width
 
 
-def _live_tag(ink: _Ink, look: Look, motion: Motion, text: str) -> None:
+def _chip_hold_width(ink: _Ink, word: str) -> float:
+    return ink.width(word, CHIP) + 17
+
+
+def _chip_hold(ink: _Ink, x: float, y: float, word: str, height: float = CHIP_H, glitch: bool = True) -> float:
+    """The guard's HOLD chip: the CRIT chip's shape with the word in the bright tone and a glitch under it, the
+    text drawn again a pixel either side in the selection and the danger colours, as a refresh hit splits the
+    numerals. The split stays still: the chip is a state, not an event. The Edgerun plate has no bright tone (its
+    text is ink, for the yellow) and no glow, so there the word is the CRIT chip's red and the split is left out,
+    and so it is for a stale frame (``glitch`` False), which is drawn flat: the fringes would outshine the dimmed
+    word. ``height`` is the chip's, 14 px in the header and 12 inside the stale band, between its hazard strips.
+    Returns its width."""
+    pal = ink.pal
+    width = _chip_hold_width(ink, word)
+    x0, x1 = ink.snap(x), ink.snap(x + width)
+    ink.polygon([(x0, y), (x1 - CHIP_CUT, y), (x1, y + CHIP_CUT), (x1, y + height), (x0, y + height)], pal.ink)
+    ink.hazard((x0, y, x0 + 7, y + height), *pal.crit_fill)
+    layer, _ = ink.layer(word, CHIP, x + 11, y + 10 - (CHIP_H - height) / 2)
+    if pal.plate:
+        ink.glyphs(layer, pal.hz_a)
+        return width
+    if not glitch:
+        ink.glyphs(layer, pal.fg_hi)
+        return width
+    shift = round(HOLD_SPLIT * ink.cv.kx)
+    ink.stamp(Layer(layer.mask, layer.x - shift, layer.y), pal.sel)
+    ink.stamp(Layer(layer.mask, layer.x + shift, layer.y), pal.hz_a)
+    ink.glyphs(layer, pal.fg_hi)
+    return width
+
+
+def _live_tag(ink: _Ink, look: Look, motion: Motion, text: str) -> float:
     """The header's right-hand word: plain, in a 1 px outline (Blackwall), or on a black chip with the live dot
-    (the Edgerun plate)."""
+    (the Edgerun plate). Returns the tag's left edge."""
     pal = ink.pal
     word_w = ink.width(text, STATUS)
     if pal.plate:
@@ -708,23 +781,37 @@ def _live_tag(ink: _Ink, look: Look, motion: Motion, text: str) -> None:
         ink.outline(ink.snap(left), TAG_TOP, RIGHT, TAG_BOTTOM, pal.line)
         ink.text(text, STATUS, left + 4, BOXED_BASE, pal.ok)
     else:
+        left = RIGHT - word_w
         ink.text(text, STATUS, RIGHT, HEAD_BASE, pal.ok, align="right")
+    return left
 
 
 def _draw_header(ink: _Ink, look: Look, model: WidgetModel, motion: Motion) -> None:
-    """Alive mark and brand on the left, the status word on the right."""
+    """Alive mark and brand on the left, the status word on the right. While the usage guard holds, the right-hand
+    place is the HOLD chip (the status is in the pulse and the dim of the rows); while it is only armed, a quiet
+    GUARD chip sits before the status word, if the brand leaves room."""
     pal = ink.pal
     live = model.status is ApiStatus.LIVE and not model.stale
     brand_x = LEFT
     if not pal.plate:
         _pip(ink, LEFT, PIP_Y, pal.ok if live else pal.stale, motion.pulse if live else 1.0, glow=live)
         brand_x = LEFT + PIP + BRAND_GAP
-    ink.text("CLAUDE//USAGE", BRAND, brand_x, HEAD_BASE, pal.fg_hi)
-    if live:
-        _live_tag(ink, look, motion, "LIVE")
+    brand_end = brand_x + ink.text("CLAUDE//USAGE", BRAND, brand_x, HEAD_BASE, pal.fg_hi)
+    hold = _hold_word(model)
+    if hold is not None:
+        _chip_hold(ink, RIGHT - _chip_hold_width(ink, hold), HEADER_TOP - 1, hold, glitch=not model.stale)
         return
-    text = model.status_text.upper()
-    _chip_out(ink, RIGHT - _chip_out_width(ink, text), HEADER_TOP - 1, text, pal.ink3, pal.ink2)
+    if live:
+        tag_left = _live_tag(ink, look, motion, "LIVE")
+    else:
+        text = model.status_text.upper()
+        tag_left = RIGHT - _chip_out_width(ink, text)
+        _chip_out(ink, tag_left, HEADER_TOP - 1, text, pal.ink3, pal.ink2)
+    if model.guard is not None:
+        width = _chip_out_width(ink, "GUARD")
+        left = tag_left - GUARD_GAP - width
+        if left >= brand_end + GUARD_GAP:
+            _chip_out(ink, left, HEADER_TOP - 1, "GUARD", pal.ink3, pal.ink2)
 
 
 def _draw_band(ink: _Ink, theme: Any, model: WidgetModel) -> None:
@@ -738,12 +825,44 @@ def _draw_band(ink: _Ink, theme: Any, model: WidgetModel) -> None:
     ink.hazard((x0, y1 - HAZARD_STRIP, x1, y1), fill_a, fill_b)
     text = _band_text(theme, model)
     age = _age_tag(model)
+    hold = _hold_word(model)
+    if hold is not None:
+        _draw_band_hold(ink, model, text, age, hold)
+        return
     age_w = ink.width(age, RESET) if age else 0.0
     room = (BAND_AGE_RIGHT - age_w - 10 if age else BAND_AGE_RIGHT) - BAND_TEXT_X
     fitted = _fit(ink, text, BAND_TYPE, room)
     ink.text(fitted, BAND_TYPE, BAND_TEXT_X, BAND_BASE, pal.warn)
     if age and fitted == text:
         ink.text(age, RESET, BAND_AGE_RIGHT, BAND_BASE, pal.signal if pal.plate else pal.ink2, align="right")
+
+
+def _draw_band_hold(ink: _Ink, model: WidgetModel, text: str, age: str | None, hold: str) -> None:
+    """The stale band while the guard holds. The cause stays whole (it is what the user acts on), the HOLD chip
+    sits at the right end between the hazard strips, and the age keeps its place before it when the band has room
+    for all three. What gives way, in order: the countdown (the chip is then HOLD alone), the age, and last the
+    end of the cause."""
+    pal = ink.pal
+    x0, y0, x1, y1 = BAND
+    text_w = ink.width(text, BAND_TYPE)
+    age_w = ink.width(age, RESET) + 10 if age else 0.0
+    plans = [(hold, age_w)]
+    if hold != "HOLD":
+        plans.append(("HOLD", age_w))
+    plans.append(("HOLD", 0.0))
+    for word, with_age in plans:
+        chip_w = _chip_hold_width(ink, word)
+        if BAND_TEXT_X + text_w + with_age + GUARD_GAP + chip_w <= BAND_AGE_RIGHT:
+            break
+    else:
+        word, with_age = "HOLD", 0.0
+    chip_w = _chip_hold_width(ink, word)
+    left = BAND_AGE_RIGHT - chip_w
+    fitted = _fit(ink, text, BAND_TYPE, left - GUARD_GAP - with_age - BAND_TEXT_X)
+    ink.text(fitted, BAND_TYPE, BAND_TEXT_X, BAND_BASE, pal.warn)
+    if with_age and fitted == text and age:
+        ink.text(age, RESET, left - GUARD_GAP, BAND_BASE, pal.signal if pal.plate else pal.ink2, align="right")
+    _chip_hold(ink, left, y0 + HAZARD_STRIP, word, y1 - y0 - 2 * HAZARD_STRIP, glitch=not model.stale)
 
 
 # ── Rows ──────────────────────────────────────────────────────────────────────
@@ -758,15 +877,16 @@ class RowBoxes(NamedTuple):
     value: tuple[float, float]
 
 
-def _chip_width(ink: _Ink, emphasis: str) -> float:
+def _chip_width(ink: _Ink, emphasis: str, word: str = "CRIT") -> float:
     if emphasis == SEVERITY_CRITICAL:
-        return ink.width("CRIT", CHIP) + 17
+        return ink.width(word, CHIP) + 17
     if emphasis == SEVERITY_WARNING:
         return _chip_out_width(ink, "WARN")
     return 0.0
 
 
-def _layout_row(ink: _Ink, look: Look, row: Row, emphasis: str, digits: str, reset: str | None) -> RowBoxes:
+def _layout_row(ink: _Ink, look: Look, row: Row, emphasis: str, digits: str, reset: str | None,
+                chip_word: str = "CRIT") -> RowBoxes:
     """Fit a row's name side against its value side. A row too wide for both gives up its reset text first,
     then its share tag, and then the end of its name; the value and the severity chip always stay."""
     unit_w = ink.width("%", UNIT) if row.percent is not None else 0.0
@@ -776,7 +896,7 @@ def _layout_row(ink: _Ink, look: Look, row: Row, emphasis: str, digits: str, res
     name_w = ink.width(name, NAME)
     tag = row.share_text.upper() if _is_scoped(row) and row.share_text else None
     tag_w = ink.width(tag, TAG) if tag else 0.0
-    chip_w = _chip_width(ink, emphasis)
+    chip_w = _chip_width(ink, emphasis, chip_word)
 
     def end_of(name_width: float, with_tag: bool) -> float:
         end = LEFT + name_width + ((6 + tag_w) if with_tag and tag else 0.0)
@@ -915,10 +1035,11 @@ def _draw_row(ink: _Ink, look: Look, model: WidgetModel, row: Row, top: float, m
     """One limit: name (tag, chip) and reset text above, value on the right, hairline and bar below. The
     tooltip moves the reset text to an info line under the bar and shows the exact percentage."""
     pal = ink.pal
-    emphasis = _emphasis(model, row)
+    emphasis = _row_emphasis(model, row)
+    word = _chip_word(model, row)
     digits = _exact_digits(row.percent) if tooltip else _digits(row.percent)
     reset = _reset_text(row, tooltip)
-    boxes = _layout_row(ink, look, row, emphasis, digits, None if tooltip else reset)
+    boxes = _layout_row(ink, look, row, emphasis, digits, None if tooltip else reset, word)
     name = _row_name(row)
     if ink.width(name, NAME) > boxes.name[1] - boxes.name[0] + 0.01:
         name = _fit(ink, name, NAME, boxes.name[1] - boxes.name[0])
@@ -927,7 +1048,7 @@ def _draw_row(ink: _Ink, look: Look, model: WidgetModel, row: Row, top: float, m
         ink.text(row.share_text.upper(), TAG, boxes.tag[0], top + TAG_BASE, pal.ink3)
     if boxes.chip is not None:
         if emphasis == SEVERITY_CRITICAL:
-            _chip_crit(ink, boxes.chip[0], top)
+            _chip_crit(ink, boxes.chip[0], top, word)
         else:
             colour = pal.ink if pal.plate else pal.warn
             _chip_out(ink, boxes.chip[0], top, "WARN", colour, colour)
@@ -986,12 +1107,67 @@ def _tooltip_height(rows: int) -> int:
     return ROW_TOP + TOOLTIP_PITCH * (max(2, rows) - 1) + TOOLTIP_INFO + CHIP_H + BOTTOM_PAD
 
 
+# ── Tooltip: the usage guard's line ───────────────────────────────────────────
+
+def _guard_statement(model: WidgetModel) -> tuple[str, str] | None:
+    """(lead, rest) of the hover card's guard line, in capitals and the theme's slashes, or None while the guard is
+    off: ("GUARD // ARMED:", "SESSION 95%, WEEKLY 90%") and ("GUARD // HOLDING:",
+    "WEEKLY 91% (CAP 90%). RESUMES FRI 7:12 PM (IN 2D 3H).")."""
+    guard = model.guard
+    if guard is None:
+        return None
+    if not guard.holding:
+        caps = ", ".join(engine.glue(f"{label.upper()} {_number(cap)}%") for label, cap in guard.watched())
+        return "GUARD // ARMED:", caps
+    limits = []
+    for label, reading, cap in guard.over_limits():
+        text = engine.glue(label.upper() if reading is None else f"{label.upper()} {_digits(reading)}%")
+        if cap is not None:
+            text += " " + engine.glue(f"(CAP {_number(cap)}%)")
+        limits.append(text)
+    rest = ", ".join(limits)
+    rest = f"{rest}." if rest else ""
+    if guard.resume_clock:
+        clock = engine.glue(guard.resume_clock.upper())
+        countdown = engine.glue(f"(IN {guard.resume_in})")
+        rest = f"{rest} RESUMES {clock} {countdown}."
+    return "GUARD // HOLDING:", rest.strip()
+
+
+def _guard_lines(ink: _Ink, model: WidgetModel) -> tuple[str, list[str]]:
+    """(the lead, the rest of the guard's line broken to the card's width), measured on ``ink`` (any canvas of the
+    frame's scale). The first line leaves room for the lead. No lines while the guard is off; a guard with nothing to
+    list (no caps) is its lead alone, without the colon."""
+    statement = _guard_statement(model)
+    if statement is None:
+        return "", []
+    lead, rest = statement
+    if not rest:
+        return lead.removesuffix(":"), []
+    room = CONTENT_W - ink.width(lead, CHIP) - GUARD_GAP
+    return lead, engine.wrap_words(rest, lambda line: ink.width(line, RESET), CONTENT_W, room)
+
+
+def _draw_guard_block(ink: _Ink, model: WidgetModel, lead: str, lines: list[str], last_top: float) -> None:
+    """A hairline under the last row and the guard's line under it: the lead in bold, in the danger colour while the
+    guard holds, then the rest in the body tone, running on from it and wrapping to the left edge."""
+    pal = ink.pal
+    holding = model.guard is not None and model.guard.holding
+    rule = last_top + TOOLTIP_INFO + CHIP_H + GUARD_GAP - 2
+    ink.rect(LEFT, rule, RIGHT, rule + 1, pal.track)
+    top = rule + 6
+    lead_w = ink.text(lead, CHIP, LEFT, top + TAG_BASE, pal.value_crit if holding and not model.stale else pal.fg)
+    for index, line in enumerate(lines):
+        x = LEFT + lead_w + GUARD_GAP if index == 0 else LEFT
+        ink.text(line, RESET, x, top + TAG_BASE + GUARD_LINE_H * index, pal.fg if holding else pal.ink2)
+
+
 # ── Taskbar strip ─────────────────────────────────────────────────────────────
 
 def _draw_strip_row(ink: _Ink, look: Look, model: WidgetModel, row: Row | None, top: float, label: str) -> None:
     pal = ink.pal
     percent = row.percent if row is not None else None
-    emphasis = _emphasis(model, row) if row is not None else SEVERITY_NORMAL
+    emphasis = _row_emphasis(model, row) if row is not None else SEVERITY_NORMAL
     ink.text(label, STATUS, STRIP_LABEL_X, top + STRIP_TEXT_BASE, pal.fg_hi)
 
     rail = top + STRIP_RAIL_Y
@@ -1022,9 +1198,14 @@ def _draw_strip_row(ink: _Ink, look: Look, model: WidgetModel, row: Row | None, 
 
 def _draw_strip_status(ink: _Ink, look: Look, model: WidgetModel, motion: Motion) -> None:
     """The status word. While live it sits after the pulsing dot, as the design shows. Any other state drops
-    the dot and centres its word, dim, in the tag."""
+    the dot and centres its word, dim, in the tag. While the usage guard holds, the tag is the HOLD chip instead:
+    the strip has no room for the countdown, and the status is in the dim of the rows."""
     pal = ink.pal
     x0, y0, x1, y1 = STRIP_TAG
+    if _hold_word(model) is not None:
+        word = "HOLD"
+        _chip_hold(ink, (x0 + x1 - _chip_hold_width(ink, word)) / 2, y0, word, y1 - y0, glitch=not model.stale)
+        return
     if pal.plate:
         ink.rect(x0, y0, x1, y1, pal.ink)
     elif look.boxed:
@@ -1213,12 +1394,17 @@ class NightCitySkin:
     def render_tooltip(self, model: WidgetModel, theme: Any, variant: Any, scale: float = 1.0) -> Image.Image:
         o = RenderOptions()
         rows = _rows(model)
-        height = _tooltip_height(len(rows))
         pal = _palette(theme, variant, model, o)
+        lead, guard_lines = _guard_lines(_Ink(_canvas(1, 1, scale, theme), pal, o), model)   # measured at this scale
+        height = _tooltip_height(len(rows))
+        if model.guard is not None:
+            height += GUARD_BLOCK_PAD + GUARD_LINE_H * max(1, len(guard_lines))
         cv = _canvas(FLOAT_W, height, scale, theme)
         _paint_frame(cv, pal, FLOAT_W, height, CHAMFER, o)
         ink = _Ink(cv, pal, o)
         _draw_surface(ink, theme, look_for(variant), model, rows, TOOLTIP_PITCH, motion_for(model, o), height, True)
+        if model.guard is not None:
+            _draw_guard_block(ink, model, lead, guard_lines, ROW_TOP + TOOLTIP_PITCH * (max(2, len(rows)) - 1))
         ink.run()
         return cv.finish()
 
