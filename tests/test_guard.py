@@ -126,3 +126,42 @@ def test_limits_doc_reads_a_snapshot():
     assert doc["scoped"] == [{"label": "FABLE WEEKLY", "model": "Fable", "percent": 3.0,
                               "resets_at": iso(NOW + timedelta(days=2))}]
     assert guard.limits_doc(None) == {"session": None, "weekly": None, "scoped": []}
+
+
+# ── The session files (agent/sessions.py) ────────────────────────────────────────
+
+def test_told_lists_the_sessions_told_of_this_episode(tmp_path):
+    from usage_monitor.agent import sessions
+
+    (tmp_path / sessions.SEEN_NAME).write_text(json.dumps({
+        "s1": {"at": "x", "guard": {"episode": "weekly@W", "told_at": "2026-10-28T21:05:00Z"}},
+        "s2": {"at": "x", "guard": {"episode": "session@S", "told_at": "2026-10-28T20:00:00Z"}},
+        "s3": {"at": "x", "steps": {}},
+    }), encoding="utf-8")
+    assert sessions.told(tmp_path, "weekly@W") == [{"session_id": "s1", "told_at": "2026-10-28T21:05:00Z"}]
+    assert sessions.told(tmp_path, "") == []
+
+
+def test_waiting_lists_live_waits_and_skips_leftovers(tmp_path):
+    import os
+
+    from usage_monitor.agent import sessions
+
+    mine = sessions.register_wait(tmp_path, "s1", NOW)
+    (tmp_path / sessions.WAITING_DIR / "999999.json").write_text(
+        json.dumps({"pid": 999999, "session_id": "gone", "since": "2026-10-28T20:00:00Z"}), encoding="utf-8")
+    assert [(entry["pid"], entry["session_id"]) for entry in sessions.waiting(tmp_path)] == [(os.getpid(), "s1")]
+    sessions.unregister_wait(mine)
+    assert sessions.waiting(tmp_path) == []
+
+
+def test_resume_now_releases_waits_that_started_before_it(tmp_path):
+    import time
+
+    from usage_monitor.agent import sessions
+
+    started = time.time() - 5
+    assert not sessions.resumed_since(tmp_path, started)
+    sessions.resume_now(tmp_path)
+    assert sessions.resumed_since(tmp_path, started)
+    assert not sessions.resumed_since(tmp_path, time.time() + 60)
