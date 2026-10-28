@@ -309,10 +309,13 @@ class OneClient:
         return FetchResult(status=ApiStatus.LIVE, detail="Updated", snapshot=snapshot(now), fresh=True)
 
 
-def run_cycle(tmp_path: Path, folder: Path | None, *, paused: bool = False) -> svc.DataService:
+def run_cycle(tmp_path: Path, folder: Path | None, *, paused: bool = False,
+              options: dict | None = None) -> svc.DataService:
     from usage_monitor.settings import Settings
 
     settings = Settings(tmp_path / "settings.json", save_delay_s=60)
+    if options:
+        settings.update(options)
     service = svc.DataService(settings, store_path=tmp_path / "usage.db", pricing=Pricing.load(),
                               usage_client=OneClient(), roots=[tmp_path], clock=lambda: NOW,
                               pause_check=lambda: paused, pricing_refresh=lambda _cached: False,
@@ -697,4 +700,39 @@ def test_an_overwritten_status_file_is_put_back_on_the_next_cycle(tmp_path, fold
         assert doc["source"] == status.SOURCE_MONITOR and doc["session"]["percent"] == 30.0
     finally:
         service._close_store()
+        settings.close()
+
+
+# ── The usage guard in the service (#27) ─────────────────────────────────────────
+
+def test_the_service_publishes_the_guard_and_writes_it_with_the_reading(tmp_path, folder):
+    service = run_cycle(tmp_path, folder, options={"guard_enabled": True, "guard_weekly_cap": 70})
+    assert service.state.guard["state"] == "holding"
+    assert [item["name"] for item in service.state.guard["over"]] == ["weekly"]   # 80% against a 70% cap
+    doc = status.read(folder / status.STATUS_NAME)
+    assert doc["guard"]["state"] == "holding" and doc["guard"]["policy"]["weekly_cap"] == 70
+
+
+def test_a_disarmed_guard_is_off_in_the_state(tmp_path, folder):
+    service = run_cycle(tmp_path, folder)
+    assert service.state.guard["state"] == "off"
+
+
+def test_a_window_that_reset_since_the_last_reading_is_fetched_again_soon(tmp_path):
+    from usage_monitor.settings import Settings
+
+    settings = Settings(tmp_path / "settings.json", save_delay_s=60)
+    settings.update({"poll_interval_ms": 86_400_000})                 # a day: only the reset can make a fetch due
+    service = svc.DataService(settings, store_path=tmp_path / "usage.db", pricing=Pricing.load(),
+                              usage_client=OneClient(), roots=[tmp_path], clock=lambda: NOW,
+                              pricing_refresh=lambda _cached: False)
+    try:
+        resets = NOW + timedelta(hours=2)                               # the session in snapshot()
+        service._last_fetch = OneClient().fetch(NOW)
+        service._last_fetch_at = NOW
+        assert not service._fetch_due(resets + timedelta(seconds=10))  # too soon after the reset
+        assert service._fetch_due(resets + svc.RESET_FETCH_DELAY + timedelta(seconds=1))
+        service._last_fetch_at = resets + timedelta(minutes=1)          # read again after the reset
+        assert not service._fetch_due(resets + timedelta(minutes=2))
+    finally:
         settings.close()

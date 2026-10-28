@@ -53,6 +53,12 @@ DEFAULTS: dict[str, Any] = {
     "alert_on_reset": True,
     "alert_on_credits": True,
     "alert_quiet_hours": None,
+    # The usage guard (#27): off until the user arms it; a cap of None leaves that limit unwatched.
+    "guard_enabled": False,
+    "guard_session_cap": 95,
+    "guard_weekly_cap": 90,
+    "guard_scoped_cap": None,
+    "guard_resume_stagger_s": 120,
 }
 
 _MISSING = object()
@@ -124,6 +130,15 @@ def _is_thresholds(v: Any) -> bool:
             and all(_is_int(t) and 1 <= t <= 100 for t in v) and len(set(v)) == len(v))
 
 
+def _is_cap(v: Any) -> bool:
+    """A guard cap: None (not watched) or a whole percentage in 1..100."""
+    return v is None or (_is_int(v) and 1 <= v <= 100)
+
+
+def _is_stagger(v: Any) -> bool:
+    return _is_int(v) and 0 <= v <= 600
+
+
 def _is_quiet_hours(v: Any) -> bool:
     if v is None:
         return True
@@ -153,6 +168,11 @@ _RULES: dict[str, Callable[[Any], bool]] = {
     "alert_on_reset": _is_bool,
     "alert_on_credits": _is_bool,
     "alert_quiet_hours": _is_quiet_hours,
+    "guard_enabled": _is_bool,
+    "guard_session_cap": _is_cap,
+    "guard_weekly_cap": _is_cap,
+    "guard_scoped_cap": _is_cap,
+    "guard_resume_stagger_s": _is_stagger,
 }
 
 

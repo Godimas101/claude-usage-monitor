@@ -74,8 +74,10 @@ if sys.platform == "win32":
 
 def build(*, status: str, status_detail: str, usage: UsageSnapshot | None, plan: PlanInfo,
           burn: BurnRate | None, pacing: Mapping[str, Any], now: datetime,
-          poll_interval_s: float | None, source: str = SOURCE_MONITOR, app_version: str = "") -> dict:
-    """The status document. ``pacing`` is analytics.pacing_report() for the same moment."""
+          poll_interval_s: float | None, source: str = SOURCE_MONITOR, app_version: str = "",
+          guard: Mapping[str, Any] | None = None) -> dict:
+    """The status document. ``pacing`` is analytics.pacing_report() for the same moment, ``guard``
+    the usage guard's evaluation (agent/guard.py), with the policy readers re-evaluate against."""
     scoped = [_window_entry(item, _SCOPED_KEYS) for item in pacing.get("scoped") or []]
     return {
         "schema": SCHEMA,
@@ -92,6 +94,7 @@ def build(*, status: str, status_detail: str, usage: UsageSnapshot | None, plan:
         "scoped": [entry for entry in scoped if entry is not None],
         "burn": _burn_entry(burn),
         "extra_usage": _extra_entry(usage.spend if usage is not None else None),
+        "guard": dict(guard) if guard else None,
     }
 
 
