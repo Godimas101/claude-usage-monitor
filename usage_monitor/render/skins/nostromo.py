@@ -68,6 +68,11 @@ SCAN_STRENGTH = 0.3
 TOOLTIP_ROW_PITCH = 50
 TOOLTIP_INFO_OFFSET = 34
 QUALIFIER_GAP = 6               # between a row's name and its qualifier ("5H", "OF 25% SHARE")
+ARMED_GAP = 10                  # air round the armed guard's "[GUARD]" in the header, and before a row's "CAP 95%" tag
+GUARD_RULE_OFFSET = 52          # the hover card's guard block: its rule and first line, from the last row's top
+GUARD_TEXT_OFFSET = 58
+GUARD_LINE_H = 12
+GUARD_BLOCK_PAD = 12            # what the block adds to the card besides its lines: the gap round its rule
 VALUE_CLEARANCE = 8             # least space between the name line and the value
 VALUE_CHIP_PAD = 6.0            # a critical value sits in a chip 3 px wider than the digits on each side
 ELLIPSIS = "\u2026"
@@ -92,6 +97,16 @@ STRIP_GROUPS = (
     (144.0, 166.0, 256.0, "7D"),
 )
 STRIP_DIVIDER_X = 134
+STRIP_HOLD_BOX = (129, 10, 140, 25)         # the hold chip that takes the divider's place while the usage guard holds
+STRIP_HOLD_GLYPH = (                        # an hourglass: waiting for the reset
+    "#######",
+    ".#####.",
+    "..###..",
+    "...#...",
+    "..###..",
+    ".#####.",
+    "#######",
+)
 
 # The strip has no room for a status word, so the mark beside "5H" tells the states apart: the blinking dot while
 # live, the pause bars, a hollow ring for last known (stale, no login, loading), and a pixel glyph each for no
@@ -299,6 +314,14 @@ def _emphasis(model: WidgetModel, row: Row) -> str:
     return "normal" if model.stale else row.severity
 
 
+def _row_emphasis(model: WidgetModel, row: Row) -> str:
+    """_emphasis, raised to critical for a row the usage guard holds on, whatever its severity: a cap set at 60 %
+    is as final to the user as the API's critical, and the value then reads as the state it is."""
+    if _over_cap(model, row):
+        return SEVERITY_CRITICAL
+    return _emphasis(model, row)
+
+
 def _percent_text(percent: float | None) -> str:
     return "--" if percent is None else f"{int(percent + 0.5) if percent >= 0 else 0}%"
 
@@ -364,8 +387,42 @@ def _age_text(model: WidgetModel) -> str | None:
     return model.age_text.removesuffix(" AGO")
 
 
+def _hold_word(model: WidgetModel) -> str | None:
+    """The header's chip while the usage guard (#27) holds: "HOLD 2H 14M", or "HOLD" when no reset time is known.
+    None when the guard is off or only armed. The countdown is always the time left ("HOLD 2D 3H"): the clock time of
+    a resume that far away is the tooltip's."""
+    guard = model.guard
+    if guard is None or not guard.holding:
+        return None
+    return f"HOLD {guard.resume_in}" if guard.resume_in else "HOLD"
+
+
+def _over_cap(model: WidgetModel, row: Row) -> bool:
+    """Whether the guard holds because of this row: it is at or past the cap the guard watches for it, and the numbers
+    are live to say so (a stale frame is drawn flat, with no severity marks, as the other skins' are)."""
+    guard = model.guard
+    return (guard is not None and guard.holding and not model.stale and row.key in guard.over_keys
+            and row.percent is not None)
+
+
+def _cap_text(model: WidgetModel, row: Row) -> str | None:
+    """"CAP 95%" for a row that is over its cap, else None."""
+    guard = model.guard
+    cap = guard.caps.get(row.key) if guard is not None and _over_cap(model, row) else None
+    return None if cap is None else f"CAP {_number(cap)}%"
+
+
+def _number(value: float) -> str:
+    """A cap as people write it: 95, not 95.0."""
+    return str(int(value)) if float(value).is_integer() else f"{value:g}"
+
+
 def _state_word(model: WidgetModel) -> tuple[str, str]:
-    """(word, style) for the header's right-hand word. style is "label", "bright" or "chip"."""
+    """(word, style) for the header's right-hand word. style is "label", "bright" or "chip". While the guard holds
+    the word is the hold chip: a held account is the state that matters, and the status pill beside it says the rest."""
+    hold = _hold_word(model)
+    if hold is not None:
+        return hold, "chip"
     status = model.status
     if status is ApiStatus.LIVE:
         worst = worst_severity(model.rows) if not model.stale else "normal"
@@ -478,20 +535,38 @@ def _pill(plan: _Plan, cv: Canvas, pal: Palette, model: WidgetModel, x: float, y
 
 def _header(plan: _Plan, cv: Canvas, pal: Palette, model: WidgetModel, opts: RenderOptions,
             dot_x: float, dot_y: float, top: float, right: float, dot_size: float = 6.0) -> None:
-    """Status mark, pill and age on the left, severity word on the right."""
+    """Status mark, pill and age on the left, severity word on the right. The usage guard adds nothing to the
+    left while it holds (its chip takes the right-hand word, see _state_word) and a quiet [GUARD] after the age
+    while it is armed."""
     _alive_mark(plan, cv, pal, model, opts, dot_x, dot_y, dot_size)
-    _pill(plan, cv, pal, model, dot_x + dot_size + 6, top)
+    left_end = _pill(plan, cv, pal, model, dot_x + dot_size + 6, top)
     semi = cv.font(FONT_SEMI, LABEL_SIZE)
     word, style = _state_word(model)
     baseline = cv.baseline_in_box(top, HEADER_H, semi)
+    word_w = cv.advance(word, semi, LABEL_TRACKING)
     if style == "chip":
-        chip_w = cv.advance(word, semi, LABEL_TRACKING) + 8
+        chip_w = word_w + 8
         plan.mark(lambda c: c.fill_rect(right - chip_w, top, right, top + HEADER_H, pal.bright))
         layer, _ = cv.text_layer(word, right - 4, baseline, semi, LABEL_TRACKING, align="right")
         plan.stamp(layer, pal.ink)
     else:
         layer, _ = cv.text_layer(word, right, baseline, semi, LABEL_TRACKING, align="right")
         plan.stamp(layer, pal.bright if style == "bright" else pal.label)
+    if model.guard is not None and not model.guard.holding:
+        _armed_mark(plan, cv, pal, left_end, right - word_w - (8 if style == "chip" else 0), top)
+
+
+def _armed_mark(plan: _Plan, cv: Canvas, pal: Palette, left_end: float, word_left: float, top: float) -> None:
+    """The armed guard: "[GUARD]" in the label tone after the age, in the free stretch before the state word. A
+    long status ("RATE LIMITED" and its age) leaves room for the short "[G]" only, and a header with no room at
+    all draws nothing: the mark is quiet by design."""
+    semi = cv.font(FONT_SEMI, LABEL_SIZE)
+    for text in ("[GUARD]", "[G]"):
+        x = left_end + ARMED_GAP
+        if x + cv.advance(text, semi, LABEL_TRACKING) <= word_left - ARMED_GAP:
+            layer, _ = cv.text_layer(text, x, cv.baseline_in_box(top + 1, 10, semi), semi, LABEL_TRACKING)
+            plan.stamp(layer, pal.label)
+            return
 
 
 def _dashed_box(plan: _Plan, cv: Canvas, pal: Palette, x0: float, y0: float, x1: float, y1: float) -> None:
@@ -558,9 +633,27 @@ def _lit_color(pal: Palette, emphasis: str) -> Color:
 
 # ── Floating widget ───────────────────────────────────────────────────────────
 
+def _cap_tag(plan: _Plan, cv: Canvas, pal: Palette, model: WidgetModel, row: Row, name_end: float, value_left: float,
+             top: float) -> None:
+    """"CAP 95%" in a pill, after the name line of a row the guard holds on. It is drawn only where it fits between
+    the name line and the value (VALUE_CLEARANCE off it): a long scoped name keeps its room, and the value chip and
+    the header's hold chip carry the state."""
+    text = _cap_text(model, row)
+    if text is None:
+        return
+    semi = cv.font(FONT_SEMI, LABEL_SIZE)
+    x = name_end + ARMED_GAP
+    width = 2 + 4 + cv.advance(text, semi, LABEL_TRACKING) + 4
+    if x + width > value_left - VALUE_CLEARANCE:
+        return
+    plan.mark(lambda c: c.outline_rect(x, top, x + width, top + HEADER_H, pal.bright, 1))
+    layer, _ = cv.text_layer(text, x + 5, cv.baseline_in_box(top + 1, 10, semi), semi, LABEL_TRACKING)
+    plan.stamp(layer, pal.bright)
+
+
 def _row_widget(plan: _Plan, cv: Canvas, pal: Palette, model: WidgetModel, row: Row, index: int) -> None:
     top = ROW_TOP + ROW_PITCH * index
-    emphasis = _emphasis(model, row)
+    emphasis = _row_emphasis(model, row)
     semi = cv.font(FONT_SEMI, LABEL_SIZE)
     reg = cv.font(FONT_REG, LABEL_SIZE)
     vt = cv.font(FONT_VT, VALUE_SIZE)
@@ -570,10 +663,14 @@ def _row_widget(plan: _Plan, cv: Canvas, pal: Palette, model: WidgetModel, row: 
     label, qualifier = _name_line(cv, row, _percent_text(row.percent), semi, reg, vt, VALUE_CHIP_PAD if chipped else 0.0)
     name_layer, name_w = cv.text_layer(label, LEFT, cv.baseline_in_box(top, 12, semi), semi, LABEL_TRACKING)
     plan.stamp(name_layer, pal.main)
+    name_end = LEFT + name_w
     if qualifier:
-        qual_layer, _ = cv.text_layer(qualifier, LEFT + name_w + QUALIFIER_GAP, cv.baseline_in_box(top, 12, reg), reg,
-                                      QUALIFIER_TRACKING)
+        qual_layer, qual_w = cv.text_layer(qualifier, LEFT + name_w + QUALIFIER_GAP, cv.baseline_in_box(top, 12, reg),
+                                           reg, QUALIFIER_TRACKING)
         plan.stamp(qual_layer, pal.label)
+        name_end += QUALIFIER_GAP + qual_w
+    value_left = RIGHT - cv.advance(_percent_text(row.percent), vt) - (VALUE_CHIP_PAD if chipped else 0.0)
+    _cap_tag(plan, cv, pal, model, row, name_end, value_left, top)
 
     # Value: 22 px VT323, right edge at 266, line box from top - 4.
     value = _percent_text(row.percent)
@@ -653,7 +750,9 @@ class NostromoSkin:
         opts = RenderOptions()
         rows = list(model.rows)
         last_top = ROW_TOP + TOOLTIP_ROW_PITCH * (len(rows) - 1)
-        height = int(last_top + 56) if not model.stale_message else int(last_top + 92)
+        lead, guard_lines = _guard_lines(_canvas(1, 1, scale, theme), model)    # measured at this scale, drawn below
+        guard_h = GUARD_BLOCK_PAD + GUARD_LINE_H * len(guard_lines) if guard_lines else 0
+        height = int(last_top + 56 + guard_h) if not model.stale_message else int(last_top + 92 + guard_h)
         cv = _canvas(FLOAT_W, height, scale, theme)
         outer = engine.chamfer_polygon(0, 0, FLOAT_W, height, CHAMFER, CHAMFER)
         body = engine.inset_chamfer(0, 0, FLOAT_W, height, CHAMFER, CHAMFER, 1)
@@ -665,9 +764,11 @@ class NostromoSkin:
         plan.mark(lambda c: c.fill_rect(LEFT, RULE_Y, RIGHT, RULE_Y + 1, pal.rule))
         for index, row in enumerate(rows):
             _row_tooltip(plan, cv, pal, model, row, index)
+        if guard_lines:
+            _guard_block(plan, cv, pal, lead, guard_lines, last_top)
         message = _message_text(model)
         if message:
-            top = last_top + TOOLTIP_INFO_OFFSET + 20
+            top = last_top + TOOLTIP_INFO_OFFSET + 20 + guard_h
             _message(plan, cv, pal, message, top, LEFT, RIGHT, top + MESSAGE_H)
         plan.run(cv)
         cv.scanlines(1, height - 1, SCAN_STRENGTH, clip=body)
@@ -741,7 +842,7 @@ def _brighten(frame: Image.Image, scale: float) -> Image.Image:
 def _row_tooltip(plan: _Plan, cv: Canvas, pal: Palette, model: WidgetModel, row: Row, index: int) -> None:
     """A widget row plus a reset-and-pace line: exact percentage, local reset time, pace in points."""
     top = ROW_TOP + TOOLTIP_ROW_PITCH * index
-    emphasis = _emphasis(model, row)
+    emphasis = _row_emphasis(model, row)
     semi = cv.font(FONT_SEMI, LABEL_SIZE)
     reg = cv.font(FONT_REG, LABEL_SIZE)
     vt = cv.font(FONT_VT, VALUE_SIZE)
@@ -749,10 +850,13 @@ def _row_tooltip(plan: _Plan, cv: Canvas, pal: Palette, model: WidgetModel, row:
     label, qualifier = _name_line(cv, row, _exact_percent_text(row.percent), semi, reg, vt)
     name_layer, name_w = cv.text_layer(label, LEFT, cv.baseline_in_box(top, 12, semi), semi, LABEL_TRACKING)
     plan.stamp(name_layer, pal.main)
+    name_end = LEFT + name_w
     if qualifier:
-        qual_layer, _ = cv.text_layer(qualifier, LEFT + name_w + QUALIFIER_GAP, cv.baseline_in_box(top, 12, reg), reg,
-                                      QUALIFIER_TRACKING)
+        qual_layer, qual_w = cv.text_layer(qualifier, LEFT + name_w + QUALIFIER_GAP, cv.baseline_in_box(top, 12, reg),
+                                           reg, QUALIFIER_TRACKING)
         plan.stamp(qual_layer, pal.label)
+        name_end += QUALIFIER_GAP + qual_w
+    _cap_tag(plan, cv, pal, model, row, name_end, RIGHT - cv.advance(_exact_percent_text(row.percent), vt), top)
 
     value_layer, _ = cv.text_layer(_exact_percent_text(row.percent), RIGHT, cv.baseline_in_box(top - 4, 22, vt),
                                    vt, align="right")
@@ -779,6 +883,67 @@ def _row_tooltip(plan: _Plan, cv: Canvas, pal: Palette, model: WidgetModel, row:
     pace_layer, _ = cv.text_layer(pace_text, RIGHT, cv.baseline_in_box(info_top, 12, semi), semi,
                                   LABEL_TRACKING, align="right")
     plan.stamp(pace_layer, pace_color)
+
+
+# ── Tooltip: the usage guard's line ───────────────────────────────────────────
+
+def _guard_statement(model: WidgetModel) -> tuple[str, str] | None:
+    """(lead, rest) of the hover card's guard line, in capitals, or None while the guard is off:
+    ("GUARD ARMED:", "SESSION 95%, WEEKLY 90%") and
+    ("GUARD HOLDING:", "WEEKLY 91% (CAP 90%). RESUMES FRI 7:12 PM (IN 2D 3H).")."""
+    guard = model.guard
+    if guard is None:
+        return None
+    if not guard.holding:
+        caps = ", ".join(engine.glue(f"{label.upper()} {_number(cap)}%") for label, cap in guard.watched())
+        return "GUARD ARMED:", caps
+    limits = []
+    for label, reading, cap in guard.over_limits():
+        text = engine.glue(label.upper() if reading is None else f"{label.upper()} {_percent_text(reading)}")
+        if cap is not None:
+            text += " " + engine.glue(f"(CAP {_number(cap)}%)")
+        limits.append(text)
+    rest = ", ".join(limits)
+    rest = f"{rest}." if rest else ""
+    if guard.resume_clock:
+        clock = engine.glue(guard.resume_clock.upper())
+        countdown = engine.glue(f"(IN {guard.resume_in})")
+        rest = f"{rest} RESUMES {clock} {countdown}."
+    return "GUARD HOLDING:", rest.strip()
+
+
+def _guard_lines(cv: Canvas, model: WidgetModel) -> tuple[int, list[str]]:
+    """(characters of the lead, the guard's line broken to the card's width), measured on ``cv`` (any canvas of the
+    frame's scale). No lines while the guard is off. A guard with nothing to list (no caps) is its lead alone,
+    without the colon."""
+    statement = _guard_statement(model)
+    if statement is None:
+        return 0, []
+    lead, rest = statement
+    if not rest:
+        lead = lead.removesuffix(":")
+    reg = cv.font(FONT_REG, LABEL_SIZE)
+    text = f"{lead} {rest}" if rest else lead
+    return len(lead), engine.wrap_words(text, lambda line: cv.advance(line, reg, QUALIFIER_TRACKING), RIGHT - LEFT)
+
+
+def _guard_block(plan: _Plan, cv: Canvas, pal: Palette, lead: int, lines: list[str], last_top: float) -> None:
+    """A rule under the last row and the guard's lines under it. The lead (the line's first ``lead`` characters) is
+    semibold and bright, the rest of it plain."""
+    plan.mark(lambda c: c.fill_rect(LEFT, last_top + GUARD_RULE_OFFSET, RIGHT, last_top + GUARD_RULE_OFFSET + 1, pal.rule))
+    semi = cv.font(FONT_SEMI, LABEL_SIZE)
+    reg = cv.font(FONT_REG, LABEL_SIZE)
+    for index, line in enumerate(lines):
+        top = last_top + GUARD_TEXT_OFFSET + GUARD_LINE_H * index
+        head, tail = (line[:lead], line[lead:]) if index == 0 else ("", line)
+        x = LEFT
+        if head:
+            layer, advance = cv.text_layer(head, x, cv.baseline_in_box(top, 12, semi), semi, QUALIFIER_TRACKING)
+            plan.stamp(layer, pal.hot)
+            x += advance
+        if tail:
+            layer, _ = cv.text_layer(tail, x, cv.baseline_in_box(top, 12, reg), reg, QUALIFIER_TRACKING)
+            plan.stamp(layer, pal.main)
 
 
 def _pace_text(pal: Palette, row: Row) -> tuple[str, Color]:
@@ -813,7 +978,7 @@ def _render_strip(model: WidgetModel, pal: Palette, scale: float, opts: RenderOp
     for index, (label_x, bar_x, value_right, window) in enumerate(STRIP_GROUPS):
         row = rows[index] if index < len(rows) else None
         percent = row.percent if row is not None else None
-        emphasis = _emphasis(model, row) if row is not None else "normal"
+        emphasis = _row_emphasis(model, row) if row is not None else "normal"
         label_layer, _ = cv.text_layer(window, label_x, label_baseline, semi, STRIP_LABEL_TRACKING)
         plan.stamp(label_layer, pal.label)
 
@@ -839,7 +1004,14 @@ def _render_strip(model: WidgetModel, pal: Palette, scale: float, opts: RenderOp
             plan.halo(layer, GLOW_STRIP_VALUE_LARGE_SIGMA, pal.glow_soft)
             plan.stamp(layer, pal.hot)
 
-    plan.mark(lambda c: c.fill_rect(STRIP_DIVIDER_X, 9, STRIP_DIVIDER_X + 1, 25, pal.rule_strong))
+    if model.guard is not None and model.guard.holding:
+        # The guard holds: the divider's place, between the groups, is a chip with an hourglass in it. The strip has
+        # no room for the countdown or for [GUARD] while armed, so the hover card says both.
+        x0, y0, x1, y1 = STRIP_HOLD_BOX
+        plan.mark(lambda c: c.fill_rect(x0, y0, x1, y1, pal.bright))
+        _pixel_glyph(plan, cv, STRIP_HOLD_GLYPH, (x0 + x1) / 2, (y0 + y1) / 2, pal.ink)
+    else:
+        plan.mark(lambda c: c.fill_rect(STRIP_DIVIDER_X, 9, STRIP_DIVIDER_X + 1, 25, pal.rule_strong))
     plan.run(cv)
     return cv.finish()
 
