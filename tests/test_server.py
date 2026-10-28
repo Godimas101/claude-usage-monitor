@@ -38,6 +38,9 @@ from typing import Any
 
 import pytest
 
+from usage_monitor.agent import guard as agent_guard
+from usage_monitor.agent import sessions as agent_sessions
+from usage_monitor.agent import setup as agent_setup
 from usage_monitor.data import analytics
 from usage_monitor.data import models as m
 from usage_monitor.data.pricing import Pricing
@@ -2132,6 +2135,10 @@ def test_the_alert_settings_are_stored_and_reported(make_server: Any, settings: 
                            {"start": "22:00", "end": "7:00"}, {"start": "22:00", "end": "07:00", "x": 1},
                            {"start": 2200, "end": "07:00"}, "22:00", [], 5, {}]),
     ("billing_day", [None, 1, 31, 15, 0, 32, -1, 1.5, True, "15"]),
+    ("guard_enabled", [True, False, 1, 0, "true", None, []]),
+    *[(key, [None, 1, 50, 95, 100, 0, 101, -1, 1.5, 95.0, True, False, "95", [95], {}])
+      for key in ("guard_session_cap", "guard_weekly_cap", "guard_scoped_cap")],
+    ("guard_resume_stagger_s", [0, 1, 120, 600, 601, -1, 1.5, 120.0, True, False, "120", None, [120]]),
 ])
 def test_the_server_and_settings_agree_on_what_these_keys_accept(tmp_path: Path, key: str,
                                                                  values: list[Any]) -> None:
@@ -2179,6 +2186,359 @@ def test_the_alert_settings_reach_the_alert_engine_live(make_server: Any, settin
     assert engine.evaluate(sample_state(percent=30.0)) == []                    # 20 % was crossed, in quiet hours
     assert post_json(server, "/api/settings", {"alert_quiet_hours": None})[0] == 200
     assert [alert.title for alert in engine.evaluate(sample_state(percent=55.0))] == ["Session limit at 50%"]
+
+
+# ── The usage guard (#27): its settings, GET /api/guard and the two POSTs ────────────
+
+HOLDING = {
+    "state": "holding",
+    "over": [{"name": "session", "label": "session", "percent": 96.0, "cap": 95, "resets_at": "2026-10-21T19:39:00Z"}],
+    "resume_at": "2026-10-21T19:39:00Z",
+    "policy": {"enabled": True, "session_cap": 95, "weekly_cap": 90, "scoped_cap": None, "stagger_s": 120},
+}
+DEAD_PID = 99_999_999                    # no process has this id, so agent/sessions.py treats a file of it as left over
+SETUP_STATUS: dict[str, Any] = {
+    "available": True, "reason": None, "manual": "docs/AGENT_HOOK.md", "exe": "C:/x/ClaudeUsageMonitor.exe",
+    "settings_path": "C:/Users/t/.claude/settings.json", "errors": [],
+    "hooks": {"state": "missing", "installed": 0, "total": 3, "events": {}}, "mcp": {"state": "missing"},
+    "claude": {"found": True, "path": "C:/x/claude.exe", "version": "2.1.160", "min_version": "2.1.139", "supported": True},
+}
+
+
+class FakeSetup:
+    """agent/setup.py's status, install and remove, recording their calls. Nothing here reads a real ~/.claude or runs claude."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self.answers: dict[str, Any] = {
+            "install": {"ok": True, "action": "install", "changed": ["Added the SessionStart hook."], "unchanged": [],
+                        "backup": "C:/Users/t/.claude/settings.json.cum-backup-20261028-180509", "warnings": [],
+                        "errors": [], "manual": None, "settings_path": SETUP_STATUS["settings_path"]},
+            "remove": {"ok": False, "action": "remove", "changed": [], "unchanged": [], "backup": None, "warnings": [],
+                       "errors": ["The Claude Code settings file is not valid JSON, so setup left it alone."],
+                       "manual": None, "settings_path": SETUP_STATUS["settings_path"]},
+        }
+
+    def status(self) -> Any:
+        self.calls.append("status")
+        return SETUP_STATUS
+
+    def act(self, action: str) -> Any:
+        self.calls.append(action)
+        return self.answers[action]
+
+    def callbacks(self) -> dict[str, Callable[[], Any]]:
+        return {"status": self.status, "install": lambda: self.act("install"), "remove": lambda: self.act("remove")}
+
+
+def seed_sessions(folder: Path, guard: dict[str, Any], told: list[tuple[str, str]],
+                  waiting: list[dict[str, Any]] | None = None) -> None:
+    """The files agent/sessions.py documents: hook-seen.json for the sessions told of this episode, waiting/<pid>.json."""
+    folder.mkdir(parents=True, exist_ok=True)
+    seen = {sid: {"at": at, "steps": {}, "guard": {"episode": agent_guard.episode(guard), "told_at": at}}
+            for sid, at in told}
+    seen["session-of-an-older-episode"] = {"at": "2026-10-20T10:00:00Z", "steps": {},
+                                          "guard": {"episode": "session@2026-10-20T14:00:00Z", "told_at": "2026-10-20T10:00:00Z"}}
+    (folder / agent_sessions.SEEN_NAME).write_text(json.dumps(seen), encoding="utf-8")
+    (folder / agent_sessions.WAITING_DIR).mkdir(exist_ok=True)
+    for entry in waiting or []:
+        (folder / agent_sessions.WAITING_DIR / f"{entry['pid']}.json").write_text(json.dumps(entry), encoding="utf-8")
+
+
+@pytest.fixture
+def guard_rig(make_server: Any, tmp_path: Path) -> types.SimpleNamespace:
+    folder, fake, clock = tmp_path / "guard", FakeSetup(), FakeClock()
+    server, rec = make_server(guard_dir=folder, setup_cb=fake.callbacks(), clock=clock)
+    rec.state = dataclasses.replace(sample_state(), guard=HOLDING)
+    return types.SimpleNamespace(server=server, rec=rec, folder=folder, setup=fake, clock=clock)
+
+
+def get_guard(server: ApiServer) -> dict[str, Any]:
+    status, _headers, body = request(server, "GET", "/api/guard")
+    assert status == 200
+    return json.loads(body)
+
+
+def test_the_guard_settings_are_stored_and_reported(make_server: Any, settings: Settings) -> None:
+    server, rec = make_server()
+    defaults = json.loads(request(server, "GET", "/api/state")[2])["settings"]
+    assert (defaults["guard_enabled"], defaults["guard_session_cap"], defaults["guard_weekly_cap"],
+            defaults["guard_scoped_cap"], defaults["guard_resume_stagger_s"]) == (False, 95, 90, None, 120)
+    payload = {"guard_enabled": True, "guard_session_cap": 80, "guard_weekly_cap": None, "guard_scoped_cap": 70,
+               "guard_resume_stagger_s": 30}
+    status, body = post_json(server, "/api/settings", payload)
+    assert status == 200 and body["applied"] == payload and rec.applied[-1] == payload
+    for key, value in payload.items():
+        assert settings.get(key) == value and body["settings"][key] == value, key
+    assert post_json(server, "/api/settings", {"guard_scoped_cap": 100, "guard_resume_stagger_s": 0})[0] == 200
+    assert (settings.get("guard_scoped_cap"), settings.get("guard_resume_stagger_s")) == (100, 0)
+
+
+@pytest.mark.parametrize("payload", [
+    {"guard_enabled": "yes"}, {"guard_enabled": 1}, {"guard_enabled": None},
+    {"guard_session_cap": 0}, {"guard_weekly_cap": 101}, {"guard_scoped_cap": -1}, {"guard_session_cap": 95.5},
+    {"guard_weekly_cap": True}, {"guard_scoped_cap": "95"}, {"guard_session_cap": [95]},
+    {"guard_resume_stagger_s": 601}, {"guard_resume_stagger_s": -1}, {"guard_resume_stagger_s": 1.5},
+    {"guard_resume_stagger_s": True}, {"guard_resume_stagger_s": None}, {"guard_resume_stagger_s": "120"},
+])
+def test_a_bad_guard_value_is_a_400_and_applies_nothing(make_server: Any, settings: Settings, payload: dict[str, Any]) -> None:
+    server, rec = make_server()
+    status, body = post_json(server, "/api/settings", {"reduce_motion": True, **payload})
+    assert status == 400 and next(iter(payload)) in body["error"]
+    assert rec.applied == [] and settings.get("reduce_motion", False) is False and settings.get(next(iter(payload))) in (
+        agent_guard.DEFAULTS.get(next(iter(payload))), None)
+
+
+def test_the_guard_block_of_the_state_reaches_the_page(make_server: Any) -> None:
+    server, rec = make_server()
+    rec.state = dataclasses.replace(sample_state(), guard=HOLDING)
+    assert json.loads(request(server, "GET", "/api/state")[2])["state"]["guard"] == HOLDING
+
+
+def test_the_guard_endpoint_reports_the_state_the_sessions_told_and_waiting_and_the_setup(guard_rig: Any) -> None:
+    told = [("11111111-aaaa", "2026-10-21T16:00:00Z"), ("22222222-bbbb", "2026-10-21T15:30:00Z")]
+    here = {"pid": os.getpid(), "session_id": "33333333-cccc", "since": "2026-10-21T16:05:00Z", "cwd": "C:/Demo/atlas-web"}
+    gone = {"pid": DEAD_PID, "session_id": "44444444-dddd", "since": "2026-10-21T15:00:00Z", "cwd": "C:/Demo/gone"}
+    seed_sessions(guard_rig.folder, HOLDING, told, [here, gone])
+    answer = get_guard(guard_rig.server)
+    assert set(answer) == {"guard", "told", "waiting", "setup"}
+    assert answer["guard"] == HOLDING
+    assert answer["told"] == [{"session_id": "22222222-bbbb", "told_at": "2026-10-21T15:30:00Z"},
+                              {"session_id": "11111111-aaaa", "told_at": "2026-10-21T16:00:00Z"}]    # this episode, oldest first
+    assert answer["waiting"] == [here]                                                                 # a dead --wait counts for nothing
+    assert answer["setup"] == SETUP_STATUS
+
+
+def test_before_the_first_cycle_the_guard_is_empty_but_the_waiting_sessions_are_still_listed(guard_rig: Any) -> None:
+    here = {"pid": os.getpid(), "session_id": None, "since": "2026-10-21T16:05:00Z", "cwd": None}
+    seed_sessions(guard_rig.folder, HOLDING, [("11111111-aaaa", "2026-10-21T16:00:00Z")], [here])
+    for state in (None, dataclasses.replace(sample_state(), guard={})):
+        guard_rig.rec.state = state
+        answer = get_guard(guard_rig.server)
+        assert answer["guard"] == {} and answer["told"] == [] and answer["waiting"] == [here]
+
+
+def test_with_no_session_files_the_lists_are_empty_and_nothing_is_created(guard_rig: Any) -> None:
+    answer = get_guard(guard_rig.server)
+    assert answer["told"] == [] and answer["waiting"] == [] and not guard_rig.folder.exists()
+
+
+def test_the_guard_files_are_read_from_the_app_data_folder_unless_told_otherwise(make_server: Any, tmp_path: Path) -> None:
+    server, rec = make_server(setup_cb=FakeSetup().callbacks())                   # no guard_dir: CUM_APPDATA_DIR, as the app has it
+    rec.state = dataclasses.replace(sample_state(), guard=HOLDING)
+    here = {"pid": os.getpid(), "session_id": "s", "since": "2026-10-21T16:05:00Z", "cwd": "C:/Demo"}
+    seed_sessions(tmp_path / "app", HOLDING, [("11111111-aaaa", "2026-10-21T16:00:00Z")], [here])
+    answer = get_guard(server)
+    assert [entry["session_id"] for entry in answer["told"]] == ["11111111-aaaa"] and answer["waiting"] == [here]
+    assert request(server, "POST", "/api/guard/resume")[0] == 200
+    assert (tmp_path / "app" / agent_sessions.RESUME_NAME).is_file()
+
+
+# ── The setup status is slow to compute, so it is kept ────────────────────────────────
+
+def test_the_setup_status_is_kept_for_a_minute_and_looked_at_again_after(guard_rig: Any) -> None:
+    get_guard(guard_rig.server)
+    get_guard(guard_rig.server)
+    assert guard_rig.setup.calls == ["status"]                                    # the second poll did not run claude again
+    guard_rig.clock.now += server_mod.SETUP_STATUS_TTL_S - 1
+    get_guard(guard_rig.server)
+    assert guard_rig.setup.calls == ["status"]
+    guard_rig.clock.now += 2
+    get_guard(guard_rig.server)
+    assert guard_rig.setup.calls == ["status", "status"]
+
+
+@pytest.mark.parametrize("action", ["install", "remove"])
+def test_a_setup_click_makes_the_next_look_a_fresh_one(guard_rig: Any, action: str) -> None:
+    get_guard(guard_rig.server)
+    assert post_json(guard_rig.server, "/api/guard/setup", {"action": action})[0] == 200
+    get_guard(guard_rig.server)
+    assert guard_rig.setup.calls == ["status", action, "status"]
+
+
+def test_two_polls_at_once_share_one_look_at_the_setup(make_server: Any, tmp_path: Path) -> None:
+    gate, entered, calls = threading.Event(), threading.Event(), []
+
+    def slow() -> Any:
+        calls.append("status")
+        entered.set()
+        gate.wait(10)
+        return SETUP_STATUS
+
+    server, rec = make_server(guard_dir=tmp_path / "guard", setup_cb={"status": slow})
+    answers: list[dict[str, Any]] = []
+    threads = [threading.Thread(target=lambda: answers.append(get_guard(server))) for _ in range(3)]
+    for thread in threads:
+        thread.start()
+    assert entered.wait(10)
+    time.sleep(0.2)                                                              # the others are waiting for that one answer
+    assert calls == ["status"]
+    gate.set()
+    for thread in threads:
+        thread.join(10)
+    assert calls == ["status"] and len(answers) == 3 and all(a["setup"] == SETUP_STATUS for a in answers)
+
+
+def test_a_click_while_the_status_is_being_computed_is_not_undone_by_it(make_server: Any, tmp_path: Path) -> None:
+    """A look that began before an install may end after it: it must not be kept as the answer for the next minute."""
+    gate, entered, state = threading.Event(), threading.Event(), {"hooks": "missing"}
+
+    def status() -> Any:
+        seen = dict(state)
+        entered.set()
+        gate.wait(10)
+        return {**SETUP_STATUS, "hooks": seen}
+
+    def install() -> Any:
+        state["hooks"] = "installed"
+        return {"ok": True}
+
+    server, _ = make_server(guard_dir=tmp_path / "guard", setup_cb={"status": status, "install": install})
+    first: list[dict[str, Any]] = []
+    thread = threading.Thread(target=lambda: first.append(get_guard(server)))
+    thread.start()
+    assert entered.wait(10)
+    entered.clear()
+    clicked = threading.Thread(target=lambda: post_json(server, "/api/guard/setup", {"action": "install"}))
+    clicked.start()
+    clicked.join(10)
+    gate.set()
+    thread.join(10)
+    assert first[0]["setup"]["hooks"] == {"hooks": "missing"}                    # that poll saw the old state
+    assert get_guard(server)["setup"]["hooks"] == {"hooks": "installed"}         # and the next one looked again
+
+
+def test_a_setup_status_that_fails_is_an_unavailable_status_not_an_error(make_server: Any, tmp_path: Path) -> None:
+    def broken() -> Any:
+        raise RuntimeError("C:/private/place")
+
+    server, _ = make_server(guard_dir=tmp_path / "guard", setup_cb={"status": broken})
+    status, _headers, body = request(server, "GET", "/api/guard")
+    answer = json.loads(body)
+    assert status == 200 and answer["setup"]["available"] is False and b"private" not in body
+    assert answer["setup"] == agent_setup.unavailable_status("The setup status could not be read right now.")
+
+
+def test_without_a_status_callback_setup_is_unavailable(make_server: Any, tmp_path: Path) -> None:
+    server, _ = make_server(guard_dir=tmp_path / "guard", setup_cb={})
+    assert get_guard(server)["setup"]["available"] is False
+    status, body = post_json(server, "/api/guard/setup", {"action": "install"})
+    assert status == 501 and "not available" in body["error"]
+
+
+# ── POST /api/guard/resume ────────────────────────────────────────────────────────────
+
+def test_resume_now_writes_the_marker_the_waiting_sessions_look_for(guard_rig: Any) -> None:
+    started = time.time() - 1
+    assert not agent_sessions.resumed_since(guard_rig.folder, started)
+    status, body = post_json(guard_rig.server, "/api/guard/resume", {})
+    assert status == 200 and body == {"ok": True}
+    assert (guard_rig.folder / agent_sessions.RESUME_NAME).is_file()
+    assert agent_sessions.resumed_since(guard_rig.folder, started)
+    assert request(guard_rig.server, "POST", "/api/guard/resume")[0] == 200       # no body at all is fine too, and so is again
+
+
+def test_resume_now_drains_whatever_body_it_is_sent_and_refuses_an_oversized_one(guard_rig: Any) -> None:
+    assert request(guard_rig.server, "POST", "/api/guard/resume", body=b'{"anything": [1, 2, 3]}')[0] == 200
+    status, headers, _ = request(guard_rig.server, "POST", "/api/guard/resume", body=b"x" * (64 * 1024 + 1))
+    assert status == 413 and headers.get("connection", "").lower() == "close"
+
+
+def test_resume_now_failing_is_a_500_without_details(guard_rig: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    def refuse(folder: Path) -> None:
+        raise OSError(5, "C:/private/place is read-only")
+
+    monkeypatch.setattr(agent_sessions, "resume_now", refuse)
+    status, _headers, body = request(guard_rig.server, "POST", "/api/guard/resume")
+    assert status == 500 and json.loads(body) == {"error": "could not record the resume request"}
+
+
+# ── POST /api/guard/setup ─────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("action", ["install", "remove"])
+def test_setup_returns_the_result_of_setup_as_it_is(guard_rig: Any, action: str) -> None:
+    status, body = post_json(guard_rig.server, "/api/guard/setup", {"action": action})
+    assert status == 200 and body == guard_rig.setup.answers[action]               # a refusal (ok false) is still a 200
+    assert guard_rig.setup.calls == [action]
+
+
+@pytest.mark.parametrize("payload", [{}, {"action": "gate"}, {"action": "Install"}, {"action": ["install"]}, {"action": None},
+                                     {"action": 1}, {"act": "install"}, [], "install", None, 5])
+def test_setup_takes_only_install_or_remove(guard_rig: Any, payload: Any) -> None:
+    status, body = post_json(guard_rig.server, "/api/guard/setup", payload)
+    assert status == 400 and body == {"error": 'action must be "install" or "remove"'}
+    assert guard_rig.setup.calls == []
+
+
+def test_setup_with_a_body_that_is_not_json_is_a_400_that_does_not_echo_it(guard_rig: Any) -> None:
+    status, _headers, body = request(guard_rig.server, "POST", "/api/guard/setup", body=b'{"action": "install", "x": abc123')
+    assert status == 400 and b"abc123" not in body and guard_rig.setup.calls == []
+    assert request(guard_rig.server, "POST", "/api/guard/setup")[0] == 400         # no body is not an action either
+
+
+def test_setup_failing_is_a_500_without_details_and_the_status_is_looked_at_again(make_server: Any, tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    def boom() -> Any:
+        raise RuntimeError("C:/private/place")
+
+    def status() -> Any:
+        calls.append("status")
+        return SETUP_STATUS
+
+    server, _ = make_server(guard_dir=tmp_path / "guard", setup_cb={"status": status, "install": boom})
+    get_guard(server)
+    code, _headers, body = request(server, "POST", "/api/guard/setup", body=b'{"action": "install"}')
+    assert code == 500 and b"private" not in body and json.loads(body) == {"error": "setup install failed"}
+    get_guard(server)
+    assert calls == ["status", "status"]                                            # whatever it did half way, look again
+    assert post_json(server, "/api/guard/setup", {"action": "remove"})[0] == 501    # no callback for that one
+
+
+GUARD_ROUTES = [("GET", "/api/guard"), ("POST", "/api/guard/resume"), ("POST", "/api/guard/setup")]
+
+
+@pytest.mark.parametrize(("method", "path"), GUARD_ROUTES)
+def test_the_guard_routes_need_the_token_the_right_host_and_the_right_method(guard_rig: Any, method: str, path: str) -> None:
+    body = b'{"action": "install"}' if method == "POST" else None
+    assert request(guard_rig.server, method, path, body=body, token=False)[0] == 401
+    assert request(guard_rig.server, method, path, body=body, host="evil.example:80")[0] == 403
+    other = "GET" if method == "POST" else "POST"
+    status, headers, _ = request(guard_rig.server, other, path, body=b"{}" if other == "POST" else None)
+    assert status == 405 and headers["allow"] == method
+    assert guard_rig.setup.calls == [] and not guard_rig.folder.exists()               # none of that reached the setup or the files
+
+
+def test_the_guard_answers_carry_no_token_and_no_cors_header(guard_rig: Any) -> None:
+    for status, headers, body in (request(guard_rig.server, "GET", "/api/guard"),
+                                  request(guard_rig.server, "POST", "/api/guard/resume"),
+                                  request(guard_rig.server, "POST", "/api/guard/setup", body=b'{"action": "install"}')):
+        assert status == 200 and guard_rig.server.token.encode("ascii") not in body
+        assert not [name for name in headers if name.startswith("access-control-")]
+
+
+# ── Setup in a dev instance and from source ───────────────────────────────────────────
+
+def test_a_dev_instance_never_sets_up_claude_code(make_server: Any, tmp_path: Path) -> None:
+    """Like the Run entry, the user's Claude Code settings belong to the installed copy: a test build leaves them alone."""
+    server, _ = make_server(dev=True, guard_dir=tmp_path / "guard")
+    setup_status = get_guard(server)["setup"]
+    assert setup_status["available"] is False and "dev instance" in setup_status["reason"]
+    assert setup_status["manual"] == "docs/AGENT_HOOK.md"
+    for action in ("install", "remove"):
+        status, body = post_json(server, "/api/guard/setup", {"action": action})
+        assert status == 200 and body["ok"] is False and body["action"] == action and "dev instance" in body["errors"][0]
+        assert body["changed"] == [] and body["backup"] is None
+
+
+def test_the_real_setup_is_the_default_and_from_source_it_says_so(make_server: Any, tmp_path: Path,
+                                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delattr(sys, "frozen", raising=False)                              # a source run: no exe to point hooks at
+    server, _ = make_server(guard_dir=tmp_path / "guard")
+    assert get_guard(server)["setup"]["reason"] == agent_setup.NOT_INSTALLED_REASON
+    status, body = post_json(server, "/api/guard/setup", {"action": "install"})
+    assert status == 200 and body["ok"] is False and body["errors"] == [agent_setup.NOT_INSTALLED_REASON]
+    assert not (tmp_path / "home" / ".claude").exists()                            # and nothing was written anywhere
 
 
 # ── Dev isolation ──────────────────────────────────────────────────────────────────

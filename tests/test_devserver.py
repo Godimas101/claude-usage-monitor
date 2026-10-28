@@ -268,9 +268,117 @@ def test_the_export_comes_from_the_synthetic_history_too(started: Callable[..., 
 
 
 def test_the_existing_scenarios_are_unchanged() -> None:
-    assert devserver.SCENARIOS == ("normal", "warning", "critical", "stale")
+    assert devserver.SCENARIOS[:4] == ("normal", "warning", "critical", "stale")
     state = devserver.fake_state("normal", NOW)
     assert state.windows["month"].totals.cost_usd == pytest.approx(1659.14, abs=0.05)
+    assert state.guard == {}                                      # the guard's verdict is the server's, from its settings
+
+
+# ── The usage guard (#27) ─────────────────────────────────────────────────────────
+
+GUARD_DIR = "guard-dev"                                           # the dev server's own folder for the session files
+SESSION_RESET = "2026-10-21T19:39:00Z"                      # NOW + 3 h 27 min, the fake session's reset
+
+
+def post(server: ApiServer, path: str, payload: Any = None) -> tuple[int, Any]:
+    conn = http.client.HTTPConnection("127.0.0.1", server.port, timeout=30)
+    try:
+        body = json.dumps(payload).encode("utf-8") if payload is not None else None
+        headers = {TOKEN_HEADER: server.token, **({"Content-Type": "application/json"} if body else {})}
+        conn.request("POST", path, body=body, headers=headers)
+        response = conn.getresponse()
+        data = response.read()
+        return response.status, json.loads(data) if data else None
+    finally:
+        conn.close()
+
+
+def test_the_guard_scenario_is_a_holding_guard_with_two_sessions_told_and_one_waiting(
+        started: Callable[..., ApiServer]) -> None:
+    server = started("guard")
+    state = get_json(server, "/api/state")
+    guard = state["state"]["guard"]
+    assert guard["state"] == "holding" and guard["resume_at"] == SESSION_RESET
+    assert guard["over"] == [{"name": "session", "label": "session", "percent": 96.0, "cap": 95,
+                              "resets_at": SESSION_RESET}]
+    assert guard["policy"] == {"enabled": True, "session_cap": 95, "weekly_cap": 90, "scoped_cap": None, "stagger_s": 120}
+    assert state["settings"]["guard_enabled"] is True
+    answer = get_json(server, "/api/guard")
+    assert answer["guard"] == guard
+    assert [entry["session_id"][:8] for entry in answer["told"]] == ["3f9a1c2e", "c81d04b7"]          # oldest first
+    assert [entry["told_at"] for entry in answer["told"]] == ["2026-10-21T15:48:00Z", "2026-10-21T15:51:00Z"]
+    assert len(answer["waiting"]) == 1
+    waiting = answer["waiting"][0]
+    assert waiting["pid"] == os.getpid() and waiting["cwd"] == r"C:\Demo\atlas-web" and waiting["since"] == "2026-10-21T15:54:00Z"
+    assert waiting["session_id"].startswith("77b0aa10")
+
+
+def test_every_scenario_carries_the_guards_verdict_for_the_dev_settings(started: Callable[..., ApiServer]) -> None:
+    server = started("normal")
+    assert get_json(server, "/api/state")["state"]["guard"]["state"] == "off"
+    assert get_json(server, "/api/guard")["told"] == [] and get_json(server, "/api/guard")["waiting"] == []
+    assert post(server, "/api/settings", {"guard_enabled": True})[0] == 200
+    assert get_json(server, "/api/state")["state"]["guard"]["state"] == "armed"                # 13 % is under the 95 % cap
+    assert post(server, "/api/settings", {"guard_session_cap": 10})[0] == 200
+    holding = get_json(server, "/api/state")["state"]["guard"]
+    assert holding["state"] == "holding" and [item["name"] for item in holding["over"]] == ["session"]
+    assert holding["over"][0]["percent"] == 13.0 and holding["over"][0]["cap"] == 10
+    assert get_json(server, "/api/guard")["waiting"] == []                                      # only the guard scenario seeds sessions
+
+
+def test_resume_now_in_the_dev_server_ends_the_wait_and_touches_only_its_own_folder(
+        started: Callable[..., ApiServer], tmp_path: Path) -> None:
+    server = started("guard")
+    assert len(get_json(server, "/api/guard")["waiting"]) == 1
+    assert post(server, "/api/guard/resume") == (200, {"ok": True})
+    after = get_json(server, "/api/guard")
+    assert after["waiting"] == [] and len(after["told"]) == 2 and after["guard"]["state"] == "holding"
+    assert (tmp_path / "dev" / GUARD_DIR / "resume-now").is_file()
+    assert not (tmp_path / "app" / "resume-now").exists() and not (tmp_path / "app" / "hook-seen.json").exists()
+
+
+def test_the_told_sessions_follow_the_episode_as_the_fake_reset_times_slide(started: Callable[..., ApiServer]) -> None:
+    moment = [NOW]
+    server = started("guard", clock=lambda: moment[0])
+    first = get_json(server, "/api/guard")
+    moment[0] = NOW + timedelta(minutes=1)                                            # the fake resets move: a new episode key
+    second = get_json(server, "/api/guard")
+    assert second["guard"]["resume_at"] != first["guard"]["resume_at"]
+    assert second["told"] == first["told"] and len(second["told"]) == 2                  # still the same two, still 24 and 21 minutes ago
+
+
+def test_setup_in_the_dev_server_runs_the_real_code_on_a_sandbox(started: Callable[..., ApiServer], tmp_path: Path) -> None:
+    server = started("guard")
+    before = get_json(server, "/api/guard")["setup"]
+    assert before["available"] is True and before["hooks"]["state"] == "missing" and before["mcp"] == {"state": "missing"}
+    assert before["claude"]["version"] == "2.1.160" and before["claude"]["supported"] is True
+    sandbox = tmp_path / "dev" / "claude-config" / "settings.json"
+    assert before["settings_path"] == str(sandbox)
+
+    status, result = post(server, "/api/guard/setup", {"action": "install"})
+    assert status == 200 and result["ok"] is True and result["changed"][-1] == "Registered the claude-usage MCP tool."
+    hooks = json.loads(sandbox.read_text(encoding="utf-8"))["hooks"]
+    assert hooks["PostToolUse"][0]["hooks"][0]["command"] == "C:/Dev/ClaudeUsageMonitor/ClaudeUsageMonitor.exe"
+    after = get_json(server, "/api/guard")["setup"]                                       # the click made the next look a fresh one
+    assert after["hooks"]["state"] == "installed" and after["mcp"] == {"state": "registered"}
+
+    status, result = post(server, "/api/guard/setup", {"action": "remove"})
+    assert status == 200 and result["ok"] is True and json.loads(sandbox.read_text(encoding="utf-8")) == {}
+    assert get_json(server, "/api/guard")["setup"]["hooks"]["state"] == "missing"
+    assert not (tmp_path / "home" / ".claude").exists()                                   # the owner's folder is never touched
+
+
+def test_the_dev_server_keeps_every_guard_file_in_its_own_folder(started: Callable[..., ApiServer], tmp_path: Path) -> None:
+    server = started("guard")
+    get_json(server, "/api/guard")
+    folder = tmp_path / "dev" / GUARD_DIR
+    assert (folder / "hook-seen.json").is_file() and list((folder / "waiting").glob("*.json"))
+    assert not (tmp_path / "app").exists() or not list((tmp_path / "app").glob("hook-seen.json"))
+
+
+def test_main_accepts_the_guard_scenario(capsys: pytest.CaptureFixture[str]) -> None:
+    assert devserver.main(["--port", "0", "--scenario", "guard"], wait=interrupted) == 0
+    assert capsys.readouterr().out.startswith("devserver scenario=guard url=http://127.0.0.1:")
 
 
 # ── --db ──────────────────────────────────────────────────────────────────────────

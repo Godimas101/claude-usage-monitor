@@ -56,6 +56,11 @@
  *             .nm-addlevel, .nm-quiet, .nm-quiet-to, .nm-themes > .nm-theme (+ .nm-swatches), .nm-variants,
  *             .nm-mode-k, .nm-links, .nm-supp (a list of names), .nm-tier, .nm-authors. A switched-off group
  *             (.nm-set.is-off, Alerts) disables its controls (:disabled); its text is not dimmed.
+ * Guard       The usage guard card on the Settings page (section.nm-card[aria-label="Usage guard"]) is made of the parts above and
+ *             nothing of its own: a toggle, four .nm-input number fields (a blank one is off) and two blocks the page fills in,
+ *             #guard-live (.nm-verdict > .nm-chip OFF, ARMED or HOLDING, .nm-story, .nm-kv-grid.is-one, .nm-actions) and
+ *             #guard-setup (the same parts, with .nm-callout for a note or the result of a click, .nm-error for a refusal, .nm-path
+ *             for a file path or a command and .nm-lede for what it costs). A value that has not arrived is data-pending there too.
  * States      .nm-empty, .nm-error, .nm-pending, .nm-callout (.is-warn: a boxed note; with data-pending it keeps its room and shows
  *             nothing, so a note that is there before and after its report does not move the card).
  * Overview    .nm-cost > .nm-cost-l (.nm-hero, .nm-plan, .nm-tiles > .nm-tile > small + .nm-big) + .nm-cost-r
@@ -160,11 +165,24 @@
   var LINKS = {
     repo: "https://github.com/Godimas101/claude-usage-monitor",
     bug: "https://github.com/Godimas101/claude-usage-monitor/issues/new?template=bug_report.md&labels=bug",
-    patreon: "https://patreon.com/Godimas101"
+    patreon: "https://patreon.com/Godimas101",
+    hooks: "https://github.com/Godimas101/claude-usage-monitor/blob/main/docs/AGENT_HOOK.md"
   };
   var POLL_CHOICES = [
     [60000, "1 MIN"], [300000, "5 MIN"], [600000, "10 MIN"], [900000, "15 MIN"], [1800000, "30 MIN"], [3600000, "60 MIN"]
   ];
+  // The usage guard card on the Settings page: how often it asks /api/guard while it is on screen, how many sessions each of its
+  // lists names, and its words.
+  var GUARD_POLL_MS = 3000;
+  var GUARD_LISTED = 5;
+  var GUARD_EXPLAIN = "When plan usage reaches a cap, working Claude sessions are told to wrap up, and sessions that wait are woken when every limit is under its cap again. Nothing is blocked.";
+  var GUARD_COST = "Adds a quick check after each tool call (about a quarter of a second).";
+  var GUARD_LABELS = {
+    guard_enabled: "USAGE GUARD", guard_session_cap: "SESSION CAP", guard_weekly_cap: "WEEKLY CAP",
+    guard_scoped_cap: "MODEL WEEKLY CAP", guard_resume_stagger_s: "STAGGER"
+  };
+  var HOOK_WORDS = { installed: "INSTALLED", partial: "PARTLY INSTALLED", missing: "NOT INSTALLED", unknown: "UNKNOWN" };
+  var MCP_WORDS = { registered: "REGISTERED", missing: "NOT REGISTERED", other: "A DIFFERENT PROGRAM", unknown: "UNKNOWN" };
   var BASIS = "API-equivalent at list prices";
   // The Fast mode card's note. It is the same words before the report, with no fast-mode request and with some, so the card is
   // as tall in all three and only its tone changes (a note that said something else per state wrapped to another line count).
@@ -284,6 +302,12 @@
     chartCard: "",           // the card whose markup is being built, and how many charts it has drawn so far
     chartN: 0,
     exportStatus: { text: "", path: "", error: false },
+    guard: null,             // the last /api/guard answer: { guard, told, waiting, setup }
+    guardAt: 0,              // when it was asked for (ms), so the Settings page asks again after GUARD_POLL_MS
+    guardFlight: false,
+    guardLost: false,        // the last ask got no answer
+    resumeBusy: false,       // "Resume now" is being sent
+    setup: { busy: "", result: null },   // "install" or "remove" while a click runs; the result of the last click
     odoShown: null,
     cmpTimer: 0,
     tipApi: null,
@@ -1989,10 +2013,11 @@
   var SESSION_VERDICT = { LIMITED: "LIMITED", AT_RISK: "AT RISK", SAFE: "SAFE", IDLE: "IDLE", UNKNOWN: "UNKNOWN" };
   var WEEKLY_VERDICT = { AHEAD: "AHEAD", ON_PACE: "ON PACE", BEHIND: "BEHIND", UNKNOWN: "UNKNOWN" };
 
-  /* Rows of a label and a value: [[label, value, pending]]. A row marked pending shows a placeholder where its value will be. */
+  /* Rows of a label and a value: [[label, value, pending, title]]. A row marked pending shows a placeholder where its value will
+   * be; a title is the label's tooltip (the full text of a name that is shown short). */
   function kvGrid(pairs, cls) {
     return '<div class="nm-kv-grid' + (cls ? " " + cls : "") + '">' + pairs.map(function (row) {
-      return '<div class="nm-kv"><span>' + esc(row[0]) + "</span><b" + (row[2] ? ' data-pending=""' : "") + ">" + esc(row[1]) + "</b></div>";
+      return '<div class="nm-kv"><span' + (row[3] ? ' title="' + esc(row[3]) + '"' : "") + ">" + esc(row[0]) + "</span><b" + (row[2] ? ' data-pending="" aria-hidden="true"' : "") + ">" + esc(row[1]) + "</b></div>";
     }).join("") + "</div>";
   }
 
@@ -2997,6 +3022,7 @@
         '<input class="nm-input" type="number" data-key="plan_price_override" min="0.01" max="10000" step="0.01" placeholder="AUTO" inputmode="decimal" aria-describedby="plan-hint err-plan_price_override"></label>' + errLine("plan_price_override") +
         '</div><div class="nm-actions"><button class="nm-btn" type="button" data-action="refresh">Refresh now</button></div></div></section>' +
         alertsCard() +
+        guardCard() +
         '<section class="nm-card wide" aria-label="System"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">System</h2><span class="nm-meta-t">start-up and updates</span></div><div class="nm-set">' +
         toggleRow("launch_on_startup", "Start with Windows", S.data && S.data.dev ? "Dev instance: this is not saved to Windows." : "Run the monitor when you sign in.") +
         toggleRow("check_updates", "Check for updates", "Look for a newer release once in a while.") +
@@ -3005,6 +3031,13 @@
         '<p class="nm-status" id="set-update-status" role="status"></p></div></section>' +
         "</div>" +
         '<p class="nm-status" id="set-status" role="status" aria-live="polite"></p>';
+      if (!S.setup.busy) {
+        S.setup.result = null;                            // what the last click said belongs to that visit
+      }
+      S.guardAt = 0;
+      syncSettings(main);
+      pollGuard();                                        // what was last known shows at once, and is asked for again
+      return;
     }
     syncSettings(main);
   }
@@ -3048,6 +3081,7 @@
     });
     syncThemePicker(main);
     syncAlerts(main);
+    syncGuard(main);
     syncUpdate(main);
   }
 
@@ -3093,6 +3127,293 @@
       if (el) {
         el.disabled = !enabled || !qh;
       }
+    });
+  }
+
+  // ── The usage guard ─────────────────────────────────────────────────────────────
+
+  /* A number setting that may be left blank: a blank field is "off" (guard caps) or the default (the stagger). */
+  function capRow(key, title, desc, placeholder, min, max) {
+    return '<label class="nm-row-set"><span><span class="t">' + esc(title) + '</span><span class="d" id="desc-' + key + '">' + esc(desc) +
+      '</span></span><input class="nm-input" type="number" data-key="' + key + '" min="' + min + '" max="' + max + '" step="1" placeholder="' + esc(placeholder) +
+      '" inputmode="numeric" aria-describedby="desc-' + key + " err-" + key + '"></label>' + errLine(key);
+  }
+
+  /* The Settings card. Its two blocks are filled by syncGuard: the live status and the one-click setup. */
+  function guardCard() {
+    return '<section class="nm-card wide" aria-label="Usage guard"><div class="nm-card-in">' +
+      '<div class="nm-card-t"><h2 class="nm-ttl">Usage guard</h2><span class="nm-meta-t">tells working sessions to wrap up</span></div><div class="nm-set" id="guard-set">' +
+      toggleRow("guard_enabled", "Arm the guard", GUARD_EXPLAIN) +
+      capRow("guard_session_cap", "Session cap", "Percent of the 5-hour session limit, 1 to 100. Blank leaves it unwatched.", "OFF", 1, 100) +
+      capRow("guard_weekly_cap", "Weekly cap", "Percent of the weekly limit, 1 to 100. Blank leaves it unwatched.", "OFF", 1, 100) +
+      capRow("guard_scoped_cap", "Model weekly cap", "Percent of a model’s own weekly limit, such as Fable’s, 1 to 100. Blank leaves it unwatched.", "OFF", 1, 100) +
+      capRow("guard_resume_stagger_s", "Stagger", "Seconds between waking the sessions that wait, so they do not all start at once. 0 to 600.", "120", 0, 600) +
+      '<div class="nm-row-set is-stack"><span><span class="t">Status</span></span><div id="guard-live"></div></div>' +
+      '<div class="nm-row-set is-stack"><span><span class="t">One-click setup</span><span class="d">Adds the hooks and the MCP tool to Claude Code for you. Your other settings stay as they are, and a backup is kept.</span></span>' +
+      '<div id="guard-setup"></div></div></div></div></section>';
+  }
+
+  /* What /api/guard last said, in a shape the card can rely on whatever came back. */
+  function guardView() {
+    var answer = S.guard && typeof S.guard === "object" ? S.guard : {};
+    var guard = answer.guard && typeof answer.guard === "object" ? answer.guard : {};
+    return {
+      known: !!S.guard,
+      state: guard.state === "off" || guard.state === "armed" || guard.state === "holding" ? guard.state : "",
+      over: Array.isArray(guard.over) ? guard.over : [],
+      resumeAt: parseTime(guard.resume_at),
+      policy: guard.policy && typeof guard.policy === "object" && !Array.isArray(guard.policy) ? guard.policy : {},
+      told: Array.isArray(answer.told) ? answer.told : [],
+      waiting: Array.isArray(answer.waiting) ? answer.waiting : [],
+      setup: answer.setup && typeof answer.setup === "object" && !Array.isArray(answer.setup) ? answer.setup : null
+    };
+  }
+
+  /* A session id as people say it: its first eight characters. */
+  function shortId(id) {
+    return id ? String(id).slice(0, 8) : "";
+  }
+
+  function folderName(path) {
+    var parts = String(path || "").split(/[\\/]+/).filter(Boolean);
+    return parts.length ? parts[parts.length - 1] : "";
+  }
+
+  function pctWords(value) {
+    var n = num(value);
+    return n === null ? "--" : n === Math.round(n) ? fmtPct(n) : fmtPct(n, 1);
+  }
+
+  function listWords(items) {
+    return items.length < 2 ? items.join("") : items.slice(0, -1).join(", ") + " and " + items[items.length - 1];
+  }
+
+  /* The limits the caps watch, as words: "session at 95%". */
+  function watchedWords(policy) {
+    var out = [];
+    [["session_cap", "the session limit"], ["weekly_cap", "the weekly limit"], ["scoped_cap", "each model’s weekly limit"]].forEach(function (pair) {
+      if (num(policy[pair[0]]) !== null) {
+        out.push(pair[1] + " at " + pctWords(policy[pair[0]]));
+      }
+    });
+    return out;
+  }
+
+  /* The status block as it is before the monitor has answered: the shape of the common case, so nothing moves when it does. */
+  function guardLivePlaceholder() {
+    return '<div class="nm-verdict"><span class="nm-chip" data-pending="" aria-hidden="true">ARMED</span></div>' +
+      '<p class="nm-story" data-pending="" aria-hidden="true">Watching the session limit at 95% and the weekly limit at 90%. Every watched limit is under its cap.</p>' +
+      '<div class="nm-actions"><button class="nm-btn" type="button" data-fid="guard-resume" disabled>Resume now</button></div>';
+  }
+
+  /* Off, Armed or Holding. While holding: which limits are over their caps, when the hold ends, the sessions told of it and the
+   * sessions that wait. "Resume now" is there always and works only while something waits. */
+  function guardLiveHtml(v, nowMs) {
+    if (!v.known) {
+      return S.guardLost ? '<p class="nm-error" role="status">The dashboard could not get the guard’s status from the monitor.</p>' : guardLivePlaceholder();
+    }
+    if (!v.state) {
+      return guardLivePlaceholder();
+    }
+    var chip;
+    var story;
+    if (v.state === "off") {
+      chip = '<span class="nm-chip">OFF</span>';
+      story = "The guard is off. Nothing is watched, and no session is told anything.";
+    } else if (v.state === "armed") {
+      var watched = watchedWords(v.policy);
+      chip = '<span class="nm-chip is-ok">ARMED</span>';
+      story = watched.length ? "Watching " + listWords(watched) + ". Every watched limit is under its cap." : "No cap is set, so no limit is watched. Set at least one cap above.";
+    } else {
+      chip = '<span class="nm-chip solid is-crit">HOLDING</span>';
+      story = "A cap was reached. Working sessions are told once to wrap up, and sessions that wait wake when every watched limit is under its cap again.";
+    }
+    var rows = [];
+    if (v.state === "holding") {
+      v.over.forEach(function (item) {
+        rows.push([String(item.label || item.name || "limit").toUpperCase(), pctWords(item.percent) + " OF A " + pctWords(item.cap) + " CAP"]);
+      });
+      var left = v.resumeAt === null ? null : v.resumeAt - nowMs;
+      rows.push(["RESUMES", left === null ? "NO RESET TIME KNOWN" : clockText(v.resumeAt) + (left > 60000 ? " · IN " + fmtRemain(left) : " · NOW")]);
+      rows.push(["TOLD THIS EPISODE", v.told.length ? plural(v.told.length, "session").toUpperCase() : "NONE YET"]);
+      v.told.slice(0, GUARD_LISTED).forEach(function (t) {
+        rows.push([shortId(t.session_id) || "unknown session", clockText(parseTime(t.told_at))]);
+      });
+      if (v.told.length > GUARD_LISTED) {
+        rows.push(["AND " + (v.told.length - GUARD_LISTED) + " MORE", ""]);
+      }
+    }
+    if (v.state === "holding" || v.waiting.length) {
+      rows.push(["WAITING", v.waiting.length ? plural(v.waiting.length, "session").toUpperCase() : "NONE"]);
+      v.waiting.slice(0, GUARD_LISTED).forEach(function (w) {
+        var folder = folderName(w.cwd) || "unknown folder";
+        rows.push([folder + (w.session_id ? " · " + shortId(w.session_id) : ""), "SINCE " + clockText(parseTime(w.since)), false, w.cwd || ""]);
+      });
+      if (v.waiting.length > GUARD_LISTED) {
+        rows.push(["AND " + (v.waiting.length - GUARD_LISTED) + " MORE", ""]);
+      }
+    }
+    var can = v.waiting.length > 0 && !S.resumeBusy;
+    return '<div class="nm-verdict">' + chip + '</div><p class="nm-story" role="status">' + esc(story) + "</p>" +
+      (rows.length ? kvGrid(rows, "is-one") : "") +
+      '<div class="nm-actions"><button class="nm-btn" type="button" data-action="guard-resume" data-fid="guard-resume"' + (can ? "" : " disabled") + ">" +
+      (S.resumeBusy ? "Resuming…" : "Resume now") + "</button></div>";
+  }
+
+  function hooksWords(hooks) {
+    if (!hooks) {
+      return "UNKNOWN";
+    }
+    return hooks.state === "partial" ? "PARTLY INSTALLED (" + hooks.installed + " OF " + hooks.total + ")" : HOOK_WORDS[hooks.state] || "UNKNOWN";
+  }
+
+  function claudeWords(claude) {
+    if (!claude || !claude.found) {
+      return "NOT FOUND";
+    }
+    if (!claude.version) {
+      return "VERSION UNKNOWN";
+    }
+    return claude.version + (claude.supported === false ? " · NEEDS " + claude.min_version + " OR NEWER" : "");
+  }
+
+  /* What an Install or a Remove did, in the monitor's plain words: a summary of what changed or was already so and where the backup
+   * is, the warnings (and the command to run by hand when the monitor could not), and what went wrong, each in a box of its own and
+   * only when it has something to say. Nothing here is a token or a secret. */
+  function guardResultHtml(r) {
+    if (!r || typeof r !== "object") {
+      return "";
+    }
+    var changed = Array.isArray(r.changed) ? r.changed : [];
+    var said = changed.concat(Array.isArray(r.unchanged) ? r.unchanged : []).join(" ");
+    var head = r.ok ? (changed.length ? (r.action === "remove" ? "Removed." : "Installed.") : "Nothing to change.") : changed.length ? "Partly done." : "";
+    var summary = (head ? "<b>" + esc(head) + "</b> " : "") + esc(said);
+    if (r.backup) {
+      summary += (summary ? "<br>" : "") + 'Backup: <span class="nm-path">' + esc(r.backup) + "</span>";
+    }
+    var notes = (Array.isArray(r.warnings) ? r.warnings : []).map(esc);
+    if (r.manual) {
+      notes.push('To do it by hand, run: <span class="nm-path">' + esc(r.manual) + "</span>");
+    }
+    return (summary ? '<div class="nm-callout" role="status">' + summary + "</div>" : "") +
+      (notes.length ? '<div class="nm-callout is-warn" role="note">' + notes.join("<br>") + "</div>" : "") +
+      (Array.isArray(r.errors) ? r.errors : []).map(function (error) {
+        return '<p class="nm-error" role="alert">' + esc(error) + "</p>";
+      }).join("");
+  }
+
+  /* The one-click setup block: where setup stands, Install and Remove, what the last click did, and what it costs. When setup
+   * cannot run here, why, and where to do it by hand. */
+  function guardSetupHtml(v) {
+    var s = v.setup;
+    var busy = S.setup.busy;
+    var rows;
+    var notes = "";
+    if (!s) {
+      rows = kvGrid([["HOOKS", "NOT INSTALLED", true], ["MCP TOOL", "NOT REGISTERED", true], ["CLAUDE CODE", "2.1.160", true]], "is-one");
+    } else {
+      rows = kvGrid([["HOOKS", hooksWords(s.hooks)], ["MCP TOOL", MCP_WORDS[(s.mcp || {}).state] || "UNKNOWN"], ["CLAUDE CODE", claudeWords(s.claude)]], "is-one");
+      if (!s.available) {
+        notes += '<div class="nm-callout is-warn" role="note"><b>Setup is not available here.</b> ' + esc(s.reason || "") +
+          ' Set it up by hand instead: <a href="' + esc(LINKS.hooks) + '" data-external="1">docs/AGENT_HOOK.md</a>.</div>';
+      } else if (s.claude && s.claude.supported === false) {
+        notes += '<div class="nm-callout is-warn" role="note">Claude Code ' + esc(s.claude.version) + " is older than " + esc(s.claude.min_version) +
+          ", which the hooks need. Update it with <span class=\"nm-path\">claude update</span> first.</div>";
+      }
+      (Array.isArray(s.errors) ? s.errors : []).forEach(function (error) {
+        notes += '<p class="nm-error" role="alert">' + esc(error) + "</p>";
+      });
+    }
+    var off = !s || !s.available || !!busy;
+    return rows + notes + '<div class="nm-actions">' +
+      '<button class="nm-btn solid" type="button" data-action="guard-install" data-fid="guard-install"' + (off ? " disabled" : "") + ">" + (busy === "install" ? "Installing…" : "Install") + "</button>" +
+      '<button class="nm-btn" type="button" data-action="guard-remove" data-fid="guard-remove"' + (off ? " disabled" : "") + ">" + (busy === "remove" ? "Removing…" : "Remove") + "</button></div>" +
+      guardResultHtml(S.setup.result) + '<p class="nm-lede">' + esc(GUARD_COST) + "</p>";
+  }
+
+  /* Puts the two blocks in step with what the monitor last said. A block whose markup did not change is left alone, so a poll never
+   * drops the focus of whoever is tabbing through its buttons. */
+  function syncGuard(main) {
+    main = main || $("#main");
+    var v = guardView();
+    var now = Date.now();
+    [["#guard-live", guardLiveHtml(v, now)], ["#guard-setup", guardSetupHtml(v)]].forEach(function (pair) {
+      var box = $(pair[0], main);
+      if (box && box.getAttribute("data-sig") !== pair[1]) {
+        box.setAttribute("data-sig", pair[1]);
+        replaceHtml(box, pair[1]);
+      }
+    });
+  }
+
+  /* Asks /api/guard (the state, who was told, who waits, where setup stands). One ask at a time; the Settings page asks again every
+   * GUARD_POLL_MS while it is on screen, and at once after a change. */
+  function pollGuard() {
+    if (S.guardFlight) {
+      return;
+    }
+    S.guardFlight = true;
+    S.guardAt = Date.now();
+    api("GET", "/api/guard").then(function (res) {
+      S.guardFlight = false;
+      S.guardLost = !(res.ok && res.data);
+      if (!S.guardLost) {
+        S.guard = res.data;
+      }
+      syncGuard();
+    }, function () {
+      S.guardFlight = false;
+      S.guardLost = true;
+      syncGuard();
+    });
+  }
+
+  /* Once a second, from tick(): ask again when it is time, and let the countdown move. */
+  function guardTick() {
+    if (S.page !== "settings" || S.formKey !== "settings" || document.visibilityState === "hidden") {
+      return;
+    }
+    if (!S.guardFlight && Date.now() - S.guardAt >= GUARD_POLL_MS) {
+      pollGuard();
+    }
+    syncGuard();
+  }
+
+  /* "Resume now": every session that waits on the guard is woken at once, whatever the limits say. */
+  function guardResume() {
+    if (S.resumeBusy) {
+      return;
+    }
+    S.resumeBusy = true;
+    syncGuard();
+    api("POST", "/api/guard/resume").then(function (res) {
+      S.resumeBusy = false;
+      setStatus(res.ok ? "RESUME REQUESTED" : failedText("RESUME FAILED", res), !res.ok);
+      pollGuard();
+    }, function () {
+      S.resumeBusy = false;
+      setStatus("RESUME FAILED: THE DASHBOARD LOST ITS LINK", true);
+      syncGuard();
+    });
+  }
+
+  /* Install or Remove. The monitor answers with what it did, or why it did not; either way the result stays beside the buttons. */
+  function guardSetup(action) {
+    if (S.setup.busy) {
+      return;
+    }
+    var failed = function (why) {
+      return { ok: false, action: action, changed: [], unchanged: [], backup: null, warnings: [], errors: [why], manual: null };
+    };
+    S.setup = { busy: action, result: null };
+    syncGuard();
+    api("POST", "/api/guard/setup", { action: action }).then(function (res) {
+      S.setup = { busy: "", result: res.ok && res.data && typeof res.data === "object" ? res.data : failed("The monitor could not run setup (" + errorText(res) + ").") };
+      pollGuard();
+      syncGuard();
+    }, function () {
+      S.setup = { busy: "", result: failed("The dashboard lost its link to the monitor.") };
+      syncGuard();
     });
   }
 
@@ -3411,6 +3732,9 @@
           invalidateStats();
         }
         poll(true);
+        if (Object.keys(patch).some(function (k) { return k.indexOf("guard_") === 0; })) {
+          pollGuard();                                    // the guard's status follows its settings at once
+        }
         syncSettings($("#main"));
         return true;
       }
@@ -3431,7 +3755,7 @@
   }
 
   function labelFor(key) {
-    return String(key).replace(/_/g, " ").toUpperCase();
+    return GUARD_LABELS[key] || String(key).replace(/_/g, " ").toUpperCase();
   }
 
   function applyThemeChoice(themeId, variantId) {
@@ -3525,6 +3849,23 @@
       }
     } else if (key === "poll_interval_ms") {
       value = parseInt(el.value, 10);
+    } else if (key === "guard_session_cap" || key === "guard_weekly_cap" || key === "guard_scoped_cap") {
+      var cap = String(el.value).trim();
+      if (cap === "") {
+        value = null;                                     // blank is off: the limit is not watched
+      } else if (!/^\d{1,3}$/.test(cap) || +cap < 1 || +cap > 100) {
+        fieldError(key, "Enter a whole number from 1 to 100, or leave it blank to stop watching this limit.");
+        return;
+      } else {
+        value = parseInt(cap, 10);
+      }
+    } else if (key === "guard_resume_stagger_s") {
+      var stagger = String(el.value).trim();
+      if (!/^\d{1,3}$/.test(stagger) || +stagger > 600) {
+        fieldError(key, "Enter a whole number of seconds from 0 to 600.");
+        return;
+      }
+      value = parseInt(stagger, 10);
     } else {
       value = el.value;
     }
@@ -3580,6 +3921,10 @@
       installUpdate();
     } else if (action === "skip-update") {
       skipUpdate();
+    } else if (action === "guard-resume") {
+      guardResume();
+    } else if (action === "guard-install" || action === "guard-remove") {
+      guardSetup(action === "guard-install" ? "install" : "remove");
     }
   }
 
@@ -4161,6 +4506,7 @@
   function tick() {
     renderAge();
     renderHealth();
+    guardTick();
     if (S.data) {
       ensureStats();
     }
@@ -4324,7 +4670,10 @@
       skelEfficiency: skelEfficiency, skelHistory: skelHistory, errorSwap: errorSwap, tagCard: tagCard, cardPart: cardPart,
       playEnterIfDue: playEnterIfDue, wantEnter: wantEnter, loadPrefs: loadPrefs, PAGE_KEYS: PAGE_KEYS, clockText: clockText,
       errorText: errorText, failedText: failedText, checkUpdateText: checkUpdateText, settingsClick: settingsClick,
-      updateAction: updateAction, installUpdate: installUpdate, skipUpdate: skipUpdate, aboutPage: aboutPage
+      updateAction: updateAction, installUpdate: installUpdate, skipUpdate: skipUpdate, aboutPage: aboutPage,
+      settingsPage: settingsPage, settingsChange: settingsChange, labelFor: labelFor, guardCard: guardCard, guardView: guardView,
+      guardLiveHtml: guardLiveHtml, guardSetupHtml: guardSetupHtml, guardResultHtml: guardResultHtml, syncGuard: syncGuard,
+      pollGuard: pollGuard, guardTick: guardTick
     };
     return;
   }

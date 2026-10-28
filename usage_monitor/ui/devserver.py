@@ -1,6 +1,6 @@
 """Dev helper: the real webui on the local API, fed by a fake MonitorState (no Win32, no tray).
 
-    python -m usage_monitor.ui.devserver --port 8765 --scenario normal|warning|critical|stale
+    python -m usage_monitor.ui.devserver --port 8765 --scenario normal|warning|critical|stale|guard
                                          [--db PATH] [--theme ID[/VARIANT]]
 
 Used for Playwright checks and design review. Settings go to CUM_APPDATA_DIR (or a temporary
@@ -8,6 +8,13 @@ folder), never to the owner's real app data, and the server is a dev one, so the
 Windows" switch never reaches the sign-in (Run) entry. The numbers are realistic: the session
 window is 31 % elapsed, the weekly window 57 % elapsed, and the month sits at about $1,659
 API-equivalent.
+
+The usage guard (#27) works in every scenario: its verdict is the real agent/guard.py evaluated on the fake limits
+and the dev settings, so arming it and changing a cap on the Settings page shows at once. The ``guard`` scenario is
+the one that holds: the guard is armed and the session is past its cap, two sessions were told of it and one waits
+(Resume now releases it). Their files live in a folder of the dev server's own, and "Install" and "Remove" run the
+real agent/setup.py on a sandbox (a settings file in the dev folder and a claude that lives in memory), so nothing of
+the owner's ~/.claude, the app data folder or Claude Code is ever read or touched.
 
 The statistics routes (/api/analytics/*, /api/export) read a usage database. With ``--db PATH``
 that is the file you name, read the way the app reads its own (it is never created and never
@@ -24,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import json
 import math
 import os
 import random
@@ -31,12 +39,16 @@ import re
 import sqlite3
 import tempfile
 import threading
-from collections.abc import Callable
+import time as clock_time
+from collections.abc import Callable, Sequence
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from usage_monitor import paths, themes
+from usage_monitor.agent import guard as agent_guard
+from usage_monitor.agent import sessions as agent_sessions
+from usage_monitor.agent import setup as agent_setup
 from usage_monitor.data.models import (
     ApiErrorEvent,
     ApiStatus,
@@ -66,7 +78,7 @@ from usage_monitor.ui.server import ApiServer, open_statistics_store
 
 log = get_logger(__name__)
 
-SCENARIOS = ("normal", "warning", "critical", "stale")
+SCENARIOS = ("normal", "warning", "critical", "stale", "guard")
 _SESSION_S = 5 * 3600
 _WEEK_S = 7 * 86400
 
@@ -82,6 +94,7 @@ _SCENARIO_PCT = {
     "warning": (72, 21, 4),
     "critical": (93, 58, 12),
     "stale": (13, 2, 0),
+    "guard": (96, 58, 12),          # the session is past the guard's 95 % cap, the week and Fable are not
 }
 
 
@@ -127,7 +140,8 @@ def fake_state(scenario: str, now: datetime) -> MonitorState:
     session_pct, weekly_pct, fable_pct = _SCENARIO_PCT[scenario]
     session_reset = now + timedelta(hours=3, minutes=27)   # 31 % of the 5-hour window elapsed
     weekly_reset = now + timedelta(days=2, hours=23)       # 57 % of the 7-day window elapsed
-    severity = {"critical": ("critical", "warning"), "warning": ("warning", "normal")}.get(scenario, ("normal", "normal"))
+    severity = {"critical": ("critical", "warning"), "guard": ("critical", "warning"),
+                "warning": ("warning", "normal")}.get(scenario, ("normal", "normal"))
     fetched = now - timedelta(minutes=41) if scenario == "stale" else now - timedelta(seconds=12)
     status = ApiStatus.STALE if scenario == "stale" else ApiStatus.LIVE
     detail = ("Token expired. Sign in to Claude Code to restore live usage." if status is ApiStatus.STALE
@@ -173,7 +187,8 @@ def fake_state(scenario: str, now: datetime) -> MonitorState:
         "all": window("all", now - timedelta(days=180), everything),
     }
     burn_by_scenario = {"normal": (1240.0, 6.10, "NORMAL"), "warning": (2140.0, 10.40, "FAST"),
-                        "critical": (3400.0, 17.20, "VERY FAST"), "stale": (0.0, 0.0, "IDLE")}
+                        "critical": (3400.0, 17.20, "VERY FAST"), "guard": (3400.0, 17.20, "VERY FAST"),
+                        "stale": (0.0, 0.0, "IDLE")}
     tokens_per_min, usd_per_hour, velocity = burn_by_scenario[scenario]
     # A gentle minute-to-minute drift, so the burn trace has a shape to draw.
     drift = 1.0 + 0.12 * math.sin(now.timestamp() / 150.0)
@@ -451,6 +466,112 @@ class SyntheticHistory:
         return store
 
 
+# ── The usage guard (#27) ─────────────────────────────────────────────────────────
+
+# What the "guard" scenario arms: the defaults, with the guard on.
+GUARD_SETTINGS = {"guard_enabled": True, "guard_session_cap": 95, "guard_weekly_cap": 90, "guard_scoped_cap": None,
+                  "guard_resume_stagger_s": 120}
+_TOLD = (("3f9a1c2e-5b7d-4e0a-9c11-7d2f6a8b0e41", 24), ("c81d04b7-62aa-4f3e-8e57-b09a1d3c5f72", 21))   # id, minutes ago
+_WAITER = ("77b0aa10-9d3e-4c52-a6f8-12e4c0b7d9a3", r"C:\Demo\atlas-web", 18)                           # id, folder, minutes ago
+_FAKE_EXE = r"C:\Dev\ClaudeUsageMonitor\ClaudeUsageMonitor.exe"       # the sandbox's idea of the installed exe: never run
+_FAKE_CLAUDE = r"C:\Dev\claude\claude.exe"
+
+
+def fake_guard(state: MonitorState, settings: Settings, now: datetime) -> dict[str, Any]:
+    """The guard's verdict on the fake limits, from the real agent/guard.py and the dev settings."""
+    return agent_guard.evaluate(agent_guard.limits_doc(state.usage), agent_guard.policy_from(settings.get), now)
+
+
+class GuardSessions:
+    """The session files of the ``guard`` scenario, in a folder of the dev server's own. The app data folder is never
+    used: Resume now there would release the owner's real waiting sessions.
+
+    Two sessions were told of the holding episode and one session waits, as agent/sessions.py keeps them; the server
+    reads them through that module. This only writes them. The told sessions are written again whenever the episode
+    changes (the fake reset times slide a minute at a time), and the wait ends when Resume now was pressed, as a real
+    ``--wait`` process would end it.
+    """
+
+    def __init__(self, folder: Path) -> None:
+        self.folder = folder
+        self._started = clock_time.time()
+        self._origin: datetime | None = None    # the first moment seen: the minutes "ago" count from it, so they stay put
+        self._episode = ""
+        self._released = False
+        self._lock = threading.Lock()            # the server's threads all ask for the state
+
+    def sync(self, guard: dict[str, Any], now: datetime) -> None:
+        with self._lock:
+            self._sync(guard, now)
+
+    def _sync(self, guard: dict[str, Any], now: datetime) -> None:
+        self._origin = self._origin or now
+        episode = agent_guard.episode(guard)
+        waiter = self.folder / agent_sessions.WAITING_DIR / f"{os.getpid()}.json"     # this process is alive: its wait counts
+        if agent_sessions.resumed_since(self.folder, self._started):
+            self._released = True
+        if not episode or self._released:
+            waiter.unlink(missing_ok=True)
+        elif not waiter.exists():
+            session_id, folder, minutes = _WAITER
+            waiter.parent.mkdir(parents=True, exist_ok=True)
+            waiter.write_text(json.dumps({"pid": os.getpid(), "session_id": session_id, "cwd": folder,
+                                          "since": _iso(self._origin - timedelta(minutes=minutes))}), encoding="utf-8")
+        if episode and episode != self._episode:
+            seen = {}
+            for session_id, minutes in _TOLD:
+                told_at = _iso(self._origin - timedelta(minutes=minutes))
+                seen[session_id] = {"at": told_at, "steps": {}, "guard": {"episode": episode, "told_at": told_at}}
+            self.folder.mkdir(parents=True, exist_ok=True)
+            (self.folder / agent_sessions.SEEN_NAME).write_text(json.dumps(seen), encoding="utf-8")
+        self._episode = episode
+
+
+def _iso(moment: datetime) -> str:
+    return moment.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+class _DevClaude:
+    """The claude command, in memory, for the sandbox: ``--version`` and ``mcp get`` / ``add`` / ``remove`` as Claude
+    Code answers them. It runs nothing."""
+
+    def __init__(self) -> None:
+        self.tool: tuple[str, list[str]] | None = None
+
+    def __call__(self, argv: Sequence[str]) -> agent_setup.Ran:
+        words = list(argv)[1:]
+        if words == ["--version"]:
+            return agent_setup.Ran(0, "2.1.160 (Claude Code)\n", "")
+        if words[:3] == ["mcp", "get", agent_setup.MCP_NAME]:
+            if self.tool is None:
+                return agent_setup.Ran(1, "", f'No MCP server found with name: "{agent_setup.MCP_NAME}".\n')
+            command, args = self.tool
+            return agent_setup.Ran(0, f"{agent_setup.MCP_NAME}:\n  Scope: User config (available in all your projects)\n"
+                                      f"  Status: ✓ Connected\n  Type: stdio\n  Command: {command}\n"
+                                      f"  Args: {' '.join(args)}\n", "")
+        if words[:2] == ["mcp", "add"] and "--" in words:
+            command, *args = words[words.index("--") + 1:]
+            self.tool = (command, args)
+            return agent_setup.Ran(0, f"Added stdio MCP server {agent_setup.MCP_NAME} to user config\n", "")
+        if words[:2] == ["mcp", "remove"]:
+            self.tool = None
+            return agent_setup.Ran(0, f"Removed MCP server {agent_setup.MCP_NAME} from user config\n", "")
+        return agent_setup.Ran(1, "", "the dev server's claude does not know that command")
+
+
+def dev_setup(folder: Path) -> dict[str, Callable[[], Any]]:
+    """The setup callbacks of the dev server: the real agent/setup.py, working on a sandbox. Its "installed exe" and
+    "claude" are made-up paths that nothing runs; its Claude Code settings file is ``claude-config/settings.json`` in
+    ``folder``; its claude keeps the MCP tool in memory. The page can be clicked through, and the owner's real
+    ~/.claude is never read."""
+    ctx = agent_setup.Context(
+        frozen=True, executable=_FAKE_EXE, env={agent_setup.CONFIG_ENV: str(folder / "claude-config")}, home=folder,
+        which=lambda name: _FAKE_CLAUDE if name == agent_setup.CLAUDE_COMMAND else None, run=_DevClaude(),
+        now=datetime.now)
+    return {"status": lambda: agent_setup.status(ctx), "install": lambda: agent_setup.install(ctx),
+            "remove": lambda: agent_setup.remove(ctx)}
+
+
 def theme_settings(spec: str) -> dict[str, str]:
     """The settings for ``--theme ID[/VARIANT]``. Without a variant the theme's default one is named, so
     the result does not depend on what an earlier run left in the dev settings. ValueError for an unknown theme."""
@@ -481,11 +602,18 @@ def make_server(scenario: str, port: int, settings_dir: Path | None = None, *, d
     def update_check() -> dict[str, Any]:
         return {"available": False, "version": None, "checked": True, "current": _app_version()}
 
+    guard_folder = folder / "guard-dev"
+    guard_sessions = GuardSessions(guard_folder) if scenario == "guard" else None
+
     def state() -> MonitorState:
-        current = fake_state(scenario, now())
+        moment = now()
+        current = fake_state(scenario, moment)
         if history is not None:
             history.sync(current)
-        return current
+        guard = fake_guard(current, settings, moment)
+        if guard_sessions is not None:
+            guard_sessions.sync(guard, moment)
+        return dataclasses.replace(current, guard=guard)
 
     def open_store() -> Store:
         return history.open() if history is not None else open_statistics_store(Path(str(db)))
@@ -506,10 +634,14 @@ def make_server(scenario: str, port: int, settings_dir: Path | None = None, *, d
         port=port,
         analytics_store=open_store,
         wall_clock=clock,
+        guard_dir=guard_folder,
+        setup_cb=dev_setup(folder),
     )
     try:
         if theme:
             server.apply_settings(theme_settings(theme))
+        if scenario == "guard":
+            server.apply_settings(GUARD_SETTINGS)
     except ValueError:
         settings.close()
         raise

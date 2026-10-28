@@ -25,6 +25,7 @@ import os
 import re
 import shutil
 import subprocess
+from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
@@ -178,7 +179,7 @@ def test_money_is_labelled_apart_from_list_price_cost() -> None:
 
 def posted_setting_keys() -> set[str]:
     keys: set[str] = set()
-    for pattern in (r'toggleRow\("([a-z_]+)"', r'selectRow\("([a-z_]+)"', r'data-key="([a-z_]+)"',
+    for pattern in (r'toggleRow\("([a-z_]+)"', r'selectRow\("([a-z_]+)"', r'capRow\("([a-z_]+)"', r'data-key="([a-z_]+)"',
                     r"saveSettings\(\{ ([a-z_]+):", r"patch = \{ ([a-z_]+):"):
         keys.update(re.findall(pattern, APP_CODE))
     return keys
@@ -276,7 +277,7 @@ def test_index_html_is_the_shell_the_server_and_the_scripts_expect() -> None:
 def test_the_pages_make_no_requests_beyond_the_monitor_and_the_about_links() -> None:
     links = re.search(r"var LINKS = \{(.*?)\};", APP_CODE, re.S).group(1)
     allowed = set(re.findall(r'"(https://[^"]+)"', links))
-    assert len(allowed) == 3
+    assert len(allowed) == 4          # the repository, the bug form, Patreon, and the guard's manual setup (docs/AGENT_HOOK.md)
     namespaces = {"http://www.w3.org/2000/svg"}          # the name of the SVG markup language: an identifier, never fetched
     for name, text in ALL_SCRIPTS.items():
         assert set(re.findall(r"https?://[^\s\"')]+", strip_comments(text))) <= allowed | namespaces, name
@@ -1206,6 +1207,368 @@ def test_the_quiet_hours_fields_are_as_wide_as_the_time_the_locale_writes_in_the
     rule = re.search(r"\.nm-input\.is-time \{([^}]*)\}", strip_comments(THEME_CSS[theme_id])).group(1)
     assert "width: auto" in rule, theme_id
     assert int(re.search(r"min-width: (\d+)px", rule).group(1)) >= 140, theme_id
+
+
+# ── The usage guard card (#27) ─────────────────────────────────────────────────────
+
+GUARD_KEYS = ["guard_enabled", "guard_session_cap", "guard_weekly_cap", "guard_scoped_cap", "guard_resume_stagger_s"]
+GUARD_CAPS, GUARD_STAGGER = GUARD_KEYS[1:4], GUARD_KEYS[4]
+GUARD_EXPLANATION = ("When plan usage reaches a cap, working Claude sessions are told to wrap up, and sessions that wait are "
+                     "woken when every limit is under its cap again. Nothing is blocked.")
+GUARD_COST = "Adds a quick check after each tool call (about a quarter of a second)."
+GUARD_FUNCTIONS = ("capRow", "guardCard", "guardView", "guardLiveHtml", "guardSetupHtml", "guardResultHtml", "syncGuard",
+                   "pollGuard", "guardTick", "guardResume", "guardSetup")
+
+
+def js_string(name: str) -> str:
+    """The text of ``var NAME = "...";`` in app.js."""
+    return re.search(rf'var {name} = "([^"]*)";', APP_CODE).group(1)
+
+
+def test_the_guard_card_sits_between_alerts_and_system_and_has_a_control_for_every_guard_setting() -> None:
+    page = function_body(APP_CODE, "settingsPage")
+    assert page.index("alertsCard() +") < page.index("guardCard() +") < page.index('aria-label="System"')
+    card = function_body(APP_CODE, "guardCard")
+    assert 'aria-label="Usage guard"' in card and 'toggleRow("guard_enabled", "Arm the guard", GUARD_EXPLAIN)' in card
+    for key in GUARD_CAPS + [GUARD_STAGGER]:
+        assert f'capRow("{key}"' in card, key
+    assert 'id="guard-live"' in card and 'id="guard-setup"' in card
+    assert set(GUARD_KEYS) <= posted_setting_keys() <= set(server.SETTING_SPECS)
+    assert "errLine(key)" in function_body(APP_CODE, "capRow")                    # a refusal lands under its field, announced
+
+
+def test_the_guard_says_what_it_does_in_the_words_it_was_given() -> None:
+    assert js_string("GUARD_EXPLAIN") == GUARD_EXPLANATION and js_string("GUARD_COST") == GUARD_COST
+    assert "GUARD_COST" in function_body(APP_CODE, "guardSetupHtml")
+
+
+def test_the_guard_fields_apply_the_limits_the_server_and_settings_apply() -> None:
+    specs = server.SETTING_SPECS
+    for key in GUARD_CAPS:
+        check = specs[key].check
+        assert check(None) and check(1) and check(100) and not check(0) and not check(101) and not check(True)
+    stagger = specs[GUARD_STAGGER].check
+    assert stagger(0) and stagger(600) and not stagger(601) and not stagger(-1) and not stagger(None)
+    change = function_body(APP_CODE, "settingsChange")
+    assert 'key === "guard_session_cap" || key === "guard_weekly_cap" || key === "guard_scoped_cap"' in change
+    assert re.search(r"\+cap < 1 \|\| \+cap > 100", change) and re.search(r"\+stagger > 600", change)
+    assert 'value = null;' in change[change.index("guard_session_cap"):]               # a blank cap is "not watched"
+
+
+def test_the_guard_talks_to_the_monitor_only_through_its_three_routes() -> None:
+    routes = set(re.findall(r'api\("(?:GET|POST)", "(/api/guard[^"]*)"', APP_CODE))
+    assert routes == {"/api/guard", "/api/guard/resume", "/api/guard/setup"}
+    assert 'api("POST", "/api/guard/setup", { action: action })' in function_body(APP_CODE, "guardSetup")
+    click = function_body(APP_CODE, "settingsClick")
+    for action in ("guard-resume", "guard-install", "guard-remove"):
+        assert f'"{action}"' in click, action
+    assert 'failedText("RESUME FAILED", res)' in strip_comments(APP_CODE)             # in capitals all the way, like every failure line
+
+
+def test_the_guard_asks_again_only_while_the_settings_page_is_on_screen_and_one_ask_at_a_time() -> None:
+    tick = function_body(APP_CODE, "guardTick")
+    for needle in ('S.page !== "settings"', 'S.formKey !== "settings"', 'visibilityState === "hidden"', "S.guardFlight", "GUARD_POLL_MS"):
+        assert needle in tick, needle
+    assert "guardTick();" in function_body(APP_CODE, "tick") and "var GUARD_POLL_MS = 3000;" in APP_CODE
+    assert "if (S.guardFlight) {" in function_body(APP_CODE, "pollGuard")
+    assert "pollGuard();" in function_body(APP_CODE, "saveSettings")                   # a change of a guard setting shows at once
+
+
+def test_the_guard_has_no_motion_of_its_own_and_never_touches_a_token() -> None:
+    """Whatever moves in the card is the theme's (the entrance, the pending shimmer, the hover), and so it obeys reduce_motion."""
+    for name in GUARD_FUNCTIONS:
+        body = strip_comments(function_body(APP_CODE, name))
+        assert not re.search(r"requestAnimationFrame|setTimeout|setInterval|\.animate\(|animation|transition", body), name
+        assert not re.search(r"TOKEN|token|credential|Authorization|localStorage|sessionStorage", body, re.I), name
+
+
+def test_the_guard_blocks_are_built_from_the_existing_parts_and_open_as_placeholders() -> None:
+    live, setup = function_body(APP_CODE, "guardLivePlaceholder"), function_body(APP_CODE, "guardSetupHtml")
+    assert 'data-pending=""' in live and "disabled" in live                             # the shape of the common case, no button live yet
+    assert 'kvGrid([["HOOKS", "NOT INSTALLED", true]' in setup                          # the rows exist from the first frame, pending
+    for name in ("guardLiveHtml", "guardSetupHtml", "guardResultHtml"):
+        assert "esc(" in function_body(APP_CODE, name), name                            # everything it was told is escaped
+    assert 'function kvGrid(pairs, cls)' in APP_CODE and 'row[3] ? \' title="\'' in function_body(APP_CODE, "kvGrid")
+
+
+def test_the_gates_theme_gives_the_guard_card_its_icon_and_the_other_themes_need_none() -> None:
+    assert re.search(r'\.nm-card\[aria-label="Usage guard"\] \{ --g-ico: "\\[0-9A-F]{4}"; \}', THEME_CSS["gates"])
+    for theme_id in ("nostromo", "night_city"):
+        assert "--g-ico" not in THEME_CSS[theme_id]
+
+
+def test_the_gates_theme_keeps_the_tone_of_the_guard_chips_its_script_calls_neutral() -> None:
+    """gates.js tones a chip from its words and calls a word it does not know neutral, which would wash ARMED and HOLDING
+    out: the two chips carry their tone as a class (is-ok, is-crit), and Gates lets that class win inside the guard block."""
+    css = THEME_CSS["gates"]
+    for tone, colour in (("is-ok", "--ok"), ("is-crit", "--alert")):
+        assert f'#guard-live .nm-chip.{tone}[data-g-tone="neutral"] {{ color: var({colour});' in css, tone
+
+
+def test_the_manual_setup_the_card_points_at_is_in_the_repository() -> None:
+    links = re.search(r"var LINKS = \{(.*?)\};", APP_CODE, re.S).group(1)
+    assert 'hooks: "https://github.com/Godimas101/claude-usage-monitor/blob/main/docs/AGENT_HOOK.md"' in links
+    assert 'data-external="1">docs/AGENT_HOOK.md</a>' in function_body(APP_CODE, "guardSetupHtml")
+    assert (paths.resource_dir() / "docs" / "AGENT_HOOK.md").is_file()
+
+
+def kv(html: str) -> list[tuple[str, str]]:
+    """The label and value of each row of a kvGrid, as text."""
+    rows = re.findall(r'<div class="nm-kv"><span[^>]*>([^<]*)</span><b[^>]*>([^<]*)</b></div>', html)
+    return [(unescape(label), unescape(value)) for label, value in rows]
+
+
+def chip(html: str) -> tuple[str, str]:
+    found = re.search(r'<span class="nm-chip([^"]*)"[^>]*>([^<]*)</span>', html)
+    return found.group(1), found.group(2)
+
+
+def story(html: str) -> str:
+    return unescape(re.search(r'<p class="nm-story"[^>]*>([^<]*)</p>', html).group(1))
+
+
+def resume_disabled(html: str) -> bool:
+    return bool(re.search(r'<button[^>]*(?:data-action="guard-resume"|data-fid="guard-resume")[^>]* disabled', html))
+
+
+@ui_only
+def test_the_guard_card_has_its_toggle_four_fields_and_the_two_blocks_the_page_fills(checks: dict[str, Any]) -> None:
+    card = Markup(checks["guard"]["card"])
+    fields = {attrs["data-key"]: attrs for attrs in card.find("input") if attrs.get("data-key")}
+    assert list(fields) == GUARD_KEYS and fields["guard_enabled"]["type"] == "checkbox"
+    for key in GUARD_CAPS:
+        assert (fields[key]["type"], fields[key]["min"], fields[key]["max"], fields[key]["placeholder"]) == ("number", "1", "100", "OFF")
+        assert "err-" + key in fields[key]["aria-describedby"]                           # the field says where its refusal is announced
+    assert (fields[GUARD_STAGGER]["min"], fields[GUARD_STAGGER]["max"], fields[GUARD_STAGGER]["placeholder"]) == ("0", "600", "120")
+    ids = {attrs["id"] for _tag, attrs in card.tags if attrs.get("id")}
+    assert {"guard-live", "guard-setup", *("err-" + key for key in GUARD_CAPS + [GUARD_STAGGER])} <= ids
+    assert card.find("section")[0]["aria-label"] == "Usage guard"
+    assert GUARD_EXPLANATION in " ".join(card.text)
+    for title in ("Session cap", "Weekly cap", "Model weekly cap", "Stagger", "One-click setup"):
+        assert title in card.text, title
+    assert checks["guard"]["labels"] == ["USAGE GUARD", "SESSION CAP", "WEEKLY CAP", "MODEL WEEKLY CAP", "STAGGER", "POLL INTERVAL MS"]
+
+
+@ui_only
+def test_the_guard_status_says_off_armed_or_holding(checks: dict[str, Any]) -> None:
+    live = checks["guard"]["live"]
+    assert chip(live["off"]) == ("", "OFF") and "The guard is off" in story(live["off"])
+    assert chip(live["armed"]) == (" is-ok", "ARMED")
+    assert story(live["armed"]) == "Watching the session limit at 95% and the weekly limit at 90%. Every watched limit is under its cap."
+    assert "each model’s weekly limit at 80%" in story(live["armedThree"]) and "the weekly limit at 90% and each" in story(live["armedThree"])
+    assert story(live["armedNoCaps"]) == "No cap is set, so no limit is watched. Set at least one cap above."
+    assert chip(live["holding"]) == (" solid is-crit", "HOLDING") and story(live["holding"]).startswith("A cap was reached.")
+    for state in ("off", "armed", "armedThree", "armedNoCaps"):
+        assert kv(live[state]) == [], state                                              # nothing but the sentence until something waits
+
+
+@ui_only
+def test_while_holding_it_names_what_is_over_when_it_ends_who_was_told_and_who_waits(checks: dict[str, Any]) -> None:
+    rows, clock = kv(checks["guard"]["live"]["holding"]), checks["guard"]["clock"]
+    assert rows[:2] == [("SESSION", "96% OF A 95% CAP"), ("FABLE WEEKLY", "91.5% OF A 90% CAP")]      # percent against cap, as the limit is named
+    assert rows[2] == ("RESUMES", f"{clock['resumes']} · IN 3 H 27 M")                                 # local time and a countdown
+    assert rows[3] == ("TOLD THIS EPISODE", "2 SESSIONS")
+    assert rows[4] == ("3f9a1c2e", clock["told"]) and rows[5][0] == "3f9a1c2e" and rows[5][1] != rows[4][1]   # short ids, and when
+    assert rows[6] == ("WAITING", "1 SESSION") and rows[7] == ("atlas-web · 77b0aa10", f"SINCE {clock['since']}")   # the folder, and since when
+    assert 'title="C:\\Demo\\atlas-web"' in checks["guard"]["live"]["holding"]                          # the whole path is one hover away
+    assert len(rows) == 8
+
+
+@ui_only
+def test_resume_now_is_enabled_only_while_something_waits(checks: dict[str, Any]) -> None:
+    live = checks["guard"]["live"]
+    for state in ("off", "armed", "armedThree", "armedNoCaps", "holdingNobody", "holdingNoResetTime", "holdingAMomentLeft", "pending",
+                  "beforeTheFirstCycle", "holdingBusy"):
+        assert resume_disabled(live[state]), state
+    for state in ("holding", "holdingMany", "armedStillWaiting", "holdingHostile"):
+        assert not resume_disabled(live[state]), state                                   # a session that is still waiting can be released
+    assert 'data-action="guard-resume"' in live["holding"] and ">Resume now</button>" in live["holding"]
+    assert ">Resuming…</button>" in live["holdingBusy"]                                  # and a click on its way is not sent twice
+
+
+@ui_only
+def test_the_hold_says_so_when_it_does_not_know_when_it_ends_and_when_it_is_about_to(checks: dict[str, Any]) -> None:
+    live = checks["guard"]["live"]
+    assert ("RESUMES", "NO RESET TIME KNOWN") in kv(live["holdingNoResetTime"])
+    assert kv(live["holdingAMomentLeft"])[1] == ("RESUMES", f"{checks['guard']['clock']['resumes']} · NOW")
+    assert kv(live["holdingNobody"])[2:] == [("TOLD THIS EPISODE", "NONE YET"), ("WAITING", "NONE")]
+    assert kv(live["armedStillWaiting"])[0] == ("WAITING", "1 SESSION")                  # the hold just ended but a session has not woken yet
+
+
+@ui_only
+def test_a_long_list_of_sessions_is_cut_and_counted(checks: dict[str, Any]) -> None:
+    rows = kv(checks["guard"]["live"]["holdingMany"])
+    labels = [label for label, _value in rows]
+    assert rows[labels.index("TOLD THIS EPISODE")][1] == "7 SESSIONS" and rows[labels.index("WAITING")][1] == "7 SESSIONS"
+    # the limit, when it ends, the told header and its five and a "more" row, the waiting header and its five and a "more" row
+    assert labels.count("AND 2 MORE") == 2 and len(rows) == 1 + 1 + 1 + 5 + 1 + 1 + 5 + 1
+    assert [row for row in rows if row[0] == "AND 2 MORE"] == [("AND 2 MORE", "")] * 2
+
+
+@ui_only
+def test_the_guard_blocks_open_as_placeholders_and_say_so_when_the_monitor_does_not_answer(checks: dict[str, Any]) -> None:
+    live, setup = checks["guard"]["live"], checks["guard"]["setup"]["pending"]
+    for html in (live["pending"], live["beforeTheFirstCycle"], live["odd"]):
+        assert 'class="nm-chip" data-pending=""' in html and '<p class="nm-story" data-pending=""' in html and resume_disabled(html)
+        assert html.count('data-pending=""') == 2 == html.count('data-pending="" aria-hidden="true"')     # nothing to read yet, so nothing is read out
+    assert setup.count('data-pending=""') == 3 == setup.count('data-pending="" aria-hidden="true"') and kv(setup)[0][0] == "HOOKS"
+    assert 'class="nm-error"' in live["lost"] and "could not get the guard" in live["lost"] and "data-pending" not in live["lost"]
+    assert live["pending"] != live["off"]
+
+
+@ui_only
+def test_everything_the_card_was_told_is_escaped(checks: dict[str, Any]) -> None:
+    """Session ids, folders, limit labels and every message of setup arrive from outside the page: none may become markup."""
+    for html in (checks["guard"]["live"]["holdingHostile"], checks["guard"]["setup"]["hostile"]):
+        page = Markup(html)
+        assert page.find("img") == [] and not any("onerror" in attrs for _tag, attrs in page.tags)
+        assert "<img" not in html.lower()
+    shown = " ".join(Markup(checks["guard"]["setup"]["hostile"]).text)
+    assert shown.count(HOSTILE) == 7                      # the reason, what changed and what did not, the backup, the warning, the error, the command
+    assert HOSTILE.upper() in " ".join(Markup(checks["guard"]["live"]["holdingHostile"]).text)   # a label is shown in capitals, as text
+
+
+@ui_only
+def test_the_setup_status_line_says_hooks_the_tool_and_the_claude_code_version(checks: dict[str, Any]) -> None:
+    setup = checks["guard"]["setup"]
+    assert kv(setup["missing"]) == [("HOOKS", "NOT INSTALLED"), ("MCP TOOL", "NOT REGISTERED"), ("CLAUDE CODE", "2.1.160")]
+    assert kv(setup["installed"]) == [("HOOKS", "INSTALLED"), ("MCP TOOL", "REGISTERED"), ("CLAUDE CODE", "2.1.160")]
+    assert kv(setup["partial"]) == [("HOOKS", "PARTLY INSTALLED (2 OF 3)"), ("MCP TOOL", "A DIFFERENT PROGRAM"), ("CLAUDE CODE", "2.1.160")]
+    assert kv(setup["tooOld"])[2] == ("CLAUDE CODE", "2.1.94 · NEEDS 2.1.139 OR NEWER") and "older than 2.1.139" in setup["tooOld"]
+    assert kv(setup["versionUnknown"])[2] == ("CLAUDE CODE", "VERSION UNKNOWN") and kv(setup["noClaude"])[2] == ("CLAUDE CODE", "NOT FOUND")
+    assert kv(setup["fromSource"])[:2] == [("HOOKS", "UNKNOWN"), ("MCP TOOL", "UNKNOWN")]
+    assert "The Claude Code settings file is not valid JSON" in setup["unreadable"]       # what setup would refuse, said before the click
+
+
+def buttons(html: str) -> dict[str, bool]:
+    """Install and Remove: whether each is disabled."""
+    return {name: bool(re.search(rf'data-action="guard-{name}"[^>]* disabled', html)) for name in ("install", "remove")}
+
+
+@ui_only
+def test_install_and_remove_are_there_when_setup_can_run_and_the_cost_is_always_said(checks: dict[str, Any]) -> None:
+    setup = checks["guard"]["setup"]
+    for name in ("missing", "installed", "partial", "tooOld", "versionUnknown", "unreadable"):
+        assert buttons(setup[name]) == {"install": False, "remove": False}, name
+    for name in ("pending", "noClaude", "fromSource", "installing", "removing"):               # no answer yet, no setup here, or one click on its way
+        assert buttons(setup[name]) == {"install": True, "remove": True}, name
+    for name, html in setup.items():
+        assert f'<p class="nm-lede">{GUARD_COST}</p>' in html, name                              # what it costs is said whatever the state
+        install = "Installing…" if name == "installing" else "Install"                          # the label of a click on its way says so
+        remove = "Removing…" if name == "removing" else "Remove"
+        assert re.findall(r'data-action="guard-(?:install|remove)"[^>]*>([^<]*)</button>', html) == [install, remove], name
+
+
+@ui_only
+def test_when_setup_cannot_run_it_says_why_and_points_at_the_manual_setup(checks: dict[str, Any]) -> None:
+    setup = checks["guard"]["setup"]
+    for name, reason in (("fromSource", "One-click setup works in the installed app. This copy runs from source."),
+                         ("noClaude", "Claude Code was not found on this PC")):
+        page = Markup(setup[name])
+        assert "Setup is not available here." in page.text and any(reason in text for text in page.text), name
+        link = [attrs for attrs in page.find("a")][0]
+        assert link["href"].endswith("/docs/AGENT_HOOK.md") and link["data-external"] == "1", name
+        assert "docs/AGENT_HOOK.md" in page.text, name
+        assert buttons(setup[name]) == {"install": True, "remove": True}
+    assert "Setup is not available" not in setup["missing"]
+
+
+@ui_only
+def test_a_click_shows_what_changed_the_backup_the_warnings_and_the_errors_each_in_its_place(checks: dict[str, Any]) -> None:
+    setup = checks["guard"]["setup"]
+    done = setup["installed_ok"]
+    assert '<div class="nm-callout" role="status"><b>Installed.</b> Added the SessionStart hook. Registered the claude-usage MCP tool.<br>' in done
+    assert 'Backup: <span class="nm-path">C:\\Users\\t\\.claude\\settings.json.cum-backup-20261028-180509</span>' in done
+    assert '<div class="nm-callout is-warn" role="note">The VS Code extension has its own Claude Code version; it also needs 2.1.139 or newer.</div>' in done
+    assert "<b>Removed.</b> Removed the PostToolUse hook." in setup["removed_ok"]
+    assert "<b>Nothing to change.</b> The three hooks were already in place." in setup["nothing"]
+    refused = setup["refused"]
+    assert '<p class="nm-error" role="alert">Claude Code 2.1.94 is older than 2.1.139' in refused and "nm-callout" not in refused   # no empty box above it
+    by_hand = setup["byHand"]
+    assert "To do it by hand, run: <span class=\"nm-path\">claude mcp add --transport stdio --scope user claude-usage" in by_hand
+    assert "<b>Installed.</b> Added the SessionStart hook." in by_hand and '<div class="nm-callout is-warn" role="note">The MCP tool was not registered.' in by_hand
+
+
+@ui_only
+def test_each_block_is_rewritten_only_when_it_changed(checks: dict[str, Any]) -> None:
+    sync = checks["guard"]["sync"]
+    assert sync["first"] == 2 and sync["unchanged"] == 2 and sync["afterOneChange"] == 3 and sync["liveHasButtonDisabled"] is True
+
+
+@ui_only
+def test_the_card_asks_for_the_guard_once_the_page_is_up_and_visible_and_it_is_time(checks: dict[str, Any]) -> None:
+    polling = checks["guard"]["polling"]
+    assert polling["due"] == ["GET /api/guard"]
+    for name in ("notYet", "inFlight", "elsewhere", "hidden", "pageNotBuilt"):
+        assert polling[name] == [], name
+
+
+@ui_only
+def test_resume_now_posts_once_says_so_and_asks_for_the_new_state(checks: dict[str, Any]) -> None:
+    actions = checks["guard"]["actions"]
+    assert actions["resume"]["calls"] == ["POST /api/guard/resume", "GET /api/guard"] and actions["resume"]["learned"] is True
+    assert actions["resume"]["status"] == {"text": "RESUME REQUESTED", "error": False} and actions["resume"]["busy"] is False
+    assert actions["resumeTwice"] == []                                                  # a click while one is on its way is ignored
+    for name, text in (("resumeRefused", "RESUME FAILED: COULD NOT RECORD THE RESUME REQUEST"),
+                       ("resumeLost", "RESUME FAILED: THE DASHBOARD LOST ITS LINK")):
+        assert actions[name]["status"] == {"text": text, "error": True} and actions[name]["busy"] is False, name
+        assert re.search(r"[A-Z]", text) and not re.search(r"[a-z]", text)               # capitals all the way: Gates writes it in sentence case
+
+
+@ui_only
+def test_install_and_remove_post_their_action_show_the_result_and_look_again(checks: dict[str, Any]) -> None:
+    actions = checks["guard"]["actions"]
+    assert actions["install"]["calls"] == ['POST /api/guard/setup {"action":"install"}', "GET /api/guard"]
+    assert actions["whileRunning"]["busy"] == "install" and "Installing…" not in actions["install"]["shown"]
+    assert actions["install"]["busy"] == "" and actions["install"]["result"]["changed"] == ["Added the SessionStart hook."]
+    assert "<b>Installed.</b> Added the SessionStart hook." in actions["install"]["shown"]                  # the block shows what it said
+    assert actions["remove"]["calls"] == ['POST /api/guard/setup {"action":"remove"}', "GET /api/guard"]
+    assert actions["remove"]["result"]["action"] == "remove"
+    assert actions["refusedByTheMonitor"]["result"]["errors"] == ["not valid JSON"]
+    assert actions["serverError"]["result"] == {"ok": False, "action": "install", "changed": [], "unchanged": [], "backup": None,
+                                                "warnings": [], "errors": ["The monitor could not run setup (setup install failed)."],
+                                                "manual": None}
+    assert actions["setupLost"]["result"]["errors"] == ["The dashboard lost its link to the monitor."] and actions["setupLost"]["busy"] == ""
+    assert actions["setupLost"]["calls"] == ['POST /api/guard/setup {"action":"remove"}']
+    assert actions["setupTwice"] == []                                                   # one at a time
+
+
+@ui_only
+@pytest.mark.parametrize(("label", "key", "posted"), [
+    ("capBlank", "guard_session_cap", None), ("capSpaces", "guard_weekly_cap", None), ("cap1", "guard_session_cap", 1),
+    ("cap95", "guard_session_cap", 95), ("cap100", "guard_scoped_cap", 100), ("stagger0", "guard_resume_stagger_s", 0),
+    ("stagger120", "guard_resume_stagger_s", 120), ("stagger600", "guard_resume_stagger_s", 600),
+])
+def test_a_field_the_server_would_take_is_posted_as_a_whole_number_or_null(checks: dict[str, Any], label: str, key: str,
+                                                                          posted: int | None) -> None:
+    result = checks["guard"]["actions"]["fields"][label]
+    assert result["wrote"] == [{key: posted}] and result["error"] == "" and result["shown"] is False
+    assert result["status"].startswith("SAVED ") and server.SETTING_SPECS[key].check(posted)
+
+
+@ui_only
+@pytest.mark.parametrize(("label", "key", "value", "line"), [
+    ("cap0", "guard_session_cap", "0", "Enter a whole number from 1 to 100"), ("cap101", "guard_weekly_cap", "101", "Enter a whole number from 1 to 100"),
+    ("capDecimal", "guard_session_cap", "9.5", "Enter a whole number from 1 to 100"), ("capNegative", "guard_scoped_cap", "-5", "Enter a whole number from 1 to 100"),
+    ("capText", "guard_session_cap", "abc", "Enter a whole number from 1 to 100"), ("capExp", "guard_session_cap", "1e2", "Enter a whole number from 1 to 100"),
+    ("capLong", "guard_session_cap", "0095", "Enter a whole number from 1 to 100"),
+    ("stagger601", "guard_resume_stagger_s", "601", "Enter a whole number of seconds from 0 to 600"),
+    ("staggerBlank", "guard_resume_stagger_s", "", "Enter a whole number of seconds from 0 to 600"),
+    ("staggerNegative", "guard_resume_stagger_s", "-1", "Enter a whole number of seconds from 0 to 600"),
+    ("staggerDecimal", "guard_resume_stagger_s", "1.5", "Enter a whole number of seconds from 0 to 600"),
+])
+def test_a_field_the_server_would_refuse_is_refused_in_the_page_under_the_field(checks: dict[str, Any], label: str, key: str,
+                                                                               value: str, line: str) -> None:
+    result = checks["guard"]["actions"]["fields"][label]
+    assert result["wrote"] == [] and result["lines"] == 0 and result["shown"] is True and result["error"].startswith(line)
+
+
+@ui_only
+def test_a_guard_setting_asks_the_guard_for_its_new_status_and_no_other_setting_does(checks: dict[str, Any]) -> None:
+    actions = checks["guard"]["actions"]
+    assert actions["toggle"]["calls"] == ['POST /api/settings {"guard_enabled":true}', "GET /api/state", "GET /api/guard"]
+    assert actions["toggle"]["status"] == "SAVED USAGE GUARD"
+    assert actions["otherSettingDoesNotAskTheGuard"] == []
 
 
 # ── Top sessions ──────────────────────────────────────────────────────────────────

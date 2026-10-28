@@ -38,6 +38,9 @@ from pathlib import Path
 from typing import Any
 
 from usage_monitor import paths
+from usage_monitor.agent import guard as agent_guard
+from usage_monitor.agent import sessions as agent_sessions
+from usage_monitor.agent import setup as agent_setup
 from usage_monitor.data import analytics
 from usage_monitor.data.models import MonitorState, PlanInfo, UsageSnapshot
 from usage_monitor.data.pricing import Pricing
@@ -71,6 +74,8 @@ SUPPORTERS_RETRY_S = 300.0      # a failed fetch is retried after 5 min, not aft
 MAX_SUPPORTERS_BYTES = 512 * 1024
 THEME_ORDER = ("nostromo", "night_city", "gates")
 UPDATE_OPERATIONS = ("check", "apply", "skip")
+GUARD_SETUP_ACTIONS = ("install", "remove")
+SETUP_STATUS_TTL_S = 60.0       # the setup status runs `claude` twice, so /api/guard keeps it this long (a click clears it)
 
 _MISSING = object()
 _SECURITY_HEADERS = {
@@ -211,6 +216,12 @@ SETTING_SPECS: dict[str, _Spec] = {
     "alert_on_credits": _Spec(_is_bool, True),
     "alert_quiet_hours": _Spec(_nullable(_is_quiet_hours), None),
     "dashboard_bounds": _Spec(_nullable(_is_bounds), None),
+    # The usage guard (#27). A cap of null leaves that limit unwatched; the rules are Settings' own.
+    "guard_enabled": _Spec(_is_bool, False),
+    "guard_session_cap": _Spec(_nullable(_is_percent), 95),
+    "guard_weekly_cap": _Spec(_nullable(_is_percent), 90),
+    "guard_scoped_cap": _Spec(_nullable(_is_percent), None),
+    "guard_resume_stagger_s": _Spec(_is_int(0, 600), 120),
 }
 
 
@@ -427,6 +438,37 @@ class _Supporters:
                 ttl = SUPPORTERS_RETRY_S
             self._entry = (now + ttl, payload)
             return dict(payload, cached=False)
+
+
+class _TimedValue:
+    """One value that is slow to compute, kept for ``ttl`` seconds and computed by one caller at a time (the others
+    wait for that answer). ``clear()`` drops it, and an answer that was still being computed then is not kept."""
+
+    def __init__(self, compute: Callable[[], Any], ttl: float, clock: Callable[[], float]) -> None:
+        self._compute = compute
+        self._ttl = ttl
+        self._clock = clock
+        self._compute_lock = threading.Lock()
+        self._state_lock = threading.Lock()
+        self._entry: tuple[float, Any] | None = None
+        self._generation = 0
+
+    def get(self) -> Any:
+        with self._compute_lock:
+            with self._state_lock:
+                if self._entry is not None and self._clock() < self._entry[0]:
+                    return self._entry[1]
+                generation = self._generation
+            value = self._compute()
+            with self._state_lock:
+                if generation == self._generation:
+                    self._entry = (self._clock() + self._ttl, value)
+            return value
+
+    def clear(self) -> None:
+        with self._state_lock:
+            self._generation += 1
+            self._entry = None
 
 
 # ── Statistics: query parameters, report inputs and the cached reader ────────────────
@@ -740,6 +782,11 @@ class ApiServer:
     open it). ``update_cb`` maps ``info`` (the newest release the update check found, as a dict, or None), ``check``,
     ``apply`` and ``skip`` to callables. The last three answer POST /api/update/<name> (a missing one is a 501);
     ``info`` feeds the ``update`` block of /api/state (see ``_update_view``).
+
+    The usage guard (#27) reads and writes the session files in ``guard_dir`` (default: the app data folder; agent/
+    sessions.py owns them) and sets up Claude Code through ``setup_cb``, a mapping of ``status``, ``install`` and
+    ``remove`` to callables (default: agent/setup.py, except in a dev instance, which never edits the user's Claude
+    Code settings and answers that setup is off). GET /api/guard keeps the setup status for SETUP_STATUS_TTL_S.
     """
 
     def __init__(
@@ -761,6 +808,8 @@ class ApiServer:
         analytics_store: Callable[[], Store] | None = None,
         pricing_provider: Callable[[], Pricing | None] | None = None,
         wall_clock: Callable[[], datetime] | None = None,
+        guard_dir: Path | None = None,
+        setup_cb: Mapping[str, Callable[[], Any]] | None = None,
     ) -> None:
         self._state_provider = state_provider
         self._settings = settings
@@ -781,6 +830,9 @@ class ApiServer:
         self._pricing_provider = pricing_provider
         self._fallback_pricing: Pricing | None = None
         self._reader = _Reader(analytics_store, self._current_pricing, monotonic)
+        self._guard_dir = guard_dir
+        self._setup_cb = dict(setup_cb) if setup_cb is not None else self._default_setup_cb()
+        self._setup_status = _TimedValue(self._setup_status_now, SETUP_STATUS_TTL_S, monotonic)
         self._lock = threading.Lock()
         self._httpd: _Httpd | None = None
         self._thread: threading.Thread | None = None
@@ -922,8 +974,11 @@ class ApiServer:
             "/api/state": ("GET", self._get_state),
             "/api/themes": ("GET", self._get_themes),
             "/api/supporters": ("GET", self._get_supporters),
+            "/api/guard": ("GET", self._get_guard),
             "/api/settings": ("POST", self._post_settings),
             "/api/refresh": ("POST", self._post_refresh),
+            "/api/guard/resume": ("POST", self._post_guard_resume),
+            "/api/guard/setup": ("POST", self._post_guard_setup),
             "/api/dashboard/closed": ("POST", self._post_dashboard_closed),
         }
         route = routes.get(path)
@@ -1022,6 +1077,19 @@ class ApiServer:
 
     def _get_supporters(self, req: _Handler) -> None:
         self._send_json(req, 200, self._supporters.get())
+
+    def _get_guard(self, req: _Handler) -> None:
+        """The usage guard as the Settings card shows it: the guard block of the state (``{}`` before the first
+        cycle), the sessions told of this holding episode, the sessions waiting, and the setup status."""
+        state = self._state_provider()
+        guard = to_jsonable(state.guard) if state is not None and state.guard else {}
+        folder = self._guard_folder()
+        self._send_json(req, 200, {
+            "guard": guard,
+            "told": agent_sessions.told(folder, agent_guard.episode(guard)),
+            "waiting": agent_sessions.waiting(folder),
+            "setup": self._setup_status.get(),
+        })
 
     def _get_analytics(self, req: _Handler, name: str, query: str) -> None:
         """One statistics report as JSON (shapes: docs/ARCHITECTURE.md, "Phase 2 - stats")."""
@@ -1163,6 +1231,36 @@ class ApiServer:
             raise _HttpError(500, f"update {operation} failed") from None
         self._send_json(req, 200, {"ok": True, "result": to_jsonable(result)})
 
+    def _post_guard_resume(self, req: _Handler) -> None:
+        """"Resume now": every waiting ``--wait`` ends at once, whatever the limits say (agent/sessions.py)."""
+        self._read_body(req)  # no body is expected; drain whatever was sent
+        try:
+            agent_sessions.resume_now(self._guard_folder())
+        except OSError:
+            log.exception("could not record the resume request")
+            raise _HttpError(500, "could not record the resume request") from None
+        self._send_json(req, 200, {"ok": True})
+
+    def _post_guard_setup(self, req: _Handler) -> None:
+        """``{"action": "install" | "remove"}``: set Claude Code up for the guard, or take it out again. The answer is
+        the result of agent/setup.py as it is: ``ok`` false with ``errors`` is a refusal in plain words, not an HTTP
+        error, so the page can show it beside the buttons."""
+        body = self._json_body(req)
+        action = body.get("action") if isinstance(body, dict) else None
+        if action not in GUARD_SETUP_ACTIONS:
+            raise _HttpError(400, 'action must be "install" or "remove"')
+        callback = self._setup_cb.get(action)
+        if callback is None:
+            raise _HttpError(501, f"setup {action} is not available")
+        try:
+            result = callback()
+        except Exception:
+            log.exception("guard setup %s failed", action)
+            raise _HttpError(500, f"setup {action} failed") from None
+        finally:
+            self._setup_status.clear()     # the next /api/guard looks again
+        self._send_json(req, 200, to_jsonable(result))
+
     # ── Body handling ──
 
     def _read_body(self, req: _Handler) -> bytes:
@@ -1207,6 +1305,31 @@ class ApiServer:
         except OSError as exc:
             log.warning("could not change the startup entry: %s", exc)
             raise _HttpError(500, "could not change the startup entry") from None
+
+    def _guard_folder(self) -> Path:
+        """Where the guard's session files live: the folder given to the constructor, else the app data folder."""
+        return self._guard_dir if self._guard_dir is not None else paths.app_data_dir()
+
+    def _default_setup_cb(self) -> dict[str, Callable[[], Any]]:
+        """The real setup, except in a dev instance: a test build never edits the user's Claude Code settings or
+        registers itself with Claude Code, as it never touches the Run entry either (see __init__)."""
+        if self._dev:
+            reason = ("This is a dev instance, so one-click setup is off: a test build never edits your "
+                      "Claude Code settings.")
+            return {"status": lambda: agent_setup.unavailable_status(reason),
+                    "install": lambda: agent_setup.refused("install", reason),
+                    "remove": lambda: agent_setup.refused("remove", reason)}
+        return {"status": agent_setup.status, "install": agent_setup.install, "remove": agent_setup.remove}
+
+    def _setup_status_now(self) -> Any:
+        getter = self._setup_cb.get("status")
+        if getter is None:
+            return agent_setup.unavailable_status("Setup is not available here.")
+        try:
+            return to_jsonable(getter())
+        except Exception:  # a status that fails must not break the page that asks for it
+            log.exception("guard setup status unavailable")
+            return agent_setup.unavailable_status("The setup status could not be read right now.")
 
     def _current(self, key: str) -> Any:
         if key == "launch_on_startup":
