@@ -4,6 +4,10 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Fixed
+- The taskbar strip stays in sight while Start, Search or a tray flyout is open, and while you peek at a window from its taskbar preview. It is now part of the taskbar itself, not a window floating over it ([#29](https://github.com/Godimas101/claude-usage-monitor/issues/29)).
+- The floating widget also stays in sight while you peek at a window from its taskbar preview ([#29](https://github.com/Godimas101/claude-usage-monitor/issues/29)).
+
 - Docs: MCP setup command fails in PowerShell (bare -- swallowed) and leaves a <you> placeholder ([#30](https://github.com/Godimas101/claude-usage-monitor/issues/30)) — closed 2026-10-26 by @Godimas101
 
 

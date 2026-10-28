@@ -70,10 +70,16 @@ usage_monitor/
   `WM_NCHITTEST` → `HTCAPTION` for native drag; `WM_EXITSIZEMOVE` saves `position` (clamped to a
   visible monitor work area); `WM_NCLBUTTONDBLCLK` → dashboard; `WM_NCRBUTTONUP` → menu.
   Hidden while a fullscreen app runs, when `hide_floating_in_fullscreen` is on (default off).
+  Excluded from Aero Peek (`DWMWA_EXCLUDED_FROM_PEEK`), like every top-level layered window, so
+  peeking at a window from its taskbar preview leaves it shown.
 - **Taskbar strip:** sized to the taskbar height, placed left of `TrayNotifyWnd` (bottom
   taskbar), re-placed on `WM_DISPLAYCHANGE`, `WM_SETTINGCHANGE` (work area), `TaskbarCreated`
-  and a 3 s fallback timer. Topmost re-asserted every 500 ms while visible (the shell re-raises
-  the taskbar). Hidden while a fullscreen app runs. Click → dashboard; right click → menu.
+  and a 3 s fallback timer. A layered **child** of `Shell_TrayWnd` (#29): while Start, Search or a
+  tray flyout is open, Windows 11 lifts the taskbar above every always-on-top window until the
+  shell lets it down, and only the taskbar's own children go with it. Layered, because the
+  taskbar's XAML content covers a plain GDI child. Raised over its siblings every 500 ms. A new
+  taskbar (Explorer restarted), or a strip window that died with the old one, gets a new window at
+  the next re-place. Hidden while a fullscreen app runs. Click → dashboard; right click → menu.
 - **Tooltip:** hover over either widget for ~400 ms shows a themed layered tooltip with exact
   percentages, reset times and pace; hides on `WM_MOUSELEAVE`.
 - **Content insets.** A frame may carry a transparent margin round the card the user sees (Gates draws its soft
@@ -224,11 +230,11 @@ class UIHost:                                   # host.py
     def set_timer(self, ms: int, fn, *, repeat=True) -> int; def kill_timer(self, timer_id)
     def on_session_change(self, cb) / on_settings_change(cb) / on_display_change(cb) / on_taskbar_created(cb)
 class LayeredWindow:                            # layered.py
-    def __init__(self, host, *, draggable: bool, topmost=True): ...
+    def __init__(self, host, *, draggable: bool, topmost=True, parent=None): ...   # parent: a layered child
     def update(self, image, x: int, y: int) -> None    # premultiplied BGRA via UpdateLayeredWindow
     def move(self, x, y); show(); hide(); destroy(); bring_to_top(); set_click_through(on)
     on_click / on_double_click / on_right_click(x, y) / on_drag_end(x, y) / on_hover(bool): callbacks
-    hwnd; dpi; rect; visible
+    hwnd; dpi; rect; visible; parent; alive        # x, y are always screen coordinates
 platform.py: taskbar_info(), work_areas(), dpi_for_point(x, y), is_fullscreen_foreground(),
              is_locked(), screensaver_running(), windows_accent_hex(), apps_use_light_theme(),
              clamp_to_work_area(x, y, w, h)

@@ -201,8 +201,11 @@ class FakeHost:
 class FakeWindow:
     """A layered window that only remembers what it was asked to do."""
 
-    def __init__(self, host: Any = None, *, draggable: bool, topmost: bool = True) -> None:
+    def __init__(self, host: Any = None, *, draggable: bool, topmost: bool = True,
+                 parent: int | None = None) -> None:
         self.draggable = draggable
+        self.parent = parent
+        self.alive = True
         self.visible = False
         self.dpi = 96
         self.dragging = False
@@ -256,8 +259,8 @@ class WindowFactory:
     def __init__(self) -> None:
         self.windows: list[FakeWindow] = []
 
-    def __call__(self, host: Any, *, draggable: bool, topmost: bool = True) -> FakeWindow:
-        window = FakeWindow(host, draggable=draggable, topmost=topmost)
+    def __call__(self, host: Any, *, draggable: bool, topmost: bool = True, parent: int | None = None) -> FakeWindow:
+        window = FakeWindow(host, draggable=draggable, topmost=topmost, parent=parent)
         self.windows.append(window)
         return window
 
@@ -859,6 +862,46 @@ def test_the_strip_never_starts_left_of_the_taskbar():
 def test_the_strip_has_no_place_on_a_vertical_or_auto_hiding_taskbar(info):
     assert strip_supported(info) is False
     assert strip_origin(info, 264, 48) is None
+
+
+def test_the_strip_is_a_child_of_the_taskbar_it_sits_on():
+    # While Start, Search or a tray flyout is open, Windows 11 lifts the taskbar above every
+    # always-on-top window; only its own children stay in sight (#29).
+    rig = Rig("taskbar")
+    rig.widget.render(rig.ctx())
+    assert rig.window.parent == rig.plat.info.hwnd and len(rig.windows.windows) == 1
+    assert rig.window.visible
+
+
+def test_a_new_taskbar_gives_the_strip_a_new_window():
+    rig = Rig("taskbar")                                               # Explorer restarted: a new taskbar
+    rig.widget.render(rig.ctx())
+    rig.plat.info = TaskbarInfo(**{**rig.plat.info.__dict__, "hwnd": 2})
+    rig.widget.render(rig.ctx())
+    new = rig.windows.windows[-1]
+    assert rig.window.destroyed and new is not rig.window and new.parent == 2
+    assert new.visible and new.updates and new.on_click is not None and new.on_hover is not None
+
+
+def test_a_strip_window_that_died_with_its_taskbar_is_made_again_by_the_re_place():
+    rig = Rig("taskbar")
+    rig.widget.render(rig.ctx())
+    rig.window.alive = False
+    for _ in range(6):                                                 # six 500 ms keep ticks: the 3 s re-place
+        rig.host.fire(next(iter(rig.host.timers)))
+    new = rig.windows.windows[-1]
+    assert new is not rig.window and new.parent == rig.plat.info.hwnd and new.visible
+
+
+def test_a_strip_made_before_the_taskbar_existed_moves_onto_it():
+    host, plat, windows = FakeHost(), FakePlatform(), WindowFactory()
+    plat.info = None
+    widget = TaskbarWidget(host, on_open=lambda: None, on_menu=lambda x, y: None, platform=plat, window_factory=windows)
+    assert windows.windows[0].parent is None
+    plat.info = taskbar(96)
+    widget.render(context())
+    assert windows.windows[0].destroyed and windows.windows[-1].parent == plat.info.hwnd
+    assert windows.windows[-1].visible
 
 
 def test_a_top_taskbar_is_supported():

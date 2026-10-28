@@ -15,6 +15,14 @@ Two input modes, chosen by ``draggable``:
 
 Pixels whose alpha is 0 let the mouse through to whatever lies behind, as for any layered window.
 
+With ``parent`` (the taskbar strip, #29) the window is instead a layered child of that window:
+WS_CHILD | WS_CLIPSIBLINGS with WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_NOPARENTNOTIFY. Windows 11
+lifts the taskbar above every always-on-top window while Start, Search or a tray flyout is open, and
+a child is composed with it, so it stays in sight. Callers keep using screen coordinates; the window
+converts them to the parent's, which is what UpdateLayeredWindow and SetWindowPos take for a child.
+NOPARENTNOTIFY keeps creating and destroying it from waiting on the parent's process. A top-level
+window is excluded from Aero Peek, so peeking at a window from its taskbar thumbnail leaves it shown.
+
 Callbacks are plain attributes and are called with as many arguments as they accept:
 
     on_click(x, y)            left click, screen coordinates (not draggable windows only)
@@ -52,6 +60,14 @@ LAYERED_CLASS = "ClaudeUsageMonitor.Layered"
 HOVER_DWELL_MS = 400
 
 
+def _exclude_from_peek(hwnd: int) -> None:
+    """Keep the window shown while Aero Peek previews another window. Best effort."""
+    on = wintypes.BOOL(True)
+    result = win32.DwmSetWindowAttribute(hwnd, win32.DWMWA_EXCLUDED_FROM_PEEK, ctypes.byref(on), ctypes.sizeof(on))
+    if result != 0:
+        log.debug("could not exclude window %s from Peek (HRESULT %#x)", hwnd, result & 0xFFFFFFFF)
+
+
 def premultiplied_bgra(image: Image.Image) -> bytes:
     """The pixels of ``image`` as premultiplied BGRA, the format UpdateLayeredWindow expects."""
     if image.mode == "RGBa":  # already premultiplied; converting would round twice
@@ -63,10 +79,12 @@ def premultiplied_bgra(image: Image.Image) -> bytes:
 class LayeredWindow:
     """A layered popup window showing a Pillow image at a screen position."""
 
-    def __init__(self, host: UIHost, *, draggable: bool, topmost: bool = True) -> None:
+    def __init__(self, host: UIHost, *, draggable: bool, topmost: bool = True,
+                 parent: int | None = None) -> None:
         self._host = host
         self._draggable = draggable
-        self._topmost = topmost
+        self._parent = int(parent or 0)
+        self._topmost = topmost and not self._parent
         self._dc: int | None = None
         self._stock_bitmap: int | None = None
         self._bitmap: int | None = None
@@ -92,10 +110,16 @@ class LayeredWindow:
         self.on_dpi_changed: Callable[..., Any] | None = None
 
         register_window_class(LAYERED_CLASS, style=win32.CS_DBLCLKS)
-        ex_style = win32.WS_EX_LAYERED | win32.WS_EX_TOOLWINDOW | win32.WS_EX_NOACTIVATE
-        if topmost:
-            ex_style |= win32.WS_EX_TOPMOST
-        self._hwnd = create_window(LAYERED_CLASS, ex_style, self)
+        if self._parent:
+            ex_style = win32.WS_EX_LAYERED | win32.WS_EX_NOACTIVATE | win32.WS_EX_NOPARENTNOTIFY
+            self._hwnd = create_window(LAYERED_CLASS, ex_style, self, parent=self._parent,
+                                       style=win32.WS_CHILD | win32.WS_CLIPSIBLINGS)
+        else:
+            ex_style = win32.WS_EX_LAYERED | win32.WS_EX_TOOLWINDOW | win32.WS_EX_NOACTIVATE
+            if self._topmost:
+                ex_style |= win32.WS_EX_TOPMOST
+            self._hwnd = create_window(LAYERED_CLASS, ex_style, self)
+            _exclude_from_peek(self._hwnd)
         self._remove_cleanup = host.add_cleanup(self.destroy)
 
     # ── State ──
@@ -107,6 +131,16 @@ class LayeredWindow:
     @property
     def draggable(self) -> bool:
         return self._draggable
+
+    @property
+    def parent(self) -> int | None:
+        """The window this one is a child of, or None for a top-level window."""
+        return self._parent or None
+
+    @property
+    def alive(self) -> bool:
+        """False once the window is gone, as a child is when its parent is destroyed (Explorer restarting)."""
+        return bool(self._hwnd and win32.IsWindow(self._hwnd))
 
     @property
     def dragging(self) -> bool:
@@ -192,6 +226,7 @@ class LayeredWindow:
 
     def _move(self, x: int, y: int) -> None:
         if self._hwnd:
+            x, y = self._from_screen(x, y)
             flags = win32.SWP_NOSIZE | win32.SWP_NOZORDER | win32.SWP_NOACTIVATE
             if not win32.SetWindowPos(self._hwnd, None, x, y, 0, 0, flags):
                 log.debug("move failed: %s", win32.error_text())
@@ -265,8 +300,16 @@ class LayeredWindow:
         self._dc = self._stock_bitmap = self._bitmap = None
         self._bits, self._size = 0, None
 
+    def _from_screen(self, x: int, y: int) -> tuple[int, int]:
+        """A screen point in the coordinates this window is placed in: the parent's for a child."""
+        if not self._parent:
+            return x, y
+        point = wintypes.POINT(x, y)
+        win32.ScreenToClient(self._parent, ctypes.byref(point))
+        return point.x, point.y
+
     def _present(self, x: int, y: int, width: int, height: int) -> bool:
-        position = wintypes.POINT(x, y)
+        position = wintypes.POINT(*self._from_screen(x, y))
         size = wintypes.SIZE(width, height)
         origin = wintypes.POINT(0, 0)
         ctypes.set_last_error(0)
