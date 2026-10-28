@@ -1452,32 +1452,43 @@ def test_the_tray_tooltip_rounds_like_the_widget_and_fits_the_shell_limit():
 def test_the_menu_lists_the_actions_in_order_and_marks_the_toggles():
     calls: list[str] = []
     items = menu_items(
-        floating_on=True, taskbar_on=False, update_version=None,
+        floating_on=True, taskbar_on=False, guard_on=True, waiting=0, update_version=None,
         open_dashboard=lambda: calls.append("open"), toggle_floating=lambda: calls.append("floating"),
-        toggle_taskbar=lambda: calls.append("taskbar"), refresh=lambda: calls.append("refresh"),
+        toggle_taskbar=lambda: calls.append("taskbar"), toggle_guard=lambda: calls.append("guard"),
+        resume_waiting=lambda: calls.append("resume"), refresh=lambda: calls.append("refresh"),
         report_bug=lambda: calls.append("bug"), update=lambda: calls.append("update"),
         quit_app=lambda: calls.append("quit"),
     )
     labelled = [(i.label, i.checked) for i in items if not i.separator]
     assert labelled == [("Open dashboard", False), ("Floating widget", True), ("Taskbar widget", False),
-                        ("Refresh now", False), ("Report a bug", False), ("Exit", False)]
+                        ("Usage guard", True), ("Refresh now", False), ("Report a bug", False), ("Exit", False)]
     assert items[0].label == "Open dashboard" and items[-1].label == "Exit"
     assert items[1].separator and items[-2].separator
     assert not any(a.separator and b.separator for a, b in zip(items, items[1:]))
     for item in items:
         if item.action:
             item.action()
-    assert calls == ["open", "floating", "taskbar", "refresh", "bug", "quit"]
+    assert calls == ["open", "floating", "taskbar", "guard", "refresh", "bug", "quit"]
+
+
+MENU_KWARGS = dict(floating_on=True, taskbar_on=True, guard_on=False, open_dashboard=lambda: None,
+                   toggle_floating=lambda: None, toggle_taskbar=lambda: None, toggle_guard=lambda: None,
+                   resume_waiting=lambda: None, refresh=lambda: None, report_bug=lambda: None,
+                   update=lambda: None, quit_app=lambda: None)
 
 
 def test_the_menu_offers_the_update_only_when_there_is_one():
-    kwargs = dict(floating_on=True, taskbar_on=True, open_dashboard=lambda: None, toggle_floating=lambda: None,
-                  toggle_taskbar=lambda: None, refresh=lambda: None, report_bug=lambda: None,
-                  update=lambda: None, quit_app=lambda: None)
-    plain = [i.label for i in menu_items(update_version=None, **kwargs)]
-    offered = [i.label for i in menu_items(update_version="2.1.0", **kwargs)]
+    plain = [i.label for i in menu_items(update_version=None, waiting=0, **MENU_KWARGS)]
+    offered = [i.label for i in menu_items(update_version="2.1.0", waiting=0, **MENU_KWARGS)]
     assert "Update to v2.1.0" in offered and not any(label.startswith("Update") for label in plain)
     assert offered.index("Update to v2.1.0") == offered.index("Report a bug") + 1
+
+
+def test_the_menu_offers_to_resume_only_while_sessions_wait():
+    idle = [i.label for i in menu_items(update_version=None, waiting=0, **MENU_KWARGS)]
+    waiting = [i.label for i in menu_items(update_version=None, waiting=2, **MENU_KWARGS)]
+    assert not any(label.startswith("Resume") for label in idle)
+    assert waiting.index("Resume waiting sessions (2)") == waiting.index("Usage guard") + 1
 
 
 def test_links_stay_on_github():
@@ -2308,6 +2319,22 @@ def test_the_menu_reflects_and_flips_the_widget_toggles(wired):
     assert settings.get("show_floating") is False and app.floating is None
     items = {i.label: i for i in app.menu_items() if not i.separator}
     assert not items["Floating widget"].checked and items["Taskbar widget"].checked
+
+
+def test_the_menu_arms_the_guard_and_resumes_waiting_sessions(wired, isolated_env):
+    from usage_monitor.agent import sessions
+
+    app, settings = wired.app, wired.settings
+    items = {i.label: i for i in app.menu_items() if not i.separator}
+    assert not items["Usage guard"].checked and not any(label.startswith("Resume") for label in items)
+    items["Usage guard"].action()
+    assert settings.get("guard_enabled") is True
+    sessions.register_wait(isolated_env, "s1", NOW)          # this test process stands in for a waiting session
+    items = {i.label: i for i in app.menu_items() if not i.separator}
+    assert items["Usage guard"].checked
+    started = time.time() - 1
+    items["Resume waiting sessions (1)"].action()
+    assert sessions.resumed_since(isolated_env, started)
 
 
 def test_the_menu_actions_open_the_dashboard_refresh_report_and_exit(wired):

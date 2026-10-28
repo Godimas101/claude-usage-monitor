@@ -51,6 +51,7 @@ from typing import Any
 import update_check
 import version
 from usage_monitor import paths, themes
+from usage_monitor.agent import sessions as agent_sessions
 from usage_monitor.data.alerts import AlertEngine
 from usage_monitor.data.models import ApiStatus, MonitorState
 from usage_monitor.data.service import DataService
@@ -202,21 +203,32 @@ def menu_items(
     *,
     floating_on: bool,
     taskbar_on: bool,
+    guard_on: bool,
+    waiting: int,
     update_version: str | None,
     open_dashboard: Callable[[], None],
     toggle_floating: Callable[[], None],
     toggle_taskbar: Callable[[], None],
+    toggle_guard: Callable[[], None],
+    resume_waiting: Callable[[], None],
     refresh: Callable[[], None],
     report_bug: Callable[[], None],
     update: Callable[[], None],
     quit_app: Callable[[], None],
 ) -> list[MenuItem]:
-    """The tray and widget menu. "Update to vX" appears only while an update is on offer."""
+    """The tray and widget menu. "Resume waiting sessions" appears only while Claude sessions wait on the usage
+    guard (#27), and "Update to vX" only while an update is on offer."""
     items = [
         MenuItem("Open dashboard", open_dashboard),
         SEPARATOR,
         MenuItem("Floating widget", toggle_floating, checked=floating_on),
         MenuItem("Taskbar widget", toggle_taskbar, checked=taskbar_on),
+        SEPARATOR,
+        MenuItem("Usage guard", toggle_guard, checked=guard_on),
+    ]
+    if waiting:
+        items.append(MenuItem(f"Resume waiting sessions ({waiting})", resume_waiting))
+    items += [
         SEPARATOR,
         MenuItem("Refresh now", refresh),
         MenuItem("Report a bug", report_bug),
@@ -736,10 +748,14 @@ class MonitorApp:
         return menu_items(
             floating_on=bool(setting(self.settings, "show_floating")),
             taskbar_on=bool(setting(self.settings, "show_taskbar")),
+            guard_on=bool(setting(self.settings, "guard_enabled")),
+            waiting=len(self._waiting_sessions()),
             update_version=plain_version(offered.get("version")) if offered else None,
             open_dashboard=self.open_dashboard,
             toggle_floating=lambda: self._toggle("show_floating"),
             toggle_taskbar=lambda: self._toggle("show_taskbar"),
+            toggle_guard=lambda: self._toggle("guard_enabled"),
+            resume_waiting=self.resume_waiting,
             refresh=self.refresh_now,
             report_bug=lambda: self._open_url(bug_report_url()),
             update=self._apply_update,
@@ -749,6 +765,19 @@ class MonitorApp:
     def refresh_now(self) -> None:
         if self.service is not None:
             self.service.refresh_now()
+
+    def resume_waiting(self) -> None:
+        """Release every Claude session waiting on the usage guard (#27), whatever the limits say."""
+        try:
+            agent_sessions.resume_now(paths.app_data_dir())
+        except OSError:
+            log.warning("could not release the waiting sessions", exc_info=True)
+
+    def _waiting_sessions(self) -> list[dict]:
+        try:
+            return agent_sessions.waiting(paths.app_data_dir())
+        except OSError:
+            return []
 
     def call_on_ui(self, fn: Callable[[], Any], timeout: float = UI_CALL_TIMEOUT_S) -> Any:
         """Run ``fn`` on the UI thread and return its result (for other threads; never call it from
