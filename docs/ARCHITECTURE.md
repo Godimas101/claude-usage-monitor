@@ -40,7 +40,10 @@ v1.2 (Phase 1 exit) keeps the v1 Tk UI (`widget.py`, `options.py`, `tray.py`, `t
 2. **Tolerance.** The transcript format "is internal to Claude Code and changes between
    versions" (Claude Code docs). Parsers never raise on bad input: skip, count, log at debug.
    Every field is optional.
-3. **No model calls.** The monitor never runs `claude` and never sends a model request.
+3. **No model calls.** The monitor never sends a model request and never runs `claude -p`. The
+   only `claude` commands it runs are in `agent/setup.py`, the usage guard's one-click setup:
+   `claude --version` and `claude mcp get` (read-only) for the Settings card, and `claude mcp add`
+   / `claude mcp remove` when the user clicks Install or Remove.
 4. **No silent swallowing.** Catch broadly at thread boundaries only, and log what was caught
    via `usage_monitor.log.get_logger(__name__)`.
 5. **Time.** Store UTC epoch seconds (`REAL`). Convert to local time only for window
@@ -341,7 +344,10 @@ the readers in that time share it. A reader that must ask
 first takes a byte-range lock on `state.lock` (Windows frees it when its holder is killed), re-reads
 the file under it, and never writes a reading older than the one on disk. `--hook` never fetches
 except at `SessionStart`, and `--hook` and `--gate` exit 0 on every path. The guard only informs:
-nothing in it blocks a tool or stops a session. How to wire it into Claude Code: [`AGENT_HOOK.md`](AGENT_HOOK.md).
+nothing in it blocks a tool or stops a session. `setup.py` is its one-click setup, run by the
+Settings card through the local API: it backs up Claude Code's user settings and writes the three
+`--hook` entries, and registers the MCP tool with `claude mcp add`. It runs only in the installed
+app, never in a dev instance. How to wire it into Claude Code: [`AGENT_HOOK.md`](AGENT_HOOK.md).
 
 ## Phase 2 — stats (#11–#14)
 

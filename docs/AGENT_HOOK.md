@@ -100,7 +100,7 @@ place makes the hook fail with an error you can see, rather than run the wrong t
           {
             "type": "command",
             "command": "PASTE-THE-PATH-HERE",
-            "args": ["--hook", "--threshold", "80"],
+            "args": ["--hook"],
             "timeout": 10
           }
         ]
@@ -137,14 +137,14 @@ place makes the hook fail with an error you can see, rather than run the wrong t
 ```
 
 Use any of them on its own. If you already have a `"hooks"` block, add these events to it. The usage
-guard's **Install** button adds the first three for you (below).
+guard's **Install** button adds the first three for you (below), exactly as shown.
 
 **`--hook`** adds the summary line to Claude's context.
 - With `--always` (the SessionStart entry), it does so every time. SessionStart also runs after
   `/compact` and on resume, so the numbers come back after a compaction.
-- Without `--always`, it stays silent until a limit reaches `--threshold` (default 80). It then
-  speaks once, and again each time a limit climbs another 5 points. That is counted per session,
-  and a new window starts from nothing.
+- Without `--always`, it stays silent until a limit reaches `--threshold` (default 80; add
+  `"--threshold", "90"` to `args` for another level). It then speaks once, and again each time a
+  limit climbs another 5 points. That is counted per session, and a new window starts from nothing.
 - On PostToolUse (after every tool call) it adds nothing unless the usage guard holds or a limit
   passes the threshold. It starts the exe each time, which adds about a quarter of a second per tool
   call.
@@ -197,14 +197,31 @@ the week is still over its cap wakes nobody. After a window resets, the app fetc
   most every 15 minutes. With no reading at all, it keeps waiting.
 
 **What Install does:**
+- It checks Claude Code first: the `claude` command must be on the PATH, at 2.1.139 or newer. With an
+  older one it changes nothing and tells you to run `claude update`.
 - It backs up your Claude Code user settings (`%USERPROFILE%\.claude\settings.json`, or the folder in
   `CLAUDE_CONFIG_DIR`) to `settings.json.cum-backup-<date>-<time>` beside the file.
-- It adds the SessionStart, UserPromptSubmit and PostToolUse entries shown under [Hooks](#hooks), and
-  leaves your other hooks alone, including a `--gate` you added yourself.
-- It registers the `get_plan_usage` MCP tool.
+- It adds the SessionStart, UserPromptSubmit and PostToolUse entries shown under [Hooks](#hooks). An
+  entry of this app's already in one of those events, such as a `--hook` you added by hand for v2.1,
+  is replaced, and the backup keeps it. Your other hooks stay as they are, including a `--gate` you
+  added yourself.
+- It registers the `get_plan_usage` MCP tool with `claude mcp add`. A `claude-usage` tool that starts
+  another program is replaced. When `claude` is an npm install and the app's path has a character that
+  cmd.exe would misread, the card gives you the command to run yourself instead.
+- Running it again changes nothing. A settings file that is not valid JSON is left alone, and the card
+  says why.
 
-**Remove** takes out only what Install added. Install needs Claude Code 2.1.139 or newer. The VS Code
-extension has its own version, and needs it too.
+**Remove** takes out only what Install added: this app's entries in those three events (a `--gate`
+stays), and the MCP tool when it starts this app. It backs up the file first too.
+
+The VS Code extension has its own Claude Code version, and needs 2.1.139 or newer too. Setup works only
+in the installed app: a copy run from source, or a dev instance, never edits your Claude Code settings,
+so set those up by hand from this page.
+
+To show where setup stands, the card runs `claude --version` and `claude mcp get claude-usage` (which
+starts the tool for a moment to check that it connects). It does that when the card first opens in a
+dashboard window, then at most every 10 minutes, and again after each Install or Remove. Neither
+command sends a model request.
 
 The guard and `--gate` are separate. The gate refuses new agents and workflows past the caps in its
 own arguments. The guard refuses nothing.

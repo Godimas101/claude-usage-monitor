@@ -4,11 +4,23 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Added
+- **The usage guard.** Set a cap for the session, weekly or Fable limit in Settings → Usage guard, or switch the guard on from the tray menu. When usage reaches a cap, each Claude Code session that is working is told after its next tool call: which limit is over, that nothing is blocked, to wrap up at a safe point, and when work can resume. Idle sessions are left alone, and the guard never stops anything ([#27](https://github.com/Godimas101/claude-usage-monitor/issues/27)).
+- **Waking up again.** A session that was told can wait with `ClaudeUsageMonitor.exe --wait` as a background command. The wait ends when every watched limit is under its cap again, which wakes the session. Waiting sessions are woken one at a time, oldest first, two minutes apart by default. **Resume now** on the card, or **Resume waiting sessions** in the tray menu, wakes them all at once ([#27](https://github.com/Godimas101/claude-usage-monitor/issues/27)).
+- **One-click setup.** **Install** on the Usage guard card backs up your Claude Code settings, adds the monitor's hooks and registers the `get_plan_usage` MCP tool. **Remove** takes out only what Install added. It needs Claude Code 2.1.139 or newer ([#27](https://github.com/Godimas101/claude-usage-monitor/issues/27)).
+- The widgets show the guard in every theme: a quiet mark while it is armed, and while it holds, **HOLD** with the time left, a cap tag on each limit over its cap and a line in the hover card. The tray tooltip says it too ([#27](https://github.com/Godimas101/claude-usage-monitor/issues/27)).
+- The Usage guard card on the Settings page shows the caps, the stagger, which sessions were told, which ones wait, and where the setup stands ([#27](https://github.com/Godimas101/claude-usage-monitor/issues/27)).
+- `state.json` carries a `guard` block: the guard's state, the limits over their caps, when work can resume and the caps in use ([#27](https://github.com/Godimas101/claude-usage-monitor/issues/27)).
+
+### Changed
+- `--hook` can also run after each tool call (PostToolUse). There it adds nothing unless the usage guard holds or a limit passes the threshold ([#27](https://github.com/Godimas101/claude-usage-monitor/issues/27)).
+- When a limit's window resets, the monitor fetches the new numbers 30 seconds later, instead of at its next poll ([#27](https://github.com/Godimas101/claude-usage-monitor/issues/27)).
+- The monitor now runs `claude` for the usage guard's setup: `claude --version` and `claude mcp get` to show where setup stands, and `claude mcp add` or `remove` when you click Install or Remove. It still never sends a model request ([#27](https://github.com/Godimas101/claude-usage-monitor/issues/27)).
+
 ### Fixed
 - The taskbar strip stays in sight while Start, Search or a tray flyout is open, and while you peek at a window from its taskbar preview. It is now part of the taskbar itself, not a window floating over it ([#29](https://github.com/Godimas101/claude-usage-monitor/issues/29)).
 - The floating widget also stays in sight while you peek at a window from its taskbar preview ([#29](https://github.com/Godimas101/claude-usage-monitor/issues/29)).
-
-- Docs: MCP setup command fails in PowerShell (bare -- swallowed) and leaves a <you> placeholder ([#30](https://github.com/Godimas101/claude-usage-monitor/issues/30)) — closed 2026-10-26 by @Godimas101
+- The MCP setup command in [docs/AGENT_HOOK.md](https://github.com/Godimas101/claude-usage-monitor/blob/main/docs/AGENT_HOOK.md) works in PowerShell. The `--` is quoted, because PowerShell drops a bare `--` when Claude Code was installed with npm, and the command finds the app's folder by itself, with no `<you>` placeholder to fill in ([#30](https://github.com/Godimas101/claude-usage-monitor/issues/30)).
 
 
 ## [2.1.0] — 2026-10-24

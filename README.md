@@ -177,7 +177,9 @@ hooks need Claude Code 2.1.139 or newer.
 | **History** | A local SQLite database, `usage.db`, that remembers every request the transcripts showed, so it survives Claude Code cleaning up old transcripts. |
 | **Prices** | A price table bundled with the app (`pricing.json`, list prices in US dollars per million tokens). |
 
-The monitor never runs `claude`, never signs in for you and never sends a model request.
+The monitor never signs in for you and never sends a model request. The only time it runs `claude` is the usage
+guard's one-click setup in Settings: it checks Claude Code's version and MCP entry (`claude --version`,
+`claude mcp get`), and adds or removes the entry when you click **Install** or **Remove**.
 
 ## 💵 What "API-equivalent at list prices" means
 

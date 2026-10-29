@@ -154,9 +154,15 @@ icons, links and selection and never draws "normal" bars in the critical red.
                       time_fraction (0..1 | None), severity ("normal" | "warning" | "critical"),
                       resets_at, resets_text, pace ("ahead" | "on_pace" | "behind" | None), share_text
 @dataclass class WidgetModel: status: ApiStatus, status_text, age_text, rows: list[Row],
-                              stale: bool, stale_message: str | None, blink_on: bool, updated_at
+                              stale: bool, stale_message: str | None, blink_on: bool, updated_at,
+                              guard: GuardMark | None      # the usage guard (#27); None while it is off
                               .lamp -> "live" | "paused" | "stale" | "offline" | "limited" | "loading"   # LAMP_KINDS
+@dataclass class GuardMark: state ("armed" | "holding"), over_keys (Row keys at or past their caps),
+                            caps {key: %}, labels {key: "Fable weekly"}, readings {key: %}, resume_at,
+                            resume_text ("2H 14M" under a day, else "Wed 4:00 PM"), resume_in (always the
+                            countdown), resume_clock (always the time); .holding, .over_limits(), .watched()
 build_model(state: MonitorState | None, now, *, show_scoped="auto", blink_on=True) -> WidgetModel
+format_countdown(seconds) -> "2D 3H" | "2H 14M" | "9M" | "<1M"     # whole minutes, rounded down
 SURFACE_FLOATING | SURFACE_TASKBAR | SURFACE_TOOLTIP          # the surfaces the optional skin methods name
 Insets = (left, top, right, bottom); NO_INSETS = (0, 0, 0, 0)  # transparent margin of a frame, in its own pixels
 @dataclass(frozen) class HoverPlay: frames, delays_ms, hold=False, leave=(), leave_ms=40   # plain data, see below
@@ -214,7 +220,31 @@ on every surface. Body text is at least 6.16 : 1 (Relic) and 5.36 : 1 (Mox) on a
 **Frame dump.** `render/dump.py` renders `DUMP_STATE_NAMES`: the ten `STATE_NAMES` (`normal3`, `normal2`, `warning`,
 `critical`, `stale`, `offline`, `paused`, `rate_limited`, `no_credentials`, `loading`) plus `SCOPED_STATE_NAMES`
 (`stale3`, `offline3`, `paused3`, `rate_limited3`: the not-live states with the scoped row the live data would still
-carry, which is what a widget shows on an account that has the row). The contact sheet leaves the scoped ones out.
+carry, which is what a widget shows on an account that has the row) and `GUARD_STATE_NAMES` (`guard_armed`,
+`guard_hold_session`, `guard_hold_weekly`: a live account with the Fable row, judged by the real `agent/guard.py` at the
+default caps; the session hold resumes within hours, the weekly one days away). The contact sheet leaves the scoped
+ones out.
+
+**The usage guard on the widgets (#27).** `WidgetModel.guard` is None while the guard is off, and every skin then draws
+exactly what it drew before the guard existed. Armed is quiet by design, and never changes a strip
+(`tests/test_skin_guard.py` compares the bytes); holding names the hold and the time left. A row the guard holds on is
+drawn critical whatever its severity (on a live card): a cap set at 60 % is as final to the user as the API's critical.
+The strips have no room for the countdown, so the hover card says it. The tray icon does not change; the tray tooltip
+adds "guard armed" or "guard holding, resumes 6:26 PM (in 2h 14m)". While the guard holds, the app's clock tick also
+lands just past each whole minute of the countdown (`tick_delay_ms`).
+
+| | Armed | Holding |
+|---|---|---|
+| Nostromo floating | "[GUARD]" (or "[G]") after the age, when the header has room | the header's right-hand word becomes the chip "HOLD 2H 14M"; a "CAP 95%" pill after each held row's name, where it fits |
+| Nostromo strip | nothing | a chip with an hourglass in the divider's place |
+| Night City floating | a quiet GUARD chip before the status word, when the brand leaves room | the HOLD chip, with a standing glitch, in the status word's place; a held row's critical chip reads "CAP 95" |
+| Night City strip | nothing | the HOLD chip in the status tag |
+| Gates floating | a bare shield in the dim tone, left of the status pill | the shield in a capsule tinted with the alert colour; the footer reads "Guard holding · Resumes 6:26 PM (in 2h 14m)"; a "Cap 95%" badge after each held row's name |
+| Gates strip | nothing | a small filled shield in the alert colour above the lamp |
+| Hover card | "Guard armed: session 95%, weekly 90%" | "Guard holding: weekly 91% (cap 90%). Resumes Fri 7:12 PM (in 2d 3h)." |
+
+Each skin words the hover card in its own voice: Nostromo in capitals, Night City as "GUARD // HOLDING:", Gates as an
+InfoBar under the rows.
 
 Sign-in copy. `WidgetModel.stale_message` is the neutral wording ("LOGIN EXPIRED - OPEN CLAUDE CODE");
 a skin words the state as its approved mockup does and falls back to the neutral text where it has
@@ -264,8 +294,13 @@ six-hourly update re-check timer is armed (`update_recheck`).
   `--smoke-test` always runs as a dev instance, whatever the environment says. The API server is
   a dev server when its `dev` flag is set **or** `CUM_DEV_INSTANCE=1` is in the environment.
 - **Dev server.** `python -m usage_monitor.ui.devserver [--port N] [--scenario
-  normal|warning|critical|stale] [--db PATH] [--theme ID[/VARIANT]]` serves the real webui and API
+  normal|warning|critical|stale|guard] [--db PATH] [--theme ID[/VARIANT]]` serves the real webui and API
   from a fake `MonitorState`, with settings in `CUM_APPDATA_DIR` (or a temporary folder).
+  The usage guard works in every scenario: its verdict is the real `agent/guard.py` on the fake
+  limits and the dev settings, so arming it or changing a cap shows at once. The `guard` scenario
+  arms it at the default caps with the session past its cap, and fills a folder of its own with
+  sessions that were told and one that waits, so the Settings card has everything to show. The
+  dev server is a dev instance, so its one-click setup is off.
   `--db PATH` serves `/api/analytics/*` and `/api/export` from that usage database through the same
   read-only opener the app uses (`server.open_statistics_store`: the file is never created and never
   upgraded, so a copy from an older schema answers `503` until the current app has opened it once);
@@ -344,6 +379,28 @@ Settings: `theme_id`, `theme_variant`, `theme_mode` (Gates: light / dark / syste
 | POST | `/api/refresh` | `DataService.refresh_now()` |
 | POST | `/api/dashboard/closed` | `{"pid": n}`: the dashboard process says its window is gone (`dashboard_closed_cb`, wired to `DashboardLauncher.window_closed`); `400` without a pid, `501` where nothing manages the dashboard |
 | POST | `/api/update/check` · `/api/update/apply` · `/api/update/skip` | updater (see "Updates") |
+| GET | `/api/guard` | the usage guard for the Settings card: `{guard, told, waiting, setup}` (below) |
+| POST | `/api/guard/resume` | "Resume now": every running `--wait` ends at once, whatever the limits say |
+| POST | `/api/guard/setup` | `{"action": "install" \| "remove"}`: the one-click setup (below) |
+
+### The usage guard: `/api/guard` (#27)
+
+`ApiServer(..., guard_dir=None, setup_cb=None)`. `guard_dir` is the folder of the guard's session files
+(`agent/sessions.py`: `hook-seen.json`, `waiting/`, `resume-now`), the app data folder by default.
+`setup_cb` maps `status`, `install` and `remove` to callables, by default `agent/setup.py`'s.
+
+- **`GET /api/guard`** answers `guard` (the state's guard block, `{}` before the first cycle), `told` (the
+  sessions told of the current holding episode, with when), `waiting` (the live `--wait` processes, oldest
+  first) and `setup` (`setup.status()`). The status runs `claude --version` and `claude mcp get`, so it is kept
+  for `SETUP_STATUS_TTL_S` (10 minutes) and computed by one caller at a time (`_TimedValue`). A setup click
+  and `POST /api/dashboard/closed` clear it, so each dashboard window and each click look afresh. The card
+  asks every `GUARD_POLL_MS` (3 s) while it is on screen.
+- **`POST /api/guard/setup`** answers `setup.install()` or `setup.remove()` as it is: `ok: false` with
+  `errors` is a refusal in plain words (Claude Code too old, a settings file that is not JSON), shown beside
+  the buttons, not an HTTP error. An unknown action is `400`.
+- **A dev instance never edits Claude Code's settings.** Its `setup_cb` answers that setup is off and
+  refuses both clicks, as it never touches the Run entry either. `setup.py` itself also refuses outside the
+  frozen build: from source there is no exe to point the hooks at.
 
 ### Statistics: `GET /api/analytics/<name>`
 
@@ -405,6 +462,9 @@ object is a `400` and nothing in the request is applied. The answer is `{"ok": t
 | `alert_thresholds` | 1 to 5 different whole numbers from 1 to 100 |
 | `alert_quiet_hours` | `null`, or `{"start": "HH:MM", "end": "HH:MM"}` in local 24-hour time (may wrap midnight) |
 | `dashboard_bounds` | `null`, or `{"x", "y", "w", "h"}` whole numbers (width 320 to 8000, height 240 to 8000) |
+| `guard_enabled` | boolean (default off) |
+| `guard_session_cap`, `guard_weekly_cap`, `guard_scoped_cap` | `null` (that limit is not watched), or a whole number 1 to 100 (defaults 95, 90 and `null`) |
+| `guard_resume_stagger_s` | whole number of seconds, 0 to 600 (default 120): the gap between waking one waiting session and the next |
 
 The alert rules repeat `Settings`' own (a test keeps the two identical), so a bad value is refused
 before anything is applied; a value `Settings` still refuses is a `400` too. There is no

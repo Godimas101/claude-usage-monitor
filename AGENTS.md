@@ -22,7 +22,7 @@ Privacy, everywhere: never print, store or log message text, prompts, file conte
 | `usage_monitor/ui/` | Win32 layer (ctypes, no Tk): host, layered windows, widgets, tray, menu, server, dashboard |
 | `usage_monitor/render/` | Pillow renderers: view model, drawing engine, one skin per theme |
 | `usage_monitor/themes/` | Theme tokens (`<id>.json`) and their loader |
-| `usage_monitor/agent/` | Plan-usage awareness for Claude sessions (#24): `state.json`, `--status`, `--hook`, `--gate`, the MCP server, and the usage guard (#27): `guard.py`, `sessions.py`, `--wait`. Setup: [`docs/AGENT_HOOK.md`](docs/AGENT_HOOK.md) |
+| `usage_monitor/agent/` | Plan-usage awareness for Claude sessions (#24): `state.json`, `--status`, `--hook`, `--gate`, the MCP server, and the usage guard (#27): `guard.py`, `sessions.py`, `--wait`, and `setup.py` (its one-click setup). Setup: [`docs/AGENT_HOOK.md`](docs/AGENT_HOOK.md) |
 | `usage_monitor/webui/` | Dashboard HTML/CSS/JS, the motion layer (`motion.js`, `motion.css`, `themes/<id>.motion.css`) and the bundled OFL fonts (the Pillow skins read them too) |
 | `update_check.py`, `version.py` | GitHub release check and self-update; version read from `VERSION` |
 | `tests/` | pytest, offline, synthetic fixtures only |
@@ -42,7 +42,9 @@ strip, tooltip, tray icon) plus a **pywebview dashboard** (WebView2) served by a
 - All Win32 goes through ctypes with explicit `argtypes`/`restype` on every function (use
   `usage_monitor/ui/win32.py`). Keep callbacks referenced and catch every exception inside one.
 - Log with `usage_monitor.log.get_logger(__name__)`. No hidden globals: paths, clock and HTTP are
-  injectable. The monitor never runs `claude` and never sends a model request.
+  injectable. The monitor never sends a model request and never runs `claude -p`. The only `claude` it runs is in
+  `agent/setup.py`, the usage guard's one-click setup: `--version` and `mcp get` for the Settings card, and
+  `mcp add` / `mcp remove` when the user clicks Install or Remove.
 
 ## Themes
 
