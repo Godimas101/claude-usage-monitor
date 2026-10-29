@@ -57,7 +57,7 @@ from usage_monitor.data.models import ApiStatus, MonitorState
 from usage_monitor.data.service import DataService
 from usage_monitor.data.store import Store
 from usage_monitor.log import get_logger, setup_logging
-from usage_monitor.render.model import WidgetModel, build_model
+from usage_monitor.render.model import GuardMark, WidgetModel, build_model
 from usage_monitor.render.skins import RenderOptions, get_skin
 from usage_monitor.settings import DEFAULTS as SETTINGS_DEFAULTS
 from usage_monitor.settings import Settings, parse_clock
@@ -187,7 +187,8 @@ def _percent_text(percent: float) -> str:
 
 def tray_tooltip(model: WidgetModel, *, dev: bool = False) -> str:
     """"Claude usage - session 13% - weekly 2%", with the status after it when the numbers are not
-    live ("... - stale") and " (dev)" for a dev instance."""
+    live ("... - stale"), the usage guard while it is on ("... - guard armed") and " (dev)" for a dev
+    instance."""
     rows = {row.key: row for row in model.rows}
     parts = ["Claude usage"]
     for key in ("session", "weekly"):
@@ -196,7 +197,20 @@ def tray_tooltip(model: WidgetModel, *, dev: bool = False) -> str:
             parts.append(f"{key} {_percent_text(row.percent)}")
     if len(parts) == 1 or model.status not in (ApiStatus.LIVE, ApiStatus.PAUSED):
         parts.append(model.status_text.lower())
+    if model.guard is not None:
+        parts.append(_guard_tip(model.guard))
     return " - ".join(parts) + (" (dev)" if dev else "")
+
+
+def _guard_tip(guard: GuardMark) -> str:
+    """The usage guard in the tooltip, in the Gates footer's words: "guard armed", or "guard holding, resumes
+    6:26 PM (in 2h 14m)". Which limits are over their caps is left to the hover card and the dashboard, so the
+    worst case still fits the shell's 127 characters."""
+    if not guard.holding:
+        return "guard armed"
+    if guard.resume_clock is None:
+        return "guard holding"
+    return f"guard holding, resumes {guard.resume_clock} (in {(guard.resume_in or '').lower()})"
 
 
 def menu_items(
@@ -303,19 +317,23 @@ def blink_cycle(theme: Any) -> tuple[int, int] | None:
     return lit, round(period_ms) - lit
 
 
-def tick_delay_ms(age_seconds: float | None) -> int:
+def tick_delay_ms(age_seconds: float | None, resume_in_s: float | None = None) -> int:
     """Milliseconds until the text on the widgets can next change.
 
     The age readout steps once a second for the first minute after a fetch and once a minute after
-    that, so the wait ends just past the next step. The time rails and reset times need a redraw at
-    least every TICK_CAP_S. With no age to show, only the cap applies.
+    that, so the wait ends just past the next step. The usage guard's countdown (resume_in_s, the
+    seconds until a holding guard lets work resume) steps at each whole minute left, so the wait also
+    ends just past its next step. The time rails and reset times need a redraw at least every
+    TICK_CAP_S. With neither to show, only the cap applies.
     """
     cap = int(TICK_CAP_S * 1000)
-    if age_seconds is None or age_seconds < 0:
-        return cap
-    step = 1.0 if age_seconds < 60 else 60.0
-    wait = step - (age_seconds % step)
-    return min(cap, int(wait * 1000) + 25)
+    waits = []
+    if age_seconds is not None and age_seconds >= 0:
+        step = 1.0 if age_seconds < 60 else 60.0
+        waits.append(step - (age_seconds % step))
+    if resume_in_s is not None and resume_in_s > 0:
+        waits.append(resume_in_s % 60.0)    # "2H 14M" turns "2H 13M" as soon as less than 134 minutes are left
+    return min([cap] + [int(wait * 1000) + 25 for wait in waits])
 
 
 class Blinker:
@@ -1167,7 +1185,8 @@ class MonitorApp:
         self._cancel_tick()
         if self._torn_down or self.host is None or not self._animation_allowed():
             return
-        self._tick_timer = self.host.set_timer(tick_delay_ms(self._age_seconds()), self._on_tick, repeat=False)
+        delay = tick_delay_ms(self._age_seconds(), self._resume_in_seconds())
+        self._tick_timer = self.host.set_timer(delay, self._on_tick, repeat=False)
 
     def _cancel_tick(self) -> None:
         if self._tick_timer is not None and self.host is not None:
@@ -1183,6 +1202,13 @@ class MonitorApp:
         if fetched is None or self._ctx is None or self._ctx.model.age_text is None:
             return None
         return (self._clock() - fetched).total_seconds()
+
+    def _resume_in_seconds(self) -> float | None:
+        """Seconds until the usage guard lets work resume, while it holds with a known resume time."""
+        guard = self._ctx.model.guard if self._ctx is not None else None
+        if guard is None or guard.resume_at is None:
+            return None
+        return (guard.resume_at - self._clock()).total_seconds()
 
     # ── Diagnostics ──
 

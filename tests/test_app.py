@@ -58,7 +58,7 @@ from usage_monitor.app import (
 )
 from usage_monitor.data import models as m
 from usage_monitor.render.dump import sample_model, sample_state
-from usage_monitor.render.model import build_model
+from usage_monitor.render.model import GuardMark, build_model
 from usage_monitor.render.skins import RenderOptions
 from usage_monitor.settings import Settings
 from usage_monitor.ui import platform as plat
@@ -1467,6 +1467,27 @@ def test_the_tray_tooltip_rounds_like_the_widget_and_fits_the_shell_limit():
     assert len(text) < 127
 
 
+def test_the_tray_tooltip_carries_the_usage_guard_while_it_is_on():
+    assert tray_tooltip(model_for("guard_armed")) == "Claude usage - session 38% - weekly 52% - guard armed"
+    held = model_for("guard_hold_session")
+    assert tray_tooltip(held) == (f"Claude usage - session 96% - weekly 58% - guard holding, resumes "
+                                  f"{held.guard.resume_clock} (in 2h 14m)")
+    week = model_for("guard_hold_weekly")
+    assert tray_tooltip(week, dev=True).endswith(f" - guard holding, resumes {week.guard.resume_clock} (in 2d 3h) (dev)")
+    no_reset = dataclasses.replace(model_for("normal3"), guard=GuardMark(state="holding"))
+    assert tray_tooltip(no_reset) == "Claude usage - session 13% - weekly 2% - guard holding"
+
+
+def test_the_longest_guard_tooltip_still_fits_the_shell_limit():
+    model = model_for("rate_limited")
+    rows = [dataclasses.replace(row, percent=100.0) for row in model.rows]
+    guard = GuardMark(state="holding", over_keys=("session", "weekly"), resume_clock="Wed 12:00 PM", resume_in="6D 23H")
+    text = tray_tooltip(dataclasses.replace(model, rows=rows, guard=guard), dev=True)
+    assert text == ("Claude usage - session 100% - weekly 100% - rate limited - guard holding, resumes Wed 12:00 PM "
+                    "(in 6d 23h) (dev)")
+    assert len(text) <= 127
+
+
 def test_the_menu_lists_the_actions_in_order_and_marks_the_toggles():
     calls: list[str] = []
     items = menu_items(
@@ -1533,6 +1554,27 @@ def test_the_age_readout_changes_exactly_when_the_tick_fires():
     later = NOW + timedelta(milliseconds=tick_delay_ms(12.3))
     assert build_model(state, NOW).age_text == "12 S AGO"
     assert build_model(state, later).age_text == "13 S AGO"
+
+
+@pytest.mark.parametrize("age, resume_in, expected", [
+    (None, 134.5, 14525),    # 2M left turns 1M in 14.5 s
+    (12.3, 134.5, 725),      # the age readout steps first
+    (95.0, 8040.0, 25),      # exactly 2H 14M left: it turns 2H 13M at once
+    (None, 8100.0 + 40.0, 30000),
+    (None, 0.0, 30000), (None, -5.0, 30000),    # past the resume time there is nothing left to count down
+])
+def test_the_clock_tick_also_lands_just_after_the_guard_countdown_steps(age, resume_in, expected):
+    assert tick_delay_ms(age, resume_in) == pytest.approx(expected, abs=2)
+
+
+def test_the_guard_countdown_changes_exactly_when_the_tick_fires():
+    """2H 13M 14.5S before work resumes, the tick lands just after the countdown turns 2H 12M."""
+    state = sample_state("guard_hold_session", NOW)    # work resumes 2H 14M after NOW
+    now = NOW + timedelta(seconds=45.5)
+    guard = build_model(state, now).guard
+    later = now + timedelta(milliseconds=tick_delay_ms(None, (guard.resume_at - now).total_seconds()))
+    assert guard.resume_in == "2H 13M"
+    assert build_model(state, later).guard.resume_in == "2H 12M"
 
 
 def test_only_nostromo_blinks_and_its_cycle_is_2_4_seconds_85_percent_lit():
@@ -2449,6 +2491,16 @@ def test_the_clock_tick_redraws_and_re_arms_with_the_right_delay(wired):
 def test_with_nothing_to_age_the_clock_ticks_every_thirty_seconds(wired):
     ms, _fn, _repeat = wired.host.timers[wired.app._tick_timer]
     assert ms == 30000
+
+
+def test_a_holding_guard_wakes_the_clock_for_its_countdown_and_shows_in_the_tray(wired):
+    app, host = wired.app, wired.host
+    app._clock = lambda: NOW + timedelta(seconds=50)    # 62 s after the fetch, 2H 13M 10S before work resumes
+    wired.service.publish(sample_state("guard_hold_session", NOW))
+    host.run_posted()
+    ms, _fn, _repeat = host.timers[app._tick_timer]
+    assert ms == tick_delay_ms(62.0, 7990.0) == 10025    # the countdown steps before the age readout does
+    assert " - guard holding, resumes " in app.tray.tooltips[-1]
 
 
 def test_locking_the_session_stops_the_animation_and_the_clock_and_unlocking_redraws(wired):
