@@ -454,6 +454,89 @@ function aboutBanner(update) {
 out.bannerAbout = { shown: aboutBanner(UPDATE), none: aboutBanner(undefined) };
 S.formKey = null;
 
+// ── the sign-in help and the pages of a PC with no Claude Code (#28) ─────────────────────────────────────────────────────────
+// A sign-in that is missing or has expired gets the help panel in place of the plain status line, on every page. A PC whose records
+// the monitor has read and found empty (someone who uses Claude on the web or in the app) has nothing for the cost, efficiency and
+// history pages to count. Every state here is made up; the page is as it starts (nothing decided, nothing being checked).
+const SIGN_UPDATED = "2026-10-21T16:11:48.000Z";
+const SIGN_LATER = "2026-10-21T16:12:05.000Z";
+const NO_SIGN_IN = "No Claude sign-in found; open Claude Code to sign in";
+const ingestOf = (patch) => Object.assign({ running: false, files_done: 0, files_total: 0, last_duration_s: 0.01, last_error: null }, patch);
+const requestsIn = (n) => ({ all: { name: "all", start: null, end: null, totals: { requests: n } } });
+function forget() {
+  reset();
+  S.noActivity = false;
+  S.copy = "";
+  S.check = { busy: false, sent: false, from: "", at: 0, still: false, failed: false };
+  S.themesRequested = true;                                       // no /api/themes ask in the recorded calls
+}
+function monitorState(status, patch) {
+  forget();
+  S.data = { state: Object.assign({
+    status, status_detail: NO_SIGN_IN, plan: { name: "Max 5x", monthly_price_usd: 100 }, windows: requestsIn(0), ingest: ingestOf({}),
+    unpriced_models: [], updated_at: SIGN_UPDATED,
+    usage: { limits: [liveLimit("session", "SESSION", 13), liveLimit("weekly_all", "WEEKLY", 2)], breakdown: [], spend: null },
+  }, patch || {}), model_names: {}, settings: {} };
+}
+const topPart = (page, key) => (api.buildModel(page).top.filter((x) => x.key === key)[0] || {}).html;
+out.signIn = { banner: {}, onPages: {} };
+for (const status of statuses) {
+  monitorState(status, { status_detail: "detail of " + status });
+  out.signIn.banner[status] = api.statusBanner();
+}
+for (const page of PAGE_LIST) {
+  monitorState("no_credentials");
+  out.signIn.onPages[page] = topPart(page, "status");
+}
+monitorState("stale", { status_detail: "Sign-in token expired; open Claude Code to refresh it" });
+out.signIn.expired = api.statusBanner();
+monitorState("stale", { status_detail: hostile });
+out.signIn.hostile = api.statusBanner();
+monitorState("stale", { status_detail: "" });
+out.signIn.noDetail = api.statusBanner();
+
+// limits only: decided from the all-time window once an ingest is done, held through the ingests that follow
+function decided(patch, before) {
+  monitorState("live", patch);
+  S.noActivity = !!before;
+  return api.limitsOnly();
+}
+const reading = ingestOf({ running: true, files_done: 3, files_total: 40 });
+out.limitsOnly = {
+  noState: (forget(), api.limitsOnly()),
+  noIngest: decided({ ingest: null }),
+  firstIngestRunning: decided({ ingest: ingestOf({ running: true, files_done: 3, files_total: 40, last_duration_s: null }) }),
+  firstIngestFailed: decided({ ingest: ingestOf({ last_duration_s: null, last_error: "RuntimeError: boom" }) }),
+  done: decided({}),
+  doneNoTotals: decided({ windows: { all: {} } }),
+  noWindow: decided({ windows: {} }),
+  withRequests: decided({ windows: requestsIn(7) }),
+  laterIngestHolds: decided({ ingest: reading }, true),
+  laterIngestFromNothing: decided({ ingest: reading }, false),
+  aRequestEndsIt: decided({ windows: requestsIn(3), ingest: reading }, true),
+};
+
+// the pages of such a PC: three of them are one card, the Overview keeps its limit, surface and burn cards, nothing is asked for
+monitorState("live");
+out.noRecords = { pages: {}, stats: {}, top: {} };
+for (const page of ["cost", "efficiency", "history"]) {
+  out.noRecords.pages[page] = modelOf(page);
+  out.noRecords.top[page] = { problem: topPart(page, "problem"), stale: topPart(page, "stale") };
+}
+for (const page of PAGE_LIST) out.noRecords.stats[page] = api.pageStats(page).map((e) => e.key);
+out.noRecords.overview = modelOf("overview");
+out.noRecords.limits = states("limits");
+// a failed cost report is nothing to report when nothing is counted
+monitorState("live");
+failed("cost", { window: "cycle" }, 500);
+out.noRecords.failedReport = { states: states("overview"), problem: topPart("overview", "problem"), stale: topPart("overview", "stale") };
+// a PC with Claude Code records, and a first ingest that is still running: the pages are what they were
+monitorState("live", { windows: requestsIn(9800) });
+out.records = { overview: states("overview"), cost: states("cost"), efficiency: states("efficiency"), history: states("history"), stats: api.pageStats("cost").map((e) => e.key) };
+monitorState("live", { ingest: ingestOf({ running: true, files_done: 3, files_total: 40, last_duration_s: null }) });
+out.firstIngest = { overview: states("overview"), cost: states("cost"), efficiency: states("efficiency"), history: states("history") };
+forget();
+
 // ── a status line written in capitals is capitals all the way: the Gates theme sets a line in sentence case only when all of it is ──
 // (isCaps is gates.js's own test). The monitor's reason is lower case ("update apply failed"), so each failure path has to raise it.
 const isCaps = (text) => /[A-Z]/.test(text) && !/[a-z]/.test(text);
@@ -740,4 +823,108 @@ async function guardActions() {
   reset();
 }
 
-failures().then(guardPolling).then(guardActions).then(() => console.log(JSON.stringify(out)), (error) => { console.error(error && error.stack ? error.stack : String(error)); process.exit(1); });
+// "Check again" and "Copy" on the sign-in help, against a recording monitor and a clipboard that answers as the test says
+async function signInActions() {
+  const saved = { fetch: box.fetch, set: box.setTimeout, clear: box.clearTimeout, navigator: box.navigator };
+  const calls = [];
+  const timers = [];
+  box.clearTimeout = () => {};
+  box.setTimeout = (fn, ms) => { timers.push({ fn, ms }); return timers.length; };
+  const run = async (table, act) => {
+    calls.length = 0;
+    box.fetch = (url, init) => {
+      const key = ((init && init.method) || "GET") + " " + url;
+      calls.push(key);
+      const hit = table[key] || [404, { error: "not in this test" }];
+      return hit === "lost" ? Promise.reject(new Error("link lost")) : answer(hit[0], hit[1])();
+    };
+    act();
+    await settle();
+    return calls.slice();
+  };
+  const payload = (status, at, extra) => ({ state: Object.assign({}, S.data.state, { status, updated_at: at }, extra || {}), model_names: {}, settings: {} });
+  const where = () => Object.assign({}, S.check);
+  const REFRESHED = { "POST /api/refresh": [200, { ok: true }] };
+  const out2 = {};
+
+  // the monitor looks again and the state of that cycle still has no sign-in: the panel says so
+  monitorState("no_credentials");
+  const during = {};
+  out2.still = {
+    calls: await run(Object.assign({ "GET /api/state": [200, payload("no_credentials", SIGN_LATER)] }, REFRESHED), () => {
+      api.checkAgain();
+      during.check = where();
+      during.html = api.statusBanner();
+    }),
+    during, check: where(), html: api.statusBanner(),
+  };
+  // the same for an expired sign-in, in its own words
+  monitorState("stale", { status_detail: "Sign-in token expired; open Claude Code to refresh it" });
+  await run(Object.assign({ "GET /api/state": [200, payload("stale", SIGN_LATER)] }, REFRESHED), () => api.helpAction("check-again"));
+  out2.stillExpired = { check: where(), html: api.statusBanner() };
+  // one request at a time: clicks while a check is on its way send nothing
+  monitorState("no_credentials");
+  out2.twice = await run(Object.assign({ "GET /api/state": [200, payload("no_credentials", SIGN_LATER)] }, REFRESHED), () => {
+    api.checkAgain();
+    api.checkAgain();
+    api.helpAction("check-again");
+  });
+  monitorState("no_credentials");
+  S.check = { busy: true, sent: false, from: SIGN_UPDATED, at: Date.now(), still: false, failed: false };
+  out2.busyIgnores = await run(REFRESHED, () => api.checkAgain());
+  // found: the next state is live, the panel is gone and nothing is left to say
+  monitorState("no_credentials");
+  await run(Object.assign({ "GET /api/state": [200, payload("live", SIGN_LATER, { status_detail: "Updated 12:12:05" })] }, REFRESHED), () => api.checkAgain());
+  out2.found = { check: where(), html: api.statusBanner() };
+  // the cycle has not been published yet (updated_at has not moved): the check goes on, until it has waited long enough
+  monitorState("no_credentials");
+  await run(Object.assign({ "GET /api/state": [200, payload("no_credentials", SIGN_UPDATED)] }, REFRESHED), () => api.checkAgain());
+  out2.waiting = { check: where(), ended: api.syncCheck() };
+  S.check.at = Date.now() - 20000;
+  out2.late = { ended: api.syncCheck(), check: where(), html: api.statusBanner() };
+  // not before the monitor has answered the click
+  monitorState("no_credentials");
+  S.check = { busy: true, sent: false, from: SIGN_UPDATED, at: Date.now() - 20000, still: false, failed: false };
+  S.data.state.updated_at = SIGN_LATER;
+  out2.notSentYet = { ended: api.syncCheck(), check: where() };
+  // the monitor refuses, or the link is lost
+  monitorState("no_credentials");
+  out2.refused = { calls: await run({ "POST /api/refresh": [501, { error: "refresh is not available" }] }, () => api.checkAgain()), check: where(), html: api.statusBanner() };
+  monitorState("no_credentials");
+  out2.lost = { calls: await run({ "POST /api/refresh": "lost" }, () => api.checkAgain()), check: where(), html: api.statusBanner() };
+  // what a check said does not outlive the panel
+  monitorState("live");
+  S.check = { busy: false, sent: true, from: SIGN_UPDATED, at: 0, still: true, failed: false };
+  out2.outlived = { ended: api.syncCheck(), check: where() };
+
+  // Copy: the command goes to the clipboard once, the button says so for a moment; where the clipboard refuses or is not there the
+  // command is selected instead (no selection API in this page, which must not matter)
+  const writes = [];
+  const copyWith = async (clipboard) => {
+    monitorState("no_credentials");
+    writes.length = 0;
+    timers.length = 0;
+    box.navigator = clipboard === undefined ? undefined : { clipboard };
+    api.helpAction("copy-command");
+    await settle();
+    const shown = { copy: S.copy, html: api.statusBanner(), timers: timers.map((t) => t.ms), writes: writes.slice() };
+    if (timers.length) { timers[timers.length - 1].fn(); }
+    shown.after = { copy: S.copy, html: api.statusBanner() };
+    return shown;
+  };
+  out2.copy = {
+    written: await copyWith({ writeText: (text) => { writes.push(text); return Promise.resolve(); } }),
+    refused: await copyWith({ writeText: (text) => { writes.push(text); return Promise.reject(new Error("denied")); } }),
+    throws: await copyWith({ writeText: () => { throw new Error("no permission"); } }),
+    missing: await copyWith({}),
+    noClipboard: await copyWith(undefined),
+  };
+  monitorState("no_credentials");
+  out2.unknownAction = { calls: await run({}, () => api.helpAction("nothing-here")), copy: S.copy, check: where() };      // an unknown action does nothing
+
+  box.fetch = saved.fetch; box.setTimeout = saved.set; box.clearTimeout = saved.clear; box.navigator = saved.navigator;
+  forget();
+  out.signInActions = out2;
+}
+
+failures().then(guardPolling).then(guardActions).then(signInActions).then(() => console.log(JSON.stringify(out)), (error) => { console.error(error && error.stack ? error.stack : String(error)); process.exit(1); });
