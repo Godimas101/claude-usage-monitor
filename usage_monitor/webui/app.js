@@ -151,7 +151,7 @@
     stale: { text: "AUTH LOST", ok: false },
     offline: { text: "NO CARRIER", ok: false },
     rate_limited: { text: "RATE LIMITED", ok: false },
-    no_credentials: { text: "NO CREDENTIALS", ok: false },
+    no_credentials: { text: "NO LOGIN", ok: false },
     paused: { text: "PAUSED", ok: false }
   };
   var ACCENT_ABBR = {
@@ -198,7 +198,7 @@
   // other banners' (the Gates theme sets it in sentence case).
   var INSTALL_COMMAND = "irm https://claude.ai/install.ps1 | iex";
   var SIGNIN_HEAD = "NO CLAUDE SIGN-IN YET";
-  var SIGNIN_WHY = "The monitor reads your plan's limits through the sign-in that Claude Code saves on this PC. Signing in to Claude Code once is enough, even if you use Claude on the web or in the Claude app. Claude Code needs a Pro or Max plan.";
+  var SIGNIN_WHY = "The monitor reads your plan's limits through the sign-in that Claude Code saves on this PC. Signing in to Claude Code once is enough, even if you use Claude on the web or in the Claude app. Claude Code needs a paid plan such as Pro or Max.";
   var SIGNIN_RENEWS = "Claude Code renews the sign-in each time it runs. If the monitor later says the sign-in has expired, open Claude Code again.";
   var CHECK_NONE = "Still no sign-in found.";
   var CHECK_STALE = "Still no working sign-in.";
@@ -1795,9 +1795,10 @@
   // ── A PC with no Claude Code activity (#28) ─────────────────────────────────────
 
   /* True when the monitor has finished reading this PC's Claude Code records and found none: the all-time window holds no request,
-   * and an ingest is done (not running, and it has taken a time). Someone who uses Claude on the web or in the app has none, and
-   * the pages that count records would be cards full of zeros. It is never decided before a state has arrived or while the first
-   * ingest still runs (the windows read zero then because nothing is counted yet). Once decided it holds through the ingests that
+   * and an ingest is done (not running, and it has taken a time) with nothing it could not read (a file it could not read may hold
+   * requests). Someone who uses Claude on the web or in the app has none, and the pages that count records would be cards full of
+   * zeros. It is never decided before a state has arrived or while the first ingest still runs (the windows read zero then because
+   * nothing is counted yet). Once decided it holds through the ingests that
    * follow (one runs every minute, and the state says "running" while it does) and ends when a request is counted. */
   function limitsOnly() {
     var s = st();
@@ -1808,7 +1809,7 @@
     }
     if (requests > 0) {
       S.noActivity = false;
-    } else if (!s.ingest.running && num(s.ingest.last_duration_s) !== null) {
+    } else if (!s.ingest.running && num(s.ingest.last_duration_s) !== null && !s.ingest.last_error) {
       S.noActivity = true;
     }
     return S.noActivity;

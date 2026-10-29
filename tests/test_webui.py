@@ -1584,7 +1584,7 @@ README_WEB_AND_APP = "https://github.com/Godimas101/claude-usage-monitor#-using-
 INSTALL_COMMAND = "irm https://claude.ai/install.ps1 | iex"
 SIGNIN_HEAD = "NO CLAUDE SIGN-IN YET"
 SIGNIN_WHY = ("The monitor reads your plan's limits through the sign-in that Claude Code saves on this PC. Signing in to Claude Code "
-              "once is enough, even if you use Claude on the web or in the Claude app. Claude Code needs a Pro or Max plan.")
+              "once is enough, even if you use Claude on the web or in the Claude app. Claude Code needs a paid plan such as Pro or Max.")
 SIGNIN_STEPS = ["Open PowerShell: press Start and type PowerShell.", "Install Claude Code:",
                 "Open a new PowerShell window, run claude, and sign in with your Claude account in the browser that opens.",
                 "Come back here and press Check again."]
@@ -1753,7 +1753,7 @@ def test_with_no_sign_in_the_help_says_what_to_do_in_the_words_it_was_given(chec
 def test_an_expired_sign_in_keeps_the_monitors_reason_and_adds_the_one_thing_to_do(checks: dict[str, Any]) -> None:
     html = checks["signIn"]["expired"]
     assert html.startswith('<div class="nm-msg nm-help" role="region" aria-label="Claude sign-in"><b>AUTH LOST</b>')       # the banner's own heading
-    assert paragraphs(html) == ["Sign-in token expired; open Claude Code to refresh it", SIGNIN_EXPIRED]
+    assert paragraphs(html) == ["The Claude sign-in has expired; open Claude Code to renew it", SIGNIN_EXPIRED]
     page = Markup(html)
     assert page.find("ol") == [] and page.find("a") == []                              # no steps to start from nothing, no manual to read
     assert [attrs["data-action"] for attrs in page.find("button")] == ["check-again"]  # and no install command to copy
@@ -1838,6 +1838,7 @@ def test_limits_only_is_decided_only_after_an_ingest_has_finished(checks: dict[s
     assert decided["done"] is True                                                     # an ingest is done, and the all-time window holds no request
     for name in ("noState", "noIngest", "firstIngestRunning", "firstIngestFailed", "doneNoTotals", "noWindow", "withRequests"):
         assert decided[name] is False, name                                            # not before a state, nor while the first ingest runs
+    assert decided["doneWithErrors"] is False                                          # nor when files could not be read: they may hold requests
     assert decided["laterIngestFromNothing"] is False                                  # an ingest that runs before anything was decided decides nothing
     assert decided["laterIngestHolds"] is True                                         # one that runs after (every minute) does not undo it
     assert decided["aRequestEndsIt"] is False                                          # and a counted request ends it

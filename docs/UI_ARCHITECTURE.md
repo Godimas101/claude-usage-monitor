@@ -256,7 +256,8 @@ No sign-in at all is a different case (#28): the person may never have used Clau
 Claude apps share its limits), so the widgets send them to the dashboard, which has the steps, rather than to
 Claude Code. The neutral text is "NO LOGIN FOUND - OPEN THE DASHBOARD" (Nostromo's auth box shows it as its two
 lines), Night City's band "NO LOGIN // OPEN DASHBOARD" (`theme.extras.copy.no_login`), and Gates' footer
-"No sign-in found. Open the dashboard for help."
+"No sign-in found. Open the dashboard for help." The dashboard's link status reads "NO LOGIN" too (Gates: "Not signed in"),
+and its status banner becomes the sign-in help (see "webui").
 
 ### `ui/`
 ```python
@@ -300,8 +301,15 @@ six-hourly update re-check timer is armed (`update_recheck`).
   `--smoke-test` always runs as a dev instance, whatever the environment says. The API server is
   a dev server when its `dev` flag is set **or** `CUM_DEV_INSTANCE=1` is in the environment.
 - **Dev server.** `python -m usage_monitor.ui.devserver [--port N] [--scenario
-  normal|warning|critical|stale|guard] [--db PATH] [--theme ID[/VARIANT]]` serves the real webui and API
-  from a fake `MonitorState`, with settings in `CUM_APPDATA_DIR` (or a temporary folder).
+  normal|warning|critical|stale|guard|no_login|limits_only] [--db PATH] [--theme ID[/VARIANT]]` serves the real webui and API
+  from a fake `MonitorState`, with settings in `CUM_APPDATA_DIR` (or a temporary folder). `stale` and `no_login` carry
+  the data layer's own sign-in texts (`usage_api.EXPIRED_DETAIL`, `usage_api.NO_SIGN_IN_DETAIL`).
+  The two scenarios of someone who uses Claude on the web or in the app (#28) have no Claude Code on the PC:
+  `no_login` has no sign-in (no limits, no plan), and `limits_only` is signed in with the limits of `normal` and a week
+  spent in chats. In both every window is empty and the ingest has finished with no file to read, and the synthetic
+  history holds no transcript (`limits_only` keeps the usage readings a poll stores, so its pace works), so the dashboard
+  shows its pages for a PC with no Claude Code activity. A refresh (the Refresh button, *Check again*) moves the fake
+  state's `updated_at` by a millisecond, as a real cycle publishes a new one, so the page sees the cycle it asked for.
   The usage guard works in every scenario: its verdict is the real `agent/guard.py` on the fake
   limits and the dev settings, so arming it or changing a cap shows at once. The `guard` scenario
   arms it at the default caps with the session past its cap, and fills a folder of its own with
@@ -636,6 +644,7 @@ default browser instead, and the exit code says so (below).
   holds the reports back, lets them land and fails if any card changed height (`test_server.py`, `CUM_UI_TESTS=1`). The Overview's
   cost, efficiency and model cards draw from the cost report like the Cost page does: while it is on its way they are pending,
   and when it fails they say so (`data-state="error"` and the page's `problem` banner) instead of staying pending for good.
+  A PC with no Claude Code activity is the exception: nothing is asked for there (below).
 - **Update banner.** `.nm-update[role=status]` is the first banner of every page but Settings, whose System card has the same
   buttons (the toast says "Open the tray menu or the dashboard to update", and the dashboard may be on any page: `pageModel`
   adds the banner to every page's top parts; the About page, which is built once and not as parts, keeps it in a
@@ -648,6 +657,23 @@ default browser instead, and the exit code says so (below).
   `/api/update/skip` and hides the banner at once, rolling back on failure. The status text is tied to the release it was
   about, so it never shows against a newer one. The dev server fakes no update (its `info` callback returns nothing): to see
   the banner, answer `/api/state` with an `update` block (a Playwright route does it).
+- **Sign-in help (#28).** For the two statuses only the user can fix, `no_credentials` and `stale`, the status banner grows into
+  a help panel (`.nm-msg.nm-help[role=region]`, built by `signInHelp`). With no sign-in it says why the monitor needs the
+  sign-in Claude Code saves (even for someone who uses Claude on the web or in the app), gives four steps and links the
+  README section on using Claude on the web or in the app. The second step shows the install command
+  (`irm https://claude.ai/install.ps1 | iex`) in `.nm-cmd` with a *Copy* button; the command is text, never linked or fetched.
+  An expired or rejected sign-in keeps the heading and the monitor's reason and adds what to do. *Check again* posts
+  `/api/refresh`, one at a time, and keeps "Checking…" on the button (`aria-disabled`, so the focus stays) until the state's
+  `updated_at` moves (the cycle it asked for is published) or 15 s pass; a state that still needs a sign-in then says so in
+  the panel's `.nm-status`. *Copy* writes the command with `navigator.clipboard`, or selects it and says "Press Ctrl+C"
+  where the page cannot. The check's state is `S.check`, the button's answer `S.copy`.
+- **No Claude Code activity (#28).** Someone who uses Claude on the web or in the app has limits but no transcripts. Once an
+  ingest has finished (`ingest.running` false, `ingest.last_duration_s` set, no `last_error`) with no request in the all-time window
+  (`windows.all.totals.requests` is 0), `limitsOnly()` decides that this PC has none. It is never decided before a state
+  arrives or while the first ingest runs (the windows read zero then), it holds through the ingests that follow (`S.noActivity`)
+  and it ends when a request is counted. Cost & value, Efficiency and History are then one wide card that explains it, and
+  the Overview's cost, efficiency and model cards keep their frame and title with one `.nm-empty` line (`data-state="ready"`,
+  no `data-needs`). No cost, efficiency or history report is asked for; the limits, the pace and the alerts are as before.
 - **Forecast.** A limit's forecast runs from now at the average rate so far (used / elapsed, `averageRateForecast`) to where
   it crosses 100 % (the end is marked "100% ~ <time>", the same moment as the card's "Limit reached") or to the reset when it
   stays below; the end label and the "Projected end" fact read the same value, so they cannot disagree. Scoped limits use the

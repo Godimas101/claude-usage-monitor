@@ -26,7 +26,7 @@ from typing import Any
 
 import pytest
 
-from usage_monitor.data import analytics
+from usage_monitor.data import analytics, usage_api
 from usage_monitor.data import models as m
 from usage_monitor.data.pricing import Pricing
 from usage_monitor.data.store import Store
@@ -384,7 +384,7 @@ def test_main_accepts_the_guard_scenario(capsys: pytest.CaptureFixture[str]) -> 
 # ── No sign-in, and a sign-in with no Claude Code on this PC (#28) ────────────────
 
 NO_CLAUDE_CODE = ("no_login", "limits_only")                      # someone who uses Claude on the web or in the app
-NO_SIGN_IN = "No Claude sign-in found; open Claude Code to sign in"      # UsageClient's words for a missing sign-in
+NO_SIGN_IN = usage_api.NO_SIGN_IN_DETAIL                         # UsageClient's words for a missing sign-in
 WINDOWS = ("session", "today", "week", "month", "all")
 
 

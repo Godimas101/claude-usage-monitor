@@ -18,7 +18,7 @@ the owner's ~/.claude, the app data folder or Claude Code is ever read or touche
 
 Two scenarios are for someone who uses Claude on the web or in the app and has no Claude Code on this PC (#28). ``no_login``
 has no sign-in: the status is no_credentials, with no limits and no plan, and the ingest has finished with no file to read.
-``limits_only`` is signed in with the limits of ``normal``, and its statistics store holds no transcript (every window reads
+``limits_only`` is signed in with the limits of ``normal`` (its week went to chats), and its statistics store holds no transcript (every window reads
 zero, the ingest has finished) but the usage readings the monitor stores at each poll, so the pace and the forecast work. In
 both, nothing is counted, so the pages that count Claude Code's records say so. A refresh (the Refresh buttons, "Check again")
 moves the fake state's ``updated_at`` as a real monitor's does, so the page sees the cycle it asked for arrive.
@@ -79,6 +79,7 @@ from usage_monitor.data.models import (
 )
 from usage_monitor.data.pricing import Pricing
 from usage_monitor.data.store import Store
+from usage_monitor.data.usage_api import EXPIRED_DETAIL, NO_SIGN_IN_DETAIL
 from usage_monitor.log import get_logger
 from usage_monitor.settings import Settings
 from usage_monitor.ui.server import ApiServer, open_statistics_store
@@ -88,8 +89,6 @@ log = get_logger(__name__)
 SCENARIOS = ("normal", "warning", "critical", "stale", "guard", "no_login", "limits_only")
 # Scenarios of someone who uses Claude on the web or in the app (#28): no Claude Code transcript on this PC, so nothing is counted.
 NO_TRANSCRIPTS = ("no_login", "limits_only")
-# How UsageClient words the status of a missing sign-in (the text itself is the data layer's).
-NO_SIGN_IN_DETAIL = "No Claude sign-in found; open Claude Code to sign in"
 _SESSION_S = 5 * 3600
 _WEEK_S = 7 * 86400
 
@@ -157,7 +156,8 @@ def fake_state(scenario: str, now: datetime) -> MonitorState:
                 "warning": ("warning", "normal")}.get(scenario, ("normal", "normal"))
     fetched = now - timedelta(minutes=41) if scenario == "stale" else now - timedelta(seconds=12)
     status = {"stale": ApiStatus.STALE, "no_login": ApiStatus.NO_CREDENTIALS}.get(scenario, ApiStatus.LIVE)
-    detail = {ApiStatus.STALE: "Token expired. Sign in to Claude Code to restore live usage.",
+    # A missing or an expired sign-in in UsageClient's own words, as the dashboard's sign-in help shows them.
+    detail = {ApiStatus.STALE: EXPIRED_DETAIL,
               ApiStatus.NO_CREDENTIALS: NO_SIGN_IN_DETAIL}.get(status, "Live usage from the Claude API.")
 
     limits = [
@@ -172,8 +172,9 @@ def fake_state(scenario: str, now: datetime) -> MonitorState:
     usage = None if scenario == "no_login" else UsageSnapshot(
         fetched_at=fetched,
         limits=limits,
-        breakdown=[BreakdownRow("claude_code", "Claude Code", 100.0),
-                   BreakdownRow("chat", "Chats", 0.0),
+        # Someone with no Claude Code here spends the week in chats (limits_only); the rest is Claude Code's.
+        breakdown=[BreakdownRow("claude_code", "Claude Code", 0.0 if scenario == "limits_only" else 100.0),
+                   BreakdownRow("chat", "Chats", 100.0 if scenario == "limits_only" else 0.0),
                    BreakdownRow("cowork", "Cowork", 0.0)],
         breakdown_window_start=weekly_reset - timedelta(days=7),
         spend=Spend(enabled=False),

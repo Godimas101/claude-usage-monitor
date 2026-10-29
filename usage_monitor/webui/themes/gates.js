@@ -38,7 +38,7 @@
   // The link states app.js writes, as Windows 11 words them (the widget's own words where it has them).
   var VOCAB = {
     "UPLINK LIVE": "Live", "LIVE": "Live", "ACQUIRING": "Connecting", "AUTH LOST": "Sign-in needed", "NO CARRIER": "Offline",
-    "RATE LIMITED": "Rate limited", "NO CREDENTIALS": "Not signed in", "PAUSED": "Paused", "NO LINK": "No connection"
+    "RATE LIMITED": "Rate limited", "NO LOGIN": "Not signed in", "PAUSED": "Paused", "NO LINK": "No connection"
   };
   var TONES = {
     "UNDER PACE": "ok", "ON PACE": "ok", "SAFE": "ok", "BEHIND": "ok", "NORMAL": "ok", "NOMINAL": "ok",

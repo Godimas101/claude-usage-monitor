@@ -51,10 +51,10 @@ _LEGACY_RESERVED = frozenset({
     "limits", "weekly_scoped_shares",
 })
 _BACKOFF_STATUSES = frozenset({ApiStatus.RATE_LIMITED, ApiStatus.OFFLINE})
-_EXPIRED_DETAIL = "The Claude sign-in has expired; open Claude Code to renew it"
+EXPIRED_DETAIL = "The Claude sign-in has expired; open Claude Code to renew it"
 # Said to people who may never have used Claude Code (claude.ai and the Claude apps share its limits, #28), so it names
 # no file and no token, and points at the dashboard, which has the steps.
-_NO_SIGN_IN_DETAIL = "No Claude sign-in on this PC; sign in to Claude Code once (the dashboard shows how)"
+NO_SIGN_IN_DETAIL = "No Claude sign-in on this PC; sign in to Claude Code once (the dashboard shows how)"
 _FRACTION = re.compile(r"\.(\d+)")
 
 Opener = Callable[..., Any]
@@ -440,10 +440,10 @@ class UsageClient:
             self._stale_mtime = None
             self._failures = 0
             self.next_allowed_at = None
-            self._set(ApiStatus.NO_CREDENTIALS, _NO_SIGN_IN_DETAIL)
+            self._set(ApiStatus.NO_CREDENTIALS, NO_SIGN_IN_DETAIL)
             return self._result(fresh=False)
         if info.is_expired(now):
-            return self._stale(info.mtime, _EXPIRED_DETAIL)
+            return self._stale(info.mtime, EXPIRED_DETAIL)
         if self.status is ApiStatus.STALE and info.mtime == self._stale_mtime:
             return self._result(fresh=False)  # rejected token: wait for the file to change
         return self._request(token, info.mtime, now)

@@ -11,11 +11,15 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 - The widgets show the guard in every theme: a quiet mark while it is armed, and while it holds, **HOLD** with the time left, a cap tag on each limit over its cap and a line in the hover card. The tray tooltip says it too ([#27](https://github.com/Godimas101/claude-usage-monitor/issues/27)).
 - The Usage guard card on the Settings page shows the caps, the stagger, which sessions were told, which ones wait, and where the setup stands ([#27](https://github.com/Godimas101/claude-usage-monitor/issues/27)).
 - `state.json` carries a `guard` block: the guard's state, the limits over their caps, when work can resume and the caps in use ([#27](https://github.com/Godimas101/claude-usage-monitor/issues/27)).
+- **Sign-in help.** With no Claude sign-in on the PC, the dashboard explains why the monitor needs one and gives the steps to sign in to Claude Code once, even if you use Claude only on the web or in the app. It has the install command to copy and a **Check again** button. An expired sign-in gets **Check again** too ([#28](https://github.com/Godimas101/claude-usage-monitor/issues/28)).
+- On a PC with no Claude Code activity, Cost & value, Efficiency and History say why they are empty instead of showing zeros. The limits, their pace and the alerts work as usual ([#28](https://github.com/Godimas101/claude-usage-monitor/issues/28)).
+- The README has a section for people who use Claude on the web or in the app: how to sign in once, what works, what stays empty and how long a sign-in lasts ([#28](https://github.com/Godimas101/claude-usage-monitor/issues/28)).
 
 ### Changed
 - `--hook` can also run after each tool call (PostToolUse). There it adds nothing unless the usage guard holds or a limit passes the threshold ([#27](https://github.com/Godimas101/claude-usage-monitor/issues/27)).
 - When a limit's window resets, the monitor fetches the new numbers 30 seconds later, instead of at its next poll ([#27](https://github.com/Godimas101/claude-usage-monitor/issues/27)).
 - The monitor now runs `claude` for the usage guard's setup: `claude --version` and `claude mcp get` to show where setup stands, and `claude mcp add` or `remove` when you click Install or Remove. It still never sends a model request ([#27](https://github.com/Godimas101/claude-usage-monitor/issues/27)).
+- With no sign-in, the widgets send you to the dashboard, which has the steps, instead of to Claude Code, which you may not have. The dashboard says **NO LOGIN** instead of **NO CREDENTIALS** ([#28](https://github.com/Godimas101/claude-usage-monitor/issues/28)).
 
 ### Fixed
 - The taskbar strip stays in sight while Start, Search or a tray flyout is open, and while you peek at a window from its taskbar preview. It is now part of the taskbar itself, not a window floating over it ([#29](https://github.com/Godimas101/claude-usage-monitor/issues/29)).

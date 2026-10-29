@@ -460,7 +460,7 @@ S.formKey = null;
 // history pages to count. Every state here is made up; the page is as it starts (nothing decided, nothing being checked).
 const SIGN_UPDATED = "2026-10-21T16:11:48.000Z";
 const SIGN_LATER = "2026-10-21T16:12:05.000Z";
-const NO_SIGN_IN = "No Claude sign-in found; open Claude Code to sign in";
+const NO_SIGN_IN = "No Claude sign-in on this PC; sign in to Claude Code once (the dashboard shows how)";
 const ingestOf = (patch) => Object.assign({ running: false, files_done: 0, files_total: 0, last_duration_s: 0.01, last_error: null }, patch);
 const requestsIn = (n) => ({ all: { name: "all", start: null, end: null, totals: { requests: n } } });
 function forget() {
@@ -488,7 +488,7 @@ for (const page of PAGE_LIST) {
   monitorState("no_credentials");
   out.signIn.onPages[page] = topPart(page, "status");
 }
-monitorState("stale", { status_detail: "Sign-in token expired; open Claude Code to refresh it" });
+monitorState("stale", { status_detail: "The Claude sign-in has expired; open Claude Code to renew it" });
 out.signIn.expired = api.statusBanner();
 monitorState("stale", { status_detail: hostile });
 out.signIn.hostile = api.statusBanner();
@@ -507,6 +507,7 @@ out.limitsOnly = {
   noIngest: decided({ ingest: null }),
   firstIngestRunning: decided({ ingest: ingestOf({ running: true, files_done: 3, files_total: 40, last_duration_s: null }) }),
   firstIngestFailed: decided({ ingest: ingestOf({ last_duration_s: null, last_error: "RuntimeError: boom" }) }),
+  doneWithErrors: decided({ ingest: ingestOf({ last_error: "PermissionError on a.jsonl" }) }),
   done: decided({}),
   doneNoTotals: decided({ windows: { all: {} } }),
   noWindow: decided({ windows: {} }),
@@ -859,7 +860,7 @@ async function signInActions() {
     during, check: where(), html: api.statusBanner(),
   };
   // the same for an expired sign-in, in its own words
-  monitorState("stale", { status_detail: "Sign-in token expired; open Claude Code to refresh it" });
+  monitorState("stale", { status_detail: "The Claude sign-in has expired; open Claude Code to renew it" });
   await run(Object.assign({ "GET /api/state": [200, payload("stale", SIGN_LATER)] }, REFRESHED), () => api.helpAction("check-again"));
   out2.stillExpired = { check: where(), html: api.statusBanner() };
   // one request at a time: clicks while a check is on its way send nothing
