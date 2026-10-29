@@ -1,7 +1,7 @@
 """Dev helper: the real webui on the local API, fed by a fake MonitorState (no Win32, no tray).
 
-    python -m usage_monitor.ui.devserver --port 8765 --scenario normal|warning|critical|stale|guard
-                                         [--db PATH] [--theme ID[/VARIANT]]
+    python -m usage_monitor.ui.devserver --port 8765
+        --scenario normal|warning|critical|stale|guard|no_login|limits_only [--db PATH] [--theme ID[/VARIANT]]
 
 Used for Playwright checks and design review. Settings go to CUM_APPDATA_DIR (or a temporary
 folder), never to the owner's real app data, and the server is a dev one, so the "Start with
@@ -15,6 +15,13 @@ the one that holds: the guard is armed and the session is past its cap, two sess
 (Resume now releases it). Their files live in a folder of the dev server's own, and "Install" and "Remove" run the
 real agent/setup.py on a sandbox (a settings file in the dev folder and a claude that lives in memory), so nothing of
 the owner's ~/.claude, the app data folder or Claude Code is ever read or touched.
+
+Two scenarios are for someone who uses Claude on the web or in the app and has no Claude Code on this PC (#28). ``no_login``
+has no sign-in: the status is no_credentials, with no limits and no plan, and the ingest has finished with no file to read.
+``limits_only`` is signed in with the limits of ``normal``, and its statistics store holds no transcript (every window reads
+zero, the ingest has finished) but the usage readings the monitor stores at each poll, so the pace and the forecast work. In
+both, nothing is counted, so the pages that count Claude Code's records say so. A refresh (the Refresh buttons, "Check again")
+moves the fake state's ``updated_at`` as a real monitor's does, so the page sees the cycle it asked for arrive.
 
 The statistics routes (/api/analytics/*, /api/export) read a usage database. With ``--db PATH``
 that is the file you name, read the way the app reads its own (it is never created and never
@@ -78,7 +85,11 @@ from usage_monitor.ui.server import ApiServer, open_statistics_store
 
 log = get_logger(__name__)
 
-SCENARIOS = ("normal", "warning", "critical", "stale", "guard")
+SCENARIOS = ("normal", "warning", "critical", "stale", "guard", "no_login", "limits_only")
+# Scenarios of someone who uses Claude on the web or in the app (#28): no Claude Code transcript on this PC, so nothing is counted.
+NO_TRANSCRIPTS = ("no_login", "limits_only")
+# How UsageClient words the status of a missing sign-in (the text itself is the data layer's).
+NO_SIGN_IN_DETAIL = "No Claude sign-in found; open Claude Code to sign in"
 _SESSION_S = 5 * 3600
 _WEEK_S = 7 * 86400
 
@@ -95,6 +106,8 @@ _SCENARIO_PCT = {
     "critical": (93, 58, 12),
     "stale": (13, 2, 0),
     "guard": (96, 58, 12),          # the session is past the guard's 95 % cap, the week and Fable are not
+    "no_login": (0, 0, 0),          # no limits at all: there is no sign-in to read them with
+    "limits_only": (13, 2, 0),      # the limits of the normal scenario
 }
 
 
@@ -143,9 +156,9 @@ def fake_state(scenario: str, now: datetime) -> MonitorState:
     severity = {"critical": ("critical", "warning"), "guard": ("critical", "warning"),
                 "warning": ("warning", "normal")}.get(scenario, ("normal", "normal"))
     fetched = now - timedelta(minutes=41) if scenario == "stale" else now - timedelta(seconds=12)
-    status = ApiStatus.STALE if scenario == "stale" else ApiStatus.LIVE
-    detail = ("Token expired. Sign in to Claude Code to restore live usage." if status is ApiStatus.STALE
-              else "Live usage from the Claude API.")
+    status = {"stale": ApiStatus.STALE, "no_login": ApiStatus.NO_CREDENTIALS}.get(scenario, ApiStatus.LIVE)
+    detail = {ApiStatus.STALE: "Token expired. Sign in to Claude Code to restore live usage.",
+              ApiStatus.NO_CREDENTIALS: NO_SIGN_IN_DETAIL}.get(status, "Live usage from the Claude API.")
 
     limits = [
         Limit(kind="session", group="session", percent=float(session_pct), severity=severity[0],
@@ -156,7 +169,7 @@ def fake_state(scenario: str, now: datetime) -> MonitorState:
               resets_at=weekly_reset, is_active=True, label="FABLE WEEKLY", scope_model="Fable",
               window_seconds=_WEEK_S, allowance_pct=50.0, used_pct_of_weekly=float(fable_pct)),
     ]
-    usage = UsageSnapshot(
+    usage = None if scenario == "no_login" else UsageSnapshot(
         fetched_at=fetched,
         limits=limits,
         breakdown=[BreakdownRow("claude_code", "Claude Code", 100.0),
@@ -186,27 +199,36 @@ def fake_state(scenario: str, now: datetime) -> MonitorState:
         "month": window("month", month_start, month, month_models),
         "all": window("all", now - timedelta(days=180), everything),
     }
+    if scenario in NO_TRANSCRIPTS:      # the same windows with nothing in them; all-time starts at the first request, and there is none
+        windows = {name: WindowStats(name=name, start=w.start, end=w.end) for name, w in windows.items()}
+        windows["all"] = WindowStats(name="all", start=None, end=None)
     burn_by_scenario = {"normal": (1240.0, 6.10, "NORMAL"), "warning": (2140.0, 10.40, "FAST"),
                         "critical": (3400.0, 17.20, "VERY FAST"), "guard": (3400.0, 17.20, "VERY FAST"),
-                        "stale": (0.0, 0.0, "IDLE")}
+                        "stale": (0.0, 0.0, "IDLE"), "no_login": (0.0, 0.0, "IDLE"), "limits_only": (0.0, 0.0, "IDLE")}
     tokens_per_min, usd_per_hour, velocity = burn_by_scenario[scenario]
     # A gentle minute-to-minute drift, so the burn trace has a shape to draw.
     drift = 1.0 + 0.12 * math.sin(now.timestamp() / 150.0)
     tokens_per_min, usd_per_hour = round(tokens_per_min * drift, 1), round(usd_per_hour * drift, 2)
     ingest_running = scenario == "warning"
+    if scenario in NO_TRANSCRIPTS:      # the first read is done and found no transcript
+        ingest = IngestProgress(running=False, files_done=0, files_total=0, last_duration_s=0.01, last_error=None)
+    else:
+        ingest = IngestProgress(running=ingest_running, files_done=3120 if ingest_running else 4210,
+                                files_total=4210, last_duration_s=0.42, last_error=None)
+    plan = (PlanInfo(subscription_type=None, rate_limit_tier=None, name="Unknown plan", monthly_price_usd=None)
+            if scenario == "no_login" else
+            PlanInfo(subscription_type="max", rate_limit_tier="default_claude_max_5x", name="Max 5x", monthly_price_usd=100.0))
     return MonitorState(
         status=status,
         status_detail=detail,
         usage=usage,
-        usage_fetched_at=fetched,
-        plan=PlanInfo(subscription_type="max", rate_limit_tier="default_claude_max_5x",
-                      name="Max 5x", monthly_price_usd=100.0),
+        usage_fetched_at=None if usage is None else fetched,
+        plan=plan,
         windows=windows,
         burn=BurnRate(tokens_per_min=tokens_per_min, usd_per_hour=usd_per_hour, velocity=velocity,
                       window_minutes=30),
         unpriced_models=["claude-opus-6-preview"] if scenario == "critical" else [],
-        ingest=IngestProgress(running=ingest_running, files_done=3120 if ingest_running else 4210,
-                              files_total=4210, last_duration_s=0.42, last_error=None),
+        ingest=ingest,
         updated_at=now - timedelta(seconds=12),
     )
 
@@ -455,7 +477,8 @@ class SyntheticHistory:
         now = self._now()
         began = datetime.now()
         store = Store(":memory:")
-        items = _History(now, scale=self._scale).build()
+        # No transcript at all for someone who has no Claude Code here; the usage readings below are still stored, as a poll does.
+        items = [] if self._scenario in NO_TRANSCRIPTS else _History(now, scale=self._scale).build()
         pricing = Pricing.load()
         for start in range(0, len(items), CHUNK):
             store.add_items(items[start:start + CHUNK], pricing)
@@ -604,10 +627,19 @@ def make_server(scenario: str, port: int, settings_dir: Path | None = None, *, d
 
     guard_folder = folder / "guard-dev"
     guard_sessions = GuardSessions(guard_folder) if scenario == "guard" else None
+    refreshes = [0]
+
+    def refresh() -> None:
+        # A real monitor publishes a new state (a new updated_at) after a refresh, and the page tells that its cycle has run by
+        # it ("Check again" on the sign-in help). The fake one moves updated_at by a millisecond a refresh, the least JSON keeps.
+        refreshes[0] += 1
+        log.info("devserver: refresh requested")
 
     def state() -> MonitorState:
         moment = now()
         current = fake_state(scenario, moment)
+        if refreshes[0]:
+            current = dataclasses.replace(current, updated_at=current.updated_at + timedelta(milliseconds=refreshes[0]))
         if history is not None:
             history.sync(current)
         guard = fake_guard(current, settings, moment)
@@ -621,7 +653,7 @@ def make_server(scenario: str, port: int, settings_dir: Path | None = None, *, d
     server = ApiServer(
         state,
         settings,
-        refresh_cb=lambda: log.info("devserver: refresh requested"),
+        refresh_cb=refresh,
         update_cb={
             "check": update_check,
             "apply": lambda: {"started": False, "reason": "devserver never updates"},

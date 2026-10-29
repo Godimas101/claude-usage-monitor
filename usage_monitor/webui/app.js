@@ -33,6 +33,11 @@
  *             does) + .nm-actions (button.nm-btn[data-action=update-now | update-notes | update-skip]) + .nm-status.
  *             The first banner of every page but Settings (which has the same buttons in its System card), present only while
  *             /api/state reports a release that was not skipped.
+ * Help        .nm-msg.nm-help[role=region] is the status banner grown into a help panel, for the two statuses only the user can fix
+ *             (no_credentials: the steps to sign in; stale: what to do about an expired sign-in). b (the heading) + p + ol (the steps;
+ *             a li may end in .nm-cmd > code.nm-path + button.nm-btn[data-action=copy-command]) + .nm-actions (button.nm-btn.solid
+ *             [data-action=check-again], .nm-links > a[data-external]) + p.nm-status[role=status] (what a check found). A code is a
+ *             command the user types; it keeps its case.
  * Card        section.nm-card[.wide|.span-N][.is-warn|.is-crit|.is-real] > .nm-card-in > .nm-card-t
  *             (.nm-tag | h2.nm-ttl, and .nm-meta-t) + the body. .is-real marks the one card of real money.
  * Values      .nm-big (sizes .h .m .s), .nm-big-row, .nm-row2 (.is-base), .nm-facts, .nm-chip (.solid
@@ -94,6 +99,10 @@
  *             it showed before is not fresh, so a refresh of unchanged numbers replays nothing).
  *   Revisits  The last good report of each page and window is kept in memory: a page opened again shows those numbers at
  *             once and refreshes behind them, without a placeholder and without replaying the figures that did not change.
+ *   No records  A PC with no Claude Code activity (the monitor has finished reading and found no request: someone who uses Claude on
+ *             the web or in the app) has nothing for the cost, efficiency and history reports to count, and none is asked for. The
+ *             Overview's cost, efficiency and model cards keep their frame and title and say so in one .nm-empty line (data-state=ready,
+ *             no data-needs); Cost & value, Efficiency and History are one wide card that explains it.
  *
  * Motion      Everything that moves checks data-reduce-motion="1" on <html> (the reduce_motion setting) and
  *             prefers-reduced-motion. With either, nothing animates, enter and arrive are never called (cancel still is:
@@ -166,7 +175,8 @@
     repo: "https://github.com/Godimas101/claude-usage-monitor",
     bug: "https://github.com/Godimas101/claude-usage-monitor/issues/new?template=bug_report.md&labels=bug",
     patreon: "https://patreon.com/Godimas101",
-    hooks: "https://github.com/Godimas101/claude-usage-monitor/blob/main/docs/AGENT_HOOK.md"
+    hooks: "https://github.com/Godimas101/claude-usage-monitor/blob/main/docs/AGENT_HOOK.md",
+    readme: "https://github.com/Godimas101/claude-usage-monitor#-using-claude-on-the-web-or-in-the-app"
   };
   var POLL_CHOICES = [
     [60000, "1 MIN"], [300000, "5 MIN"], [600000, "10 MIN"], [900000, "15 MIN"], [1800000, "30 MIN"], [3600000, "60 MIN"]
@@ -183,6 +193,24 @@
   };
   var HOOK_WORDS = { installed: "INSTALLED", partial: "PARTLY INSTALLED", missing: "NOT INSTALLED", unknown: "UNKNOWN" };
   var MCP_WORDS = { registered: "REGISTERED", missing: "NOT REGISTERED", other: "A DIFFERENT PROGRAM", unknown: "UNKNOWN" };
+  // The sign-in help (#28): what the status banner says when there is no sign-in or it has expired, and the one command it shows.
+  // The command is text for the user to run in PowerShell; the page never fetches or links it. The heading is in capitals like the
+  // other banners' (the Gates theme sets it in sentence case).
+  var INSTALL_COMMAND = "irm https://claude.ai/install.ps1 | iex";
+  var SIGNIN_HEAD = "NO CLAUDE SIGN-IN YET";
+  var SIGNIN_WHY = "The monitor reads your plan's limits through the sign-in that Claude Code saves on this PC. Signing in to Claude Code once is enough, even if you use Claude on the web or in the Claude app. Claude Code needs a Pro or Max plan.";
+  var SIGNIN_RENEWS = "Claude Code renews the sign-in each time it runs. If the monitor later says the sign-in has expired, open Claude Code again.";
+  var CHECK_NONE = "Still no sign-in found.";
+  var CHECK_STALE = "Still no working sign-in.";
+  var CHECK_FAILED = "Could not check just now. Try again.";
+  // How long "Check again" waits for the monitor to publish the cycle it asked for, and how long the copy button's answer stays
+  // ("Copied", or "Press Ctrl+C" with the command selected, which needs a moment longer to read and act on).
+  var CHECK_WAIT_MS = 15000;
+  var COPY_MS = 3000;
+  var COPY_SELECT_MS = 8000;
+  // The pages that count Claude Code's records, on a PC that has none (#28): someone who uses Claude on the web or in the app.
+  var NO_ACTIVITY = "No Claude Code activity on this PC";
+  var NO_ACTIVITY_WHY = "These pages count the work Claude Code records on this PC. Claude on the web and in the Claude app keeps no records here, so there is nothing to count. Your limits, pace and alerts work as usual.";
   var BASIS = "API-equivalent at list prices";
   // The Fast mode card's note. It is the same words before the report, with no fast-mode request and with some, so the card is
   // as tall in all three and only its tone changes (a note that said something else per state wrapped to another line count).
@@ -308,6 +336,10 @@
     guardLost: false,        // the last ask got no answer
     resumeBusy: false,       // "Resume now" is being sent
     setup: { busy: "", result: null },   // "install" or "remove" while a click runs; the result of the last click
+    check: { busy: false, sent: false, from: "", at: 0, still: false, failed: false },   // "Check again" on the sign-in help (see checkAgain)
+    copy: "",                // the copy button's answer for a moment: "copied" or "select"
+    copyTimer: 0,
+    noActivity: false,       // the monitor has finished reading and found no Claude Code activity on this PC (see limitsOnly)
     odoShown: null,
     cmpTimer: 0,
     tipApi: null,
@@ -760,19 +792,21 @@
     }
   }
 
-  /* The reports the page on screen draws from. */
+  /* The reports the page on screen draws from. A PC with no Claude Code activity (limitsOnly) has nothing for the cost, efficiency
+   * and history reports to count, so the pages that show them, and the Overview's cost cards, ask for none. */
   function pageStats(page) {
+    var none = limitsOnly();
     switch (page) {
       case "overview":
-        return [statEntry("cost", { window: "cycle" }), statEntry("pacing"), statEntry("history")];
+        return none ? [statEntry("pacing")] : [statEntry("cost", { window: "cycle" }), statEntry("pacing"), statEntry("history")];
       case "limits":
         return [statEntry("pacing")];
       case "cost":
-        return [statEntry("cost", { window: S.ui.costWindow })];
+        return none ? [] : [statEntry("cost", { window: S.ui.costWindow })];
       case "efficiency":
-        return [statEntry("efficiency", { window: S.ui.efficiencyWindow })];
+        return none ? [] : [statEntry("efficiency", { window: S.ui.efficiencyWindow })];
       case "history":
-        return [statEntry("history")];
+        return none ? [] : [statEntry("history")];
       default:
         return [];
     }
@@ -1200,12 +1234,17 @@
     }
   }
 
+  /* The line under the heading when the link is not live. No sign-in and an expired one are the two states only the user can fix,
+   * so they get the help panel (signInHelp); the rest stay a plain line. */
   function statusBanner() {
     var s = st();
     if (!s || s.status === "live") {
       return "";
     }
     var info = STATUS[s.status] || STATUS.loading;
+    if (needsSignIn(s)) {
+      return signInHelp(s, info);
+    }
     return '<div class="nm-msg" role="status"><b>' + esc(info.text) + "</b>" + esc(s.status_detail || "") + "</div>";
   }
 
@@ -1410,14 +1449,17 @@
   }
 
   /* A card (or anything that fills in like one): built under its key, tagged, and in place of its numbers shows the problem
-   * when its report failed. needs: the stat entries it draws from. */
-  function cardPart(key, state, needs, build) {
+   * when its report failed. needs: the stat entries it draws from. none: a line to show in place of its contents when there is
+   * nothing for it to count (a PC with no Claude Code activity; the card is ready, it needs no report). */
+  function cardPart(key, state, needs, build, none) {
     S.chartCard = key;
     S.chartN = 0;
     var html = build();
     if (state === "error") {
       var failed = needs.filter(function (e) { return !e.data && e.error; })[0];
       html = errorSwap(html, failed ? statProblemShort(failed) : "Could not be loaded.");
+    } else if (none) {
+      html = emptySwap(html, none);
     }
     var p = part(key, tagCard(html, key, state, needs), state);
     p.card = true;
@@ -1434,14 +1476,24 @@
     });
   }
 
-  /* The card as it is with the problem in the place of its contents: the same frame and title, one line. */
-  function errorSwap(html, message) {
+  /* The card as it is with one line in the place of its contents: the same frame and title. */
+  function cardSwap(html, line) {
     var open = /^<section\b[^>]*>/.exec(html);
     var head = /<div class="nm-card-t[^"]*">[\s\S]*?<\/div>/.exec(html);
     if (!open || !head) {
       return html;
     }
-    return open[0] + '<div class="nm-card-in">' + head[0] + '<p class="nm-error" role="status">' + esc(message) + "</p></div></section>";
+    return open[0] + '<div class="nm-card-in">' + head[0] + line + "</div></section>";
+  }
+
+  /* ... with the problem, when the card's report failed. */
+  function errorSwap(html, message) {
+    return cardSwap(html, '<p class="nm-error" role="status">' + esc(message) + "</p>");
+  }
+
+  /* ... with what it would have counted, when there is nothing to count. */
+  function emptySwap(html, message) {
+    return cardSwap(html, '<p class="nm-empty">' + esc(message) + "</p>");
   }
 
   var FIGURES = ".nm-big, .nm-stat-v, .nm-stat-s, .nm-mrow .v, .nm-kv b, .nm-facts > span, .nm-pace > span, .nm-pace > b, .nm-pace > .fc, " +
@@ -1740,6 +1792,36 @@
     }
   }
 
+  // ── A PC with no Claude Code activity (#28) ─────────────────────────────────────
+
+  /* True when the monitor has finished reading this PC's Claude Code records and found none: the all-time window holds no request,
+   * and an ingest is done (not running, and it has taken a time). Someone who uses Claude on the web or in the app has none, and
+   * the pages that count records would be cards full of zeros. It is never decided before a state has arrived or while the first
+   * ingest still runs (the windows read zero then because nothing is counted yet). Once decided it holds through the ingests that
+   * follow (one runs every minute, and the state says "running" while it does) and ends when a request is counted. */
+  function limitsOnly() {
+    var s = st();
+    var all = windowOf("all");
+    var requests = all && all.totals ? num(all.totals.requests) : null;
+    if (!s || !s.ingest || requests === null) {
+      return S.noActivity;
+    }
+    if (requests > 0) {
+      S.noActivity = false;
+    } else if (!s.ingest.running && num(s.ingest.last_duration_s) !== null) {
+      S.noActivity = true;
+    }
+    return S.noActivity;
+  }
+
+  /* Cost & value, Efficiency and History on such a PC: one card that says why there is nothing, in place of cards full of zeros. */
+  function noActivityPage(key) {
+    var cards = [cardPart("none", "ready", [], function () {
+      return card({ title: NO_ACTIVITY, cls: "wide", body: '<p class="nm-lede">' + esc(NO_ACTIVITY_WHY) + "</p>" });
+    })];
+    return pageModel(key, "nm-pgrid", cards);
+  }
+
   // ── Overview ────────────────────────────────────────────────────────────────────
 
   /* The plan the sign-in detected, with the price the plan costs (never the override). */
@@ -1995,16 +2077,20 @@
     }));
     var n = costNumbers();
     var he = statEntry("history");
+    // No Claude Code activity on this PC (limitsOnly): the three cards that count records say so in place of their figures, and
+    // they ask for no report, so they are ready, with no problem to report.
+    var none = limitsOnly() ? NO_ACTIVITY + "." : "";
     // Nothing to show yet (n.pending): the cost report is on its way, or it failed and the monitor has no month of its own to
     // stand in (a billing day is set). The three cards that draw from it say which, as they do on the Cost page.
-    var costState = n.pending ? entryState([n.entry]) : "ready";
-    cards.push(cardPart("cost", costState, [n.entry, he], function () { return costCard(n); }));
-    cards.push(cardPart("efficiency", costState, [n.entry], function () { return efficiencyCard(n); }));
-    cards.push(cardPart("models", costState, [n.entry], function () { return modelMixCard(n); }));
+    var costState = n.pending && !none ? entryState([n.entry]) : "ready";
+    cards.push(cardPart("cost", costState, none ? [] : [n.entry, he], function () { return costCard(n); }, none));
+    cards.push(cardPart("efficiency", costState, none ? [] : [n.entry], function () { return efficiencyCard(n); }, none));
+    cards.push(cardPart("models", costState, none ? [] : [n.entry], function () { return modelMixCard(n); }, none));
     cards.push(cardPart("surfaces", waiting, [], function () { return surfaceCard(u); }));
     cards.push(cardPart("burn", waiting, [], function () { return burnCard(s); }));
     return pageModel("overview", "nm-grid", cards, {
-      hazard: hazardBand(worstSeverity(limits())), problem: n.pending ? problemBanner([n.entry]) : "", stale: staleBanner([n.entry, pe, he])
+      hazard: hazardBand(worstSeverity(limits())), problem: n.pending && !none ? problemBanner([n.entry]) : "",
+      stale: staleBanner(none ? [pe] : [n.entry, pe, he])
     });
   }
 
@@ -2431,6 +2517,9 @@
   }
 
   function costPage() {
+    if (limitsOnly()) {
+      return noActivityPage("cost");
+    }
     var e = statEntry("cost", { window: S.ui.costWindow });
     var d = e.data;
     // The parts that do not depend on the window (the plan multiple, the months, the windows table, the top sessions) are
@@ -2717,6 +2806,9 @@
   }
 
   function efficiencyPage() {
+    if (limitsOnly()) {
+      return noActivityPage("efficiency");
+    }
     var e = statEntry("efficiency", { window: S.ui.efficiencyWindow });
     var d = e.data;
     var s = st();
@@ -2861,6 +2953,11 @@
   }
 
   function historyPage() {
+    if (limitsOnly()) {
+      S.odoTotal = null;                               // no odometer to roll and no comparison to turn on this page
+      S.cmpList = [];
+      return noActivityPage("history");
+    }
     var e = statEntry("history");
     var d = e.data;
     var state = entryState([e]);
@@ -3559,6 +3656,144 @@
       skipUpdate();
     } else if (action === "update-notes" && found && found.url) {
       openExternal(found.url);
+    }
+  }
+
+  // ── The sign-in help (#28) ──────────────────────────────────────────────────────
+
+  /* The two states only the user can fix: there is no sign-in (someone who uses Claude on the web or in the app and never ran
+   * Claude Code), or the sign-in has expired or was turned down. */
+  function needsSignIn(s) {
+    return !!s && (s.status === "no_credentials" || s.status === "stale");
+  }
+
+  /* A command the user types: it keeps its case in every theme. */
+  function codeText(text) {
+    return '<code class="nm-path">' + esc(text) + "</code>";
+  }
+
+  function copyButton() {
+    var label = S.copy === "copied" ? "Copied" : S.copy === "select" ? "Press Ctrl+C" : "Copy";
+    var title = S.copy === "copied" ? "Copied to the clipboard" : S.copy === "select" ? "Press Ctrl+C to copy the selected command" : "Copy the install command";
+    return '<button class="nm-btn" type="button" data-action="copy-command" data-fid="signin-copy" aria-label="' + esc(title) + '">' + esc(label) + "</button>";
+  }
+
+  /* The status banner for a missing or expired sign-in: what happened, what to do about it, and a button that looks again. With no
+   * sign-in the steps start from nothing (installing Claude Code, which also gives the plan's limits to someone who uses Claude on
+   * the web or in the app); with an expired one the monitor's own reason stays and the one thing to do is added. info is the
+   * status's entry in STATUS (its heading). */
+  function signInHelp(s, info) {
+    var missing = s.status === "no_credentials";
+    var busy = S.check.busy;
+    var found = S.check.failed ? CHECK_FAILED : S.check.still ? (missing ? CHECK_NONE : CHECK_STALE) : "";
+    var body;
+    if (missing) {
+      var steps = [
+        esc("Open PowerShell: press Start and type PowerShell."),
+        esc("Install Claude Code:") + '<div class="nm-cmd">' + codeText(INSTALL_COMMAND) + copyButton() + "</div>",
+        esc("Open a new PowerShell window, run ") + codeText("claude") + esc(", and sign in with your Claude account in the browser that opens."),
+        esc("Come back here and press Check again.")
+      ];
+      body = "<p>" + esc(SIGNIN_WHY) + "</p><ol>" + steps.map(function (step) { return "<li>" + step + "</li>"; }).join("") + "</ol><p>" + esc(SIGNIN_RENEWS) + "</p>";
+    } else {
+      body = (s.status_detail ? "<p>" + esc(s.status_detail) + "</p>" : "") + "<p>" + esc("Claude Code renews the sign-in each time it runs. Open Claude Code, or run ") +
+        codeText("claude") + esc(" in PowerShell, then press Check again.") + "</p>";
+    }
+    return '<div class="nm-msg nm-help" role="region" aria-label="Claude sign-in"><b>' + esc(missing ? SIGNIN_HEAD : info.text) + "</b>" + body +
+      '<div class="nm-actions"><button class="nm-btn solid" type="button" data-action="check-again" data-fid="check-again"' + (busy ? ' aria-disabled="true"' : "") + ">" +
+      (busy ? "Checking…" : "Check again") + "</button>" +
+      (missing ? '<span class="nm-links"><a href="' + esc(LINKS.readme) + '" data-external="1">More in the README</a></span>' : "") + "</div>" +
+      (found ? '<p class="nm-status" role="status">' + esc(found) + "</p>" : "") + "</div>";
+  }
+
+  /* Check again: asks the monitor to read the sign-in now (POST /api/refresh answers at once, the cycle runs after it) and keeps
+   * "Checking…" on the button until the state of that cycle is in (syncCheck). One at a time. */
+  function checkAgain() {
+    if (S.check.busy) {
+      return;
+    }
+    var s = st();
+    var lost = function () {
+      S.check = { busy: false, sent: true, from: "", at: 0, still: false, failed: true };
+      renderPage();
+    };
+    S.check = { busy: true, sent: false, from: s && s.updated_at ? s.updated_at : "", at: Date.now(), still: false, failed: false };
+    renderPage();
+    api("POST", "/api/refresh").then(function (res) {
+      if (!res.ok) {
+        lost();
+        return;
+      }
+      S.check.sent = true;
+      poll(true);
+    }, lost);
+  }
+
+  /* Brings a check to its end and says whether the panel changed. It is over when the monitor has published the cycle it was asked
+   * for (the state's updated_at moved) or, whatever has arrived, after CHECK_WAIT_MS; a state that still needs a sign-in then
+   * makes the panel say so. When the sign-in is found, or the status is another one, there is nothing left to say. */
+  function syncCheck() {
+    var c = S.check;
+    var s = st();
+    if (!needsSignIn(s)) {
+      if (c.busy || c.still || c.failed) {
+        S.check = { busy: false, sent: false, from: "", at: 0, still: false, failed: false };
+        return true;
+      }
+      return false;
+    }
+    if (!c.busy || !c.sent || (s.updated_at === c.from && Date.now() - c.at < CHECK_WAIT_MS)) {
+      return false;
+    }
+    S.check = { busy: false, sent: true, from: c.from, at: c.at, still: true, failed: false };
+    return true;
+  }
+
+  /* The command, selected, so Ctrl+C takes it where the clipboard could not be written. */
+  function selectCommand() {
+    var code = $(".nm-help .nm-cmd code");
+    var picked = window.getSelection ? window.getSelection() : null;
+    if (code && picked && document.createRange) {
+      var range = document.createRange();
+      range.selectNodeContents(code);
+      picked.removeAllRanges();
+      picked.addRange(range);
+    }
+  }
+
+  /* Copy: the install command to the clipboard. Where the page may not write it (no clipboard, or it refuses) the command is
+   * selected instead. The answer shows on the button for COPY_MS. */
+  function copyCommand() {
+    var clip = window.navigator && window.navigator.clipboard;
+    var answer = function (ok) {
+      S.copy = ok ? "copied" : "select";
+      renderPage();
+      if (!ok) {
+        selectCommand();
+      }
+      window.clearTimeout(S.copyTimer);
+      S.copyTimer = window.setTimeout(function () {
+        S.copy = "";
+        renderPage();
+      }, ok ? COPY_MS : COPY_SELECT_MS);
+    };
+    if (clip && typeof clip.writeText === "function") {
+      try {
+        clip.writeText(INSTALL_COMMAND).then(function () { answer(true); }, function () { answer(false); });
+        return;
+      } catch (e) {
+        /* a clipboard that throws: the command is selected instead */
+      }
+    }
+    answer(false);
+  }
+
+  /* The help panel's buttons. */
+  function helpAction(action) {
+    if (action === "check-again") {
+      checkAgain();
+    } else if (action === "copy-command") {
+      copyCommand();
     }
   }
 
@@ -4444,6 +4679,7 @@
     }
     applyTheme(S.data.theme);
     ensureThemes();
+    syncCheck();                                       // a check of the sign-in ends with the state of the cycle it asked for
     render();
   }
 
@@ -4507,6 +4743,9 @@
     renderAge();
     renderHealth();
     guardTick();
+    if (syncCheck()) {
+      renderPage();                                    // a check that waited too long ends, or the sign-in was found
+    }
     if (S.data) {
       ensureStats();
     }
@@ -4632,6 +4871,11 @@
           updateAction(banner.getAttribute("data-action"));
           return;
         }
+        var help = closest(".nm-help button[data-action]");
+        if (help) {
+          helpAction(help.getAttribute("data-action"));
+          return;
+        }
         if (S.formKey === "settings") {
           settingsClick(event);
         }
@@ -4673,7 +4917,8 @@
       updateAction: updateAction, installUpdate: installUpdate, skipUpdate: skipUpdate, aboutPage: aboutPage,
       settingsPage: settingsPage, settingsChange: settingsChange, labelFor: labelFor, guardCard: guardCard, guardView: guardView,
       guardLiveHtml: guardLiveHtml, guardSetupHtml: guardSetupHtml, guardResultHtml: guardResultHtml, syncGuard: syncGuard,
-      pollGuard: pollGuard, guardTick: guardTick
+      pollGuard: pollGuard, guardTick: guardTick, statusBanner: statusBanner, limitsOnly: limitsOnly, pageStats: pageStats,
+      checkAgain: checkAgain, syncCheck: syncCheck, copyCommand: copyCommand, helpAction: helpAction
     };
     return;
   }
