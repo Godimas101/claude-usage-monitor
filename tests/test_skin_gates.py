@@ -727,6 +727,7 @@ def test_the_footer_copy_follows_the_state():
     assert gates._footer_runs(dump.sample_model("paused"))[0][0].startswith("Paused")
     assert lead(dump.sample_model("rate_limited")) == "Rate limited."
     assert lead(dump.sample_model("no_credentials")) == "No sign-in found."
+    assert gates._footer_runs(dump.sample_model("no_credentials"))[1][0] == " Open the dashboard for help."   # not Claude Code (#28)
     assert lead(dump.sample_model("critical")) == "Nearly out"
     assert lead(dump.sample_model("warning")) == "Ahead of pace"
     assert lead(dump.sample_model("normal2")) == "Under pace"

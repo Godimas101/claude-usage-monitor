@@ -744,7 +744,7 @@ _STATUS_COPY: dict[ApiStatus, tuple[str, str, str]] = {
     ApiStatus.OFFLINE: ("", "No connection. Retrying every minute.", "text_3"),
     ApiStatus.PAUSED: ("", "Paused. Resume to keep usage live.", "text_3"),
     ApiStatus.RATE_LIMITED: ("Rate limited.", " Showing the last reading.", "warn"),
-    ApiStatus.NO_CREDENTIALS: ("No sign-in found.", " Open Claude Code to sign in.", "warn"),
+    ApiStatus.NO_CREDENTIALS: ("No sign-in found.", " Open the dashboard for help.", "warn"),
     ApiStatus.LOADING: ("", "Fetching your usage.", "text_3"),
 }
 

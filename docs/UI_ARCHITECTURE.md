@@ -252,6 +252,12 @@ none. Nostromo: the dashed auth box reads "AUTH LINK LOST." / "OPEN CLAUDE CODE 
 (`STALE_MESSAGES`, by status). Night City: the hazard band reads "RELINK // OPEN CLAUDE CODE"
 (`theme.extras.copy.stale_auth`). Gates: the footer reads "Hmm, we lost touch. Sign in to Claude Code."
 
+No sign-in at all is a different case (#28): the person may never have used Claude Code (claude.ai and the
+Claude apps share its limits), so the widgets send them to the dashboard, which has the steps, rather than to
+Claude Code. The neutral text is "NO LOGIN FOUND - OPEN THE DASHBOARD" (Nostromo's auth box shows it as its two
+lines), Night City's band "NO LOGIN // OPEN DASHBOARD" (`theme.extras.copy.no_login`), and Gates' footer
+"No sign-in found. Open the dashboard for help."
+
 ### `ui/`
 ```python
 class UIHost:                                   # host.py

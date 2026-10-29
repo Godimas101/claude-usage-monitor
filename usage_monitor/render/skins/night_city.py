@@ -174,6 +174,7 @@ UNIT = Type(FONT_MONO, 11.0, 0.0, 0.85)
 STRIP_PCT = Type(FONT_MONO, 11.0, 0.0, 0.85)
 
 DEFAULT_STALE_AUTH = "RELINK // OPEN CLAUDE CODE"
+DEFAULT_NO_LOGIN = "NO LOGIN // OPEN DASHBOARD"   # no sign-in at all: the dashboard has the steps (#28)
 DEFAULT_OFFLINE = "NO SIGNAL // NET DOWN"
 BAND_STATUSES = frozenset({ApiStatus.STALE, ApiStatus.NO_CREDENTIALS, ApiStatus.OFFLINE, ApiStatus.RATE_LIMITED})
 AGE_STATUSES = frozenset({ApiStatus.STALE, ApiStatus.OFFLINE, ApiStatus.RATE_LIMITED})
@@ -639,6 +640,8 @@ def _band_text(theme: Any, model: WidgetModel) -> str:
         return _copy(theme, "offline", DEFAULT_OFFLINE)
     if model.status is ApiStatus.RATE_LIMITED:
         return model.status_text.upper()
+    if model.status is ApiStatus.NO_CREDENTIALS:
+        return _copy(theme, "no_login", DEFAULT_NO_LOGIN)
     return _copy(theme, "stale_auth", DEFAULT_STALE_AUTH)
 
 

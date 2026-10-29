@@ -186,7 +186,7 @@ def test_nostromo_words_the_expired_sign_in_as_its_approved_mockup():
 def test_nostromo_keeps_the_neutral_text_where_it_has_no_wording_of_its_own():
     no_login = dump.sample_model("no_credentials")
     assert nostromo_skin._message_text(no_login) == STALE_MESSAGE_NO_LOGIN
-    assert nostromo_skin._message_lines(STALE_MESSAGE_NO_LOGIN) == ["NO LOGIN FOUND", "OPEN CLAUDE CODE"]
+    assert nostromo_skin._message_lines(STALE_MESSAGE_NO_LOGIN) == ["NO LOGIN FOUND", "OPEN THE DASHBOARD"]
     for name in ("normal3", "offline", "paused", "rate_limited", "loading"):
         assert nostromo_skin._message_text(dump.sample_model(name)) is None, name
 

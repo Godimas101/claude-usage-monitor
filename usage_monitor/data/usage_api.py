@@ -51,8 +51,10 @@ _LEGACY_RESERVED = frozenset({
     "limits", "weekly_scoped_shares",
 })
 _BACKOFF_STATUSES = frozenset({ApiStatus.RATE_LIMITED, ApiStatus.OFFLINE})
-_EXPIRED_DETAIL = "Sign-in token expired; open Claude Code to refresh it"
-_NO_SIGN_IN_DETAIL = "No Claude sign-in found; open Claude Code to sign in"
+_EXPIRED_DETAIL = "The Claude sign-in has expired; open Claude Code to renew it"
+# Said to people who may never have used Claude Code (claude.ai and the Claude apps share its limits, #28), so it names
+# no file and no token, and points at the dashboard, which has the steps.
+_NO_SIGN_IN_DETAIL = "No Claude sign-in on this PC; sign in to Claude Code once (the dashboard shows how)"
 _FRACTION = re.compile(r"\.(\d+)")
 
 Opener = Callable[..., Any]
@@ -476,7 +478,7 @@ class UsageClient:
         if code in (401, 403):
             log.warning("usage API rejected the sign-in (HTTP %d); waiting for the credentials file "
                         "to change", code)
-            return self._stale(mtime, f"Sign-in rejected (HTTP {code}); open Claude Code to sign in again")
+            return self._stale(mtime, f"Claude did not accept the sign-in (HTTP {code}); open Claude Code to sign in again")
         if code == 429:
             return self._rate_limited(now, _retry_after_seconds(headers, now))
         return self._offline(now, f"HTTP {code}")

@@ -30,7 +30,7 @@ GUARD_HOLDING = "holding"               # ... or a watched limit is at its cap a
 GUARD_STATES: tuple[str, ...] = (GUARD_ARMED, GUARD_HOLDING)
 
 STALE_MESSAGE_EXPIRED = "LOGIN EXPIRED - OPEN CLAUDE CODE"
-STALE_MESSAGE_NO_LOGIN = "NO LOGIN FOUND - OPEN CLAUDE CODE"
+STALE_MESSAGE_NO_LOGIN = "NO LOGIN FOUND - OPEN THE DASHBOARD"   # it has the steps for a claude.ai or app user (#28)
 
 STATUS_TEXT: dict[ApiStatus, str] = {
     ApiStatus.LOADING: "LOADING",

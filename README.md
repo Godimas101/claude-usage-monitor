@@ -21,7 +21,7 @@ A free Windows tray utility that keeps your **Claude Code plan usage** where you
 
 1. **Download** the latest installer from the [**Releases page**](https://github.com/Godimas101/claude-usage-monitor/releases/latest) (`ClaudeUsageMonitorSetup-v….exe`). No Python needed.
 2. **Run it.** It installs for your user only, so there is no admin prompt, and it has a **Start with Windows** box if you want the monitor at every sign-in.
-3. **Have Claude Code installed and signed in.** That sign-in is where your limits come from. The widgets appear next to the tray as soon as the app starts.
+3. **Have Claude Code installed and signed in.** That sign-in is where your limits come from. The widgets appear next to the tray as soon as the app starts. Only use Claude on the web or in the app? [Sign in to Claude Code once](#-using-claude-on-the-web-or-in-the-app).
 4. **Click the tray icon** (or double-click the floating widget) to open the dashboard.
 
 ## ✨ Features
@@ -227,16 +227,31 @@ Use `python main.py` instead if you want a console that shows errors (Ctrl+C qui
 ## 🔩 Requirements
 
 - Windows 11, 64-bit. Version 2 is built and tested there; Windows 10 has not been tested.
-- **Claude Code**, installed and signed in with a Claude account (that is where your limits and your transcripts come from)
+- **Claude Code**, signed in with your Claude account at least once. That is where your limits come from; the Cost, Efficiency and History pages also need you to use it. Only use Claude on the web or in the app? See [below](#-using-claude-on-the-web-or-in-the-app).
 - The **Microsoft Edge WebView2 runtime** for the dashboard window. It comes with Windows 11, and the installer offers to download it when it is missing. Without it the dashboard opens in your default browser instead.
 - Python 3.10 or newer, only if you run from source
+
+## 🌐 Using Claude on the web or in the app
+
+The 5-hour and weekly limits are shared by claude.ai, the Claude apps and Claude Code, so the monitor is just as useful if you never write code. It does need Claude Code's sign-in, though: Anthropic's usage API only answers with the sign-in that Claude Code saves on your PC. Sign in to Claude Code once:
+
+1. Open PowerShell: press Start and type **PowerShell**.
+2. Install Claude Code with Anthropic's installer: `irm https://claude.ai/install.ps1 | iex`. [Anthropic's setup page](https://code.claude.com/docs/en/setup) has the other ways.
+3. Open a new PowerShell window, run `claude`, and sign in with your Claude account in the browser that opens. Claude Code needs a paid plan such as Pro or Max; the free plan doesn't include it.
+4. In the monitor's dashboard, press **Check again**, or wait for the next fetch.
+
+- **What works:** the limits, their pace and forecasts, the alerts, the widgets and the usage guard.
+- **What stays empty:** Cost & value, Efficiency and History. They count the work Claude Code records on your PC, and Claude on the web or in an app leaves no records here. The pages say so instead of showing zeros.
+- **How long a sign-in lasts:** Claude Code renews it each time it runs. If you don't use Claude Code, the sign-in runs out after a while and the widgets show **STALE**. Open Claude Code again (run `claude`), and the monitor picks up the renewed sign-in by itself.
+- **What the monitor won't do:** read the Claude desktop app's sign-in or your browser's claude.ai cookies (a claude.ai session key is a full key to your account), or sign you in itself (that would mean reusing Claude Code's own sign-in, which isn't meant for other apps).
 
 ## 🩺 Troubleshooting
 
 | You see | What is going on | What to do |
 |---|---|---|
 | **STALE**, with a message to open Claude Code | The sign-in Claude Code saved has expired or was rejected. The monitor never signs in for you. | Open Claude Code. It refreshes the sign-in file, and the monitor picks the change up by itself. |
-| **NO LOGIN** | There is no Claude sign-in on this PC. | Sign in to Claude Code with your Claude account. An API-key-only setup has no plan limits to show. |
+| **NO LOGIN** | There is no Claude sign-in on this PC. | Sign in to Claude Code once with your Claude account, even if you use Claude on the web or in the app: [the steps](#-using-claude-on-the-web-or-in-the-app). An API-key-only setup has no plan limits to show. |
+| Cost & value, Efficiency and History are empty | There are no Claude Code records on this PC, so there is nothing to count. That is normal if you use Claude on the web or in an app. | Nothing: the limits, pace and alerts work as usual. |
 | **OFFLINE** | The usage API could not be reached. Your last numbers stay on screen. | Check your network. It retries after 30 seconds, then waits longer each time, up to 15 minutes. |
 | **RATE LIMITED** | The usage API asked for a pause. | It waits as long as the API says (or 1 minute, growing to 15). A longer fetch interval in Settings helps. |
 | **PAUSED** | Your screen is locked or a screensaver is running, and no Claude session asked for the usage in the last hour. | Nothing: it refreshes the moment you are back. |
