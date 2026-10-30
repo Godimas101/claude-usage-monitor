@@ -324,15 +324,21 @@ once per pause. While `agent-demand` in the same folder is younger than an hour 
 runs happen. A failed write is logged once per kind of failure and never stops the cycle.
 Each cycle also evaluates the usage guard (`agent/guard.py`, #27) into `MonitorState.guard`, and
 `state.json` carries it with the policy it was evaluated against. A limit whose window reset after
-the last reading brings the next fetch forward to `RESET_FETCH_DELAY` (30 s) after the reset, so
-sessions waiting on the guard are released on fresh numbers.
+the last reading brings the next fetch forward: the first cycle at least `RESET_FETCH_DELAY` (30 s)
+after the reset fetches, about a minute after it with the 60 s cycle, instead of waiting for the
+poll interval. Waiting sessions do not wait for it: each reader evaluates the guard again, and a
+window whose reset has passed no longer counts.
 
 ### `agent/` (#24, #27)
 `status.py` builds, writes and reads `state.json` (schema 1) and makes the one-line summary.
 `guard.py` is the usage guard's verdict (off, armed or holding, the limits over their caps and when
 work can resume), pure and evaluated again by each reader, because a window may have reset since
 the reading. `sessions.py` owns the files the guard's processes share: who was told
-(`hook-seen.json`), who waits (`waiting/<pid>.json`) and the `resume-now` marker.
+(`hook-seen.json`, read and rewritten under the byte-range lock `hook-seen.lock`, since parallel
+subagents run their hooks at once), who waits (`waiting/<pid>.json`, with the process's creation
+time, so a file left by a killed wait whose id Windows gave to another process counts for nothing
+and is removed), when the last wait was let go (`wait-released`: waits go oldest first, a stagger
+apart) and the `resume-now` marker.
 `cli.py` holds `--status [--json]`, `--hook` (which on PostToolUse also tells a working session once
 per holding episode that a cap was reached), `--gate` and `--wait` (a background command that ends
 when the guard lets work resume, which wakes its session), and `mcp.py` a stdio MCP server whose one tool,
@@ -346,8 +352,12 @@ the file under it, and never writes a reading older than the one on disk. `--hoo
 except at `SessionStart`, and `--hook` and `--gate` exit 0 on every path. The guard only informs:
 nothing in it blocks a tool or stops a session. `setup.py` is its one-click setup, run by the
 Settings card through the local API: it backs up Claude Code's user settings and writes the three
-`--hook` entries, and registers the MCP tool with `claude mcp add`. It runs only in the installed
-app, never in a dev instance. How to wire it into Claude Code: [`AGENT_HOOK.md`](AGENT_HOOK.md).
+`--hook` entries, and registers the MCP tool with `claude mcp add`. It knows its own entries by the
+exe's file name and `--hook`, so a moved install is replaced rather than doubled; it refuses when the
+file changed since it was read or holds what strict JSON cannot write back; and a `claude` that runs
+past its timeout is ended with its whole process tree (an npm `claude.cmd` leaves node.exe holding
+the pipes). It runs only in the installed app, never in a dev instance. How to wire it into Claude
+Code: [`AGENT_HOOK.md`](AGENT_HOOK.md).
 
 ## Phase 2 — stats (#11–#14)
 

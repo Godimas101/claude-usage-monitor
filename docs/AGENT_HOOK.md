@@ -179,13 +179,24 @@ model-limited week such as Fable (off by default). Then press **Install** on the
 **When work can resume:** only when every watched limit is under its cap again. The guard holds
 until the latest reset among the limits that are over their caps, so a fresh 5-hour window while
 the week is still over its cap wakes nobody. After a window resets, the app fetches the new numbers
-30 seconds later.
+at its first check from 30 seconds on, about a minute after the reset.
 
-**Waking up.** The notice offers the session a command to run as a background command:
+**Waking up.** The notice offers the session a command to run as a background command, with this
+app's path and the session's id filled in, in two forms. In Git Bash, which Claude Code's Bash tool
+uses:
 
 ```
 "C:/Users/you/AppData/Local/ClaudeUsageMonitor/ClaudeUsageMonitor.exe" --wait --session <id>
 ```
+
+In PowerShell:
+
+```
+& "C:/Users/you/AppData/Local/ClaudeUsageMonitor/ClaudeUsageMonitor.exe" --wait --session <id> | Out-String
+```
+
+PowerShell does not wait for a windowed program unless its output goes through a pipe, so without
+`| Out-String` the command would end at once and wake the session while the guard still holds.
 
 - `--wait` ends when work can resume, and Claude Code wakes a session when one of its background
   commands ends. That works in the terminal and in VS Code.
@@ -195,24 +206,39 @@ the week is still over its cap wakes nobody. After a window resets, the app fetc
   whatever the limits say. Turning the guard off wakes them too.
 - `--wait` reads `state.json` every 30 seconds. With the app closed, it asks the usage API itself at
   most every 15 minutes. With no reading at all, it keeps waiting.
+- Updating or uninstalling the app ends the waits that are running, since they are the app's own
+  program. Their sessions wake without the "the wait is over" line, so Claude should check the plan
+  usage, and run `--wait` again if the guard still holds.
 
 **What Install does:**
-- It checks Claude Code first: the `claude` command must be on the PATH, at 2.1.139 or newer. With an
-  older one it changes nothing and tells you to run `claude update`.
+- It checks Claude Code first: the `claude` command must be on the PATH, at 2.1.139 or newer. It
+  looks on the PATH as Windows holds it now, so a Claude Code installed while the monitor runs is
+  found. With an older one it changes nothing, names the `claude` it found, and tells you to run
+  `claude update`.
 - It backs up your Claude Code user settings (`%USERPROFILE%\.claude\settings.json`, or the folder in
-  `CLAUDE_CONFIG_DIR`) to `settings.json.cum-backup-<date>-<time>` beside the file.
+  `CLAUDE_CONFIG_DIR`) to `settings.json.cum-backup-<date>-<time>` beside the file, and keeps the five
+  newest of those backups. The file is saved again in a standard layout (a two-space indent); every
+  value in it stays as it was.
 - It adds the SessionStart, UserPromptSubmit and PostToolUse entries shown under [Hooks](#hooks). An
-  entry of this app's already in one of those events, such as a `--hook` you added by hand for v2.1,
-  is replaced, and the backup keeps it. Your other hooks stay as they are, including a `--gate` you
-  added yourself.
+  entry of this app's already in one of those events, such as a `--hook` you added by hand for v2.1 or
+  one that still points at an older install folder, is replaced, and the backup keeps it. Your other
+  hooks stay as they are, including a `--gate` you added yourself.
 - It registers the `get_plan_usage` MCP tool with `claude mcp add`. A `claude-usage` tool that starts
-  another program is replaced. When `claude` is an npm install and the app's path has a character that
-  cmd.exe would misread, the card gives you the command to run yourself instead.
-- Running it again changes nothing. A settings file that is not valid JSON is left alone, and the card
-  says why.
+  another program is replaced, and the card says what it started. When `claude` is an npm install and
+  the app's path has a character that cmd.exe would misread, the card gives you the command to run
+  yourself instead.
+- Running it again changes nothing. A settings file that is not valid JSON, that holds a value it
+  cannot write back as it is, or that Claude Code saves while setup works, is left alone, and the card
+  says why. An empty file counts as no settings, as Claude Code reads it.
+- Sessions that are already open pick up the hooks by themselves: Claude Code watches its settings
+  file. The `get_plan_usage` tool is there in the sessions that start after Install.
 
 **Remove** takes out only what Install added: this app's entries in those three events (a `--gate`
-stays), and the MCP tool when it starts this app. It backs up the file first too.
+stays), and the MCP tool when it starts this app. It backs up the file first too. It needs no
+Claude Code; with no `claude` on the PATH, the card gives the command that removes the tool.
+
+**Before you uninstall the app, press Remove.** The uninstaller does not edit Claude Code's settings,
+so the hooks and the MCP tool would stay behind, starting a program that is no longer there.
 
 The VS Code extension has its own Claude Code version, and needs 2.1.139 or newer too. Setup works only
 in the installed app: a copy run from source, or a dev instance, never edits your Claude Code settings,

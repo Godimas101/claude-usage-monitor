@@ -17,7 +17,7 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ### Changed
 - `--hook` can also run after each tool call (PostToolUse). There it adds nothing unless the usage guard holds or a limit passes the threshold ([#27](https://github.com/Godimas101/claude-usage-monitor/issues/27)).
-- When a limit's window resets, the monitor fetches the new numbers 30 seconds later, instead of at its next poll ([#27](https://github.com/Godimas101/claude-usage-monitor/issues/27)).
+- When a limit's window resets, the monitor fetches the new numbers about a minute later, instead of at its next poll ([#27](https://github.com/Godimas101/claude-usage-monitor/issues/27)).
 - The monitor now runs `claude` for the usage guard's setup: `claude --version` and `claude mcp get` to show where setup stands, and `claude mcp add` or `remove` when you click Install or Remove. It still never sends a model request ([#27](https://github.com/Godimas101/claude-usage-monitor/issues/27)).
 - With no sign-in, the widgets send you to the dashboard, which has the steps, instead of to Claude Code, which you may not have. The dashboard says **NO LOGIN** instead of **NO CREDENTIALS** ([#28](https://github.com/Godimas101/claude-usage-monitor/issues/28)).
 

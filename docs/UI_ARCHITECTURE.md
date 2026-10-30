@@ -79,7 +79,13 @@ usage_monitor/
   shell lets it down, and only the taskbar's own children go with it. Layered, because the
   taskbar's XAML content covers a plain GDI child. Raised over its siblings every 500 ms. A new
   taskbar (Explorer restarted), or a strip window that died with the old one, gets a new window at
-  the next re-place. Hidden while a fullscreen app runs. Click → dashboard; right click → menu.
+  the next re-place; a taskbar that refuses the child (`CreateWindowExW` fails) leaves the strip a
+  top-level window, floating over it, until a re-place finds another taskbar. A child gets
+  `WM_DPICHANGED_AFTERPARENT`, never `WM_DPICHANGED`, when the taskbar moves to a monitor of
+  another DPI; `LayeredWindow` turns both into `on_dpi_changed`. Windows ties the taskbar's input to
+  the thread of its child windows, so the strip is the first thing shutdown destroys: the steps
+  after it wait seconds for the dashboard and the data service. Hidden while a fullscreen app runs.
+  Click → dashboard; right click → menu.
 - **Tooltip:** hover over either widget for ~400 ms shows a themed layered tooltip with exact
   percentages, reset times and pace; hides on `WM_MOUSELEAVE`.
 - **Content insets.** A frame may carry a transparent margin round the card the user sees (Gates draws its soft
@@ -237,14 +243,19 @@ lands just past each whole minute of the countdown (`tick_delay_ms`).
 |---|---|---|
 | Nostromo floating | "[GUARD]" (or "[G]") after the age, when the header has room | the header's right-hand word becomes the chip "HOLD 2H 14M"; a "CAP 95%" pill after each held row's name, where it fits |
 | Nostromo strip | nothing | a chip with an hourglass in the divider's place |
-| Night City floating | a quiet GUARD chip before the status word, when the brand leaves room | the HOLD chip, with a standing glitch, in the status word's place; a held row's critical chip reads "CAP 95" |
+| Night City floating | a quiet GUARD chip before the status word in the header, when the brand leaves room (the stale, offline and rate-limited bands draw no armed mark) | the HOLD chip, with a standing glitch, in the status word's place; a held row's critical chip reads "CAP 95" |
 | Night City strip | nothing | the HOLD chip in the status tag |
-| Gates floating | a bare shield in the dim tone, left of the status pill | the shield in a capsule tinted with the alert colour; the footer reads "Guard holding · Resumes 6:26 PM (in 2h 14m)"; a "Cap 95%" badge after each held row's name |
+| Gates floating | a bare shield in the dim tone, left of the status pill | the shield in a capsule tinted with the alert colour; while the status is LIVE the footer reads "Guard holding · Resumes 6:26 PM (in 2h 14m)" (another status keeps its own footer); a "Cap 95%" badge after each held row's name |
 | Gates strip | nothing | a small filled shield in the alert colour above the lamp |
 | Hover card | "Guard armed: session 95%, weekly 90%" | "Guard holding: weekly 91% (cap 90%). Resumes Fri 7:12 PM (in 2d 3h)." |
 
 Each skin words the hover card in its own voice: Nostromo in capitals, Night City as "GUARD // HOLDING:", Gates as an
 InfoBar under the rows.
+
+While the guard holds, its HOLD chip takes the place of the status word in Nostromo's and Night City's headers and in
+Night City's strip tag, whatever the link status is: a paused or loading widget then says HOLD. Gates keeps its status
+pill beside the shield. Without a reading (no sign-in, still loading) no surface shows the guard: it cannot act on
+nothing.
 
 Sign-in copy. `WidgetModel.stale_message` is the neutral wording ("LOGIN EXPIRED - OPEN CLAUDE CODE");
 a skin words the state as its approved mockup does and falls back to the neutral text where it has
@@ -313,8 +324,10 @@ six-hourly update re-check timer is armed (`update_recheck`).
   The usage guard works in every scenario: its verdict is the real `agent/guard.py` on the fake
   limits and the dev settings, so arming it or changing a cap shows at once. The `guard` scenario
   arms it at the default caps with the session past its cap, and fills a folder of its own with
-  sessions that were told and one that waits, so the Settings card has everything to show. The
-  dev server is a dev instance, so its one-click setup is off.
+  sessions that were told and one that waits, so the Settings card has everything to show. Its
+  one-click setup works on a sandbox (`dev_setup`): the real `agent/setup.py` with a fake exe, a
+  settings file in the dev folder and a `claude` kept in memory, so Install and Remove can be
+  clicked through and nothing under `~/.claude` is read or written.
   `--db PATH` serves `/api/analytics/*` and `/api/export` from that usage database through the same
   read-only opener the app uses (`server.open_statistics_store`: the file is never created and never
   upgraded, so a copy from an older schema answers `503` until the current app has opened it once);
@@ -412,9 +425,10 @@ Settings: `theme_id`, `theme_variant`, `theme_mode` (Gates: light / dark / syste
 - **`POST /api/guard/setup`** answers `setup.install()` or `setup.remove()` as it is: `ok: false` with
   `errors` is a refusal in plain words (Claude Code too old, a settings file that is not JSON), shown beside
   the buttons, not an HTTP error. An unknown action is `400`.
-- **A dev instance never edits Claude Code's settings.** Its `setup_cb` answers that setup is off and
-  refuses both clicks, as it never touches the Run entry either. `setup.py` itself also refuses outside the
-  frozen build: from source there is no exe to point the hooks at.
+- **A dev instance never edits Claude Code's settings.** Unless it is handed a `setup_cb` (the dev server
+  hands it its sandbox), it answers that setup is off and refuses both clicks, as it never touches the Run
+  entry either. `setup.py` itself also refuses outside the frozen build: from source there is no exe to point
+  the hooks at.
 
 ### Statistics: `GET /api/analytics/<name>`
 
@@ -657,6 +671,14 @@ default browser instead, and the exit code says so (below).
   `/api/update/skip` and hides the banner at once, rolling back on failure. The status text is tied to the release it was
   about, so it never shows against a newer one. The dev server fakes no update (its `info` callback returns nothing): to see
   the banner, answer `/api/state` with an `update` block (a Playwright route does it).
+- **Usage guard card (#27).** The Settings card's two blocks, the live status (`#guard-live`) and the one-click setup
+  (`#guard-setup`), are filled by `syncGuard` from `/api/guard`, asked once at a time every `GUARD_POLL_MS` while Settings is
+  on screen; a block is rewritten only when its markup changed (`data-sig`), so a poll never drops the focus. The status is
+  an OFF, ARMED or HOLDING chip with one line of story, which adds that sessions may not be told while setup reports the
+  hooks missing or partly installed. Install, Remove and Resume now are `disabled` only where they cannot work (no setup
+  here, nothing waiting; Remove needs `can_remove`, not Claude Code) and only `aria-disabled` while a click is on its way,
+  so the focus stays. A blank cap is "not watched"; text a number box cannot hold (`validity.badInput`) is refused under the
+  field instead of read as blank.
 - **Sign-in help (#28).** For the two statuses only the user can fix, `no_credentials` and `stale`, the status banner grows into
   a help panel (`.nm-msg.nm-help[role=region]`, built by `signInHelp`). With no sign-in it says why the monitor needs the
   sign-in Claude Code saves (even for someone who uses Claude on the web or in the app), gives four steps and links the
