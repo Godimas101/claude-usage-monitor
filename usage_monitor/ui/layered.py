@@ -351,6 +351,7 @@ class LayeredWindow:
             win32.WM_MOUSELEAVE: self._on_mouse_leave,
             win32.WM_CAPTURECHANGED: self._on_capture_changed,
             win32.WM_DPICHANGED: self._on_dpi_message,
+            win32.WM_DPICHANGED_AFTERPARENT: self._on_dpi_after_parent,
             win32.WM_NCDESTROY: self._on_ncdestroy,
         }
 
@@ -479,6 +480,12 @@ class LayeredWindow:
     def _on_dpi_message(self, wparam: int, lparam: int) -> int:
         suggested = Rect.from_win(ctypes.cast(lparam, ctypes.POINTER(wintypes.RECT)).contents)
         self._fire(self.on_dpi_changed, win32.loword(wparam), suggested)
+        return 0
+
+    def _on_dpi_after_parent(self, _wparam: int, _lparam: int) -> int:
+        """A child window never gets WM_DPICHANGED: its parent (the taskbar) moved to another DPI, and this one with it,
+        where it already is."""
+        self._fire(self.on_dpi_changed, self.dpi, self.rect)
         return 0
 
     def _on_ncdestroy(self, _wparam: int, _lparam: int) -> None:

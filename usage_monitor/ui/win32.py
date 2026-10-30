@@ -102,6 +102,7 @@ WM_MOUSEHOVER = 0x02A1
 WM_NCMOUSELEAVE = 0x02A2
 WM_MOUSELEAVE = 0x02A3
 WM_DPICHANGED = 0x02E0
+WM_DPICHANGED_AFTERPARENT = 0x02E3   # what a child window gets instead (the taskbar strip), after its parent moved DPI
 WM_USER = 0x0400
 WM_APP = 0x8000
 

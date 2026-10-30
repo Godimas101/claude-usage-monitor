@@ -995,6 +995,19 @@ def test_a_dpi_change_reports_the_new_dpi_and_the_suggested_rect(host):
 
 
 @UI
+def test_a_child_window_hears_of_a_dpi_change_from_its_parent(host):
+    parent = LayeredWindow(host, draggable=False)
+    assert parent.update(Image.new("RGBA", (100, 50), (0, 0, 0, 255)), *OFFSCREEN)
+    child = LayeredWindow(host, draggable=False, parent=parent.hwnd)
+    assert child.update(Image.new("RGBA", (10, 10), (255, 0, 0, 255)), OFFSCREEN[0] + 20, OFFSCREEN[1] + 10)
+    seen = []
+    child.on_dpi_changed = lambda dpi, rect: seen.append((dpi, rect))
+    win32.SendMessageW(child.hwnd, win32.WM_DPICHANGED_AFTERPARENT, 0, 0)   # a child gets no WM_DPICHANGED
+    assert seen == [(child.dpi, child.rect)]
+    parent.destroy()
+
+
+@UI
 def test_destroy_frees_everything_and_can_be_repeated(host):
     warm = LayeredWindow(host, draggable=True)  # the first window also registers the class
     warm.update(solid(10, 10), *OFFSCREEN)

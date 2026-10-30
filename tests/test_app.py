@@ -3127,9 +3127,9 @@ def test_shutdown_runs_in_the_documented_order_and_only_once(wired, monkeypatch)
     monkeypatch.setattr(wired.settings, "close", lambda: events("settings.close"))
     app._teardown()
     app._teardown()                                                           # a second call changes nothing
-    assert events.log == ["dashboard.close", "service.stop", "server.stop", "tray.remove", "floating.destroy",
-                          "taskbar.destroy", "tooltip.destroy", "settings.close"]
-    assert closed == [4242]
+    assert events.log == ["taskbar.destroy", "dashboard.close", "service.stop", "server.stop", "tray.remove",
+                          "floating.destroy", "tooltip.destroy", "settings.close"]   # the strip first: the taskbar waits on us
+    assert closed == [4242] and app.taskbar is None
 
 
 def test_a_failing_shutdown_step_does_not_skip_the_rest(wired):

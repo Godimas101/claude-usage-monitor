@@ -693,20 +693,23 @@ class MonitorApp:
             self.settings.close()
 
     def _teardown(self) -> None:
-        """Shutdown order: dashboard, data service, API server, tray, windows, settings. Runs on the
-        UI thread (a host cleanup); every step is guarded so one failure does not skip the rest."""
+        """Shutdown order: the taskbar strip, dashboard, data service, API server, tray, the other windows,
+        settings. Runs on the UI thread (a host cleanup); every step is guarded so one failure does not
+        skip the rest. The strip goes first: it is a child of the taskbar, whose input Windows ties to this
+        thread, so while the steps after it wait (the dashboard and the service, seconds each) the taskbar
+        would wait with them."""
         if self._torn_down:
             return
         self._torn_down = True
         steps: list[tuple[str, Callable[[], None]]] = [
             ("animation", self._stop_timers),
             ("update re-check", self._stop_update_recheck),
+            ("taskbar widget", self._destroy_taskbar),
             ("dashboard", self._close_dashboard),
             ("data service", self._stop_service),
             ("api server", lambda: self.server and self.server.stop()),
             ("tray icon", lambda: self.tray and self.tray.remove()),
             ("floating widget", lambda: self.floating and self.floating.destroy()),
-            ("taskbar widget", lambda: self.taskbar and self.taskbar.destroy()),
             ("tooltip", lambda: self.tooltip and self.tooltip.destroy()),
             ("settings", lambda: self.settings and self.settings.close()),
         ]
@@ -727,6 +730,11 @@ class MonitorApp:
         if self.blinker is not None:
             self.blinker.stop()
         self._cancel_tick()
+
+    def _destroy_taskbar(self) -> None:
+        taskbar, self.taskbar = self.taskbar, None   # a state that arrives later must not draw it again
+        if taskbar is not None:
+            taskbar.destroy()
 
     def _stop_update_recheck(self) -> None:
         if self._update_timer is not None and self.host is not None:
