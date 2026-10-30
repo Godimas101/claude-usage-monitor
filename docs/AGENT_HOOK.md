@@ -6,7 +6,9 @@ burning through the 5-hour session or the week before the reset.
 
 Every way in reads the same thing: `%APPDATA%\ClaudeUsageMonitor\state.json`, which the running app
 rewrites whenever the reading changes (a new fetch, or a change of status or of burn velocity), and at
-least every 15 minutes. All of them are read-only and make no model request of their own. What they
+least every 15 minutes. None of them makes a model request of its own, and they only read, apart from
+the small files under [Privacy](#privacy) and the usage guard's **Install** and **Remove**, which change
+Claude Code's settings file and its MCP tool list. What they
 return joins the conversation (about 100 tokens for the hook line, a few hundred for a tool call),
 and none of them shows the sign-in token.
 
@@ -15,11 +17,12 @@ and none of them shows the sign-in token.
 | MCP tool `get_plan_usage` | Claude calls it when it wants the numbers, for example between workflow phases | `claude mcp add` (below) |
 | `--hook` | Adds a one-line summary to Claude's context at session start, and when a limit passes a threshold | `hooks` in `settings.json` |
 | `--gate` | Refuses new agents and workflows once the session or weekly limit reaches a cap you set | `hooks` in `settings.json` |
-| The usage guard (v2.2) | Tells working sessions to wrap up when usage reaches a cap you set, and wakes the ones that wait when the limits allow work again | Settings → Usage guard, one click |
+| The usage guard (v2.2) | Tells working sessions to wrap up when usage reaches a cap you set, and wakes the ones that wait when the limits allow work again | Settings → Usage guard: switch on **Arm the guard**, then press **Install** |
 | `--status [--json]` | Prints the summary line, or the full reading as JSON, for scripts | a terminal or a script |
 
-The app installs to `%LOCALAPPDATA%\ClaudeUsageMonitor\ClaudeUsageMonitor.exe`. The commands below
-are for PowerShell, the default Windows terminal, and find that folder by themselves.
+By default the app installs to `%LOCALAPPDATA%\ClaudeUsageMonitor\ClaudeUsageMonitor.exe`, and the commands
+below use that folder. They are for PowerShell, the default Windows terminal. If you chose another
+folder in Setup, put your own path in place of `$env:LOCALAPPDATA\ClaudeUsageMonitor`.
 
 ## The MCP tool
 
@@ -59,7 +62,8 @@ update closes the server; reconnect it with `/mcp`, or start a new session.
 
 ## Hooks
 
-Hooks go in your user settings file, `%USERPROFILE%\.claude\settings.json`, under `"hooks"`. To open
+Hooks go in your user settings file, `%USERPROFILE%\.claude\settings.json` (or `settings.json` in the
+folder that `CLAUDE_CONFIG_DIR` names, if you set it), under `"hooks"`. To open
 it from PowerShell, run `notepad "$env:USERPROFILE\.claude\settings.json"`. Each entry below starts
 the exe directly with its arguments (the `args` form), so no shell is involved and the spaces in the
 path need no quoting.
@@ -164,19 +168,26 @@ The guard lets a long run wind down by itself before it uses up the plan, and pi
 limits allow. It only informs: it never blocks a tool, stops a session or decides how Claude wraps
 up. Claude Code's own handling of a limit that is actually reached is unchanged.
 
-**Turning it on.** Open Settings → Usage guard, or tick **Usage guard** in the tray menu. Set a cap
-for each limit you want watched: the 5-hour session (95% by default), the week (90%) and the
+**Turning it on.** Open Settings → Usage guard and switch on **Arm the guard**, or tick **Usage guard**
+in the tray menu. The guard stays off until you do: opening the card or setting its caps does not arm
+it. Set a cap for each limit you want watched: the 5-hour session (95% by default), the week (90%) and the
 model-limited week such as Fable (off by default). Then press **Install** on the same card, once.
 
 **When usage reaches a cap:**
-- Each Claude session that is working hears it after its next tool call. It is told which limits
-  are over their caps, that nothing is blocked, to wrap up at a safe point, and when work can
-  resume. Each subagent hears it once too. Idle sessions are not disturbed.
+- Each Claude session that is working hears it at its next prompt or tool call, once the app's
+  reading shows the cap reached. The app fetches every 15 minutes by default (Settings → Data &
+  plan), so the notice can come that much later. It is told which limits are over their caps, that
+  nothing is blocked, to wrap up at a safe point, and when work can resume. Each subagent hears it
+  once too, but only the main conversation is offered the wait command. Idle sessions are not
+  disturbed.
 - Each session hears it once per holding episode. A new window over a cap is a new episode. A
   session that starts, resumes or is compacted while the guard holds hears it again.
-- The widgets show the guard holding, with the time left until work can resume.
+- The floating widget shows the guard holding, with the time left until work can resume (in Gates,
+  while the numbers are live). The taskbar strip shows only a hold mark; the hover card and the tray
+  icon's tooltip give the time.
 
-**When work can resume:** only when every watched limit is under its cap again. The guard holds
+**When work can resume:** when every watched limit is under its cap again (**Resume now**, or turning
+the guard off, lets the waits go as well: below). The guard holds
 until the latest reset among the limits that are over their caps, so a fresh 5-hour window while
 the week is still over its cap wakes nobody. After a window resets, the app fetches the new numbers
 at its first check from 30 seconds on, about a minute after the reset.
@@ -203,10 +214,11 @@ PowerShell does not wait for a windowed program unless its output goes through a
 - When several sessions wait, they are woken one after another, two minutes apart by default
   (**Stagger** on the card), oldest first, so they don't all start at once.
 - **Resume now** on the card, or **Resume waiting sessions** in the tray menu, wakes them all at once,
-  whatever the limits say. Turning the guard off wakes them too.
-- `--wait` reads `state.json` every 30 seconds. With the app closed, it asks the usage API itself at
-  most every 15 minutes. With no reading at all, it keeps waiting.
-- Updating or uninstalling the app ends the waits that are running, since they are the app's own
+  whatever the limits say. Turning the guard off wakes them too, one at a time at the stagger.
+- `--wait` reads `state.json` every 30 seconds. With the app closed, it asks the usage API itself
+  once its reading is stale (about 30 minutes old by default), and then at most every 15 minutes.
+  With no reading at all, it keeps waiting.
+- Updating the app ends the waits that are running, since they are the app's own
   program. Their sessions wake without the "the wait is over" line, so Claude should check the plan
   usage, and run `--wait` again if the guard still holds.
 
@@ -233,8 +245,9 @@ PowerShell does not wait for a windowed program unless its output goes through a
 - Sessions that are already open pick up the hooks by themselves: Claude Code watches its settings
   file. The `get_plan_usage` tool is there in the sessions that start after Install.
 
-**Remove** takes out only what Install added: this app's entries in those three events (a `--gate`
-stays), and the MCP tool when it starts this app. It backs up the file first too. It needs no
+**Remove** takes out this app's entries in those three events, including ones you added by hand or
+that point at an older install folder (a `--gate` stays), and the MCP tool when it starts this app.
+When it removes a hook, it backs up the file first too. It needs no
 Claude Code; with no `claude` on the PATH, the card gives the command that removes the tool.
 
 **Before you uninstall the app, press Remove.** The uninstaller does not edit Claude Code's settings,
@@ -276,7 +289,8 @@ exit code is 1 when there is no reading at all.
   happen. A reader that finds a paused reading older than a poll interval waits up to 15 seconds
   (the gate, 5) for the app to wake up and fetch.
 - **When there is no current reading** (the app is closed, or an older version is running),
-  `--status`, the MCP tool, the gate and the SessionStart hook ask the usage API themselves, one at a
+  `--status`, the MCP tool, the gate, the SessionStart hook and a `--wait` whose reading is stale ask
+  the usage API themselves, one at a
   time: the others wait for that answer, and it is kept in `state.json` for two minutes so that the
   callers in that time share it. The burn rate is then left out (it comes from the transcripts the
   running app reads). The pace still uses the history the app stored while it ran.
@@ -300,20 +314,23 @@ can read over 100.
 | `scoped` | The model-scoped weekly limits, such as Fable: the `weekly` fields plus `label`, `model`, `allowance_pct` and `used_pct_of_weekly` |
 | `burn` | `output_tokens_per_min`, `usd_per_hour` (API-equivalent), `velocity` and `window_minutes`; null when a reader fetched the numbers itself |
 | `extra_usage` | Usage credits: `enabled`, `used`, `limit`, `percent` and `currency`, or null |
-| `guard` | The usage guard: `state` (`off`, `armed` or `holding`), `over` (each watched limit at or past its cap: `name`, `label`, `percent`, `cap`, `resets_at`), `resume_at` (the latest of their resets) and `policy` (the caps and the stagger set in Settings). Null when a reader wrote the file; readers then use the settings file |
+| `guard` | The usage guard: `state` (`off`, `armed` or `holding`), `over` (each watched limit at or past its cap: `name`, `label`, `percent`, `cap`, `resets_at`), `resume_at` (the latest of their resets) and `policy` (the caps and the stagger set in Settings). Null when a reader wrote the file; readers then take the caps from the monitor's own `settings.json` in the app data folder |
 
 `--status --json` and the MCP tool add `monitor_running`, `usage_age_s`, `stale` and `summary`.
 
 ## Privacy
 
-These modes only read. They write only small files in the app data folder:
-- `state.json`, the reading above.
+These modes only read the reading. They keep these small files in the app data folder:
+- `state.json`, the reading above, which a reader writes only when it fetches the numbers itself.
 - `agent-demand`, an empty file whose date says when a session last asked.
 - `hook-seen.json`, which records which steps the hook has already reported, and which usage-guard
   episode each session and subagent was told of, per session ID, for seven days.
+- `hook-seen.lock`, an empty file that lets one hook at a time update `hook-seen.json`.
 - `waiting\<process ID>.json`, one per running `--wait`: its session ID, when it started and its
   folder. It is removed when the wait ends.
-- `resume-now`, an empty file whose date tells the running waits that Resume now was pressed.
+- `wait-released`, the time the last `--wait` was let go, so the next one keeps the stagger.
+- `resume-now`, an empty file the app writes when Resume now is pressed; its date tells the running
+  waits to end.
 - `state.lock`, an empty file that lets one reader at a time ask the usage API.
 - `agent.log`, warnings only.
 
