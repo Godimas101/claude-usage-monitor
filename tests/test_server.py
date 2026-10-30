@@ -4351,7 +4351,12 @@ MEASURE = '''(() => {
             tiles: tile ? +(inner.getBoundingClientRect().bottom - tile.getBoundingClientRect().bottom).toFixed(2) : null};
   });
   const plan = [...document.querySelectorAll('#cost .nm-plan .nm-facts span')].map(span => span.textContent);
-  return JSON.stringify({vw: innerWidth, vh: innerHeight, cards: cards, plan: plan});
+  const main = document.getElementById('main');
+  // For the failure message only: what else could take the cards' height (a scrollbar, a banner, the scale, the fonts).
+  const page = {main: main && [main.clientWidth, main.clientHeight, main.scrollWidth, main.scrollHeight],
+                banners: [...document.querySelectorAll('.nm-msg, .nm-update')].map(el => el.className),
+                dpr: devicePixelRatio, fonts: document.fonts.status, visible: document.visibilityState};
+  return JSON.stringify({vw: innerWidth, vh: innerHeight, cards: cards, plan: plan, page: page});
 })()'''
 results = []
 
@@ -4368,7 +4373,17 @@ def probe(window):
         for width, height in SIZES:
             window.resize(width, height)
             time.sleep(1.0)
-            results.append(json.loads(window.evaluate_js(MEASURE)))
+            # A full CUM_UI_TESTS run on a busy machine once measured every Nostromo card 3 to 5 px over at 1200 x 700,
+            # which never happened when the test ran alone: the page was still settling a second after the resize. Measure
+            # until two reads agree, which still catches a card that stays clipped; a failure prints what else took room.
+            measured = window.evaluate_js(MEASURE)
+            for _ in range(20):
+                time.sleep(0.3)
+                again = window.evaluate_js(MEASURE)
+                if again == measured:
+                    break
+                measured = again
+            results.append(json.loads(measured))
     finally:
         print(json.dumps(results), flush=True)
         window.destroy()
@@ -4409,7 +4424,8 @@ def test_overview_cards_never_clip_their_content_in_the_real_web_view(tmp_path: 
     for size, result in zip(sizes, measured):
         assert result["vw"] > 1000, f"{size}: the page is in the one column layout"
         clipped = {card["name"]: card["over"] for card in result["cards"] if card["over"] > 0}
-        assert not clipped, f"{size} (page {result['vw']} x {result['vh']}): cards cut their content off: {clipped}"
+        assert not clipped, (f"{size} (page {result['vw']} x {result['vh']}): cards cut their content off: {clipped}; "
+                             f"page {result['page']}")
         cost = next(card for card in result["cards"] if card["name"] == "cost")
         assert cost["tiles"] is not None and cost["tiles"] >= 4, f"{size}: the tile numerals touch the card edge"
 

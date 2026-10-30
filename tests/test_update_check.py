@@ -1711,13 +1711,28 @@ class Sandbox:
     def cleanup(self) -> None:
         uninstaller = self.app / "unins000.exe"
         if uninstaller.is_file():
-            subprocess.run(f'"{uninstaller}" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART', stdin=subprocess.DEVNULL,
+            # The uninstaller hands over to a copy of itself in %TEMP% and returns at once. That copy deletes the
+            # uninstall key before CurUninstallStepChanged(usPostUninstall) runs RemoveStartupEntry, so a wait for the
+            # key alone let a late RemoveStartupEntry delete the Run value the next case had just set (seen with Inno
+            # Setup 6.7.1). Its log closes only once it is done.
+            log = self.logs / f"uninstall-{len(list(self.logs.glob('uninstall-*.log')))}.log"
+            subprocess.run(f'"{uninstaller}" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG="{log}"', stdin=subprocess.DEVNULL,
                            capture_output=True, timeout=240, creationflags=NO_WINDOW)
             deadline = time.monotonic() + 90
+            while not log_closed(log) and time.monotonic() < deadline:
+                time.sleep(0.3)
             while self.display_version() is not None and time.monotonic() < deadline:
                 time.sleep(0.3)
         self.set_run_value(None)
         shutil.rmtree(self.app, ignore_errors=True)
+
+
+def log_closed(log: Path) -> bool:
+    """True once an Inno Setup log ends: Setup and Uninstall write "Log closed." last."""
+    try:
+        return "Log closed." in log.read_text(encoding="utf-8-sig", errors="replace")
+    except OSError:
+        return False
 
 
 def real_install_state() -> dict[str, Any]:
