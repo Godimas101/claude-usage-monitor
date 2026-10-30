@@ -998,6 +998,53 @@ def test_oversized_body_is_rejected_with_413(make_server: Any) -> None:
     assert headers.get("connection", "").lower() == "close"
 
 
+def test_a_refused_request_with_a_body_still_reads_its_reply(make_server: Any) -> None:
+    """A wrong host or token is refused before the body is read. Windows resets a connection that closes with unread
+    bytes in it, and the reset could reach the client before the 403 did (the v2.2 release rehearsal saw it), so the
+    server reads what is left of the body first."""
+    server, _ = make_server()
+    body = b'{"pad": "' + b"x" * 60_000 + b'"}'
+    for _ in range(10):
+        assert request(server, "POST", "/api/settings", body=body, host="evil.example:80")[0] == 403
+        assert request(server, "POST", "/api/settings", body=body, token=False)[0] == 401
+
+
+def test_a_refused_request_leaves_a_kept_alive_connection_clean(make_server: Any) -> None:
+    server, _ = make_server()
+    conn = http.client.HTTPConnection("127.0.0.1", server.port, timeout=5)
+    try:
+        conn.request("POST", "/api/refresh", body=b'{"pad": "' + b"z" * 1000 + b'"}',
+                     headers={"Content-Type": "application/json"})    # no token: refused before the body is read
+        first = conn.getresponse()
+        first.read()
+        assert first.status == 401 and (first.getheader("Connection") or "").lower() != "close"
+        sock = conn.sock
+        conn.request("GET", "/api/state", headers={TOKEN_HEADER: server.token})
+        second = conn.getresponse()
+        second.read()
+        assert second.status == 200 and conn.sock is sock   # the same connection, not a body read as a request
+    finally:
+        conn.close()
+
+
+def test_a_refused_request_whose_body_never_comes_is_answered_and_closed(make_server: Any,
+                                                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(server_mod, "DRAIN_TIMEOUT_S", 0.2)
+    server, _ = make_server()
+    with socket.create_connection(("127.0.0.1", server.port), timeout=5) as sock:
+        sock.sendall(b"POST /api/refresh HTTP/1.1\r\nHost: 127.0.0.1:%d\r\nContent-Length: 1000\r\n\r\n{}" % server.port)
+        started = time.monotonic()
+        reply = b""
+        while b"\r\n\r\n" not in reply:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            reply += chunk
+    assert reply.startswith(b"HTTP/1.1 401")
+    assert b"connection: close" in reply.lower()   # the stream is in an unknown state, so it is not kept
+    assert time.monotonic() - started < 3
+
+
 def test_settings_listener_failure_does_not_fail_the_request(make_server: Any,
                                                              themes_module: types.ModuleType) -> None:
     def broken(applied: dict[str, Any]) -> None:

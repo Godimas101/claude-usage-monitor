@@ -57,7 +57,9 @@ DEV_ENV = "CUM_DEV_INSTANCE"
 TOKEN_HEADER = "X-Monitor-Token"
 KEY_PARAM = "k"                 # GET /?k=<the per-run token> opens the page; without it the answer is 401
 MAX_BODY_BYTES = 64 * 1024
-ANALYTICS_NAMES = ("cost", "efficiency", "pacing", "history", "sessions")
+DRAIN_MAX_BYTES = 1024 * 1024   # a refused request's body is read up to this before the reply...
+DRAIN_TIMEOUT_S = 2.0           # ...for at most this long a read; past either, the connection closes after it
+ANALYTICS_NAMES =("cost", "efficiency", "pacing", "history", "sessions")
 ANALYTICS_TTL_S = 20.0          # how long a computed report is served again without a new query
 ANALYTICS_CACHE_MAX = 64        # entries kept; the oldest go first
 EXPORT_FORMATS = {
@@ -746,6 +748,7 @@ class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "ClaudeUsageMonitor"
     sys_version = ""
+    body_read = False   # set per request (one handler serves every request of a keep-alive connection)
 
     def do_GET(self) -> None:
         self.server.api._handle(self, "GET")  # type: ignore[attr-defined]
@@ -890,16 +893,18 @@ class ApiServer:
     # ── Dispatch ──
 
     def _handle(self, req: _Handler, method: str) -> None:
+        req.body_read = False
         try:
             try:
                 self._route(req, method)
             except _HttpError as exc:
                 headers = {"Allow": exc.allow} if exc.allow else None
+                close = not self._drain(req) or exc.close
                 if exc.plain:
                     self._send(req, exc.status, exc.message.encode("utf-8"), "text/plain; charset=utf-8",
-                               headers, close=exc.close)
+                               headers, close=close)
                 else:
-                    self._send_json(req, exc.status, {"error": exc.message}, headers, close=exc.close)
+                    self._send_json(req, exc.status, {"error": exc.message}, headers, close=close)
         except (ConnectionError, TimeoutError):   # BrokenPipe, Reset and Aborted are all ConnectionErrors
             log.debug("client closed the connection early")
         except Exception:  # a failing handler is a 500 and a log line, never a raised exception
@@ -1268,7 +1273,44 @@ class ApiServer:
 
     # ── Body handling ──
 
+    def _drain(self, req: _Handler) -> bool:
+        """Read what is left of a refused request's body, so the client reads the reply and not a reset.
+
+        A refusal (a wrong host or token, an unknown route, a wrong method) comes before the body is read. Windows
+        resets a connection that closes with unread bytes in it, and the reset can reach the client before the
+        reply does, so a POST to a refused route could see a connection error instead of its 401 or 403. Returns
+        False when the body could not be read whole, in which case the connection is closed after the reply.
+        """
+        if req.body_read:
+            return True
+        if req.headers.get("Transfer-Encoding"):
+            return False
+        try:
+            remaining = int(req.headers.get("Content-Length") or 0)
+        except ValueError:
+            return False
+        if remaining <= 0:
+            return remaining == 0
+        whole = remaining <= DRAIN_MAX_BYTES
+        remaining = min(remaining, DRAIN_MAX_BYTES)
+        sock = req.connection
+        previous = sock.gettimeout()
+        sock.settimeout(DRAIN_TIMEOUT_S)
+        try:
+            while remaining > 0:
+                chunk = req.rfile.read(min(65536, remaining))
+                if not chunk:
+                    return False
+                remaining -= len(chunk)
+        except OSError:   # a timeout too: the stream can no longer be read, so it is closed
+            return False
+        finally:
+            sock.settimeout(previous)
+        req.body_read = True
+        return whole
+
     def _read_body(self, req: _Handler) -> bytes:
+        req.body_read = True   # whatever happens below, the body is read or the connection closes
         if req.headers.get("Transfer-Encoding"):
             raise _HttpError(411, "Content-Length is required", close=True)
         raw_length = req.headers.get("Content-Length")
