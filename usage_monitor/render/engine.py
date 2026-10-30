@@ -575,7 +575,8 @@ def glue(text: str) -> str:
 
 def wrap_words(text: str, width_of: Callable[[str], float], limit: float, first_limit: float | None = None) -> list[str]:
     """``text`` broken at its spaces into lines no wider than ``limit``, as ``width_of`` measures a line, the first
-    line no wider than ``first_limit`` when that is given (room taken by a lead set in another face). Words joined by
+    line no wider than ``first_limit`` when that is given (room taken by a lead set in another face). A first word
+    wider than ``first_limit`` leaves the first line empty, beside the lead, and starts the second. Words joined by
     NO_BREAK (see glue) stay together, and come back with plain spaces. A word wider than the limit stands on a line
     of its own, whole: the caller decides what to do with it."""
     lines: list[str] = []
@@ -585,6 +586,9 @@ def wrap_words(text: str, width_of: Callable[[str], float], limit: float, first_
         if not token:
             continue
         word = token.replace(NO_BREAK, " ")
+        if not current and not lines and first_limit is not None and width_of(word) > first_limit:
+            lines.append("")
+            room = limit
         trial = f"{current} {word}" if current else word
         if current and width_of(trial) > room:
             lines.append(current)

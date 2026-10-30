@@ -482,7 +482,7 @@ def test_nostromo_the_guard_line_of_the_hover_card_is_in_capitals():
 
 def test_nostromo_the_guard_line_fits_the_card_and_the_card_grows_by_exactly_its_lines():
     theme = theme_of("nostromo")
-    cv = nostromo._canvas(1, 1, 1.0, theme)
+    cv = nostromo._canvas(nostromo.FLOAT_W, 1, 1.0, theme)     # as wide as the card, as render_tooltip measures
     reg = cv.font(nostromo.FONT_REG, nostromo.LABEL_SIZE)
     variant = picked("nostromo", "default")
     for model in (guarded("normal3", "armed", scoped_cap=80), guarded("normal3", "holding"),

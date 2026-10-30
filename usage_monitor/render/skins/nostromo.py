@@ -750,7 +750,8 @@ class NostromoSkin:
         opts = RenderOptions()
         rows = list(model.rows)
         last_top = ROW_TOP + TOOLTIP_ROW_PITCH * (len(rows) - 1)
-        lead, guard_lines = _guard_lines(_canvas(1, 1, scale, theme), model)    # measured at this scale, drawn below
+        # measured on a canvas as wide as the card: a canvas's buffer factor follows its width at a fractional scale
+        lead, guard_lines = _guard_lines(_canvas(FLOAT_W, 1, scale, theme), model)
         guard_h = GUARD_BLOCK_PAD + GUARD_LINE_H * len(guard_lines) if guard_lines else 0
         height = int(last_top + 56 + guard_h) if not model.stale_message else int(last_top + 92 + guard_h)
         cv = _canvas(FLOAT_W, height, scale, theme)

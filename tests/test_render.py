@@ -734,6 +734,11 @@ def test_wrap_words_gives_the_first_line_its_own_limit_and_never_splits_a_word()
     assert engine.wrap_words("aaaaaaaaa bbb", len, 4) == ["aaaaaaaaa", "bbb"]
 
 
+def test_wrap_words_starts_a_first_word_too_wide_for_the_room_beside_the_lead_on_the_next_line():
+    assert engine.wrap_words("aaaaa bbb", len, 10, first_limit=3) == ["", "aaaaa bbb"]   # "FABLE WEEKLY" after a long lead
+    assert engine.wrap_words("aaa bbb", len, 10, first_limit=3) == ["aaa", "bbb"]
+
+
 # ── Options ───────────────────────────────────────────────────────────────────
 
 def test_coerce_options_accepts_none_mapping_and_object():

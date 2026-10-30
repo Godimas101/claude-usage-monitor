@@ -112,8 +112,9 @@ class GuardMark:
     over its cap, so a hover card can say it even for a scoped row the widget does not show.
 
     resume_at is the latest reset among the limits over their caps (None when one has no reset time or the
-    guard is only armed). resume_text is that moment as the widgets show it: a countdown ("2H 14M", "9M",
-    "<1M") under a day, past a day a reset time as the rows give it ("Wed 4:00 PM"). resume_in is always the
+    guard is only armed). resume_text is that moment in one word for a surface with room for one: a countdown
+    ("2H 14M", "9M", "<1M") under a day, past a day a reset time as the rows give it ("Wed 4:00 PM"); no skin
+    draws it today (each picks resume_in or resume_clock itself), the dump and the tests read it. resume_in is always the
     countdown ("2D 3H" past a day) and resume_clock always the reset time, for a surface with room for both.
     """
     state: str
