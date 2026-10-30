@@ -454,6 +454,90 @@ function aboutBanner(update) {
 out.bannerAbout = { shown: aboutBanner(UPDATE), none: aboutBanner(undefined) };
 S.formKey = null;
 
+// ── the sign-in help and the pages of a PC with no Claude Code (#28) ─────────────────────────────────────────────────────────
+// A sign-in that is missing or has expired gets the help panel in place of the plain status line, on every page. A PC whose records
+// the monitor has read and found empty (someone who uses Claude on the web or in the app) has nothing for the cost, efficiency and
+// history pages to count. Every state here is made up; the page is as it starts (nothing decided, nothing being checked).
+const SIGN_UPDATED = "2026-10-21T16:11:48.000Z";
+const SIGN_LATER = "2026-10-21T16:12:05.000Z";
+const NO_SIGN_IN = "No Claude sign-in on this PC; sign in to Claude Code once (the dashboard shows how)";
+const ingestOf = (patch) => Object.assign({ running: false, files_done: 0, files_total: 0, last_duration_s: 0.01, last_error: null }, patch);
+const requestsIn = (n) => ({ all: { name: "all", start: null, end: null, totals: { requests: n } } });
+function forget() {
+  reset();
+  S.noActivity = false;
+  S.copy = "";
+  S.check = { busy: false, sent: false, from: "", at: 0, still: false, failed: false };
+  S.themesRequested = true;                                       // no /api/themes ask in the recorded calls
+}
+function monitorState(status, patch) {
+  forget();
+  S.data = { state: Object.assign({
+    status, status_detail: NO_SIGN_IN, plan: { name: "Max 5x", monthly_price_usd: 100 }, windows: requestsIn(0), ingest: ingestOf({}),
+    unpriced_models: [], updated_at: SIGN_UPDATED,
+    usage: { limits: [liveLimit("session", "SESSION", 13), liveLimit("weekly_all", "WEEKLY", 2)], breakdown: [], spend: null },
+  }, patch || {}), model_names: {}, settings: {} };
+}
+const topPart = (page, key) => (api.buildModel(page).top.filter((x) => x.key === key)[0] || {}).html;
+out.signIn = { banner: {}, onPages: {} };
+for (const status of statuses) {
+  monitorState(status, { status_detail: "detail of " + status });
+  out.signIn.banner[status] = api.statusBanner();
+}
+for (const page of PAGE_LIST) {
+  monitorState("no_credentials");
+  out.signIn.onPages[page] = topPart(page, "status");
+}
+monitorState("stale", { status_detail: "The Claude sign-in has expired; open Claude Code to renew it" });
+out.signIn.expired = api.statusBanner();
+monitorState("stale", { status_detail: hostile });
+out.signIn.hostile = api.statusBanner();
+monitorState("stale", { status_detail: "" });
+out.signIn.noDetail = api.statusBanner();
+
+// limits only: decided from the all-time window once an ingest is done, held through the ingests that follow
+function decided(patch, before) {
+  monitorState("live", patch);
+  S.noActivity = !!before;
+  return api.limitsOnly();
+}
+const reading = ingestOf({ running: true, files_done: 3, files_total: 40 });
+out.limitsOnly = {
+  noState: (forget(), api.limitsOnly()),
+  noIngest: decided({ ingest: null }),
+  firstIngestRunning: decided({ ingest: ingestOf({ running: true, files_done: 3, files_total: 40, last_duration_s: null }) }),
+  firstIngestFailed: decided({ ingest: ingestOf({ last_duration_s: null, last_error: "RuntimeError: boom" }) }),
+  doneWithErrors: decided({ ingest: ingestOf({ last_error: "PermissionError on a.jsonl" }) }),
+  done: decided({}),
+  doneNoTotals: decided({ windows: { all: {} } }),
+  noWindow: decided({ windows: {} }),
+  withRequests: decided({ windows: requestsIn(7) }),
+  laterIngestHolds: decided({ ingest: reading }, true),
+  laterIngestFromNothing: decided({ ingest: reading }, false),
+  aRequestEndsIt: decided({ windows: requestsIn(3), ingest: reading }, true),
+};
+
+// the pages of such a PC: three of them are one card, the Overview keeps its limit, surface and burn cards, nothing is asked for
+monitorState("live");
+out.noRecords = { pages: {}, stats: {}, top: {} };
+for (const page of ["cost", "efficiency", "history"]) {
+  out.noRecords.pages[page] = modelOf(page);
+  out.noRecords.top[page] = { problem: topPart(page, "problem"), stale: topPart(page, "stale") };
+}
+for (const page of PAGE_LIST) out.noRecords.stats[page] = api.pageStats(page).map((e) => e.key);
+out.noRecords.overview = modelOf("overview");
+out.noRecords.limits = states("limits");
+// a failed cost report is nothing to report when nothing is counted
+monitorState("live");
+failed("cost", { window: "cycle" }, 500);
+out.noRecords.failedReport = { states: states("overview"), problem: topPart("overview", "problem"), stale: topPart("overview", "stale") };
+// a PC with Claude Code records, and a first ingest that is still running: the pages are what they were
+monitorState("live", { windows: requestsIn(9800) });
+out.records = { overview: states("overview"), cost: states("cost"), efficiency: states("efficiency"), history: states("history"), stats: api.pageStats("cost").map((e) => e.key) };
+monitorState("live", { ingest: ingestOf({ running: true, files_done: 3, files_total: 40, last_duration_s: null }) });
+out.firstIngest = { overview: states("overview"), cost: states("cost"), efficiency: states("efficiency"), history: states("history") };
+forget();
+
 // ── a status line written in capitals is capitals all the way: the Gates theme sets a line in sentence case only when all of it is ──
 // (isCaps is gates.js's own test). The monitor's reason is lower case ("update apply failed"), so each failure path has to raise it.
 const isCaps = (text) => /[A-Z]/.test(text) && !/[a-z]/.test(text);
@@ -520,4 +604,334 @@ async function failures() {
   reset();
 }
 
-failures().then(() => console.log(JSON.stringify(out)), (error) => { console.error(error && error.stack ? error.stack : String(error)); process.exit(1); });
+// ── the usage guard card: its markup, the status block in every state, the setup block, the fields and the clicks ──────────────
+// Every input is made up. The page asks /api/guard, which answers { guard, told, waiting, setup }.
+const GUARD_T = Date.UTC(2026, 9, 21, 16, 12);
+const isoAt = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
+const POLICY = { enabled: true, session_cap: 95, weekly_cap: 90, scoped_cap: null, stagger_s: 120 };
+const RESETS = isoAt(GUARD_T + 3 * HOUR + 27 * 60000);
+const SESSION_OVER = { name: "session", label: "session", percent: 96, cap: 95, resets_at: RESETS };
+const FABLE_OVER = { name: "Fable weekly", label: "Fable weekly", percent: 91.5, cap: 90, resets_at: RESETS };
+const toldN = (n) => Array.from({ length: n }, (_, i) => ({ session_id: "3f9a1c2e-" + i + "aaa-bbbb", told_at: isoAt(GUARD_T - (30 - i) * 60000) }));
+const waiterOf = (id, cwd, pid) => ({ pid: pid || 4242, session_id: id, since: isoAt(GUARD_T - 18 * 60000), cwd });
+const guardAnswer = (guard, told, waiting, setup) => ({ guard, told: told || [], waiting: waiting || [], setup: setup || null });
+const holding = (over, extra) => Object.assign({ state: "holding", over, resume_at: RESETS, policy: POLICY }, extra || {});
+const SETUP_OK = {
+  available: true, can_remove: true, reason: null, manual: "docs/AGENT_HOOK.md", exe: "C:/x/ClaudeUsageMonitor.exe", settings_path: "C:/Users/t/.claude/settings.json", errors: [],
+  hooks: { state: "missing", installed: 0, total: 3, events: {} }, mcp: { state: "missing" },
+  claude: { found: true, path: "C:/c/claude.exe", version: "2.1.160", min_version: "2.1.139", supported: true },
+};
+const setupWith = (patch) => Object.assign({}, SETUP_OK, patch);
+
+function liveFor(answer, opts) {
+  reset();
+  S.guard = answer;
+  S.guardLost = !!(opts && opts.lost);
+  S.resumeBusy = !!(opts && opts.busy);
+  const html = api.guardLiveHtml(api.guardView(), (opts && opts.now) || GUARD_T);
+  S.resumeBusy = false;
+  return html;
+}
+function setupFor(setup, result, busy) {
+  reset();
+  S.guard = setup ? guardAnswer({}, [], [], setup) : null;
+  S.setup = { busy: busy || "", result: result || null };
+  const html = api.guardSetupHtml(api.guardView());
+  S.setup = { busy: "", result: null };
+  return html;
+}
+const done = (patch) => Object.assign({ ok: true, action: "install", changed: [], unchanged: [], backup: null, warnings: [], errors: [], manual: null }, patch);
+const manyWaiting = Array.from({ length: 7 }, (_, i) => waiterOf("77b0aa1" + i + "-9d3e", "C:\\Demo\\project-" + i, 4000 + i));
+
+out.guard = {
+  card: api.guardCard(),
+  live: {
+    pending: liveFor(null),
+    lost: liveFor(null, { lost: true }),
+    beforeTheFirstCycle: liveFor(guardAnswer({})),
+    off: liveFor(guardAnswer({ state: "off", over: [], resume_at: null, policy: Object.assign({}, POLICY, { enabled: false }) })),
+    armed: liveFor(guardAnswer({ state: "armed", over: [], resume_at: null, policy: POLICY })),
+    armedThree: liveFor(guardAnswer({ state: "armed", over: [], resume_at: null, policy: Object.assign({}, POLICY, { scoped_cap: 80 }) })),
+    armedNoCaps: liveFor(guardAnswer({ state: "armed", over: [], resume_at: null, policy: { enabled: true, session_cap: null, weekly_cap: null, scoped_cap: null, stagger_s: 120 } })),
+    armedStillWaiting: liveFor(guardAnswer({ state: "armed", over: [], resume_at: null, policy: POLICY }, [], [waiterOf("77b0aa10-9d3e", "C:\\Demo\\atlas-web")])),
+    armedNoHooks: liveFor(guardAnswer({ state: "armed", over: [], resume_at: null, policy: POLICY }, [], [], SETUP_OK)),
+    armedHooked: liveFor(guardAnswer({ state: "armed", over: [], resume_at: null, policy: POLICY }, [], [], setupWith({ hooks: { state: "installed", installed: 3, total: 3, events: {} } }))),
+    holdingPartHooked: liveFor(guardAnswer(holding([SESSION_OVER]), [], [], setupWith({ hooks: { state: "partial", installed: 2, total: 3, events: {} } }))),
+    holding: liveFor(guardAnswer(holding([SESSION_OVER, FABLE_OVER]), toldN(2), [waiterOf("77b0aa10-9d3e", "C:\\Demo\\atlas-web")])),
+    holdingBusy: liveFor(guardAnswer(holding([SESSION_OVER]), toldN(1), [waiterOf("77b0aa10-9d3e", "C:\\Demo\\atlas-web")]), { busy: true }),
+    holdingNobody: liveFor(guardAnswer(holding([SESSION_OVER]))),
+    holdingNoResetTime: liveFor(guardAnswer(holding([SESSION_OVER], { resume_at: null }), toldN(1))),
+    holdingAMomentLeft: liveFor(guardAnswer(holding([SESSION_OVER]), toldN(1)), { now: Date.parse(RESETS) - 20000 }),
+    holdingMany: liveFor(guardAnswer(holding([SESSION_OVER]), toldN(7), manyWaiting)),
+    holdingHostile: liveFor(guardAnswer(holding([{ name: hostile, label: hostile, percent: 96, cap: 95, resets_at: RESETS }]),
+      [{ session_id: hostile, told_at: isoAt(GUARD_T) }], [waiterOf(hostile, "C:\\<b>x</b>\\" + hostile)])),
+    odd: liveFor({ guard: "x", told: "y", waiting: 3, setup: [] }),
+  },
+  clock: { resumes: api.clockText(Date.parse(RESETS)), told: api.clockText(GUARD_T - 30 * 60000), since: api.clockText(GUARD_T - 18 * 60000) },
+  setup: {
+    pending: setupFor(null),
+    missing: setupFor(SETUP_OK),
+    installed: setupFor(setupWith({ hooks: { state: "installed", installed: 3, total: 3, events: {} }, mcp: { state: "registered" } })),
+    partial: setupFor(setupWith({ hooks: { state: "partial", installed: 2, total: 3, events: {} }, mcp: { state: "other" } })),
+    tooOld: setupFor(setupWith({ claude: { found: true, version: "2.1.94", min_version: "2.1.139", supported: false } })),
+    tooOldAt: setupFor(setupWith({ claude: { found: true, path: "C:\\Users\\t\\AppData\\Roaming\\npm\\claude.CMD", version: "2.1.94", min_version: "2.1.139", supported: false } })),
+    versionUnknown: setupFor(setupWith({ claude: { found: true, version: null, min_version: "2.1.139", supported: null } })),
+    noClaude: setupFor(setupWith({ available: false, reason: "Claude Code was not found on this PC: there is no claude command on the PATH.", claude: { found: false, version: null, min_version: "2.1.139", supported: null } })),
+    fromSource: setupFor(setupWith({ available: false, can_remove: false, reason: "One-click setup works in the installed app. This copy runs from source.", hooks: { state: "unknown", installed: 0, total: 3, events: {} }, mcp: { state: "unknown" }, claude: { found: false, version: null, min_version: "2.1.139", supported: null } })),
+    unreadable: setupFor(setupWith({ errors: ["The Claude Code settings file is not valid JSON, so setup left it alone."], hooks: { state: "unknown", installed: 0, total: 3, events: {} } })),
+    installing: setupFor(SETUP_OK, null, "install"),
+    removing: setupFor(SETUP_OK, null, "remove"),
+    installed_ok: setupFor(SETUP_OK, done({ changed: ["Added the SessionStart hook.", "Registered the claude-usage MCP tool."], backup: "C:\\Users\\t\\.claude\\settings.json.cum-backup-20261028-180509", warnings: ["The VS Code extension has its own Claude Code version; it also needs 2.1.139 or newer."] })),
+    nothing: setupFor(SETUP_OK, done({ unchanged: ["The three hooks were already in place."] })),
+    removed_ok: setupFor(SETUP_OK, done({ action: "remove", changed: ["Removed the PostToolUse hook."], backup: "C:\\b" })),
+    refused: setupFor(SETUP_OK, done({ ok: false, errors: ["Claude Code 2.1.94 is older than 2.1.139, which hooks need, so setup changed nothing. Update it with: claude update"] })),
+    byHand: setupFor(SETUP_OK, done({ changed: ["Added the SessionStart hook."], warnings: ["The MCP tool was not registered."], manual: "claude mcp add --transport stdio --scope user claude-usage '--' 'C:\\Users\\A&B\\x.exe' --mcp" })),
+    hostile: setupFor(setupWith({ available: false, reason: hostile }), done({ ok: false, changed: [hostile], unchanged: [hostile], backup: hostile, warnings: [hostile], errors: [hostile], manual: hostile })),
+  },
+  labels: ["guard_enabled", "guard_session_cap", "guard_weekly_cap", "guard_scoped_cap", "guard_resume_stagger_s", "poll_interval_ms"].map((key) => api.labelFor(key)),
+};
+
+// the two blocks are rewritten only when their markup changed, so a poll never drops the focus of someone tabbing through them
+{
+  reset();
+  const live = element("guard-live");
+  const setupBox = element("guard-setup");
+  const main = element("main");
+  let writes = 0;
+  for (const box2 of [live, setupBox]) {
+    let held = "";
+    Object.defineProperty(box2, "innerHTML", { get: () => held, set: (v) => { writes += 1; held = v; } });
+  }
+  main.querySelector = (selector) => (selector === "#guard-live" ? live : selector === "#guard-setup" ? setupBox : null);
+  S.guard = guardAnswer(holding([SESSION_OVER]), toldN(1), [waiterOf("77b0aa10-9d3e", "C:\\Demo\\atlas-web")]);
+  api.syncGuard(main);
+  const first = writes;
+  api.syncGuard(main);
+  api.syncGuard(main);
+  const unchanged = writes;
+  S.guard = guardAnswer(holding([SESSION_OVER]), toldN(1), []);
+  api.syncGuard(main);
+  out.guard.sync = { first, unchanged, afterOneChange: writes, liveHasButtonDisabled: /data-action="guard-resume"[^>]* disabled/.test(live.innerHTML) };
+  S.guard = null;
+}
+
+// the tick: the Settings page asks again every few seconds while it is on screen and visible, one ask at a time
+async function guardPolling() {
+  const saved = { query: box.document.querySelector, visible: box.document.visibilityState };
+  const asked = [];
+  box.document.querySelector = () => null;
+  box.fetch = (url, init) => { asked.push((init && init.method) + " " + url); return answer(200, guardAnswer({})) (); };
+  const tick = async (page, form, visibility, ago, flight) => {
+    reset();
+    S.page = page; S.formKey = form; S.guardFlight = !!flight; S.guardAt = Date.now() - ago;
+    box.document.visibilityState = visibility;
+    asked.length = 0;
+    api.guardTick();
+    await settle();
+    return asked.slice();
+  };
+  out.guard.polling = {
+    due: await tick("settings", "settings", "visible", 4000),
+    notYet: await tick("settings", "settings", "visible", 1000),
+    inFlight: await tick("settings", "settings", "visible", 4000, true),
+    elsewhere: await tick("overview", null, "visible", 4000),
+    hidden: await tick("settings", "settings", "hidden", 4000),
+    pageNotBuilt: await tick("settings", null, "visible", 4000),
+  };
+  box.document.querySelector = saved.query;
+  box.document.visibilityState = saved.visible;
+  box.fetch = () => { throw new Error("no network in the script tests"); };
+  reset();
+}
+
+// the fields and the clicks, against a recording monitor
+async function guardActions() {
+  const saved = box.document.querySelector;
+  const main = element("main");
+  const live = element("guard-live");
+  const setupBox = element("guard-setup");
+  main.querySelector = (selector) => (selector === "#guard-live" ? live : selector === "#guard-setup" ? setupBox : null);
+  box.document.querySelector = (selector) => (selector === "#main" ? main : null);
+  box.clearTimeout = () => {};
+  const calls = [];
+  const run = async (table, act) => {
+    calls.length = 0;
+    box.fetch = (url, init) => {
+      const key = ((init && init.method) || "GET") + " " + url;
+      calls.push({ key, body: init && init.body ? JSON.parse(init.body) : null });
+      const hit = table[key] || [404, { error: "not in this test" }];
+      return hit === "lost" ? Promise.reject(new Error("link lost")) : answer(hit[0], hit[1])();
+    };
+    act();
+    await settle();
+    return calls.map((c) => c.key + (c.body ? " " + JSON.stringify(c.body) : ""));
+  };
+  const GOOD = [200, guardAnswer(holding([SESSION_OVER]), toldN(2), [waiterOf("77b0aa10-9d3e", "C:\\Demo\\atlas-web")], SETUP_OK)];
+  const fresh = () => { reset(); S.page = "settings"; S.formKey = "settings"; S.setup = { busy: "", result: null }; S.guard = null; S.resumeBusy = false; S.guardFlight = false; S.status = { text: "", error: false }; };
+  const actions = {};
+
+  fresh();
+  actions.resume = { calls: await run({ "POST /api/guard/resume": [200, { ok: true }], "GET /api/guard": GOOD }, () => api.settingsClick(click("guard-resume"))), status: S.status, busy: S.resumeBusy, learned: !!S.guard };
+  fresh();
+  actions.resumeRefused = { calls: await run({ "POST /api/guard/resume": [500, { error: "could not record the resume request" }], "GET /api/guard": GOOD }, () => api.settingsClick(click("guard-resume"))), status: S.status, busy: S.resumeBusy };
+  fresh();
+  actions.resumeLost = { calls: await run({ "POST /api/guard/resume": "lost" }, () => api.settingsClick(click("guard-resume"))), status: S.status, busy: S.resumeBusy };
+  fresh();
+  S.resumeBusy = true;                                    // a click while one is on its way does nothing
+  actions.resumeTwice = await run({}, () => api.settingsClick(click("guard-resume")));
+  S.resumeBusy = false;
+
+  const RESULT = done({ changed: ["Added the SessionStart hook."], backup: "C:\\b", warnings: ["w"] });
+  fresh();
+  const installing = await run({ "POST /api/guard/setup": [200, RESULT], "GET /api/guard": GOOD }, () => { api.settingsClick(click("guard-install")); actions.whileRunning = { busy: S.setup.busy, live: setupBox.innerHTML }; });
+  actions.install = { calls: installing, result: S.setup.result, busy: S.setup.busy, shown: setupBox.innerHTML };
+  fresh();
+  actions.remove = { calls: await run({ "POST /api/guard/setup": [200, done({ action: "remove", changed: ["Removed the SessionStart hook."] })], "GET /api/guard": GOOD }, () => api.settingsClick(click("guard-remove"))), result: S.setup.result };
+  fresh();
+  actions.refusedByTheMonitor = { calls: await run({ "POST /api/guard/setup": [200, done({ ok: false, errors: ["not valid JSON"] })], "GET /api/guard": GOOD }, () => api.settingsClick(click("guard-install"))), result: S.setup.result };
+  fresh();
+  actions.serverError = { calls: await run({ "POST /api/guard/setup": [500, { error: "setup install failed" }], "GET /api/guard": GOOD }, () => api.settingsClick(click("guard-install"))), result: S.setup.result };
+  fresh();
+  actions.setupLost = { calls: await run({ "POST /api/guard/setup": "lost" }, () => api.settingsClick(click("guard-remove"))), result: S.setup.result, busy: S.setup.busy };
+  fresh();
+  S.setup = { busy: "install", result: null };            // one at a time
+  actions.setupTwice = await run({}, () => api.settingsClick(click("guard-remove")));
+  fresh();
+
+  // the fields: a blank cap is off, a stagger is a whole number of seconds, and what the server would refuse is refused here
+  // badInput is what a number box reports for text it cannot hold ("9e", "-"): its value then reads as ""
+  const field = (key, value, badInput) => ({ target: { type: "number", value, validity: { badInput: !!badInput }, getAttribute: (name) => (name === "data-key" ? key : null), hasAttribute: () => false } });
+  const typed = async (key, value, badInput) => {
+    elements["err-" + key] = element("err-" + key);
+    const lines = await run({ "POST /api/settings": [200, { ok: true, applied: {}, settings: {} }] }, () => api.settingsChange(field(key, value, badInput)));
+    const wrote = calls.filter((c) => c.key === "POST /api/settings").map((c) => c.body);
+    return { wrote, error: elements["err-" + key].textContent, shown: elements["err-" + key].hidden === false, status: S.status.text, lines: lines.length };
+  };
+  actions.fields = {};
+  for (const [label, key, value, bad] of [
+    ["capBlank", "guard_session_cap", ""], ["capSpaces", "guard_weekly_cap", "  "], ["cap1", "guard_session_cap", "1"], ["cap95", "guard_session_cap", "95"],
+    ["cap100", "guard_scoped_cap", "100"], ["cap0", "guard_session_cap", "0"], ["cap101", "guard_weekly_cap", "101"], ["capDecimal", "guard_session_cap", "9.5"],
+    ["capNegative", "guard_scoped_cap", "-5"], ["capText", "guard_session_cap", "abc"], ["capExp", "guard_session_cap", "1e2"], ["capLong", "guard_session_cap", "0095"],
+    ["stagger0", "guard_resume_stagger_s", "0"], ["stagger120", "guard_resume_stagger_s", "120"], ["stagger600", "guard_resume_stagger_s", "600"],
+    ["stagger601", "guard_resume_stagger_s", "601"], ["staggerBlank", "guard_resume_stagger_s", ""], ["staggerNegative", "guard_resume_stagger_s", "-1"], ["staggerDecimal", "guard_resume_stagger_s", "1.5"],
+    ["capBadInput", "guard_session_cap", "", true],
+  ]) {
+    fresh();
+    actions.fields[label] = await typed(key, value, bad);
+  }
+  fresh();
+  const toggled = { target: { type: "checkbox", checked: true, value: "on", getAttribute: (name) => (name === "data-key" ? "guard_enabled" : name === "data-kind" ? "bool" : null), hasAttribute: () => false } };
+  actions.toggle = { calls: await run({ "POST /api/settings": [200, { ok: true, applied: {}, settings: { guard_enabled: true } }], "GET /api/guard": GOOD }, () => api.settingsChange(toggled)), status: S.status.text };
+  fresh();
+  actions.otherSettingDoesNotAskTheGuard = (await run({ "POST /api/settings": [200, { ok: true, applied: {}, settings: {} }] }, () => api.settingsChange({ target: { type: "checkbox", checked: true, getAttribute: (name) => (name === "data-key" ? "reduce_motion" : null), hasAttribute: () => false } }))).filter((line) => /api\/guard/.test(line));
+  out.guard.actions = actions;
+  box.document.querySelector = saved;
+  box.fetch = () => { throw new Error("no network in the script tests"); };
+  reset();
+}
+
+// "Check again" and "Copy" on the sign-in help, against a recording monitor and a clipboard that answers as the test says
+async function signInActions() {
+  const saved = { fetch: box.fetch, set: box.setTimeout, clear: box.clearTimeout, navigator: box.navigator };
+  const calls = [];
+  const timers = [];
+  box.clearTimeout = () => {};
+  box.setTimeout = (fn, ms) => { timers.push({ fn, ms }); return timers.length; };
+  const run = async (table, act) => {
+    calls.length = 0;
+    box.fetch = (url, init) => {
+      const key = ((init && init.method) || "GET") + " " + url;
+      calls.push(key);
+      const hit = table[key] || [404, { error: "not in this test" }];
+      return hit === "lost" ? Promise.reject(new Error("link lost")) : answer(hit[0], hit[1])();
+    };
+    act();
+    await settle();
+    return calls.slice();
+  };
+  const payload = (status, at, extra) => ({ state: Object.assign({}, S.data.state, { status, updated_at: at }, extra || {}), model_names: {}, settings: {} });
+  const where = () => Object.assign({}, S.check);
+  const REFRESHED = { "POST /api/refresh": [200, { ok: true }] };
+  const out2 = {};
+
+  // the monitor looks again and the state of that cycle still has no sign-in: the panel says so
+  monitorState("no_credentials");
+  const during = {};
+  out2.still = {
+    calls: await run(Object.assign({ "GET /api/state": [200, payload("no_credentials", SIGN_LATER)] }, REFRESHED), () => {
+      api.checkAgain();
+      during.check = where();
+      during.html = api.statusBanner();
+    }),
+    during, check: where(), html: api.statusBanner(),
+  };
+  // the same for an expired sign-in, in its own words
+  monitorState("stale", { status_detail: "The Claude sign-in has expired; open Claude Code to renew it" });
+  await run(Object.assign({ "GET /api/state": [200, payload("stale", SIGN_LATER)] }, REFRESHED), () => api.helpAction("check-again"));
+  out2.stillExpired = { check: where(), html: api.statusBanner() };
+  // one request at a time: clicks while a check is on its way send nothing
+  monitorState("no_credentials");
+  out2.twice = await run(Object.assign({ "GET /api/state": [200, payload("no_credentials", SIGN_LATER)] }, REFRESHED), () => {
+    api.checkAgain();
+    api.checkAgain();
+    api.helpAction("check-again");
+  });
+  monitorState("no_credentials");
+  S.check = { busy: true, sent: false, from: SIGN_UPDATED, at: Date.now(), still: false, failed: false };
+  out2.busyIgnores = await run(REFRESHED, () => api.checkAgain());
+  // found: the next state is live, the panel is gone and nothing is left to say
+  monitorState("no_credentials");
+  await run(Object.assign({ "GET /api/state": [200, payload("live", SIGN_LATER, { status_detail: "Updated 12:12:05" })] }, REFRESHED), () => api.checkAgain());
+  out2.found = { check: where(), html: api.statusBanner() };
+  // the cycle has not been published yet (updated_at has not moved): the check goes on, until it has waited long enough
+  monitorState("no_credentials");
+  await run(Object.assign({ "GET /api/state": [200, payload("no_credentials", SIGN_UPDATED)] }, REFRESHED), () => api.checkAgain());
+  out2.waiting = { check: where(), ended: api.syncCheck() };
+  S.check.at = Date.now() - 20000;
+  out2.late = { ended: api.syncCheck(), check: where(), html: api.statusBanner() };
+  // not before the monitor has answered the click
+  monitorState("no_credentials");
+  S.check = { busy: true, sent: false, from: SIGN_UPDATED, at: Date.now() - 20000, still: false, failed: false };
+  S.data.state.updated_at = SIGN_LATER;
+  out2.notSentYet = { ended: api.syncCheck(), check: where() };
+  // the monitor refuses, or the link is lost
+  monitorState("no_credentials");
+  out2.refused = { calls: await run({ "POST /api/refresh": [501, { error: "refresh is not available" }] }, () => api.checkAgain()), check: where(), html: api.statusBanner() };
+  monitorState("no_credentials");
+  out2.lost = { calls: await run({ "POST /api/refresh": "lost" }, () => api.checkAgain()), check: where(), html: api.statusBanner() };
+  // what a check said does not outlive the panel
+  monitorState("live");
+  S.check = { busy: false, sent: true, from: SIGN_UPDATED, at: 0, still: true, failed: false };
+  out2.outlived = { ended: api.syncCheck(), check: where() };
+
+  // Copy: the command goes to the clipboard once, the button says so for a moment; where the clipboard refuses or is not there the
+  // command is selected instead (no selection API in this page, which must not matter)
+  const writes = [];
+  const copyWith = async (clipboard) => {
+    monitorState("no_credentials");
+    writes.length = 0;
+    timers.length = 0;
+    box.navigator = clipboard === undefined ? undefined : { clipboard };
+    api.helpAction("copy-command");
+    await settle();
+    const shown = { copy: S.copy, html: api.statusBanner(), timers: timers.map((t) => t.ms), writes: writes.slice() };
+    if (timers.length) { timers[timers.length - 1].fn(); }
+    shown.after = { copy: S.copy, html: api.statusBanner() };
+    return shown;
+  };
+  out2.copy = {
+    written: await copyWith({ writeText: (text) => { writes.push(text); return Promise.resolve(); } }),
+    refused: await copyWith({ writeText: (text) => { writes.push(text); return Promise.reject(new Error("denied")); } }),
+    throws: await copyWith({ writeText: () => { throw new Error("no permission"); } }),
+    missing: await copyWith({}),
+    noClipboard: await copyWith(undefined),
+  };
+  monitorState("no_credentials");
+  out2.unknownAction = { calls: await run({}, () => api.helpAction("nothing-here")), copy: S.copy, check: where() };      // an unknown action does nothing
+
+  box.fetch = saved.fetch; box.setTimeout = saved.set; box.clearTimeout = saved.clear; box.navigator = saved.navigator;
+  forget();
+  out.signInActions = out2;
+}
+
+failures().then(guardPolling).then(guardActions).then(signInActions).then(() => console.log(JSON.stringify(out)), (error) => { console.error(error && error.stack ? error.stack : String(error)); process.exit(1); });

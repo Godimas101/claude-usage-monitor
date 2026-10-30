@@ -33,6 +33,11 @@
  *             does) + .nm-actions (button.nm-btn[data-action=update-now | update-notes | update-skip]) + .nm-status.
  *             The first banner of every page but Settings (which has the same buttons in its System card), present only while
  *             /api/state reports a release that was not skipped.
+ * Help        .nm-msg.nm-help[role=region] is the status banner grown into a help panel, for the two statuses only the user can fix
+ *             (no_credentials: the steps to sign in; stale: what to do about an expired sign-in). b (the heading) + p + ol (the steps;
+ *             a li may end in .nm-cmd > code.nm-path + button.nm-btn[data-action=copy-command]) + .nm-actions (button.nm-btn.solid
+ *             [data-action=check-again], .nm-links > a[data-external]) + p.nm-status[role=status] (what a check found). A code is a
+ *             command the user types; it keeps its case.
  * Card        section.nm-card[.wide|.span-N][.is-warn|.is-crit|.is-real] > .nm-card-in > .nm-card-t
  *             (.nm-tag | h2.nm-ttl, and .nm-meta-t) + the body. .is-real marks the one card of real money.
  * Values      .nm-big (sizes .h .m .s), .nm-big-row, .nm-row2 (.is-base), .nm-facts, .nm-chip (.solid
@@ -56,6 +61,11 @@
  *             .nm-addlevel, .nm-quiet, .nm-quiet-to, .nm-themes > .nm-theme (+ .nm-swatches), .nm-variants,
  *             .nm-mode-k, .nm-links, .nm-supp (a list of names), .nm-tier, .nm-authors. A switched-off group
  *             (.nm-set.is-off, Alerts) disables its controls (:disabled); its text is not dimmed.
+ * Guard       The usage guard card on the Settings page (section.nm-card[aria-label="Usage guard"]) is made of the parts above and
+ *             nothing of its own: a toggle, four .nm-input number fields (a blank one is off) and two blocks the page fills in,
+ *             #guard-live (.nm-verdict > .nm-chip OFF, ARMED or HOLDING, .nm-story, .nm-kv-grid.is-one, .nm-actions) and
+ *             #guard-setup (the same parts, with .nm-callout for a note or the result of a click, .nm-error for a refusal, .nm-path
+ *             for a file path or a command and .nm-lede for what it costs). A value that has not arrived is data-pending there too.
  * States      .nm-empty, .nm-error, .nm-pending, .nm-callout (.is-warn: a boxed note; with data-pending it keeps its room and shows
  *             nothing, so a note that is there before and after its report does not move the card).
  * Overview    .nm-cost > .nm-cost-l (.nm-hero, .nm-plan, .nm-tiles > .nm-tile > small + .nm-big) + .nm-cost-r
@@ -89,6 +99,10 @@
  *             it showed before is not fresh, so a refresh of unchanged numbers replays nothing).
  *   Revisits  The last good report of each page and window is kept in memory: a page opened again shows those numbers at
  *             once and refreshes behind them, without a placeholder and without replaying the figures that did not change.
+ *   No records  A PC with no Claude Code activity (the monitor has finished reading and found no request: someone who uses Claude on
+ *             the web or in the app) has nothing for the cost, efficiency and history reports to count, and none is asked for. The
+ *             Overview's cost, efficiency and model cards keep their frame and title and say so in one .nm-empty line (data-state=ready,
+ *             no data-needs); Cost & value, Efficiency and History are one wide card that explains it.
  *
  * Motion      Everything that moves checks data-reduce-motion="1" on <html> (the reduce_motion setting) and
  *             prefers-reduced-motion. With either, nothing animates, enter and arrive are never called (cancel still is:
@@ -137,7 +151,7 @@
     stale: { text: "AUTH LOST", ok: false },
     offline: { text: "NO CARRIER", ok: false },
     rate_limited: { text: "RATE LIMITED", ok: false },
-    no_credentials: { text: "NO CREDENTIALS", ok: false },
+    no_credentials: { text: "NO LOGIN", ok: false },
     paused: { text: "PAUSED", ok: false }
   };
   var ACCENT_ABBR = {
@@ -160,11 +174,43 @@
   var LINKS = {
     repo: "https://github.com/Godimas101/claude-usage-monitor",
     bug: "https://github.com/Godimas101/claude-usage-monitor/issues/new?template=bug_report.md&labels=bug",
-    patreon: "https://patreon.com/Godimas101"
+    patreon: "https://patreon.com/Godimas101",
+    hooks: "https://github.com/Godimas101/claude-usage-monitor/blob/main/docs/AGENT_HOOK.md",
+    readme: "https://github.com/Godimas101/claude-usage-monitor#-using-claude-on-the-web-or-in-the-app"
   };
   var POLL_CHOICES = [
     [60000, "1 MIN"], [300000, "5 MIN"], [600000, "10 MIN"], [900000, "15 MIN"], [1800000, "30 MIN"], [3600000, "60 MIN"]
   ];
+  // The usage guard card on the Settings page: how often it asks /api/guard while it is on screen, how many sessions each of its
+  // lists names, and its words.
+  var GUARD_POLL_MS = 3000;
+  var GUARD_LISTED = 5;
+  var GUARD_EXPLAIN = "When plan usage reaches a cap, working Claude sessions are told to wrap up, and sessions that wait are woken when every limit is under its cap again. Nothing is blocked.";
+  var GUARD_COST = "Adds a quick check after each tool call (about a quarter of a second).";
+  var GUARD_LABELS = {
+    guard_enabled: "USAGE GUARD", guard_session_cap: "SESSION CAP", guard_weekly_cap: "WEEKLY CAP",
+    guard_scoped_cap: "MODEL WEEKLY CAP", guard_resume_stagger_s: "STAGGER"
+  };
+  var HOOK_WORDS = { installed: "INSTALLED", partial: "PARTLY INSTALLED", missing: "NOT INSTALLED", unknown: "UNKNOWN" };
+  var MCP_WORDS = { registered: "REGISTERED", missing: "NOT REGISTERED", other: "A DIFFERENT PROGRAM", unknown: "UNKNOWN" };
+  // The sign-in help (#28): what the status banner says when there is no sign-in or it has expired, and the one command it shows.
+  // The command is text for the user to run in PowerShell; the page never fetches or links it. The heading is in capitals like the
+  // other banners' (the Gates theme sets it in sentence case).
+  var INSTALL_COMMAND = "irm https://claude.ai/install.ps1 | iex";
+  var SIGNIN_HEAD = "NO CLAUDE SIGN-IN YET";
+  var SIGNIN_WHY = "The monitor reads your plan's limits through the sign-in that Claude Code saves on this PC. Signing in to Claude Code once is enough, even if you use Claude on the web or in the Claude app. Claude Code needs a paid plan such as Pro or Max.";
+  var SIGNIN_RENEWS = "Claude Code renews the sign-in each time it runs. If the monitor later says the sign-in has expired, open Claude Code again.";
+  var CHECK_NONE = "Still no sign-in found.";
+  var CHECK_STALE = "Still no working sign-in.";
+  var CHECK_FAILED = "Could not check just now. Try again.";
+  // How long "Check again" waits for the monitor to publish the cycle it asked for, and how long the copy button's answer stays
+  // ("Copied", or "Press Ctrl+C" with the command selected, which needs a moment longer to read and act on).
+  var CHECK_WAIT_MS = 15000;
+  var COPY_MS = 3000;
+  var COPY_SELECT_MS = 8000;
+  // The pages that count Claude Code's records, on a PC that has none (#28): someone who uses Claude on the web or in the app.
+  var NO_ACTIVITY = "No Claude Code activity on this PC";
+  var NO_ACTIVITY_WHY = "These pages count the work Claude Code records on this PC. Claude on the web and in the Claude app keeps no records here, so there is nothing to count. Your limits, pace and alerts work as usual.";
   var BASIS = "API-equivalent at list prices";
   // The Fast mode card's note. It is the same words before the report, with no fast-mode request and with some, so the card is
   // as tall in all three and only its tone changes (a note that said something else per state wrapped to another line count).
@@ -284,6 +330,16 @@
     chartCard: "",           // the card whose markup is being built, and how many charts it has drawn so far
     chartN: 0,
     exportStatus: { text: "", path: "", error: false },
+    guard: null,             // the last /api/guard answer: { guard, told, waiting, setup }
+    guardAt: 0,              // when it was asked for (ms), so the Settings page asks again after GUARD_POLL_MS
+    guardFlight: false,
+    guardLost: false,        // the last ask got no answer
+    resumeBusy: false,       // "Resume now" is being sent
+    setup: { busy: "", result: null },   // "install" or "remove" while a click runs; the result of the last click
+    check: { busy: false, sent: false, from: "", at: 0, still: false, failed: false },   // "Check again" on the sign-in help (see checkAgain)
+    copy: "",                // the copy button's answer for a moment: "copied" or "select"
+    copyTimer: 0,
+    noActivity: false,       // the monitor has finished reading and found no Claude Code activity on this PC (see limitsOnly)
     odoShown: null,
     cmpTimer: 0,
     tipApi: null,
@@ -736,19 +792,21 @@
     }
   }
 
-  /* The reports the page on screen draws from. */
+  /* The reports the page on screen draws from. A PC with no Claude Code activity (limitsOnly) has nothing for the cost, efficiency
+   * and history reports to count, so the pages that show them, and the Overview's cost cards, ask for none. */
   function pageStats(page) {
+    var none = limitsOnly();
     switch (page) {
       case "overview":
-        return [statEntry("cost", { window: "cycle" }), statEntry("pacing"), statEntry("history")];
+        return none ? [statEntry("pacing")] : [statEntry("cost", { window: "cycle" }), statEntry("pacing"), statEntry("history")];
       case "limits":
         return [statEntry("pacing")];
       case "cost":
-        return [statEntry("cost", { window: S.ui.costWindow })];
+        return none ? [] : [statEntry("cost", { window: S.ui.costWindow })];
       case "efficiency":
-        return [statEntry("efficiency", { window: S.ui.efficiencyWindow })];
+        return none ? [] : [statEntry("efficiency", { window: S.ui.efficiencyWindow })];
       case "history":
-        return [statEntry("history")];
+        return none ? [] : [statEntry("history")];
       default:
         return [];
     }
@@ -1176,12 +1234,17 @@
     }
   }
 
+  /* The line under the heading when the link is not live. No sign-in and an expired one are the two states only the user can fix,
+   * so they get the help panel (signInHelp); the rest stay a plain line. */
   function statusBanner() {
     var s = st();
     if (!s || s.status === "live") {
       return "";
     }
     var info = STATUS[s.status] || STATUS.loading;
+    if (needsSignIn(s)) {
+      return signInHelp(s, info);
+    }
     return '<div class="nm-msg" role="status"><b>' + esc(info.text) + "</b>" + esc(s.status_detail || "") + "</div>";
   }
 
@@ -1386,14 +1449,17 @@
   }
 
   /* A card (or anything that fills in like one): built under its key, tagged, and in place of its numbers shows the problem
-   * when its report failed. needs: the stat entries it draws from. */
-  function cardPart(key, state, needs, build) {
+   * when its report failed. needs: the stat entries it draws from. none: a line to show in place of its contents when there is
+   * nothing for it to count (a PC with no Claude Code activity; the card is ready, it needs no report). */
+  function cardPart(key, state, needs, build, none) {
     S.chartCard = key;
     S.chartN = 0;
     var html = build();
     if (state === "error") {
       var failed = needs.filter(function (e) { return !e.data && e.error; })[0];
       html = errorSwap(html, failed ? statProblemShort(failed) : "Could not be loaded.");
+    } else if (none) {
+      html = emptySwap(html, none);
     }
     var p = part(key, tagCard(html, key, state, needs), state);
     p.card = true;
@@ -1410,14 +1476,24 @@
     });
   }
 
-  /* The card as it is with the problem in the place of its contents: the same frame and title, one line. */
-  function errorSwap(html, message) {
+  /* The card as it is with one line in the place of its contents: the same frame and title. */
+  function cardSwap(html, line) {
     var open = /^<section\b[^>]*>/.exec(html);
     var head = /<div class="nm-card-t[^"]*">[\s\S]*?<\/div>/.exec(html);
     if (!open || !head) {
       return html;
     }
-    return open[0] + '<div class="nm-card-in">' + head[0] + '<p class="nm-error" role="status">' + esc(message) + "</p></div></section>";
+    return open[0] + '<div class="nm-card-in">' + head[0] + line + "</div></section>";
+  }
+
+  /* ... with the problem, when the card's report failed. */
+  function errorSwap(html, message) {
+    return cardSwap(html, '<p class="nm-error" role="status">' + esc(message) + "</p>");
+  }
+
+  /* ... with what it would have counted, when there is nothing to count. */
+  function emptySwap(html, message) {
+    return cardSwap(html, '<p class="nm-empty">' + esc(message) + "</p>");
   }
 
   var FIGURES = ".nm-big, .nm-stat-v, .nm-stat-s, .nm-mrow .v, .nm-kv b, .nm-facts > span, .nm-pace > span, .nm-pace > b, .nm-pace > .fc, " +
@@ -1716,6 +1792,37 @@
     }
   }
 
+  // ── A PC with no Claude Code activity (#28) ─────────────────────────────────────
+
+  /* True when the monitor has finished reading this PC's Claude Code records and found none: the all-time window holds no request,
+   * and an ingest is done (not running, and it has taken a time) with nothing it could not read (a file it could not read may hold
+   * requests). Someone who uses Claude on the web or in the app has none, and the pages that count records would be cards full of
+   * zeros. It is never decided before a state has arrived or while the first ingest still runs (the windows read zero then because
+   * nothing is counted yet). Once decided it holds through the ingests that
+   * follow (one runs every minute, and the state says "running" while it does) and ends when a request is counted. */
+  function limitsOnly() {
+    var s = st();
+    var all = windowOf("all");
+    var requests = all && all.totals ? num(all.totals.requests) : null;
+    if (!s || !s.ingest || requests === null) {
+      return S.noActivity;
+    }
+    if (requests > 0) {
+      S.noActivity = false;
+    } else if (!s.ingest.running && num(s.ingest.last_duration_s) !== null && !s.ingest.last_error) {
+      S.noActivity = true;
+    }
+    return S.noActivity;
+  }
+
+  /* Cost & value, Efficiency and History on such a PC: one card that says why there is nothing, in place of cards full of zeros. */
+  function noActivityPage(key) {
+    var cards = [cardPart("none", "ready", [], function () {
+      return card({ title: NO_ACTIVITY, cls: "wide", body: '<p class="nm-lede">' + esc(NO_ACTIVITY_WHY) + "</p>" });
+    })];
+    return pageModel(key, "nm-pgrid", cards);
+  }
+
   // ── Overview ────────────────────────────────────────────────────────────────────
 
   /* The plan the sign-in detected, with the price the plan costs (never the override). */
@@ -1971,16 +2078,20 @@
     }));
     var n = costNumbers();
     var he = statEntry("history");
+    // No Claude Code activity on this PC (limitsOnly): the three cards that count records say so in place of their figures, and
+    // they ask for no report, so they are ready, with no problem to report.
+    var none = limitsOnly() ? NO_ACTIVITY + "." : "";
     // Nothing to show yet (n.pending): the cost report is on its way, or it failed and the monitor has no month of its own to
     // stand in (a billing day is set). The three cards that draw from it say which, as they do on the Cost page.
-    var costState = n.pending ? entryState([n.entry]) : "ready";
-    cards.push(cardPart("cost", costState, [n.entry, he], function () { return costCard(n); }));
-    cards.push(cardPart("efficiency", costState, [n.entry], function () { return efficiencyCard(n); }));
-    cards.push(cardPart("models", costState, [n.entry], function () { return modelMixCard(n); }));
+    var costState = n.pending && !none ? entryState([n.entry]) : "ready";
+    cards.push(cardPart("cost", costState, none ? [] : [n.entry, he], function () { return costCard(n); }, none));
+    cards.push(cardPart("efficiency", costState, none ? [] : [n.entry], function () { return efficiencyCard(n); }, none));
+    cards.push(cardPart("models", costState, none ? [] : [n.entry], function () { return modelMixCard(n); }, none));
     cards.push(cardPart("surfaces", waiting, [], function () { return surfaceCard(u); }));
     cards.push(cardPart("burn", waiting, [], function () { return burnCard(s); }));
     return pageModel("overview", "nm-grid", cards, {
-      hazard: hazardBand(worstSeverity(limits())), problem: n.pending ? problemBanner([n.entry]) : "", stale: staleBanner([n.entry, pe, he])
+      hazard: hazardBand(worstSeverity(limits())), problem: n.pending && !none ? problemBanner([n.entry]) : "",
+      stale: staleBanner(none ? [pe] : [n.entry, pe, he])
     });
   }
 
@@ -1989,10 +2100,11 @@
   var SESSION_VERDICT = { LIMITED: "LIMITED", AT_RISK: "AT RISK", SAFE: "SAFE", IDLE: "IDLE", UNKNOWN: "UNKNOWN" };
   var WEEKLY_VERDICT = { AHEAD: "AHEAD", ON_PACE: "ON PACE", BEHIND: "BEHIND", UNKNOWN: "UNKNOWN" };
 
-  /* Rows of a label and a value: [[label, value, pending]]. A row marked pending shows a placeholder where its value will be. */
+  /* Rows of a label and a value: [[label, value, pending, title]]. A row marked pending shows a placeholder where its value will
+   * be; a title is the label's tooltip (the full text of a name that is shown short). */
   function kvGrid(pairs, cls) {
     return '<div class="nm-kv-grid' + (cls ? " " + cls : "") + '">' + pairs.map(function (row) {
-      return '<div class="nm-kv"><span>' + esc(row[0]) + "</span><b" + (row[2] ? ' data-pending=""' : "") + ">" + esc(row[1]) + "</b></div>";
+      return '<div class="nm-kv"><span' + (row[3] ? ' title="' + esc(row[3]) + '"' : "") + ">" + esc(row[0]) + "</span><b" + (row[2] ? ' data-pending="" aria-hidden="true"' : "") + ">" + esc(row[1]) + "</b></div>";
     }).join("") + "</div>";
   }
 
@@ -2406,6 +2518,9 @@
   }
 
   function costPage() {
+    if (limitsOnly()) {
+      return noActivityPage("cost");
+    }
     var e = statEntry("cost", { window: S.ui.costWindow });
     var d = e.data;
     // The parts that do not depend on the window (the plan multiple, the months, the windows table, the top sessions) are
@@ -2692,6 +2807,9 @@
   }
 
   function efficiencyPage() {
+    if (limitsOnly()) {
+      return noActivityPage("efficiency");
+    }
     var e = statEntry("efficiency", { window: S.ui.efficiencyWindow });
     var d = e.data;
     var s = st();
@@ -2836,6 +2954,11 @@
   }
 
   function historyPage() {
+    if (limitsOnly()) {
+      S.odoTotal = null;                               // no odometer to roll and no comparison to turn on this page
+      S.cmpList = [];
+      return noActivityPage("history");
+    }
     var e = statEntry("history");
     var d = e.data;
     var state = entryState([e]);
@@ -2997,6 +3120,7 @@
         '<input class="nm-input" type="number" data-key="plan_price_override" min="0.01" max="10000" step="0.01" placeholder="AUTO" inputmode="decimal" aria-describedby="plan-hint err-plan_price_override"></label>' + errLine("plan_price_override") +
         '</div><div class="nm-actions"><button class="nm-btn" type="button" data-action="refresh">Refresh now</button></div></div></section>' +
         alertsCard() +
+        guardCard() +
         '<section class="nm-card wide" aria-label="System"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">System</h2><span class="nm-meta-t">start-up and updates</span></div><div class="nm-set">' +
         toggleRow("launch_on_startup", "Start with Windows", S.data && S.data.dev ? "Dev instance: this is not saved to Windows." : "Run the monitor when you sign in.") +
         toggleRow("check_updates", "Check for updates", "Look for a newer release once in a while.") +
@@ -3005,6 +3129,13 @@
         '<p class="nm-status" id="set-update-status" role="status"></p></div></section>' +
         "</div>" +
         '<p class="nm-status" id="set-status" role="status" aria-live="polite"></p>';
+      if (!S.setup.busy) {
+        S.setup.result = null;                            // what the last click said belongs to that visit
+      }
+      S.guardAt = 0;
+      syncSettings(main);
+      pollGuard();                                        // what was last known shows at once, and is asked for again
+      return;
     }
     syncSettings(main);
   }
@@ -3048,6 +3179,7 @@
     });
     syncThemePicker(main);
     syncAlerts(main);
+    syncGuard(main);
     syncUpdate(main);
   }
 
@@ -3093,6 +3225,305 @@
       if (el) {
         el.disabled = !enabled || !qh;
       }
+    });
+  }
+
+  // ── The usage guard ─────────────────────────────────────────────────────────────
+
+  /* A number setting that may be left blank: a blank field is "off" (guard caps) or the default (the stagger). */
+  function capRow(key, title, desc, placeholder, min, max) {
+    return '<label class="nm-row-set"><span><span class="t">' + esc(title) + '</span><span class="d" id="desc-' + key + '">' + esc(desc) +
+      '</span></span><input class="nm-input" type="number" data-key="' + key + '" min="' + min + '" max="' + max + '" step="1" placeholder="' + esc(placeholder) +
+      '" inputmode="numeric" aria-describedby="desc-' + key + " err-" + key + '"></label>' + errLine(key);
+  }
+
+  /* The Settings card. Its two blocks are filled by syncGuard: the live status and the one-click setup. */
+  function guardCard() {
+    return '<section class="nm-card wide" aria-label="Usage guard"><div class="nm-card-in">' +
+      '<div class="nm-card-t"><h2 class="nm-ttl">Usage guard</h2><span class="nm-meta-t">tells working sessions to wrap up</span></div><div class="nm-set" id="guard-set">' +
+      toggleRow("guard_enabled", "Arm the guard", GUARD_EXPLAIN) +
+      capRow("guard_session_cap", "Session cap", "Percent of the 5-hour session limit, 1 to 100. Blank leaves it unwatched.", "OFF", 1, 100) +
+      capRow("guard_weekly_cap", "Weekly cap", "Percent of the weekly limit, 1 to 100. Blank leaves it unwatched.", "OFF", 1, 100) +
+      capRow("guard_scoped_cap", "Model weekly cap", "Percent of a model’s own weekly limit, such as Fable’s, 1 to 100. Blank leaves it unwatched.", "OFF", 1, 100) +
+      capRow("guard_resume_stagger_s", "Stagger", "Seconds between waking the sessions that wait, so they do not all start at once. 0 to 600.", "120", 0, 600) +
+      '<div class="nm-row-set is-stack"><span><span class="t">Status</span></span><div id="guard-live"></div></div>' +
+      '<div class="nm-row-set is-stack"><span><span class="t">One-click setup</span><span class="d">Adds the hooks and the MCP tool to Claude Code for you. Your other settings keep their values, a backup is kept, and the file is saved in a standard layout.</span></span>' +
+      '<div id="guard-setup"></div></div></div></div></section>';
+  }
+
+  /* What /api/guard last said, in a shape the card can rely on whatever came back. */
+  function guardView() {
+    var answer = S.guard && typeof S.guard === "object" ? S.guard : {};
+    var guard = answer.guard && typeof answer.guard === "object" ? answer.guard : {};
+    return {
+      known: !!S.guard,
+      state: guard.state === "off" || guard.state === "armed" || guard.state === "holding" ? guard.state : "",
+      over: Array.isArray(guard.over) ? guard.over : [],
+      resumeAt: parseTime(guard.resume_at),
+      policy: guard.policy && typeof guard.policy === "object" && !Array.isArray(guard.policy) ? guard.policy : {},
+      told: Array.isArray(answer.told) ? answer.told : [],
+      waiting: Array.isArray(answer.waiting) ? answer.waiting : [],
+      setup: answer.setup && typeof answer.setup === "object" && !Array.isArray(answer.setup) ? answer.setup : null
+    };
+  }
+
+  /* A session id as people say it: its first eight characters. */
+  function shortId(id) {
+    return id ? String(id).slice(0, 8) : "";
+  }
+
+  function folderName(path) {
+    var parts = String(path || "").split(/[\\/]+/).filter(Boolean);
+    return parts.length ? parts[parts.length - 1] : "";
+  }
+
+  function pctWords(value) {
+    var n = num(value);
+    return n === null ? "--" : n === Math.round(n) ? fmtPct(n) : fmtPct(n, 1);
+  }
+
+  function listWords(items) {
+    return items.length < 2 ? items.join("") : items.slice(0, -1).join(", ") + " and " + items[items.length - 1];
+  }
+
+  /* The limits the caps watch, as words: "session at 95%". */
+  function watchedWords(policy) {
+    var out = [];
+    [["session_cap", "the session limit"], ["weekly_cap", "the weekly limit"], ["scoped_cap", "each model’s weekly limit"]].forEach(function (pair) {
+      if (num(policy[pair[0]]) !== null) {
+        out.push(pair[1] + " at " + pctWords(policy[pair[0]]));
+      }
+    });
+    return out;
+  }
+
+  /* The status block as it is before the monitor has answered: the shape of the common case, so nothing moves when it does. */
+  function guardLivePlaceholder() {
+    return '<div class="nm-verdict"><span class="nm-chip" data-pending="" aria-hidden="true">ARMED</span></div>' +
+      '<p class="nm-story" data-pending="" aria-hidden="true">Watching the session limit at 95% and the weekly limit at 90%. Every watched limit is under its cap.</p>' +
+      '<div class="nm-actions"><button class="nm-btn" type="button" data-fid="guard-resume" disabled>Resume now</button></div>';
+  }
+
+  /* Off, Armed or Holding. While holding: which limits are over their caps, when the hold ends, the sessions told of it and the
+   * sessions that wait. "Resume now" is there always and works only while something waits. */
+  function guardLiveHtml(v, nowMs) {
+    if (!v.known) {
+      return S.guardLost ? '<p class="nm-error" role="status">The dashboard could not get the guard’s status from the monitor.</p>' : guardLivePlaceholder();
+    }
+    if (!v.state) {
+      return guardLivePlaceholder();
+    }
+    var chip;
+    var story;
+    if (v.state === "off") {
+      chip = '<span class="nm-chip">OFF</span>';
+      story = "The guard is off. Nothing is watched, and no session is told anything.";
+    } else if (v.state === "armed") {
+      var watched = watchedWords(v.policy);
+      chip = '<span class="nm-chip is-ok">ARMED</span>';
+      story = watched.length ? "Watching " + listWords(watched) + ". Every watched limit is under its cap." : "No cap is set, so no limit is watched. Set at least one cap above.";
+    } else {
+      chip = '<span class="nm-chip solid is-crit">HOLDING</span>';
+      story = "A cap was reached. Working sessions are told once to wrap up, and sessions that wait wake when every watched limit is under its cap again.";
+    }
+    var hooks = v.setup && v.setup.hooks ? v.setup.hooks.state : "";
+    if (v.state !== "off" && (hooks === "missing" || hooks === "partial")) {
+      story += " The hooks are not all installed, so sessions may not be told: press Install below.";  // the guard speaks through them
+    }
+    var rows = [];
+    if (v.state === "holding") {
+      v.over.forEach(function (item) {
+        rows.push([String(item.label || item.name || "limit").toUpperCase(), pctWords(item.percent) + " OF A " + pctWords(item.cap) + " CAP"]);
+      });
+      var left = v.resumeAt === null ? null : v.resumeAt - nowMs;
+      rows.push(["RESUMES", left === null ? "NO RESET TIME KNOWN" : clockText(v.resumeAt) + (left > 60000 ? " · IN " + fmtRemain(left) : " · NOW")]);
+      rows.push(["TOLD THIS EPISODE", v.told.length ? plural(v.told.length, "session").toUpperCase() : "NONE YET"]);
+      v.told.slice(0, GUARD_LISTED).forEach(function (t) {
+        rows.push([shortId(t.session_id) || "unknown session", clockText(parseTime(t.told_at))]);
+      });
+      if (v.told.length > GUARD_LISTED) {
+        rows.push(["AND " + (v.told.length - GUARD_LISTED) + " MORE", ""]);
+      }
+    }
+    if (v.state === "holding" || v.waiting.length) {
+      rows.push(["WAITING", v.waiting.length ? plural(v.waiting.length, "session").toUpperCase() : "NONE"]);
+      v.waiting.slice(0, GUARD_LISTED).forEach(function (w) {
+        var folder = folderName(w.cwd) || "unknown folder";
+        rows.push([folder + (w.session_id ? " · " + shortId(w.session_id) : ""), "SINCE " + clockText(parseTime(w.since)), false, w.cwd || ""]);
+      });
+      if (v.waiting.length > GUARD_LISTED) {
+        rows.push(["AND " + (v.waiting.length - GUARD_LISTED) + " MORE", ""]);
+      }
+    }
+    // While it is sent the button only says it is busy (aria-disabled keeps the keyboard focus on it); it is disabled when nothing waits.
+    var state = S.resumeBusy ? ' aria-disabled="true"' : v.waiting.length > 0 ? "" : " disabled";
+    return '<div class="nm-verdict">' + chip + '</div><p class="nm-story" role="status">' + esc(story) + "</p>" +
+      (rows.length ? kvGrid(rows, "is-one") : "") +
+      '<div class="nm-actions"><button class="nm-btn" type="button" data-action="guard-resume" data-fid="guard-resume"' + state + ">" +
+      (S.resumeBusy ? "Resuming…" : "Resume now") + "</button></div>";
+  }
+
+  function hooksWords(hooks) {
+    if (!hooks) {
+      return "UNKNOWN";
+    }
+    return hooks.state === "partial" ? "PARTLY INSTALLED (" + hooks.installed + " OF " + hooks.total + ")" : HOOK_WORDS[hooks.state] || "UNKNOWN";
+  }
+
+  function claudeWords(claude) {
+    if (!claude || !claude.found) {
+      return "NOT FOUND";
+    }
+    if (!claude.version) {
+      return "VERSION UNKNOWN";
+    }
+    return claude.version + (claude.supported === false ? " · NEEDS " + claude.min_version + " OR NEWER" : "");
+  }
+
+  /* What an Install or a Remove did, in the monitor's plain words: a summary of what changed or was already so and where the backup
+   * is, the warnings (and the command to run by hand when the monitor could not), and what went wrong, each in a box of its own and
+   * only when it has something to say. Nothing here is a token or a secret. */
+  function guardResultHtml(r) {
+    if (!r || typeof r !== "object") {
+      return "";
+    }
+    var changed = Array.isArray(r.changed) ? r.changed : [];
+    var said = changed.concat(Array.isArray(r.unchanged) ? r.unchanged : []).join(" ");
+    var head = r.ok ? (changed.length ? (r.action === "remove" ? "Removed." : "Installed.") : "Nothing to change.") : changed.length ? "Partly done." : "";
+    var summary = (head ? "<b>" + esc(head) + "</b> " : "") + esc(said);
+    if (r.backup) {
+      summary += (summary ? "<br>" : "") + 'Backup: <span class="nm-path">' + esc(r.backup) + "</span>";
+    }
+    var notes = (Array.isArray(r.warnings) ? r.warnings : []).map(esc);
+    if (r.manual) {
+      notes.push('To do it by hand, run: <span class="nm-path">' + esc(r.manual) + "</span>");
+    }
+    return (summary ? '<div class="nm-callout" role="status">' + summary + "</div>" : "") +
+      (notes.length ? '<div class="nm-callout is-warn" role="note">' + notes.join("<br>") + "</div>" : "") +
+      (Array.isArray(r.errors) ? r.errors : []).map(function (error) {
+        return '<p class="nm-error" role="alert">' + esc(error) + "</p>";
+      }).join("");
+  }
+
+  /* The one-click setup block: where setup stands, Install and Remove, what the last click did, and what it costs. When setup
+   * cannot run here, why, and where to do it by hand. */
+  function guardSetupHtml(v) {
+    var s = v.setup;
+    var busy = S.setup.busy;
+    var rows;
+    var notes = "";
+    if (!s) {
+      rows = kvGrid([["HOOKS", "NOT INSTALLED", true], ["MCP TOOL", "NOT REGISTERED", true], ["CLAUDE CODE", "2.1.160", true]], "is-one");
+    } else {
+      var where = s.claude && s.claude.path ? String(s.claude.path) : "";
+      rows = kvGrid([["HOOKS", hooksWords(s.hooks)], ["MCP TOOL", MCP_WORDS[(s.mcp || {}).state] || "UNKNOWN"], ["CLAUDE CODE", claudeWords(s.claude), false, where]], "is-one");
+      if (!s.available) {
+        notes += '<div class="nm-callout is-warn" role="note"><b>Setup is not available here.</b> ' + esc(s.reason || "") +
+          ' Set it up by hand instead: <a href="' + esc(LINKS.hooks) + '" data-external="1">docs/AGENT_HOOK.md</a>.</div>';
+      } else if (s.claude && s.claude.supported === false) {
+        // Which claude: an old npm copy can come first on the PATH while another one is up to date.
+        notes += '<div class="nm-callout is-warn" role="note">Claude Code ' + esc(s.claude.version) +
+          (where ? ' (<span class="nm-path">' + esc(where) + "</span>)" : "") + " is older than " + esc(s.claude.min_version) +
+          ", which the hooks need. Update it with <span class=\"nm-path\">claude update</span> first.</div>";
+      }
+      (Array.isArray(s.errors) ? s.errors : []).forEach(function (error) {
+        notes += '<p class="nm-error" role="alert">' + esc(error) + "</p>";
+      });
+    }
+    // A button that cannot work here is disabled; one waiting on a click is only aria-disabled, so it keeps the keyboard focus.
+    // Remove needs no Claude Code: it edits the settings file, and leaves the MCP tool to the manual line when claude is missing.
+    var canRemove = !!s && (s.can_remove === undefined ? !!s.available : !!s.can_remove);
+    var installState = !s || !s.available ? " disabled" : busy ? ' aria-disabled="true"' : "";
+    var removeState = !canRemove ? " disabled" : busy ? ' aria-disabled="true"' : "";
+    return rows + notes + '<div class="nm-actions">' +
+      '<button class="nm-btn solid" type="button" data-action="guard-install" data-fid="guard-install"' + installState + ">" + (busy === "install" ? "Installing…" : "Install") + "</button>" +
+      '<button class="nm-btn" type="button" data-action="guard-remove" data-fid="guard-remove"' + removeState + ">" + (busy === "remove" ? "Removing…" : "Remove") + "</button></div>" +
+      guardResultHtml(S.setup.result) + '<p class="nm-lede">' + esc(GUARD_COST) + "</p>";
+  }
+
+  /* Puts the two blocks in step with what the monitor last said. A block whose markup did not change is left alone, so a poll never
+   * drops the focus of whoever is tabbing through its buttons. */
+  function syncGuard(main) {
+    main = main || $("#main");
+    var v = guardView();
+    var now = Date.now();
+    [["#guard-live", guardLiveHtml(v, now)], ["#guard-setup", guardSetupHtml(v)]].forEach(function (pair) {
+      var box = $(pair[0], main);
+      if (box && box.getAttribute("data-sig") !== pair[1]) {
+        box.setAttribute("data-sig", pair[1]);
+        replaceHtml(box, pair[1]);
+      }
+    });
+  }
+
+  /* Asks /api/guard (the state, who was told, who waits, where setup stands). One ask at a time; the Settings page asks again every
+   * GUARD_POLL_MS while it is on screen, and at once after a change. */
+  function pollGuard() {
+    if (S.guardFlight) {
+      return;
+    }
+    S.guardFlight = true;
+    S.guardAt = Date.now();
+    api("GET", "/api/guard").then(function (res) {
+      S.guardFlight = false;
+      S.guardLost = !(res.ok && res.data);
+      if (!S.guardLost) {
+        S.guard = res.data;
+      }
+      syncGuard();
+    }, function () {
+      S.guardFlight = false;
+      S.guardLost = true;
+      syncGuard();
+    });
+  }
+
+  /* Once a second, from tick(): ask again when it is time, and let the countdown move. */
+  function guardTick() {
+    if (S.page !== "settings" || S.formKey !== "settings" || document.visibilityState === "hidden") {
+      return;
+    }
+    if (!S.guardFlight && Date.now() - S.guardAt >= GUARD_POLL_MS) {
+      pollGuard();
+    }
+    syncGuard();
+  }
+
+  /* "Resume now": every session that waits on the guard is woken at once, whatever the limits say. */
+  function guardResume() {
+    if (S.resumeBusy) {
+      return;
+    }
+    S.resumeBusy = true;
+    syncGuard();
+    api("POST", "/api/guard/resume").then(function (res) {
+      S.resumeBusy = false;
+      setStatus(res.ok ? "RESUME REQUESTED" : failedText("RESUME FAILED", res), !res.ok);
+      pollGuard();
+    }, function () {
+      S.resumeBusy = false;
+      setStatus("RESUME FAILED: THE DASHBOARD LOST ITS LINK", true);
+      syncGuard();
+    });
+  }
+
+  /* Install or Remove. The monitor answers with what it did, or why it did not; either way the result stays beside the buttons. */
+  function guardSetup(action) {
+    if (S.setup.busy) {
+      return;
+    }
+    var failed = function (why) {
+      return { ok: false, action: action, changed: [], unchanged: [], backup: null, warnings: [], errors: [why], manual: null };
+    };
+    S.setup = { busy: action, result: null };
+    syncGuard();
+    api("POST", "/api/guard/setup", { action: action }).then(function (res) {
+      S.setup = { busy: "", result: res.ok && res.data && typeof res.data === "object" ? res.data : failed("The monitor could not run setup (" + errorText(res) + ").") };
+      pollGuard();
+      syncGuard();
+    }, function () {
+      S.setup = { busy: "", result: failed("The dashboard lost its link to the monitor.") };
+      syncGuard();
     });
   }
 
@@ -3238,6 +3669,144 @@
       skipUpdate();
     } else if (action === "update-notes" && found && found.url) {
       openExternal(found.url);
+    }
+  }
+
+  // ── The sign-in help (#28) ──────────────────────────────────────────────────────
+
+  /* The two states only the user can fix: there is no sign-in (someone who uses Claude on the web or in the app and never ran
+   * Claude Code), or the sign-in has expired or was turned down. */
+  function needsSignIn(s) {
+    return !!s && (s.status === "no_credentials" || s.status === "stale");
+  }
+
+  /* A command the user types: it keeps its case in every theme. */
+  function codeText(text) {
+    return '<code class="nm-path">' + esc(text) + "</code>";
+  }
+
+  function copyButton() {
+    var label = S.copy === "copied" ? "Copied" : S.copy === "select" ? "Press Ctrl+C" : "Copy";
+    var title = S.copy === "copied" ? "Copied to the clipboard" : S.copy === "select" ? "Press Ctrl+C to copy the selected command" : "Copy the install command";
+    return '<button class="nm-btn" type="button" data-action="copy-command" data-fid="signin-copy" aria-label="' + esc(title) + '">' + esc(label) + "</button>";
+  }
+
+  /* The status banner for a missing or expired sign-in: what happened, what to do about it, and a button that looks again. With no
+   * sign-in the steps start from nothing (installing Claude Code, which also gives the plan's limits to someone who uses Claude on
+   * the web or in the app); with an expired one the monitor's own reason stays and the one thing to do is added. info is the
+   * status's entry in STATUS (its heading). */
+  function signInHelp(s, info) {
+    var missing = s.status === "no_credentials";
+    var busy = S.check.busy;
+    var found = S.check.failed ? CHECK_FAILED : S.check.still ? (missing ? CHECK_NONE : CHECK_STALE) : "";
+    var body;
+    if (missing) {
+      var steps = [
+        esc("Open PowerShell: press Start and type PowerShell."),
+        esc("Install Claude Code:") + '<div class="nm-cmd">' + codeText(INSTALL_COMMAND) + copyButton() + "</div>",
+        esc("Open a new PowerShell window, run ") + codeText("claude") + esc(", and sign in with your Claude account in the browser that opens."),
+        esc("Come back here and press Check again.")
+      ];
+      body = "<p>" + esc(SIGNIN_WHY) + "</p><ol>" + steps.map(function (step) { return "<li>" + step + "</li>"; }).join("") + "</ol><p>" + esc(SIGNIN_RENEWS) + "</p>";
+    } else {
+      body = (s.status_detail ? "<p>" + esc(s.status_detail) + "</p>" : "") + "<p>" + esc("Claude Code renews the sign-in each time it runs. Open Claude Code, or run ") +
+        codeText("claude") + esc(" in PowerShell, then press Check again.") + "</p>";
+    }
+    return '<div class="nm-msg nm-help" role="region" aria-label="Claude sign-in"><b>' + esc(missing ? SIGNIN_HEAD : info.text) + "</b>" + body +
+      '<div class="nm-actions"><button class="nm-btn solid" type="button" data-action="check-again" data-fid="check-again"' + (busy ? ' aria-disabled="true"' : "") + ">" +
+      (busy ? "Checking…" : "Check again") + "</button>" +
+      (missing ? '<span class="nm-links"><a href="' + esc(LINKS.readme) + '" data-external="1">More in the README</a></span>' : "") + "</div>" +
+      (found ? '<p class="nm-status" role="status">' + esc(found) + "</p>" : "") + "</div>";
+  }
+
+  /* Check again: asks the monitor to read the sign-in now (POST /api/refresh answers at once, the cycle runs after it) and keeps
+   * "Checking…" on the button until the state of that cycle is in (syncCheck). One at a time. */
+  function checkAgain() {
+    if (S.check.busy) {
+      return;
+    }
+    var s = st();
+    var lost = function () {
+      S.check = { busy: false, sent: true, from: "", at: 0, still: false, failed: true };
+      renderPage();
+    };
+    S.check = { busy: true, sent: false, from: s && s.updated_at ? s.updated_at : "", at: Date.now(), still: false, failed: false };
+    renderPage();
+    api("POST", "/api/refresh").then(function (res) {
+      if (!res.ok) {
+        lost();
+        return;
+      }
+      S.check.sent = true;
+      poll(true);
+    }, lost);
+  }
+
+  /* Brings a check to its end and says whether the panel changed. It is over when the monitor has published the cycle it was asked
+   * for (the state's updated_at moved) or, whatever has arrived, after CHECK_WAIT_MS; a state that still needs a sign-in then
+   * makes the panel say so. When the sign-in is found, or the status is another one, there is nothing left to say. */
+  function syncCheck() {
+    var c = S.check;
+    var s = st();
+    if (!needsSignIn(s)) {
+      if (c.busy || c.still || c.failed) {
+        S.check = { busy: false, sent: false, from: "", at: 0, still: false, failed: false };
+        return true;
+      }
+      return false;
+    }
+    if (!c.busy || !c.sent || (s.updated_at === c.from && Date.now() - c.at < CHECK_WAIT_MS)) {
+      return false;
+    }
+    S.check = { busy: false, sent: true, from: c.from, at: c.at, still: true, failed: false };
+    return true;
+  }
+
+  /* The command, selected, so Ctrl+C takes it where the clipboard could not be written. */
+  function selectCommand() {
+    var code = $(".nm-help .nm-cmd code");
+    var picked = window.getSelection ? window.getSelection() : null;
+    if (code && picked && document.createRange) {
+      var range = document.createRange();
+      range.selectNodeContents(code);
+      picked.removeAllRanges();
+      picked.addRange(range);
+    }
+  }
+
+  /* Copy: the install command to the clipboard. Where the page may not write it (no clipboard, or it refuses) the command is
+   * selected instead. The answer shows on the button for COPY_MS. */
+  function copyCommand() {
+    var clip = window.navigator && window.navigator.clipboard;
+    var answer = function (ok) {
+      S.copy = ok ? "copied" : "select";
+      renderPage();
+      if (!ok) {
+        selectCommand();
+      }
+      window.clearTimeout(S.copyTimer);
+      S.copyTimer = window.setTimeout(function () {
+        S.copy = "";
+        renderPage();
+      }, ok ? COPY_MS : COPY_SELECT_MS);
+    };
+    if (clip && typeof clip.writeText === "function") {
+      try {
+        clip.writeText(INSTALL_COMMAND).then(function () { answer(true); }, function () { answer(false); });
+        return;
+      } catch (e) {
+        /* a clipboard that throws: the command is selected instead */
+      }
+    }
+    answer(false);
+  }
+
+  /* The help panel's buttons. */
+  function helpAction(action) {
+    if (action === "check-again") {
+      checkAgain();
+    } else if (action === "copy-command") {
+      copyCommand();
     }
   }
 
@@ -3411,6 +3980,9 @@
           invalidateStats();
         }
         poll(true);
+        if (Object.keys(patch).some(function (k) { return k.indexOf("guard_") === 0; })) {
+          pollGuard();                                    // the guard's status follows its settings at once
+        }
         syncSettings($("#main"));
         return true;
       }
@@ -3431,7 +4003,7 @@
   }
 
   function labelFor(key) {
-    return String(key).replace(/_/g, " ").toUpperCase();
+    return GUARD_LABELS[key] || String(key).replace(/_/g, " ").toUpperCase();
   }
 
   function applyThemeChoice(themeId, variantId) {
@@ -3525,6 +4097,26 @@
       }
     } else if (key === "poll_interval_ms") {
       value = parseInt(el.value, 10);
+    } else if (key === "guard_session_cap" || key === "guard_weekly_cap" || key === "guard_scoped_cap") {
+      var cap = String(el.value).trim();
+      if (el.validity && el.validity.badInput) {          // text a number box cannot hold ("9e", "-") reads as "": not a blank
+        fieldError(key, "Enter a whole number from 1 to 100, or leave it blank to stop watching this limit.");
+        return;
+      } else if (cap === "") {
+        value = null;                                     // blank is off: the limit is not watched
+      } else if (!/^\d{1,3}$/.test(cap) || +cap < 1 || +cap > 100) {
+        fieldError(key, "Enter a whole number from 1 to 100, or leave it blank to stop watching this limit.");
+        return;
+      } else {
+        value = parseInt(cap, 10);
+      }
+    } else if (key === "guard_resume_stagger_s") {
+      var stagger = String(el.value).trim();
+      if (!/^\d{1,3}$/.test(stagger) || +stagger > 600) {
+        fieldError(key, "Enter a whole number of seconds from 0 to 600.");
+        return;
+      }
+      value = parseInt(stagger, 10);
     } else {
       value = el.value;
     }
@@ -3580,6 +4172,10 @@
       installUpdate();
     } else if (action === "skip-update") {
       skipUpdate();
+    } else if (action === "guard-resume") {
+      guardResume();
+    } else if (action === "guard-install" || action === "guard-remove") {
+      guardSetup(action === "guard-install" ? "install" : "remove");
     }
   }
 
@@ -4099,6 +4695,7 @@
     }
     applyTheme(S.data.theme);
     ensureThemes();
+    syncCheck();                                       // a check of the sign-in ends with the state of the cycle it asked for
     render();
   }
 
@@ -4161,6 +4758,10 @@
   function tick() {
     renderAge();
     renderHealth();
+    guardTick();
+    if (syncCheck()) {
+      renderPage();                                    // a check that waited too long ends, or the sign-in was found
+    }
     if (S.data) {
       ensureStats();
     }
@@ -4286,6 +4887,11 @@
           updateAction(banner.getAttribute("data-action"));
           return;
         }
+        var help = closest(".nm-help button[data-action]");
+        if (help) {
+          helpAction(help.getAttribute("data-action"));
+          return;
+        }
         if (S.formKey === "settings") {
           settingsClick(event);
         }
@@ -4324,7 +4930,11 @@
       skelEfficiency: skelEfficiency, skelHistory: skelHistory, errorSwap: errorSwap, tagCard: tagCard, cardPart: cardPart,
       playEnterIfDue: playEnterIfDue, wantEnter: wantEnter, loadPrefs: loadPrefs, PAGE_KEYS: PAGE_KEYS, clockText: clockText,
       errorText: errorText, failedText: failedText, checkUpdateText: checkUpdateText, settingsClick: settingsClick,
-      updateAction: updateAction, installUpdate: installUpdate, skipUpdate: skipUpdate, aboutPage: aboutPage
+      updateAction: updateAction, installUpdate: installUpdate, skipUpdate: skipUpdate, aboutPage: aboutPage,
+      settingsPage: settingsPage, settingsChange: settingsChange, labelFor: labelFor, guardCard: guardCard, guardView: guardView,
+      guardLiveHtml: guardLiveHtml, guardSetupHtml: guardSetupHtml, guardResultHtml: guardResultHtml, syncGuard: syncGuard,
+      pollGuard: pollGuard, guardTick: guardTick, statusBanner: statusBanner, limitsOnly: limitsOnly, pageStats: pageStats,
+      checkAgain: checkAgain, syncCheck: syncCheck, copyCommand: copyCommand, helpAction: helpAction
     };
     return;
   }

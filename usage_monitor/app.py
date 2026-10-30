@@ -51,12 +51,13 @@ from typing import Any
 import update_check
 import version
 from usage_monitor import paths, themes
+from usage_monitor.agent import sessions as agent_sessions
 from usage_monitor.data.alerts import AlertEngine
 from usage_monitor.data.models import ApiStatus, MonitorState
 from usage_monitor.data.service import DataService
 from usage_monitor.data.store import Store
 from usage_monitor.log import get_logger, setup_logging
-from usage_monitor.render.model import WidgetModel, build_model
+from usage_monitor.render.model import GuardMark, WidgetModel, build_model
 from usage_monitor.render.skins import RenderOptions, get_skin
 from usage_monitor.settings import DEFAULTS as SETTINGS_DEFAULTS
 from usage_monitor.settings import Settings, parse_clock
@@ -186,7 +187,8 @@ def _percent_text(percent: float) -> str:
 
 def tray_tooltip(model: WidgetModel, *, dev: bool = False) -> str:
     """"Claude usage - session 13% - weekly 2%", with the status after it when the numbers are not
-    live ("... - stale") and " (dev)" for a dev instance."""
+    live ("... - stale"), the usage guard while it is on ("... - guard armed") and " (dev)" for a dev
+    instance."""
     rows = {row.key: row for row in model.rows}
     parts = ["Claude usage"]
     for key in ("session", "weekly"):
@@ -195,28 +197,52 @@ def tray_tooltip(model: WidgetModel, *, dev: bool = False) -> str:
             parts.append(f"{key} {_percent_text(row.percent)}")
     if len(parts) == 1 or model.status not in (ApiStatus.LIVE, ApiStatus.PAUSED):
         parts.append(model.status_text.lower())
+    if model.guard is not None:
+        parts.append(_guard_tip(model.guard))
     return " - ".join(parts) + (" (dev)" if dev else "")
+
+
+def _guard_tip(guard: GuardMark) -> str:
+    """The usage guard in the tooltip, in the Gates footer's words: "guard armed", or "guard holding, resumes
+    6:26 PM (in 2h 14m)". Which limits are over their caps is left to the hover card and the dashboard, so the
+    worst case still fits the shell's 127 characters."""
+    if not guard.holding:
+        return "guard armed"
+    if guard.resume_clock is None:
+        return "guard holding"
+    return f"guard holding, resumes {guard.resume_clock} (in {(guard.resume_in or '').lower()})"
 
 
 def menu_items(
     *,
     floating_on: bool,
     taskbar_on: bool,
+    guard_on: bool,
+    waiting: int,
     update_version: str | None,
     open_dashboard: Callable[[], None],
     toggle_floating: Callable[[], None],
     toggle_taskbar: Callable[[], None],
+    toggle_guard: Callable[[], None],
+    resume_waiting: Callable[[], None],
     refresh: Callable[[], None],
     report_bug: Callable[[], None],
     update: Callable[[], None],
     quit_app: Callable[[], None],
 ) -> list[MenuItem]:
-    """The tray and widget menu. "Update to vX" appears only while an update is on offer."""
+    """The tray and widget menu. "Resume waiting sessions" appears only while Claude sessions wait on the usage
+    guard (#27), and "Update to vX" only while an update is on offer."""
     items = [
         MenuItem("Open dashboard", open_dashboard),
         SEPARATOR,
         MenuItem("Floating widget", toggle_floating, checked=floating_on),
         MenuItem("Taskbar widget", toggle_taskbar, checked=taskbar_on),
+        SEPARATOR,
+        MenuItem("Usage guard", toggle_guard, checked=guard_on),
+    ]
+    if waiting:
+        items.append(MenuItem(f"Resume waiting sessions ({waiting})", resume_waiting))
+    items += [
         SEPARATOR,
         MenuItem("Refresh now", refresh),
         MenuItem("Report a bug", report_bug),
@@ -291,19 +317,23 @@ def blink_cycle(theme: Any) -> tuple[int, int] | None:
     return lit, round(period_ms) - lit
 
 
-def tick_delay_ms(age_seconds: float | None) -> int:
+def tick_delay_ms(age_seconds: float | None, resume_in_s: float | None = None) -> int:
     """Milliseconds until the text on the widgets can next change.
 
     The age readout steps once a second for the first minute after a fetch and once a minute after
-    that, so the wait ends just past the next step. The time rails and reset times need a redraw at
-    least every TICK_CAP_S. With no age to show, only the cap applies.
+    that, so the wait ends just past the next step. The usage guard's countdown (resume_in_s, the
+    seconds until a holding guard lets work resume) steps at each whole minute left, so the wait also
+    ends just past its next step. The time rails and reset times need a redraw at least every
+    TICK_CAP_S. With neither to show, only the cap applies.
     """
     cap = int(TICK_CAP_S * 1000)
-    if age_seconds is None or age_seconds < 0:
-        return cap
-    step = 1.0 if age_seconds < 60 else 60.0
-    wait = step - (age_seconds % step)
-    return min(cap, int(wait * 1000) + 25)
+    waits = []
+    if age_seconds is not None and age_seconds >= 0:
+        step = 1.0 if age_seconds < 60 else 60.0
+        waits.append(step - (age_seconds % step))
+    if resume_in_s is not None and resume_in_s > 0:
+        waits.append(resume_in_s % 60.0)    # "2H 14M" turns "2H 13M" as soon as less than 134 minutes are left
+    return min([cap] + [int(wait * 1000) + 25 for wait in waits])
 
 
 class Blinker:
@@ -663,20 +693,23 @@ class MonitorApp:
             self.settings.close()
 
     def _teardown(self) -> None:
-        """Shutdown order: dashboard, data service, API server, tray, windows, settings. Runs on the
-        UI thread (a host cleanup); every step is guarded so one failure does not skip the rest."""
+        """Shutdown order: the taskbar strip, dashboard, data service, API server, tray, the other windows,
+        settings. Runs on the UI thread (a host cleanup); every step is guarded so one failure does not
+        skip the rest. The strip goes first: it is a child of the taskbar, whose input Windows ties to this
+        thread, so while the steps after it wait (the dashboard and the service, seconds each) the taskbar
+        would wait with them."""
         if self._torn_down:
             return
         self._torn_down = True
         steps: list[tuple[str, Callable[[], None]]] = [
             ("animation", self._stop_timers),
             ("update re-check", self._stop_update_recheck),
+            ("taskbar widget", self._destroy_taskbar),
             ("dashboard", self._close_dashboard),
             ("data service", self._stop_service),
             ("api server", lambda: self.server and self.server.stop()),
             ("tray icon", lambda: self.tray and self.tray.remove()),
             ("floating widget", lambda: self.floating and self.floating.destroy()),
-            ("taskbar widget", lambda: self.taskbar and self.taskbar.destroy()),
             ("tooltip", lambda: self.tooltip and self.tooltip.destroy()),
             ("settings", lambda: self.settings and self.settings.close()),
         ]
@@ -697,6 +730,11 @@ class MonitorApp:
         if self.blinker is not None:
             self.blinker.stop()
         self._cancel_tick()
+
+    def _destroy_taskbar(self) -> None:
+        taskbar, self.taskbar = self.taskbar, None   # a state that arrives later must not draw it again
+        if taskbar is not None:
+            taskbar.destroy()
 
     def _stop_update_recheck(self) -> None:
         if self._update_timer is not None and self.host is not None:
@@ -736,10 +774,14 @@ class MonitorApp:
         return menu_items(
             floating_on=bool(setting(self.settings, "show_floating")),
             taskbar_on=bool(setting(self.settings, "show_taskbar")),
+            guard_on=bool(setting(self.settings, "guard_enabled")),
+            waiting=len(self._waiting_sessions()),
             update_version=plain_version(offered.get("version")) if offered else None,
             open_dashboard=self.open_dashboard,
             toggle_floating=lambda: self._toggle("show_floating"),
             toggle_taskbar=lambda: self._toggle("show_taskbar"),
+            toggle_guard=lambda: self._toggle("guard_enabled"),
+            resume_waiting=self.resume_waiting,
             refresh=self.refresh_now,
             report_bug=lambda: self._open_url(bug_report_url()),
             update=self._apply_update,
@@ -749,6 +791,19 @@ class MonitorApp:
     def refresh_now(self) -> None:
         if self.service is not None:
             self.service.refresh_now()
+
+    def resume_waiting(self) -> None:
+        """Release every Claude session waiting on the usage guard (#27), whatever the limits say."""
+        try:
+            agent_sessions.resume_now(paths.app_data_dir())
+        except OSError:
+            log.warning("could not release the waiting sessions", exc_info=True)
+
+    def _waiting_sessions(self) -> list[dict]:
+        try:
+            return agent_sessions.waiting(paths.app_data_dir())
+        except OSError:
+            return []
 
     def call_on_ui(self, fn: Callable[[], Any], timeout: float = UI_CALL_TIMEOUT_S) -> Any:
         """Run ``fn`` on the UI thread and return its result (for other threads; never call it from
@@ -1138,7 +1193,8 @@ class MonitorApp:
         self._cancel_tick()
         if self._torn_down or self.host is None or not self._animation_allowed():
             return
-        self._tick_timer = self.host.set_timer(tick_delay_ms(self._age_seconds()), self._on_tick, repeat=False)
+        delay = tick_delay_ms(self._age_seconds(), self._resume_in_seconds())
+        self._tick_timer = self.host.set_timer(delay, self._on_tick, repeat=False)
 
     def _cancel_tick(self) -> None:
         if self._tick_timer is not None and self.host is not None:
@@ -1154,6 +1210,13 @@ class MonitorApp:
         if fetched is None or self._ctx is None or self._ctx.model.age_text is None:
             return None
         return (self._clock() - fetched).total_seconds()
+
+    def _resume_in_seconds(self) -> float | None:
+        """Seconds until the usage guard lets work resume, while it holds with a known resume time."""
+        guard = self._ctx.model.guard if self._ctx is not None else None
+        if guard is None or guard.resume_at is None:
+            return None
+        return (guard.resume_at - self._clock()).total_seconds()
 
     # ── Diagnostics ──
 

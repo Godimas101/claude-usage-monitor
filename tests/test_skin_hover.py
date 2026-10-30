@@ -162,8 +162,11 @@ class Host:
 class Window:
     """A layered window that remembers every picture it was given, and reports the pointer like the real one."""
 
-    def __init__(self, host: Any = None, *, draggable: bool, topmost: bool = True, dpi: int = 96) -> None:
+    def __init__(self, host: Any = None, *, draggable: bool, topmost: bool = True, dpi: int = 96,
+                 parent: int | None = None) -> None:
         self.draggable = draggable
+        self.parent = parent
+        self.alive = True
         self.visible = False
         self.dragging = False
         self.dpi = dpi
@@ -224,8 +227,8 @@ class Windows:
         self.made: list[Window] = []
         self.dpi = dpi
 
-    def __call__(self, host: Any, *, draggable: bool, topmost: bool = True) -> Window:
-        window = Window(host, draggable=draggable, topmost=topmost, dpi=self.dpi)
+    def __call__(self, host: Any, *, draggable: bool, topmost: bool = True, parent: int | None = None) -> Window:
+        window = Window(host, draggable=draggable, topmost=topmost, dpi=self.dpi, parent=parent)
         self.made.append(window)
         return window
 

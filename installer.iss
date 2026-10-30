@@ -54,8 +54,10 @@ ArchitecturesAllowed=x64compatible
 ; stop with "please close it" while it exists. The dashboard window is a second process of the same exe that
 ; holds no mutex: Restart Manager (CloseApplications) finds it through the files it has open and closes it,
 ; and PrepareToInstall below asks it to close first. "force" also ends the windowless readers Claude Code
-; starts from the same exe (--mcp lives as long as a Claude session; --hook and --gate briefly): they hold
-; no state, and while one held the files a silent update stopped with exit code 5 and changed nothing. Nothing is restarted by Setup: a closed dashboard cannot
+; starts from the same exe (--mcp lives as long as a Claude session; --hook and --gate briefly; --wait until
+; the usage guard lets its session go, which can be days): they hold no state, and while one held the files a
+; silent update stopped with exit code 5 and changed nothing. A --wait that is ended wakes its session without
+; the "wait is over" line (docs/AGENT_HOOK.md says so). Nothing is restarted by Setup: a closed dashboard cannot
 ; come back without the port and token of a monitor, and the monitor is relaunched by the Finish page (or
 ; by the update helper after a silent update).
 AppMutex=Global\ClaudeUsageMonitor

@@ -58,7 +58,7 @@ from usage_monitor.app import (
 )
 from usage_monitor.data import models as m
 from usage_monitor.render.dump import sample_model, sample_state
-from usage_monitor.render.model import build_model
+from usage_monitor.render.model import GuardMark, build_model
 from usage_monitor.render.skins import RenderOptions
 from usage_monitor.settings import Settings
 from usage_monitor.ui import platform as plat
@@ -201,8 +201,11 @@ class FakeHost:
 class FakeWindow:
     """A layered window that only remembers what it was asked to do."""
 
-    def __init__(self, host: Any = None, *, draggable: bool, topmost: bool = True) -> None:
+    def __init__(self, host: Any = None, *, draggable: bool, topmost: bool = True,
+                 parent: int | None = None) -> None:
         self.draggable = draggable
+        self.parent = parent
+        self.alive = True
         self.visible = False
         self.dpi = 96
         self.dragging = False
@@ -256,8 +259,8 @@ class WindowFactory:
     def __init__(self) -> None:
         self.windows: list[FakeWindow] = []
 
-    def __call__(self, host: Any, *, draggable: bool, topmost: bool = True) -> FakeWindow:
-        window = FakeWindow(host, draggable=draggable, topmost=topmost)
+    def __call__(self, host: Any, *, draggable: bool, topmost: bool = True, parent: int | None = None) -> FakeWindow:
+        window = FakeWindow(host, draggable=draggable, topmost=topmost, parent=parent)
         self.windows.append(window)
         return window
 
@@ -861,6 +864,64 @@ def test_the_strip_has_no_place_on_a_vertical_or_auto_hiding_taskbar(info):
     assert strip_origin(info, 264, 48) is None
 
 
+def test_the_strip_is_a_child_of_the_taskbar_it_sits_on():
+    # While Start, Search or a tray flyout is open, Windows 11 lifts the taskbar above every
+    # always-on-top window; only its own children stay in sight (#29).
+    rig = Rig("taskbar")
+    rig.widget.render(rig.ctx())
+    assert rig.window.parent == rig.plat.info.hwnd and len(rig.windows.windows) == 1
+    assert rig.window.visible
+
+
+def test_a_new_taskbar_gives_the_strip_a_new_window():
+    rig = Rig("taskbar")                                               # Explorer restarted: a new taskbar
+    rig.widget.render(rig.ctx())
+    rig.plat.info = TaskbarInfo(**{**rig.plat.info.__dict__, "hwnd": 2})
+    rig.widget.render(rig.ctx())
+    new = rig.windows.windows[-1]
+    assert rig.window.destroyed and new is not rig.window and new.parent == 2
+    assert new.visible and new.updates and new.on_click is not None and new.on_hover is not None
+
+
+def test_a_strip_window_that_died_with_its_taskbar_is_made_again_by_the_re_place():
+    rig = Rig("taskbar")
+    rig.widget.render(rig.ctx())
+    rig.window.alive = False
+    for _ in range(6):                                                 # six 500 ms keep ticks: the 3 s re-place
+        rig.host.fire(next(iter(rig.host.timers)))
+    new = rig.windows.windows[-1]
+    assert new is not rig.window and new.parent == rig.plat.info.hwnd and new.visible
+
+
+def test_a_strip_made_before_the_taskbar_existed_moves_onto_it():
+    host, plat, windows = FakeHost(), FakePlatform(), WindowFactory()
+    plat.info = None
+    widget = TaskbarWidget(host, on_open=lambda: None, on_menu=lambda x, y: None, platform=plat, window_factory=windows)
+    assert windows.windows[0].parent is None
+    plat.info = taskbar(96)
+    widget.render(context())
+    assert windows.windows[0].destroyed and windows.windows[-1].parent == plat.info.hwnd
+    assert windows.windows[-1].visible
+
+
+def test_a_taskbar_that_refuses_the_strip_leaves_it_floating_until_a_live_one_turns_up():
+    host, plat, windows = FakeHost(), FakePlatform(), WindowFactory()
+    dead = plat.info.hwnd
+
+    def refusing(host_: Any, *, draggable: bool, topmost: bool = True, parent: int | None = None) -> FakeWindow:
+        if parent == dead:  # Explorer died between the lookup and the window
+            raise OSError("CreateWindowExW('ClaudeUsageMonitor.Layered') failed: [WinError 1400] Invalid window handle.")
+        return windows(host_, draggable=draggable, topmost=topmost, parent=parent)
+
+    widget = TaskbarWidget(host, on_open=lambda: None, on_menu=lambda x, y: None, platform=plat, window_factory=refusing)
+    assert windows.windows[0].parent is None
+    widget.render(context())
+    assert len(windows.windows) == 1 and windows.windows[0].visible   # the dead taskbar is not asked again
+    plat.info = dataclasses.replace(plat.info, hwnd=dead + 1)           # Explorer is back
+    widget.render(context())
+    assert windows.windows[0].destroyed and windows.windows[-1].parent == dead + 1
+
+
 def test_a_top_taskbar_is_supported():
     top = taskbar(96, edge="top")
     assert strip_supported(top) is True
@@ -1406,35 +1467,74 @@ def test_the_tray_tooltip_rounds_like_the_widget_and_fits_the_shell_limit():
     assert len(text) < 127
 
 
+def test_the_tray_tooltip_carries_the_usage_guard_while_it_is_on():
+    assert tray_tooltip(model_for("guard_armed")) == "Claude usage - session 38% - weekly 52% - guard armed"
+    held = model_for("guard_hold_session")
+    assert tray_tooltip(held) == (f"Claude usage - session 96% - weekly 58% - guard holding, resumes "
+                                  f"{held.guard.resume_clock} (in 2h 14m)")
+    week = model_for("guard_hold_weekly")
+    assert tray_tooltip(week, dev=True).endswith(f" - guard holding, resumes {week.guard.resume_clock} (in 2d 3h) (dev)")
+    no_reset = dataclasses.replace(model_for("normal3"), guard=GuardMark(state="holding"))
+    assert tray_tooltip(no_reset) == "Claude usage - session 13% - weekly 2% - guard holding"
+
+
+def test_without_a_reading_no_surface_says_the_guard_is_armed():
+    state = sample_state("no_credentials")
+    state.guard = {"state": "armed", "over": [], "resume_at": None, "policy": {"enabled": True, "session_cap": 95}}
+    model = build_model(state, NOW)
+    assert model.guard is None and tray_tooltip(model) == "Claude usage - no login"  # it cannot act without a reading
+
+
+def test_the_longest_guard_tooltip_still_fits_the_shell_limit():
+    model = model_for("rate_limited")
+    rows = [dataclasses.replace(row, percent=100.0) for row in model.rows]
+    guard = GuardMark(state="holding", over_keys=("session", "weekly"), resume_clock="Wed 12:00 PM", resume_in="6D 23H")
+    text = tray_tooltip(dataclasses.replace(model, rows=rows, guard=guard), dev=True)
+    assert text == ("Claude usage - session 100% - weekly 100% - rate limited - guard holding, resumes Wed 12:00 PM "
+                    "(in 6d 23h) (dev)")
+    assert len(text) <= 127
+
+
 def test_the_menu_lists_the_actions_in_order_and_marks_the_toggles():
     calls: list[str] = []
     items = menu_items(
-        floating_on=True, taskbar_on=False, update_version=None,
+        floating_on=True, taskbar_on=False, guard_on=True, waiting=0, update_version=None,
         open_dashboard=lambda: calls.append("open"), toggle_floating=lambda: calls.append("floating"),
-        toggle_taskbar=lambda: calls.append("taskbar"), refresh=lambda: calls.append("refresh"),
+        toggle_taskbar=lambda: calls.append("taskbar"), toggle_guard=lambda: calls.append("guard"),
+        resume_waiting=lambda: calls.append("resume"), refresh=lambda: calls.append("refresh"),
         report_bug=lambda: calls.append("bug"), update=lambda: calls.append("update"),
         quit_app=lambda: calls.append("quit"),
     )
     labelled = [(i.label, i.checked) for i in items if not i.separator]
     assert labelled == [("Open dashboard", False), ("Floating widget", True), ("Taskbar widget", False),
-                        ("Refresh now", False), ("Report a bug", False), ("Exit", False)]
+                        ("Usage guard", True), ("Refresh now", False), ("Report a bug", False), ("Exit", False)]
     assert items[0].label == "Open dashboard" and items[-1].label == "Exit"
     assert items[1].separator and items[-2].separator
     assert not any(a.separator and b.separator for a, b in zip(items, items[1:]))
     for item in items:
         if item.action:
             item.action()
-    assert calls == ["open", "floating", "taskbar", "refresh", "bug", "quit"]
+    assert calls == ["open", "floating", "taskbar", "guard", "refresh", "bug", "quit"]
+
+
+MENU_KWARGS = dict(floating_on=True, taskbar_on=True, guard_on=False, open_dashboard=lambda: None,
+                   toggle_floating=lambda: None, toggle_taskbar=lambda: None, toggle_guard=lambda: None,
+                   resume_waiting=lambda: None, refresh=lambda: None, report_bug=lambda: None,
+                   update=lambda: None, quit_app=lambda: None)
 
 
 def test_the_menu_offers_the_update_only_when_there_is_one():
-    kwargs = dict(floating_on=True, taskbar_on=True, open_dashboard=lambda: None, toggle_floating=lambda: None,
-                  toggle_taskbar=lambda: None, refresh=lambda: None, report_bug=lambda: None,
-                  update=lambda: None, quit_app=lambda: None)
-    plain = [i.label for i in menu_items(update_version=None, **kwargs)]
-    offered = [i.label for i in menu_items(update_version="2.1.0", **kwargs)]
+    plain = [i.label for i in menu_items(update_version=None, waiting=0, **MENU_KWARGS)]
+    offered = [i.label for i in menu_items(update_version="2.1.0", waiting=0, **MENU_KWARGS)]
     assert "Update to v2.1.0" in offered and not any(label.startswith("Update") for label in plain)
     assert offered.index("Update to v2.1.0") == offered.index("Report a bug") + 1
+
+
+def test_the_menu_offers_to_resume_only_while_sessions_wait():
+    idle = [i.label for i in menu_items(update_version=None, waiting=0, **MENU_KWARGS)]
+    waiting = [i.label for i in menu_items(update_version=None, waiting=2, **MENU_KWARGS)]
+    assert not any(label.startswith("Resume") for label in idle)
+    assert waiting.index("Resume waiting sessions (2)") == waiting.index("Usage guard") + 1
 
 
 def test_links_stay_on_github():
@@ -1461,6 +1561,27 @@ def test_the_age_readout_changes_exactly_when_the_tick_fires():
     later = NOW + timedelta(milliseconds=tick_delay_ms(12.3))
     assert build_model(state, NOW).age_text == "12 S AGO"
     assert build_model(state, later).age_text == "13 S AGO"
+
+
+@pytest.mark.parametrize("age, resume_in, expected", [
+    (None, 134.5, 14525),    # 2M left turns 1M in 14.5 s
+    (12.3, 134.5, 725),      # the age readout steps first
+    (95.0, 8040.0, 25),      # exactly 2H 14M left: it turns 2H 13M at once
+    (None, 8100.0 + 40.0, 30000),
+    (None, 0.0, 30000), (None, -5.0, 30000),    # past the resume time there is nothing left to count down
+])
+def test_the_clock_tick_also_lands_just_after_the_guard_countdown_steps(age, resume_in, expected):
+    assert tick_delay_ms(age, resume_in) == pytest.approx(expected, abs=2)
+
+
+def test_the_guard_countdown_changes_exactly_when_the_tick_fires():
+    """2H 13M 14.5S before work resumes, the tick lands just after the countdown turns 2H 12M."""
+    state = sample_state("guard_hold_session", NOW)    # work resumes 2H 14M after NOW
+    now = NOW + timedelta(seconds=45.5)
+    guard = build_model(state, now).guard
+    later = now + timedelta(milliseconds=tick_delay_ms(None, (guard.resume_at - now).total_seconds()))
+    assert guard.resume_in == "2H 13M"
+    assert build_model(state, later).guard.resume_in == "2H 12M"
 
 
 def test_only_nostromo_blinks_and_its_cycle_is_2_4_seconds_85_percent_lit():
@@ -2267,6 +2388,22 @@ def test_the_menu_reflects_and_flips_the_widget_toggles(wired):
     assert not items["Floating widget"].checked and items["Taskbar widget"].checked
 
 
+def test_the_menu_arms_the_guard_and_resumes_waiting_sessions(wired, isolated_env):
+    from usage_monitor.agent import sessions
+
+    app, settings = wired.app, wired.settings
+    items = {i.label: i for i in app.menu_items() if not i.separator}
+    assert not items["Usage guard"].checked and not any(label.startswith("Resume") for label in items)
+    items["Usage guard"].action()
+    assert settings.get("guard_enabled") is True
+    sessions.register_wait(isolated_env, "s1", NOW)          # this test process stands in for a waiting session
+    items = {i.label: i for i in app.menu_items() if not i.separator}
+    assert items["Usage guard"].checked
+    started = time.time() - 1
+    items["Resume waiting sessions (1)"].action()
+    assert sessions.resumed_since(isolated_env, started)
+
+
 def test_the_menu_actions_open_the_dashboard_refresh_report_and_exit(wired):
     app = wired.app
     items = {i.label: i for i in app.menu_items() if not i.separator}
@@ -2361,6 +2498,16 @@ def test_the_clock_tick_redraws_and_re_arms_with_the_right_delay(wired):
 def test_with_nothing_to_age_the_clock_ticks_every_thirty_seconds(wired):
     ms, _fn, _repeat = wired.host.timers[wired.app._tick_timer]
     assert ms == 30000
+
+
+def test_a_holding_guard_wakes_the_clock_for_its_countdown_and_shows_in_the_tray(wired):
+    app, host = wired.app, wired.host
+    app._clock = lambda: NOW + timedelta(seconds=50)    # 62 s after the fetch, 2H 13M 10S before work resumes
+    wired.service.publish(sample_state("guard_hold_session", NOW))
+    host.run_posted()
+    ms, _fn, _repeat = host.timers[app._tick_timer]
+    assert ms == tick_delay_ms(62.0, 7990.0) == 10025    # the countdown steps before the age readout does
+    assert " - guard holding, resumes " in app.tray.tooltips[-1]
 
 
 def test_locking_the_session_stops_the_animation_and_the_clock_and_unlocking_redraws(wired):
@@ -2980,9 +3127,9 @@ def test_shutdown_runs_in_the_documented_order_and_only_once(wired, monkeypatch)
     monkeypatch.setattr(wired.settings, "close", lambda: events("settings.close"))
     app._teardown()
     app._teardown()                                                           # a second call changes nothing
-    assert events.log == ["dashboard.close", "service.stop", "server.stop", "tray.remove", "floating.destroy",
-                          "taskbar.destroy", "tooltip.destroy", "settings.close"]
-    assert closed == [4242]
+    assert events.log == ["taskbar.destroy", "dashboard.close", "service.stop", "server.stop", "tray.remove",
+                          "floating.destroy", "tooltip.destroy", "settings.close"]   # the strip first: the taskbar waits on us
+    assert closed == [4242] and app.taskbar is None
 
 
 def test_a_failing_shutdown_step_does_not_skip_the_rest(wired):

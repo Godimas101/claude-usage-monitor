@@ -531,15 +531,15 @@ class _Surface:
         self._on_visibility = on_visibility
         self._stats = stats if stats is not None else FrameStats()
         self._animations_on = _animation_switch(platform, animations_enabled)
-        self._window: Any = window_factory(host, draggable=draggable)
+        self._window_factory = window_factory
+        self._window: Any = self._new_window(draggable)
         self._ctx: RenderContext | None = None
         self._cache = FrameCache()
         self._frame_key: Any = None
         self._insets: Insets = NO_INSETS
         self._response = _Hover(self)
         self._shown: tuple[Image.Image, tuple[int, int] | None] | None = None
-        self._window.on_hover = self._hover
-        self._window.on_hover_dwell = self.show_tooltip
+        self._wire(self._window)
 
     @property
     def window(self) -> Any:
@@ -570,6 +570,14 @@ class _Surface:
     def _options(self, ctx: RenderContext) -> RenderOptions:
         """The per-surface render options of ``ctx`` for this widget."""
         raise NotImplementedError
+
+    def _new_window(self, draggable: bool) -> Any:
+        return self._window_factory(self._host, draggable=draggable)
+
+    def _wire(self, window: Any) -> None:
+        """Connect the window's callbacks to this widget."""
+        window.on_hover = self._hover
+        window.on_hover_dwell = self.show_tooltip
 
     # Frames
 
@@ -847,11 +855,53 @@ class TaskbarWidget(_Surface):
         self._ticks = 0
         self._fullscreen = False
         self._warned = False
-        window = self._window
+        self._timer: int | None = host.set_timer(KEEP_INTERVAL_MS, self.keep)
+
+    # The window: a child of the taskbar (#29)
+
+    _dead_parent: int | None = None  # a taskbar that refused the strip window: not asked again
+
+    def _new_window(self, draggable: bool) -> Any:
+        info = self._plat.taskbar_info()
+        return self._make_window(draggable, info.hwnd if info else None)
+
+    def _make_window(self, draggable: bool, parent: int | None) -> Any:
+        """A strip window in the taskbar ``parent``. A taskbar that died since it was looked up (Explorer
+        restarting) refuses children: the strip is then a top-level window until a re-place finds a live one."""
+        if parent:
+            try:
+                return self._window_factory(self._host, draggable=draggable, parent=parent)
+            except OSError:
+                log.warning("the taskbar refused the strip window; it floats over the taskbar for now", exc_info=True)
+                self._dead_parent = parent
+        return self._window_factory(self._host, draggable=draggable, parent=None)
+
+    def _wire(self, window: Any) -> None:
+        super()._wire(window)
         window.on_click = self._clicked
         window.on_right_click = self._right_clicked
         window.on_dpi_changed = self._dpi_changed
-        self._timer: int | None = host.set_timer(KEEP_INTERVAL_MS, self.keep)
+
+    def _follow_taskbar(self, info: TaskbarInfo) -> None:
+        """Keep the strip a child of the taskbar it sits on.
+
+        While Start, Search or a tray flyout is open, Windows 11 lifts the taskbar above every
+        always-on-top window until the shell lets it down again, which buried a top-level strip
+        behind it. A layered child of the taskbar is composed with it and stays in sight. A new
+        taskbar (Explorer restarted), or a strip window that died with the old one, gets a new window.
+        """
+        window = self._window
+        if window is not None and window.alive and info.hwnd in (window.parent, self._dead_parent):
+            return
+        self._response.stop()
+        self.hide_tooltip()
+        self._window = self._make_window(False, info.hwnd)
+        self._wire(self._window)
+        self._shown = None
+        if window is not None:
+            window.destroy()
+        if self._on_visibility is not None:
+            self._on_visibility()
 
     # Drawing
 
@@ -867,6 +917,7 @@ class TaskbarWidget(_Surface):
             self._set_visible(False)
             return
         self._warned = False
+        self._follow_taskbar(info)
         scale = scale_for(info.dpi)
         frame = self._frame(ctx, scale, info.rect.height)
         insets = self._measure(ctx, SURFACE_TASKBAR, frame, scale)

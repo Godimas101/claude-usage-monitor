@@ -39,9 +39,12 @@ MONITORENUMPROC = ctypes.WINFUNCTYPE(
 # ── Window styles, messages, hit-test codes ───────────────────────────────────
 
 WS_POPUP = 0x80000000
+WS_CHILD = 0x40000000
+WS_CLIPSIBLINGS = 0x04000000
 WS_CAPTION = 0x00C00000
 WS_MAXIMIZE = 0x01000000
 
+WS_EX_NOPARENTNOTIFY = 0x00000004
 WS_EX_TOPMOST = 0x00000008
 WS_EX_TRANSPARENT = 0x00000020
 WS_EX_TOOLWINDOW = 0x00000080
@@ -99,6 +102,7 @@ WM_MOUSEHOVER = 0x02A1
 WM_NCMOUSELEAVE = 0x02A2
 WM_MOUSELEAVE = 0x02A3
 WM_DPICHANGED = 0x02E0
+WM_DPICHANGED_AFTERPARENT = 0x02E3   # what a child window gets instead (the taskbar strip), after its parent moved DPI
 WM_USER = 0x0400
 WM_APP = 0x8000
 
@@ -184,6 +188,7 @@ QUNS_PRESENTATION_MODE = 4
 
 DESKTOP_SWITCHDESKTOP = 0x0100
 DWMWA_EXTENDED_FRAME_BOUNDS = 9
+DWMWA_EXCLUDED_FROM_PEEK = 12
 DWMWA_CLOAKED = 14
 
 # ── Menus ─────────────────────────────────────────────────────────────────────
@@ -398,6 +403,7 @@ SetWindowPos = _bind(user32, "SetWindowPos", _bool, _hwnd, _hwnd, _int, _int, _i
 GetWindowRect = _bind(user32, "GetWindowRect", _bool, _hwnd, _rect_p)
 GetClientRect = _bind(user32, "GetClientRect", _bool, _hwnd, _rect_p)
 ClientToScreen = _bind(user32, "ClientToScreen", _bool, _hwnd, _point_p)
+ScreenToClient = _bind(user32, "ScreenToClient", _bool, _hwnd, _point_p)
 GetCursorPos = _bind(user32, "GetCursorPos", _bool, _point_p)
 SetCapture = _bind(user32, "SetCapture", _hwnd, _hwnd)
 ReleaseCapture = _bind(user32, "ReleaseCapture", _bool)
@@ -499,6 +505,9 @@ GetDpiForMonitor = _bind(
 )
 DwmGetWindowAttribute = _bind(
     dwmapi, "DwmGetWindowAttribute", HRESULT, _hwnd, _dword, wintypes.LPVOID, _dword
+)
+DwmSetWindowAttribute = _bind(
+    dwmapi, "DwmSetWindowAttribute", HRESULT, _hwnd, _dword, wintypes.LPCVOID, _dword
 )
 WTSRegisterSessionNotification = _bind(
     wtsapi32, "WTSRegisterSessionNotification", _bool, _hwnd, _dword

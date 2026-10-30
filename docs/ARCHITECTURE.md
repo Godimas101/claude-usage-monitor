@@ -40,7 +40,10 @@ v1.2 (Phase 1 exit) keeps the v1 Tk UI (`widget.py`, `options.py`, `tray.py`, `t
 2. **Tolerance.** The transcript format "is internal to Claude Code and changes between
    versions" (Claude Code docs). Parsers never raise on bad input: skip, count, log at debug.
    Every field is optional.
-3. **No model calls.** The monitor never runs `claude` and never sends a model request.
+3. **No model calls.** The monitor never sends a model request and never runs `claude -p`. The
+   only `claude` commands it runs are in `agent/setup.py`, the usage guard's one-click setup:
+   `claude --version` and `claude mcp get` (read-only) for the Settings card, and `claude mcp add`
+   / `claude mcp remove` when the user clicks Install or Remove.
 4. **No silent swallowing.** Catch broadly at thread boundaries only, and log what was caught
    via `usage_monitor.log.get_logger(__name__)`.
 5. **Time.** Store UTC epoch seconds (`REAL`). Convert to local time only for window
@@ -319,10 +322,26 @@ rate reduced to its velocity), and otherwise every `REFRESH_S` (15 min). A pause
 once per pause. While `agent-demand` in the same folder is younger than an hour (readers renew it, at most every 5 min),
 `pause_check()` is overridden and the cycles run on a locked screen, which is when unattended
 runs happen. A failed write is logged once per kind of failure and never stops the cycle.
+Each cycle also evaluates the usage guard (`agent/guard.py`, #27) into `MonitorState.guard`, and
+`state.json` carries it with the policy it was evaluated against. A limit whose window reset after
+the last reading brings the next fetch forward: the first cycle at least `RESET_FETCH_DELAY` (30 s)
+after the reset fetches, about a minute after it with the 60 s cycle, instead of waiting for the
+poll interval. Waiting sessions do not wait for it: each reader evaluates the guard again, and a
+window whose reset has passed no longer counts.
 
-### `agent/` (#24)
+### `agent/` (#24, #27)
 `status.py` builds, writes and reads `state.json` (schema 1) and makes the one-line summary.
-`cli.py` holds `--status [--json]`, `--hook` and `--gate`, and `mcp.py` a stdio MCP server whose one tool,
+`guard.py` is the usage guard's verdict (off, armed or holding, the limits over their caps and when
+work can resume), pure and evaluated again by each reader, because a window may have reset since
+the reading. `sessions.py` owns the files the guard's processes share: who was told
+(`hook-seen.json`, read and rewritten under the byte-range lock `hook-seen.lock`, since parallel
+subagents run their hooks at once), who waits (`waiting/<pid>.json`, with the process's creation
+time, so a file left by a killed wait whose id Windows gave to another process counts for nothing
+and is removed), when the last wait was let go (`wait-released`: waits go oldest first, a stagger
+apart) and the `resume-now` marker.
+`cli.py` holds `--status [--json]`, `--hook` (which on PostToolUse also tells a working session once
+per holding episode that a cap was reached), `--gate` and `--wait` (a background command that ends
+when the guard lets work resume, which wakes its session), and `mcp.py` a stdio MCP server whose one tool,
 `get_plan_usage`, returns the summary and the reading. They run as light processes beside the app:
 no UI imports, no single-instance mutex, logs in `agent.log`. The app is the only poller; a
 reader asks the usage API itself only when the reading is missing or stale (the app is closed,
@@ -330,7 +349,15 @@ or an older version writes no file), and keeps that answer in `state.json` for t
 the readers in that time share it. A reader that must ask
 first takes a byte-range lock on `state.lock` (Windows frees it when its holder is killed), re-reads
 the file under it, and never writes a reading older than the one on disk. `--hook` never fetches
-except at `SessionStart`, and `--hook` and `--gate` exit 0 on every path. How to wire it into Claude Code: [`AGENT_HOOK.md`](AGENT_HOOK.md).
+except at `SessionStart`, and `--hook` and `--gate` exit 0 on every path. The guard only informs:
+nothing in it blocks a tool or stops a session. `setup.py` is its one-click setup, run by the
+Settings card through the local API: it backs up Claude Code's user settings and writes the three
+`--hook` entries, and registers the MCP tool with `claude mcp add`. It knows its own entries by the
+exe's file name and `--hook`, so a moved install is replaced rather than doubled; it refuses when the
+file changed since it was read or holds what strict JSON cannot write back; and a `claude` that runs
+past its timeout is ended with its whole process tree (an npm `claude.cmd` leaves node.exe holding
+the pipes). It runs only in the installed app, never in a dev instance. How to wire it into Claude
+Code: [`AGENT_HOOK.md`](AGENT_HOOK.md).
 
 ## Phase 2 — stats (#11–#14)
 

@@ -1,4 +1,5 @@
-"""Tests for usage_monitor.agent: the status file, --status, --hook and the MCP server (#24).
+"""Tests for usage_monitor.agent: the status file, --status, --hook and the MCP server (#24), and the usage
+guard's notice and --wait (#27).
 
 Offline: the usage API is never called (fetch_once is replaced), the app data folder is tmp_path,
 and whether the app runs is passed in rather than read from the real mutex.
@@ -7,7 +8,9 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sys
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -16,7 +19,7 @@ import pytest
 
 import main
 from usage_monitor import app
-from usage_monitor.agent import cli, mcp, status
+from usage_monitor.agent import cli, guard, mcp, sessions, status
 from usage_monitor.data import service as svc
 from usage_monitor.data.models import (
     ApiStatus,
@@ -309,10 +312,13 @@ class OneClient:
         return FetchResult(status=ApiStatus.LIVE, detail="Updated", snapshot=snapshot(now), fresh=True)
 
 
-def run_cycle(tmp_path: Path, folder: Path | None, *, paused: bool = False) -> svc.DataService:
+def run_cycle(tmp_path: Path, folder: Path | None, *, paused: bool = False,
+              options: dict | None = None) -> svc.DataService:
     from usage_monitor.settings import Settings
 
     settings = Settings(tmp_path / "settings.json", save_delay_s=60)
+    if options:
+        settings.update(options)
     service = svc.DataService(settings, store_path=tmp_path / "usage.db", pricing=Pricing.load(),
                               usage_client=OneClient(), roots=[tmp_path], clock=lambda: NOW,
                               pause_check=lambda: paused, pricing_refresh=lambda _cached: False,
@@ -396,6 +402,244 @@ def test_the_hook_speaks_every_time_with_always_and_tolerates_bad_input(folder):
 
 def test_the_hook_stays_silent_with_no_reading(folder):
     assert hook(folder, PROMPT, always=True) is None
+
+
+# ── The usage guard: --hook's notice (#27) ───────────────────────────────────────
+
+ARMED = {"enabled": True, "session_cap": 95, "weekly_cap": 75, "scoped_cap": None, "stagger_s": 120}
+TOOL = {"session_id": "s1", "hook_event_name": "PostToolUse", "tool_name": "Bash"}
+
+
+def guarded(doc: dict, **policy: Any) -> dict:
+    """``doc`` as the app writes it with the guard armed: by default the weekly cap is 75%."""
+    return {**doc, "guard": {"policy": {**ARMED, **policy}}}
+
+
+def context(said: dict | None) -> str:
+    return said["hookSpecificOutput"]["additionalContext"] if said else ""
+
+
+def told(folder: Path) -> list[str]:
+    verdict = guard.for_reader(status.read(folder / status.STATUS_NAME), NOW, folder)
+    return [entry["session_id"] for entry in sessions.told(folder, guard.episode(verdict))]
+
+
+def test_a_holding_guard_tells_each_agent_of_a_session_once(folder):
+    save(folder, guarded(document(weekly=78.0)))           # under the 80% threshold: only the guard speaks
+    said = context(hook(folder, TOOL))
+    assert said.startswith("Claude Usage Monitor: plan usage has reached the wind-down point")
+    assert "weekly 78% (cap 75%)" in said and "Nothing is blocked" in said and "Wrap up at a safe point" in said
+    assert "--wait --session s1`" in said and "Resume now" in said
+    assert "In PowerShell run `& \"" in said and "--wait --session s1 | Out-String`" in said  # or it returns at once
+    assert hook(folder, TOOL) is None                       # told already
+    assert hook(folder, PROMPT) is None                     # the main conversation heard it after a tool call
+    sub = context(hook(folder, {**TOOL, "agent_id": "a1", "agent_type": "Explore"}))
+    assert "wind-down point" in sub and "--wait" not in sub  # a subagent is not offered the wait
+    assert hook(folder, {**TOOL, "agent_id": "a1"}) is None
+    assert told(folder) == ["s1"]
+    assert hook(folder, {**TOOL, "session_id": "s2"}) is not None
+
+
+def test_a_new_holding_episode_is_told_again(folder):
+    save(folder, guarded(document(weekly=78.0)))
+    assert hook(folder, TOOL) is not None
+    save(folder, guarded(document(session=96.0, weekly=78.0)))  # the session is over its cap too
+    said = context(hook(folder, TOOL))
+    assert "session 96% (cap 95%), weekly 78% (cap 75%)" in said
+    assert hook(folder, TOOL) is None
+
+
+def test_a_window_that_resets_while_another_limit_holds_is_not_a_new_episode(folder):
+    save(folder, guarded(document(session=96.0, weekly=78.0)))
+    assert hook(folder, TOOL) is not None
+    save(folder, guarded(document(session=4.0, weekly=78.0)))  # the session reset; the week is still over its cap
+    assert hook(folder, TOOL) is None
+    assert told(folder) == ["s1"]                            # the card still counts s1 as told
+
+
+def test_a_subagent_does_not_use_up_the_threshold_line(folder):
+    save(folder, document(weekly=81.0))
+    assert hook(folder, {**TOOL, "agent_id": "a1"}) is None  # a subagent hears no summary line...
+    assert context(hook(folder, PROMPT)).startswith("Claude plan usage")  # ...so the main conversation still does
+
+
+def test_a_memory_that_cannot_be_read_is_not_overwritten(folder, monkeypatch):
+    save(folder, guarded(document(weekly=78.0)))
+    (folder / cli.HOOK_MEMORY).write_text(json.dumps({"s9": {"at": NOW.isoformat(), "steps": {"x": 1}}}),
+                                          encoding="utf-8")
+    monkeypatch.setattr(cli, "_load_memory", lambda *_a: None)  # another process holds it for a moment
+    assert "wind-down point" in context(hook(folder, TOOL))  # it still speaks...
+    assert "s9" in json.loads((folder / cli.HOOK_MEMORY).read_text(encoding="utf-8"))  # ...and saves nothing
+
+
+def test_session_start_repeats_the_notice_after_a_compaction(folder):
+    save(folder, guarded(document(weekly=78.0)))
+    start = {"session_id": "s1", "hook_event_name": "SessionStart", "source": "compact"}
+    for _ in range(2):
+        said = context(hook(folder, start, always=True))
+        assert said.startswith("Claude plan usage (Max 5x") and "wind-down point" in said
+
+
+def test_the_threshold_line_and_the_notice_share_one_context_and_one_memory(folder):
+    save(folder, guarded(document(weekly=81.0)))
+    said = context(hook(folder, TOOL))
+    summary, notice = said.split("\n\n")
+    assert summary.startswith("Claude plan usage") and notice.startswith("Claude Usage Monitor: plan usage")
+    save(folder, guarded(document(weekly=86.0)))            # a step up: the line again, the notice not
+    said = context(hook(folder, PROMPT))
+    assert said.startswith("Claude plan usage") and "wind-down point" not in said
+    assert told(folder) == ["s1"]                            # the step did not wipe who was told
+
+
+def test_the_guard_is_quiet_when_off_or_under_its_caps(folder):
+    save(folder, guarded(document(weekly=78.0), enabled=False))
+    assert hook(folder, TOOL) is None
+    save(folder, guarded(document(weekly=78.0), weekly_cap=79))
+    assert hook(folder, TOOL) is None
+    save(folder, document(weekly=78.0))                     # no policy in the reading: the settings file decides
+    (folder / guard.SETTINGS_NAME).write_text(json.dumps({"guard_enabled": True, "guard_weekly_cap": 70}),
+                                              encoding="utf-8")
+    assert "weekly 78% (cap 70%)" in context(hook(folder, TOOL))
+
+
+# ── The usage guard: --wait (#27) ────────────────────────────────────────────────
+
+class Clock:
+    """A clock that sleeps by moving on, with something to do during the naps."""
+
+    def __init__(self, during: Callable[[int], None] | None = None) -> None:
+        self.now, self.naps, self.during = NOW, [], during
+
+    def __call__(self) -> datetime:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.naps.append(seconds)
+        self.now += timedelta(seconds=seconds)
+        if self.during is not None:
+            self.during(len(self.naps))
+        assert len(self.naps) < 2_000, "the wait never ended"
+
+
+def wait(folder: Path, clock: Clock) -> tuple[int, str]:
+    out = io.BytesIO()
+    code = cli.run_wait(session_id="s1", folder=folder, clock=clock, app_version="2.1.0", out=out,
+                        sleep=clock.sleep)
+    return code, out.getvalue().decode()
+
+
+def test_a_wait_ends_at_once_when_nothing_is_over_its_cap(folder):
+    save(folder, guarded(document(weekly=50.0)))
+    clock = Clock()
+    code, said = wait(folder, clock)
+    assert code == 0 and clock.naps == []
+    assert said.startswith("Claude Usage Monitor: the wait is over: every watched limit is under its cap again. "
+                           "Work can resume. Claude plan usage (Max 5x")
+
+
+def test_a_wait_holds_until_the_window_over_its_cap_resets(folder, offline):
+    save(folder, guarded(document(session=30.0), session_cap=25, weekly_cap=None))  # the session resets at +2 h
+    seen: list = []
+    clock = Clock(during=lambda nap: seen.append(sessions.waiting(folder)) if nap == 1 else None)
+    code, said = wait(folder, clock)
+    assert code == 0 and "every watched limit is under its cap again" in said
+    assert NOW + timedelta(hours=2) <= clock.now < NOW + timedelta(hours=2, minutes=1)
+    assert [(entry["pid"], entry["session_id"]) for entry in seen[0]] == [(os.getpid(), "s1")]
+    assert sessions.waiting(folder) == []                   # it unregistered
+    assert 1 <= len(offline) <= 8                           # the app is closed: it asked now and then, not every nap
+
+
+def test_resume_now_ends_a_wait_whatever_the_limits(folder):
+    save(folder, guarded(document(weekly=78.0)))
+    clock = Clock(during=lambda nap: sessions.resume_now(folder) if nap == 3 else None)
+    code, said = wait(folder, clock)
+    assert code == 0 and len(clock.naps) == 3
+    assert said.startswith("Claude Usage Monitor: the wait is over: Resume now was pressed (the limits were not "
+                           "checked)")
+
+
+def test_waits_are_released_one_stagger_apart_oldest_first(folder, monkeypatch):
+    save(folder, guarded(document(weekly=50.0), stagger_s=120))
+    me = {"pid": os.getpid(), "session_id": "s1", "since": "2026-10-24T16:00:00Z", "cwd": None}
+    older = {**me, "pid": 1, "session_id": "s0", "since": "2026-10-24T15:00:00Z"}
+    alive = [older, me]
+    monkeypatch.setattr(sessions, "waiting", lambda _folder: list(alive))
+
+    def older_goes(nap: int) -> None:
+        if nap == 2:  # the older wait is let go now, and is gone by the next look
+            sessions.mark_released(folder, clock.now)
+            alive.remove(older)
+
+    clock = Clock(during=older_goes)
+    code, _said = wait(folder, clock)
+    went = NOW + timedelta(seconds=2 * cli.WAIT_POLL_S)
+    assert code == 0 and clock.now == went + timedelta(seconds=120) and max(clock.naps) <= cli.WAIT_POLL_S
+    assert sessions.released_at(folder) == clock.now        # the next one goes a stagger after this one
+
+
+def test_a_lone_wait_still_keeps_the_stagger_after_the_last_release(folder):
+    save(folder, guarded(document(weekly=50.0), stagger_s=120))
+    sessions.mark_released(folder, NOW - timedelta(seconds=45))  # another wait went 45 s ago, and is gone
+    clock = Clock()
+    code, _said = wait(folder, clock)
+    assert code == 0 and clock.now == NOW + timedelta(seconds=75)
+
+
+def test_a_wait_that_cannot_register_still_waits(folder, monkeypatch):
+    def refused(*_a: Any, **_k: Any) -> Any:
+        raise PermissionError("waiting/ is not writable")
+
+    monkeypatch.setattr(sessions, "register_wait", refused)
+    save(folder, guarded(document(weekly=78.0)))
+    clock = Clock(during=lambda nap: save(folder, guarded(document(weekly=50.0))) if nap == 2 else None)
+    code, said = wait(folder, clock)
+    assert code == 0 and len(clock.naps) == 2 and "every watched limit is under its cap again" in said
+
+
+def test_a_wait_turned_off_with_the_guard_says_so(folder):
+    save(folder, guarded(document(weekly=78.0), enabled=False))
+    code, said = wait(folder, Clock())
+    assert code == 0 and "the wait is over: the usage guard was turned off" in said
+
+
+def test_a_wait_without_a_reading_keeps_waiting(folder):
+    clock = Clock(during=lambda nap: sessions.resume_now(folder) if nap == 5 else None)
+    code, said = wait(folder, clock)
+    assert code == 0 and len(clock.naps) == 5 and "Resume now was pressed" in said
+
+
+def test_a_wait_that_fails_says_so_and_exits_1(folder, monkeypatch):
+    def broken(*_a: Any, **_k: Any) -> Any:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(status, "current", broken)
+    code, said = wait(folder, Clock())
+    assert code == 1 and said.startswith("Claude Usage Monitor: the wait stopped because of an error")
+    assert sessions.waiting(folder) == []
+
+
+def test_the_wait_command_line_and_its_flags(monkeypatch):
+    assert main.parse_args(["--wait", "--session", "ab c;d-1"]) == main.Command("wait", session_id="abcd-1")
+    assert main.parse_args(["--wait"]) == main.Command("wait")
+    assert main.parse_args(["--wait", "--session", "--json"]) == main.Command("wait")
+    monkeypatch.setattr(cli.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(cli.sys, "executable", r"C:\Users\A B\AppData\Local\ClaudeUsageMonitor\ClaudeUsageMonitor.exe")
+    assert cli.wait_command("s1") == ('"C:/Users/A B/AppData/Local/ClaudeUsageMonitor/ClaudeUsageMonitor.exe" '
+                                      '--wait --session s1')
+    assert cli.wait_command(None).endswith('ClaudeUsageMonitor.exe" --wait')
+    monkeypatch.setattr(cli.sys, "executable", r"C:\Apps\O'Neil\ClaudeUsageMonitor.exe")  # no space: still quoted
+    assert cli.wait_command('s"1; rm x') == '"C:/Apps/O\'Neil/ClaudeUsageMonitor.exe" --wait --session s1rmx'
+
+
+def test_a_wait_runs_even_with_no_stdout(monkeypatch):
+    import usage_monitor.log
+
+    monkeypatch.setattr(usage_monitor.log, "setup_logging", lambda *_a, **_k: None)
+    monkeypatch.setattr(main.sys, "stdout", None)
+    calls: list = []
+    monkeypatch.setattr(cli, "run_wait", lambda **kwargs: calls.append(kwargs) or 0)
+    assert main._agent(main.Command("wait", session_id="s1")) == 0
+    assert calls[0]["out"] is None and calls[0]["session_id"] == "s1"
 
 
 # ── The MCP server ───────────────────────────────────────────────────────────────
@@ -697,4 +941,39 @@ def test_an_overwritten_status_file_is_put_back_on_the_next_cycle(tmp_path, fold
         assert doc["source"] == status.SOURCE_MONITOR and doc["session"]["percent"] == 30.0
     finally:
         service._close_store()
+        settings.close()
+
+
+# ── The usage guard in the service (#27) ─────────────────────────────────────────
+
+def test_the_service_publishes_the_guard_and_writes_it_with_the_reading(tmp_path, folder):
+    service = run_cycle(tmp_path, folder, options={"guard_enabled": True, "guard_weekly_cap": 70})
+    assert service.state.guard["state"] == "holding"
+    assert [item["name"] for item in service.state.guard["over"]] == ["weekly"]   # 80% against a 70% cap
+    doc = status.read(folder / status.STATUS_NAME)
+    assert doc["guard"]["state"] == "holding" and doc["guard"]["policy"]["weekly_cap"] == 70
+
+
+def test_a_disarmed_guard_is_off_in_the_state(tmp_path, folder):
+    service = run_cycle(tmp_path, folder)
+    assert service.state.guard["state"] == "off"
+
+
+def test_a_window_that_reset_since_the_last_reading_is_fetched_again_soon(tmp_path):
+    from usage_monitor.settings import Settings
+
+    settings = Settings(tmp_path / "settings.json", save_delay_s=60)
+    settings.update({"poll_interval_ms": 86_400_000})                 # a day: only the reset can make a fetch due
+    service = svc.DataService(settings, store_path=tmp_path / "usage.db", pricing=Pricing.load(),
+                              usage_client=OneClient(), roots=[tmp_path], clock=lambda: NOW,
+                              pricing_refresh=lambda _cached: False)
+    try:
+        resets = NOW + timedelta(hours=2)                               # the session in snapshot()
+        service._last_fetch = OneClient().fetch(NOW)
+        service._last_fetch_at = NOW
+        assert not service._fetch_due(resets + timedelta(seconds=10))  # too soon after the reset
+        assert service._fetch_due(resets + svc.RESET_FETCH_DELAY + timedelta(seconds=1))
+        service._last_fetch_at = resets + timedelta(minutes=1)          # read again after the reset
+        assert not service._fetch_due(resets + timedelta(minutes=2))
+    finally:
         settings.close()
