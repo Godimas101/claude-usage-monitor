@@ -1336,6 +1336,11 @@ def resume_disabled(html: str) -> bool:
     return bool(re.search(r'<button[^>]*(?:data-action="guard-resume"|data-fid="guard-resume")[^>]* disabled', html))
 
 
+def resume_busy(html: str) -> bool:
+    """A Resume now on its way: aria-disabled, not disabled, so the keyboard focus stays on it."""
+    return bool(re.search(r'<button[^>]*data-action="guard-resume"[^>]* aria-disabled="true"', html)) and not resume_disabled(html)
+
+
 @ui_only
 def test_the_guard_card_has_its_toggle_four_fields_and_the_two_blocks_the_page_fills(checks: dict[str, Any]) -> None:
     card = Markup(checks["guard"]["card"])
@@ -1383,12 +1388,20 @@ def test_while_holding_it_names_what_is_over_when_it_ends_who_was_told_and_who_w
 def test_resume_now_is_enabled_only_while_something_waits(checks: dict[str, Any]) -> None:
     live = checks["guard"]["live"]
     for state in ("off", "armed", "armedThree", "armedNoCaps", "holdingNobody", "holdingNoResetTime", "holdingAMomentLeft", "pending",
-                  "beforeTheFirstCycle", "holdingBusy"):
+                  "beforeTheFirstCycle"):
         assert resume_disabled(live[state]), state
     for state in ("holding", "holdingMany", "armedStillWaiting", "holdingHostile"):
         assert not resume_disabled(live[state]), state                                   # a session that is still waiting can be released
     assert 'data-action="guard-resume"' in live["holding"] and ">Resume now</button>" in live["holding"]
-    assert ">Resuming…</button>" in live["holdingBusy"]                                  # and a click on its way is not sent twice
+    assert ">Resuming…</button>" in live["holdingBusy"] and resume_busy(live["holdingBusy"])  # a click on its way keeps the focus
+
+
+@ui_only
+def test_the_status_says_when_no_session_can_hear_the_guard(checks: dict[str, Any]) -> None:
+    live = checks["guard"]["live"]
+    said = "The hooks are not all installed, so sessions may not be told: press Install below."
+    assert said in live["armedNoHooks"] and said in live["holdingPartHooked"]
+    assert said not in live["armedHooked"] and said not in live["armed"]                # installed, or setup not known yet
 
 
 @ui_only
@@ -1445,18 +1458,28 @@ def test_the_setup_status_line_says_hooks_the_tool_and_the_claude_code_version(c
     assert "The Claude Code settings file is not valid JSON" in setup["unreadable"]       # what setup would refuse, said before the click
 
 
-def buttons(html: str) -> dict[str, bool]:
-    """Install and Remove: whether each is disabled."""
-    return {name: bool(re.search(rf'data-action="guard-{name}"[^>]* disabled', html)) for name in ("install", "remove")}
+def buttons(html: str) -> dict[str, str]:
+    """Install and Remove: "disabled" (it cannot work here), "busy" (aria-disabled while a click is on its way, so the
+    keyboard focus stays) or "" (it can be pressed)."""
+    def state(name: str) -> str:
+        tag = re.search(rf'<button[^>]*data-action="guard-{name}"[^>]*>', html)
+        attrs = tag.group(0) if tag else ""
+        return "disabled" if " disabled" in attrs else "busy" if 'aria-disabled="true"' in attrs else ""
+
+    return {name: state(name) for name in ("install", "remove")}
 
 
 @ui_only
 def test_install_and_remove_are_there_when_setup_can_run_and_the_cost_is_always_said(checks: dict[str, Any]) -> None:
     setup = checks["guard"]["setup"]
     for name in ("missing", "installed", "partial", "tooOld", "versionUnknown", "unreadable"):
-        assert buttons(setup[name]) == {"install": False, "remove": False}, name
-    for name in ("pending", "noClaude", "fromSource", "installing", "removing"):               # no answer yet, no setup here, or one click on its way
-        assert buttons(setup[name]) == {"install": True, "remove": True}, name
+        assert buttons(setup[name]) == {"install": "", "remove": ""}, name
+    for name in ("pending", "fromSource"):                                                    # no answer yet, or no setup here
+        assert buttons(setup[name]) == {"install": "disabled", "remove": "disabled"}, name
+    assert buttons(setup["noClaude"]) == {"install": "disabled", "remove": ""}                 # Remove needs no Claude Code
+    for name in ("installing", "removing"):                                                   # one click on its way
+        assert buttons(setup[name]) == {"install": "busy", "remove": "busy"}, name
+    assert '(<span class="nm-path">C:\\Users\\t\\AppData\\Roaming\\npm\\claude.CMD</span>) is older than 2.1.139' in setup["tooOldAt"]
     for name, html in setup.items():
         assert f'<p class="nm-lede">{GUARD_COST}</p>' in html, name                              # what it costs is said whatever the state
         install = "Installing…" if name == "installing" else "Install"                          # the label of a click on its way says so
@@ -1474,7 +1497,7 @@ def test_when_setup_cannot_run_it_says_why_and_points_at_the_manual_setup(checks
         link = [attrs for attrs in page.find("a")][0]
         assert link["href"].endswith("/docs/AGENT_HOOK.md") and link["data-external"] == "1", name
         assert "docs/AGENT_HOOK.md" in page.text, name
-        assert buttons(setup[name]) == {"install": True, "remove": True}
+        assert buttons(setup[name])["install"] == "disabled", name
     assert "Setup is not available" not in setup["missing"]
 
 
@@ -1557,6 +1580,7 @@ def test_a_field_the_server_would_take_is_posted_as_a_whole_number_or_null(check
     ("capDecimal", "guard_session_cap", "9.5", "Enter a whole number from 1 to 100"), ("capNegative", "guard_scoped_cap", "-5", "Enter a whole number from 1 to 100"),
     ("capText", "guard_session_cap", "abc", "Enter a whole number from 1 to 100"), ("capExp", "guard_session_cap", "1e2", "Enter a whole number from 1 to 100"),
     ("capLong", "guard_session_cap", "0095", "Enter a whole number from 1 to 100"),
+    ("capBadInput", "guard_session_cap", "", "Enter a whole number from 1 to 100"),  # "9e" in the box: not a blank cap
     ("stagger601", "guard_resume_stagger_s", "601", "Enter a whole number of seconds from 0 to 600"),
     ("staggerBlank", "guard_resume_stagger_s", "", "Enter a whole number of seconds from 0 to 600"),
     ("staggerNegative", "guard_resume_stagger_s", "-1", "Enter a whole number of seconds from 0 to 600"),

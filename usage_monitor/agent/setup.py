@@ -55,7 +55,10 @@ CONFIG_ENV = "CLAUDE_CONFIG_DIR"   # Claude Code's own override of its config fo
 GATE_FLAG = "--gate"
 VSCODE_WARNING = "The VS Code extension has its own Claude Code version; it also needs 2.1.139 or newer."
 NOT_INSTALLED_REASON = "One-click setup works in the installed app. This copy runs from source."
-NO_CLAUDE_REASON = "Claude Code was not found on this PC: there is no claude command on the PATH."
+NO_CLAUDE_REASON = ("Claude Code was not found on this PC: there is no claude command on the PATH. The copy inside "
+                    "the VS Code extension is not on it; install Claude Code itself (see the README).")
+KEEP_BACKUPS = 5                   # the newest backups of the settings file kept beside it; older ones go
+_STAMP_UNKNOWN = ("unknown",)      # a settings file whose size and time cannot be read
 
 # What setup writes: (event, matcher, args, timeout in seconds).
 HOOKS = (
@@ -95,21 +98,66 @@ class Context:
 
 def default_context() -> Context:
     return Context(frozen=bool(getattr(sys, "frozen", False)), executable=sys.executable, env=os.environ,
-                   home=Path.home(), which=shutil.which, run=run_claude, now=datetime.now)
+                   home=Path.home(), which=find_command, run=run_claude, now=datetime.now)
+
+
+def find_command(name: str) -> str | None:
+    """shutil.which, and when that finds nothing, again on the PATH that Windows holds now. A process keeps the PATH
+    it started with, so Claude Code installed while the monitor runs (the sign-in help sends people to do that) is
+    not on the monitor's own."""
+    found = shutil.which(name)
+    if found or sys.platform != "win32":
+        return found
+    fresh = _registry_path()
+    return shutil.which(name, path=fresh) if fresh else None
+
+
+def _registry_path() -> str | None:
+    """The machine PATH and then the user PATH, as new processes get them, with %VARIABLES% expanded."""
+    import winreg
+
+    parts = []
+    for root, key in ((winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"),
+                      (winreg.HKEY_CURRENT_USER, "Environment")):
+        try:
+            with winreg.OpenKey(root, key) as handle:
+                value, _kind = winreg.QueryValueEx(handle, "Path")
+        except OSError:
+            continue
+        if isinstance(value, str) and value.strip():
+            parts.append(os.path.expandvars(value))
+    return os.pathsep.join(parts) or None
 
 
 def run_claude(argv: Sequence[str]) -> Ran:
-    """Run ``argv`` as an argument list (never through a shell) with a timeout, no console window and captured output."""
+    """Run ``argv`` as an argument list (never through a shell) with a timeout, no console window and captured output.
+
+    At the timeout the whole process tree goes: an npm ``claude.cmd`` runs node.exe under cmd.exe, and node holds the
+    output pipes, so ending cmd.exe alone would leave this waiting for node."""
     try:
-        done = subprocess.run(
-            list(argv), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=CLAUDE_TIMEOUT_S,
-            stdin=subprocess.DEVNULL, shell=False, check=False,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    except subprocess.TimeoutExpired:
-        return Ran(None, "", "timed out")
+        process = subprocess.Popen(
+            list(argv), stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, text=True,
+            encoding="utf-8", errors="replace", shell=False, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except (OSError, ValueError) as exc:  # not found, not allowed, a bad argument
         return Ran(None, "", type(exc).__name__)
-    return Ran(done.returncode, done.stdout or "", done.stderr or "")
+    try:
+        stdout, stderr = process.communicate(timeout=CLAUDE_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        _end_tree(process)
+        with contextlib.suppress(subprocess.TimeoutExpired, OSError, ValueError):
+            process.communicate(timeout=5)
+        return Ran(None, "", "timed out")
+    return Ran(process.returncode, stdout or "", stderr or "")
+
+
+def _end_tree(process: subprocess.Popen) -> None:
+    if sys.platform == "win32":
+        taskkill = Path(os.environ.get("SystemRoot") or r"C:\Windows") / "System32" / "taskkill.exe"
+        with contextlib.suppress(OSError, subprocess.SubprocessError):
+            subprocess.run([str(taskkill), "/T", "/F", "/PID", str(process.pid)], capture_output=True, timeout=10,
+                           check=False, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    with contextlib.suppress(OSError):
+        process.kill()
 
 
 # ── Pure helpers: paths, versions and the shape of what `claude` says ───────────────────
@@ -211,11 +259,29 @@ def _handlers(doc: Mapping[str, Any], event: str) -> Iterator[Any]:
 
 
 def _is_ours(handler: Any, exe_key: str) -> bool:
-    """A command hook that starts this exe, and is not a --gate entry: that one is the user's own, and stays."""
-    if not isinstance(handler, dict) or handler.get("type") != "command" or _key(handler.get("command")) != exe_key:
+    """A command hook that starts this app's exe with --hook. It is told by the exe's file name, not its folder: an app
+    reinstalled elsewhere leaves hooks with the old path, which Install must replace and Remove must take out. A
+    --gate entry is the user's own, and stays."""
+    if not isinstance(handler, dict) or handler.get("type") != "command":
         return False
-    args = handler.get("args")
-    return not (isinstance(args, list) and GATE_FLAG in args)
+    program, args = _program_and_args(handler)
+    return bool(program) and _name(program) == _name(exe_key) and "--hook" in args and GATE_FLAG not in args
+
+
+def _program_and_args(handler: Mapping[str, Any]) -> tuple[str, list[str]]:
+    """The program a command hook starts (as a _key) and its arguments: from the exec form (``command`` and
+    ``args``), or from one command line ("C:/x/app.exe" --hook) written by hand."""
+    command, args = handler.get("command"), handler.get("args")
+    if not isinstance(command, str):
+        return "", []
+    if isinstance(args, list):
+        return _key(command), [str(arg) for arg in args]
+    found = re.match(r'\s*"([^"]+)"\s*(.*)$', command) or re.match(r"\s*(\S+)\s*(.*)$", command)
+    return (_key(found.group(1)), found.group(2).split()) if found else ("", [])
+
+
+def _name(key: str) -> str:
+    return key.rsplit("/", 1)[-1]
 
 
 def wanted_group(event: str, exe: str) -> dict:
@@ -230,12 +296,12 @@ def wanted_group(event: str, exe: str) -> dict:
 
 def hook_states(doc: Mapping[str, Any], exe: str) -> dict[str, str]:
     """Per event of setup: ``installed`` (a hook with this exe and exactly the args setup writes), ``different``
-    (this exe with other args) or ``missing``."""
+    (this app's hook with other args, or with the path of an exe that moved) or ``missing``."""
     key = _key(exe)
     states = {}
     for event, _matcher, args, _timeout in HOOKS:
         mine = [handler for handler in _handlers(doc, event) if _is_ours(handler, key)]
-        if any(handler.get("args") == list(args) for handler in mine):
+        if any(handler.get("args") == list(args) and _key(handler.get("command")) == key for handler in mine):
             states[event] = "installed"
         else:
             states[event] = "different" if mine else "missing"
@@ -348,8 +414,9 @@ def _reject_constant(name: str) -> Any:
 
 
 def read_settings(path: Path) -> tuple[dict | None, str | None]:
-    """(document, problem). The settings as a dict ({} when there is no file), or None and why setup must leave the
-    file alone: it cannot be read, is not valid JSON (an empty file included) or is not an object."""
+    """(document, problem). The settings as a dict ({} when there is no file, or an empty one, which Claude Code also
+    reads as no settings), or None and why setup must leave the file alone: it cannot be read, is not valid JSON or is
+    not an object."""
     try:
         text = path.read_text(encoding="utf-8-sig")   # a byte order mark from an editor is not part of the JSON
     except FileNotFoundError:
@@ -358,6 +425,8 @@ def read_settings(path: Path) -> tuple[dict | None, str | None]:
         return None, "The Claude Code settings file is not UTF-8 text, so setup left it alone."
     except OSError as exc:
         return None, f"The Claude Code settings file could not be read ({_os_reason(exc)}), so setup left it alone."
+    if not text.strip():
+        return {}, None
     try:
         doc = json.loads(text, parse_constant=_reject_constant)
     except (ValueError, RecursionError):
@@ -370,7 +439,7 @@ def read_settings(path: Path) -> tuple[dict | None, str | None]:
 
 def backup_settings(path: Path, now: datetime) -> Path:
     """Copy the settings file to settings.json.cum-backup-<YYYYMMDD-HHMMSS> beside it (numbered when that name is
-    taken). Returns the copy."""
+    taken), and drop all but the newest KEEP_BACKUPS of those copies. Returns the copy."""
     stamp = now.strftime("%Y%m%d-%H%M%S")
     target = path.with_name(f"{path.name}{BACKUP_INFIX}{stamp}")
     number = 1
@@ -378,17 +447,52 @@ def backup_settings(path: Path, now: datetime) -> Path:
         number += 1
         target = path.with_name(f"{path.name}{BACKUP_INFIX}{stamp}-{number}")
     shutil.copyfile(path, target)
+    _prune_backups(path, keep=target)
     return target
 
 
+def _prune_backups(path: Path, *, keep: Path) -> None:
+    def age(copy: Path) -> float:
+        try:
+            return copy.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    copies = sorted((item for item in path.parent.glob(f"{path.name}{BACKUP_INFIX}*") if item != keep),
+                    key=age, reverse=True)
+    for old in copies[KEEP_BACKUPS - 1:]:
+        with contextlib.suppress(OSError):
+            old.unlink()
+
+
+def settings_text(doc: Mapping[str, Any]) -> str:
+    """``doc`` as setup writes it: JSON with a 2-space indent and a trailing newline. Raises ValueError for what cannot
+    be written back as strict JSON in UTF-8, so setup refuses before it touches the file: a number too large for JSON
+    (1e999 reads as infinity) or half of a broken character (a lone surrogate)."""
+    text = json.dumps(doc, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
+    text.encode("utf-8")
+    return text
+
+
+def _stamp(path: Path) -> tuple:
+    """The settings file's change time and size, to tell whether something wrote it while setup was working."""
+    try:
+        info = path.stat()
+    except FileNotFoundError:
+        return ()
+    except OSError:
+        return _STAMP_UNKNOWN
+    return (info.st_mtime_ns, info.st_size)
+
+
 def write_settings(path: Path, doc: Mapping[str, Any]) -> None:
-    """Write ``doc`` as UTF-8 JSON, 2-space indent and a trailing newline, through a temp file in the same folder and
-    os.replace, so a failure leaves the old file as it was. A settings file that is a link (a dotfiles folder) stays
-    one: the file it points at is the one replaced."""
+    """Write ``doc`` as settings_text() lays it out, through a temp file in the same folder and os.replace, so a
+    failure leaves the old file as it was. A settings file that is a link (a dotfiles folder) stays one: the file it
+    points at is the one replaced."""
     if path.is_symlink():
         path = path.resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
-    text = json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
+    text = settings_text(doc)
     handle, temp = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
     try:
         with os.fdopen(handle, "w", encoding="utf-8", newline="\n") as out:
@@ -410,8 +514,18 @@ def claude_version(ctx: Context, claude: str) -> tuple[int, int, int] | None:
 
 
 def _mcp_state(ctx: Context, claude: str, exe: str) -> str:
+    return _mcp_get(ctx, claude, exe)[0]
+
+
+def _mcp_get(ctx: Context, claude: str, exe: str) -> tuple[str, str]:
+    """(state, what the tool starts): parse_mcp_get's state, and for a tool that starts a program, that program and its
+    arguments as a short phrase ("" when it says none)."""
     ran = ctx.run([claude, "mcp", "get", MCP_NAME])
-    return parse_mcp_get(f"{ran.stdout}\n{ran.stderr}", ran.returncode, exe)
+    text = _ANSI.sub("", f"{ran.stdout}\n{ran.stderr}")
+    command = re.search(r"^[ \t]*Command:[ \t]*(.+?)[ \t]*$", text, re.MULTILINE)
+    args = re.search(r"^[ \t]*Args:[ \t]*(.*?)[ \t]*$", text, re.MULTILINE)
+    starts = _clean(" ".join(part.group(1) for part in (command, args) if part)) if command else ""
+    return parse_mcp_get(text, ran.returncode, exe), starts
 
 
 def _availability(ctx: Context) -> tuple[str | None, str | None, str | None]:
@@ -431,7 +545,8 @@ def _version_text(version: tuple[int, int, int]) -> str:
 
 def unavailable_status(reason: str) -> dict:
     """The status of a setup that cannot run here, in the shape status() answers."""
-    return {"available": False, "reason": reason, "manual": MANUAL_DOC, "exe": None, "settings_path": None, "errors": [],
+    return {"available": False, "can_remove": False, "reason": reason, "manual": MANUAL_DOC, "exe": None,
+            "settings_path": None, "errors": [],
             "hooks": {"state": "unknown", "installed": 0, "total": len(HOOKS), "events": {}},
             "mcp": {"state": "unknown"},
             "claude": {"found": False, "path": None, "version": None, "min_version": MIN_CLAUDE_TEXT, "supported": None}}
@@ -446,6 +561,7 @@ def status(ctx: Context | None = None) -> dict:
     """Where setup stands. Reads the settings file and runs ``claude --version`` and ``claude mcp get`` (both read-only).
 
         available     setup can run here; ``reason`` says why not when it cannot, ``manual`` where to do it by hand
+        can_remove    Remove can run: it needs the installed app, not Claude Code (a file it cannot edit is a refusal)
         hooks         ``state`` installed | partial | missing | unknown, ``installed`` of ``total``, and ``events``:
                       the state of each of the three, installed | different | missing
         mcp           ``state`` registered | missing | other | unknown
@@ -458,6 +574,7 @@ def status(ctx: Context | None = None) -> dict:
     out.update(available=reason is None, reason=reason, exe=command_of(exe) if exe else None)
     if exe is None:
         return out
+    out["can_remove"] = True
     path = settings_path(ctx.env, ctx.home)
     out["settings_path"] = str(path)
     doc, problem = read_settings(path)
@@ -512,8 +629,9 @@ def _install(ctx: Context) -> dict:
         result["errors"].append("Could not tell which version of Claude Code is installed, so setup changed nothing. "
                                 f"Hooks need {MIN_CLAUDE_TEXT} or newer; check with: claude --version")
     elif version < MIN_CLAUDE:
-        result["errors"].append(f"Claude Code {_version_text(version)} is older than {MIN_CLAUDE_TEXT}, which hooks need, "
-                                "so setup changed nothing. Update it with: claude update")
+        result["errors"].append(f"Claude Code {_version_text(version)} (the claude at {claude}) is older than "
+                                f"{MIN_CLAUDE_TEXT}, which hooks need, so setup changed nothing. Update it with: claude update")
+    stamp = _stamp(path)
     doc, problem = read_settings(path)
     problem = problem or (hooks_problem(doc) if doc is not None else None)
     if problem:
@@ -524,6 +642,10 @@ def _install(ctx: Context) -> dict:
     states = hook_states(doc, exe)
     merged, changed = merge_install(doc, exe)
     if changed:
+        problem = _write_problem(path, stamp, merged)
+        if problem:
+            result["errors"].append(problem + " The hooks were not added.")
+            return _finish(result)
         try:
             if path.exists():
                 result["backup"] = str(backup_settings(path, ctx.now()))
@@ -542,8 +664,21 @@ def _install(ctx: Context) -> dict:
     return _finish(result)
 
 
+def _write_problem(path: Path, stamp: tuple, doc: Mapping[str, Any]) -> str | None:
+    """Why the new settings must not be written, or None: something else wrote the file since setup read it (Claude
+    Code saves it too), or the document cannot be written back as strict JSON."""
+    if _stamp(path) != stamp or stamp == _STAMP_UNKNOWN:
+        return "The Claude Code settings file changed while setup was working, so setup left it alone. Try again."
+    try:
+        settings_text(doc)
+    except ValueError:
+        return ("The Claude Code settings file holds a value that cannot be written back as it is (a number too large "
+                "for JSON, or a broken character), so setup left it alone.")
+    return None
+
+
 def _install_mcp(ctx: Context, claude: str, exe: str, result: dict) -> None:
-    state = _mcp_state(ctx, claude, exe)
+    state, starts = _mcp_get(ctx, claude, exe)
     if state == "registered":
         result["unchanged"].append(f"The {MCP_NAME} MCP tool was already registered.")
         return
@@ -560,8 +695,15 @@ def _install_mcp(ctx: Context, claude: str, exe: str, result: dict) -> None:
                                     f"removed ({_ran_reason(ran)}). Remove it with: claude mcp remove {MCP_NAME} -s user")
             result["manual"] = manual_mcp_command(exe)
             return
-        result["changed"].append(f"Removed a {MCP_NAME} MCP tool that started another program.")
+        result["changed"].append(f"Removed a {MCP_NAME} MCP tool that started another program"
+                                 + (f" ({starts})." if starts else "."))
     ran = ctx.run([claude, "mcp", "add", "--transport", "stdio", "--scope", "user", MCP_NAME, "--", exe, "--mcp"])
+    if ran.returncode != 0 and state == "unknown" and re.search(r"already exists", f"{ran.stdout}\n{ran.stderr}",
+                                                                 re.IGNORECASE):
+        result["warnings"].append(f"A {MCP_NAME} MCP tool is already registered, but Claude Code did not say what it "
+                                  f"starts, so it was left as it is. If it is not this app, remove it with: claude mcp "
+                                  f"remove {MCP_NAME} -s user, then press Install again.")
+        return
     if ran.returncode != 0:
         result["errors"].append(f"Claude Code did not register the {MCP_NAME} MCP tool ({_ran_reason(ran)}). "
                                 "The hooks are in place; register the tool by hand with the command below.")
@@ -591,6 +733,7 @@ def _remove(ctx: Context) -> dict:
         return _finish(result)
     path = settings_path(ctx.env, ctx.home)
     result["settings_path"] = str(path)
+    stamp = _stamp(path)
     doc, problem = read_settings(path)
     problem = problem or (hooks_problem(doc) if doc is not None else None)
     if problem or doc is None:
@@ -599,6 +742,10 @@ def _remove(ctx: Context) -> dict:
 
     merged, removed = merge_remove(doc, exe)
     if removed:
+        problem = _write_problem(path, stamp, merged)
+        if problem:
+            result["errors"].append(problem + " The hooks were not removed.")
+            return _finish(result)
         try:
             result["backup"] = str(backup_settings(path, ctx.now()))
             write_settings(path, merged)

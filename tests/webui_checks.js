@@ -617,7 +617,7 @@ const waiterOf = (id, cwd, pid) => ({ pid: pid || 4242, session_id: id, since: i
 const guardAnswer = (guard, told, waiting, setup) => ({ guard, told: told || [], waiting: waiting || [], setup: setup || null });
 const holding = (over, extra) => Object.assign({ state: "holding", over, resume_at: RESETS, policy: POLICY }, extra || {});
 const SETUP_OK = {
-  available: true, reason: null, manual: "docs/AGENT_HOOK.md", exe: "C:/x/ClaudeUsageMonitor.exe", settings_path: "C:/Users/t/.claude/settings.json", errors: [],
+  available: true, can_remove: true, reason: null, manual: "docs/AGENT_HOOK.md", exe: "C:/x/ClaudeUsageMonitor.exe", settings_path: "C:/Users/t/.claude/settings.json", errors: [],
   hooks: { state: "missing", installed: 0, total: 3, events: {} }, mcp: { state: "missing" },
   claude: { found: true, path: "C:/c/claude.exe", version: "2.1.160", min_version: "2.1.139", supported: true },
 };
@@ -654,6 +654,9 @@ out.guard = {
     armedThree: liveFor(guardAnswer({ state: "armed", over: [], resume_at: null, policy: Object.assign({}, POLICY, { scoped_cap: 80 }) })),
     armedNoCaps: liveFor(guardAnswer({ state: "armed", over: [], resume_at: null, policy: { enabled: true, session_cap: null, weekly_cap: null, scoped_cap: null, stagger_s: 120 } })),
     armedStillWaiting: liveFor(guardAnswer({ state: "armed", over: [], resume_at: null, policy: POLICY }, [], [waiterOf("77b0aa10-9d3e", "C:\\Demo\\atlas-web")])),
+    armedNoHooks: liveFor(guardAnswer({ state: "armed", over: [], resume_at: null, policy: POLICY }, [], [], SETUP_OK)),
+    armedHooked: liveFor(guardAnswer({ state: "armed", over: [], resume_at: null, policy: POLICY }, [], [], setupWith({ hooks: { state: "installed", installed: 3, total: 3, events: {} } }))),
+    holdingPartHooked: liveFor(guardAnswer(holding([SESSION_OVER]), [], [], setupWith({ hooks: { state: "partial", installed: 2, total: 3, events: {} } }))),
     holding: liveFor(guardAnswer(holding([SESSION_OVER, FABLE_OVER]), toldN(2), [waiterOf("77b0aa10-9d3e", "C:\\Demo\\atlas-web")])),
     holdingBusy: liveFor(guardAnswer(holding([SESSION_OVER]), toldN(1), [waiterOf("77b0aa10-9d3e", "C:\\Demo\\atlas-web")]), { busy: true }),
     holdingNobody: liveFor(guardAnswer(holding([SESSION_OVER]))),
@@ -671,9 +674,10 @@ out.guard = {
     installed: setupFor(setupWith({ hooks: { state: "installed", installed: 3, total: 3, events: {} }, mcp: { state: "registered" } })),
     partial: setupFor(setupWith({ hooks: { state: "partial", installed: 2, total: 3, events: {} }, mcp: { state: "other" } })),
     tooOld: setupFor(setupWith({ claude: { found: true, version: "2.1.94", min_version: "2.1.139", supported: false } })),
+    tooOldAt: setupFor(setupWith({ claude: { found: true, path: "C:\\Users\\t\\AppData\\Roaming\\npm\\claude.CMD", version: "2.1.94", min_version: "2.1.139", supported: false } })),
     versionUnknown: setupFor(setupWith({ claude: { found: true, version: null, min_version: "2.1.139", supported: null } })),
     noClaude: setupFor(setupWith({ available: false, reason: "Claude Code was not found on this PC: there is no claude command on the PATH.", claude: { found: false, version: null, min_version: "2.1.139", supported: null } })),
-    fromSource: setupFor(setupWith({ available: false, reason: "One-click setup works in the installed app. This copy runs from source.", hooks: { state: "unknown", installed: 0, total: 3, events: {} }, mcp: { state: "unknown" }, claude: { found: false, version: null, min_version: "2.1.139", supported: null } })),
+    fromSource: setupFor(setupWith({ available: false, can_remove: false, reason: "One-click setup works in the installed app. This copy runs from source.", hooks: { state: "unknown", installed: 0, total: 3, events: {} }, mcp: { state: "unknown" }, claude: { found: false, version: null, min_version: "2.1.139", supported: null } })),
     unreadable: setupFor(setupWith({ errors: ["The Claude Code settings file is not valid JSON, so setup left it alone."], hooks: { state: "unknown", installed: 0, total: 3, events: {} } })),
     installing: setupFor(SETUP_OK, null, "install"),
     removing: setupFor(SETUP_OK, null, "remove"),
@@ -795,23 +799,25 @@ async function guardActions() {
   fresh();
 
   // the fields: a blank cap is off, a stagger is a whole number of seconds, and what the server would refuse is refused here
-  const field = (key, value) => ({ target: { type: "number", value, getAttribute: (name) => (name === "data-key" ? key : null), hasAttribute: () => false } });
-  const typed = async (key, value) => {
+  // badInput is what a number box reports for text it cannot hold ("9e", "-"): its value then reads as ""
+  const field = (key, value, badInput) => ({ target: { type: "number", value, validity: { badInput: !!badInput }, getAttribute: (name) => (name === "data-key" ? key : null), hasAttribute: () => false } });
+  const typed = async (key, value, badInput) => {
     elements["err-" + key] = element("err-" + key);
-    const lines = await run({ "POST /api/settings": [200, { ok: true, applied: {}, settings: {} }] }, () => api.settingsChange(field(key, value)));
+    const lines = await run({ "POST /api/settings": [200, { ok: true, applied: {}, settings: {} }] }, () => api.settingsChange(field(key, value, badInput)));
     const wrote = calls.filter((c) => c.key === "POST /api/settings").map((c) => c.body);
     return { wrote, error: elements["err-" + key].textContent, shown: elements["err-" + key].hidden === false, status: S.status.text, lines: lines.length };
   };
   actions.fields = {};
-  for (const [label, key, value] of [
+  for (const [label, key, value, bad] of [
     ["capBlank", "guard_session_cap", ""], ["capSpaces", "guard_weekly_cap", "  "], ["cap1", "guard_session_cap", "1"], ["cap95", "guard_session_cap", "95"],
     ["cap100", "guard_scoped_cap", "100"], ["cap0", "guard_session_cap", "0"], ["cap101", "guard_weekly_cap", "101"], ["capDecimal", "guard_session_cap", "9.5"],
     ["capNegative", "guard_scoped_cap", "-5"], ["capText", "guard_session_cap", "abc"], ["capExp", "guard_session_cap", "1e2"], ["capLong", "guard_session_cap", "0095"],
     ["stagger0", "guard_resume_stagger_s", "0"], ["stagger120", "guard_resume_stagger_s", "120"], ["stagger600", "guard_resume_stagger_s", "600"],
     ["stagger601", "guard_resume_stagger_s", "601"], ["staggerBlank", "guard_resume_stagger_s", ""], ["staggerNegative", "guard_resume_stagger_s", "-1"], ["staggerDecimal", "guard_resume_stagger_s", "1.5"],
+    ["capBadInput", "guard_session_cap", "", true],
   ]) {
     fresh();
-    actions.fields[label] = await typed(key, value);
+    actions.fields[label] = await typed(key, value, bad);
   }
   fresh();
   const toggled = { target: { type: "checkbox", checked: true, value: "on", getAttribute: (name) => (name === "data-key" ? "guard_enabled" : name === "data-kind" ? "bool" : null), hasAttribute: () => false } };

@@ -38,6 +38,9 @@ GET_TEXT = (
 )
 
 
+REAL_RUN = subprocess.run   # the autouse fixture below refuses it; only the gated process test takes it back
+
+
 @pytest.fixture(autouse=True)
 def nothing_real(monkeypatch: pytest.MonkeyPatch) -> None:
     def refuse(*args: Any, **kwargs: Any) -> Any:
@@ -406,7 +409,7 @@ def test_remove_does_not_guess_when_it_cannot_tell_whether_the_tool_is_ours(tmp_
 # ── What it refuses ──────────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("content", [
-    '{"hooks": ', "{not json}", "", "   \n", "[]", '"text"', "null", "42", '{"a": NaN}', '{"a": 1}{"b": 2}',
+    '{"hooks": ', "{not json}", "[]", '"text"', "null", "42", '{"a": NaN}', '{"a": 1}{"b": 2}',
     b"\xff\xfe\x00{", '{"hooks": []}', '{"hooks": "yes"}', '{"hooks": {"PostToolUse": {}}}',
     '{"hooks": {"SessionStart": "x"}}',
 ])
@@ -419,6 +422,52 @@ def test_a_settings_file_it_cannot_trust_is_refused_with_nothing_written(tmp_pat
         assert result["changed"] == [] and result["backup"] is None
         assert rig.settings.read_bytes() == original and rig.files() == ["settings.json"]    # no backup, no temp file
     assert "add" not in rig.claude.kinds() and "remove" not in rig.claude.kinds()
+
+
+@pytest.mark.parametrize("value", ["1e999", '"\\ud800"'])   # infinity once read; half of a broken character
+def test_a_value_that_cannot_be_written_back_stops_setup_before_the_backup(tmp_path: Path, value: str) -> None:
+    for action, hooks in ((setup.install, {}), (setup.remove, ours())):
+        rig = make_rig(tmp_path / action.__name__)
+        original = rig.write('{"a": ' + value + ', "hooks": ' + json.dumps(hooks) + "}")
+        result = action(rig.ctx)
+        assert result["ok"] is False and "cannot be written back" in result["errors"][0]
+        assert rig.settings.read_bytes() == original and rig.files() == ["settings.json"]
+
+
+@pytest.mark.parametrize("content", ["", "   \n"])
+def test_an_empty_settings_file_is_no_settings_as_claude_code_reads_it(tmp_path: Path, content: str) -> None:
+    rig = make_rig(tmp_path)
+    rig.write(content)
+    result = setup.install(rig.ctx)
+    assert result["ok"] is True and result["backup"] is not None
+    assert json.loads(rig.settings.read_text(encoding="utf-8")) == {"hooks": ours()}
+
+
+def test_a_settings_file_written_while_setup_works_is_left_alone(tmp_path: Path, monkeypatch: Any) -> None:
+    rig = make_rig(tmp_path)
+    original = rig.write({"theme": "dark"})
+    real_read = setup.read_settings
+
+    def read_then_claude_code_saves(path: Path) -> Any:
+        answer = real_read(path)
+        path.write_text('{"theme": "dark", "model": "opus"}', encoding="utf-8")    # Claude Code saves its settings
+        return answer
+
+    monkeypatch.setattr(setup, "read_settings", read_then_claude_code_saves)
+    result = setup.install(rig.ctx)
+    assert result["ok"] is False and "changed while setup was working" in result["errors"][0]
+    assert rig.settings.read_bytes() != original and "opus" in rig.settings.read_text(encoding="utf-8")
+    assert rig.files() == ["settings.json"]                                         # no backup, no temp file
+
+
+def test_only_the_newest_backups_are_kept(tmp_path: Path) -> None:
+    rig = make_rig(tmp_path)
+    rig.write({"theme": "dark"})
+    for minute in range(8):
+        stamp = datetime(2026, 10, 1, 12, minute, 0)
+        setup.backup_settings(rig.settings, stamp)
+    backups = [name for name in rig.files() if setup.BACKUP_INFIX in name]
+    assert len(backups) == setup.KEEP_BACKUPS and backups[-1].endswith("20261001-120700")
 
 
 def test_a_settings_file_that_cannot_be_read_is_refused_and_the_status_says_so(tmp_path: Path) -> None:
@@ -579,8 +628,50 @@ def test_a_tool_that_starts_something_else_is_removed_and_registered_again(tmp_p
     assert rig.claude.kinds() == ["version", "get", "remove", "add"]
     assert rig.claude.calls[2] == [CLAUDE_EXE, "mcp", "remove", "claude-usage", "-s", "user"]
     assert rig.claude.tool == (EXE, ["--mcp"])
-    assert result["changed"][-2:] == ["Removed a claude-usage MCP tool that started another program.",
-                                      "Registered the claude-usage MCP tool."]
+    assert result["changed"][-2:] == [r"Removed a claude-usage MCP tool that started another program (C:\Old\Elsewhere.exe "
+                                      "--mcp).", "Registered the claude-usage MCP tool."]   # what it was, for the record
+
+
+def test_a_tool_that_is_there_but_did_not_say_what_it_starts_is_a_warning(tmp_path: Path) -> None:
+    rig = make_rig(tmp_path, tool=(EXE, ["--mcp"]))
+    rig.claude.forced["get"] = Ran(None, "", "timed out")    # the get gave no answer, and add finds the tool there
+    result = setup.install(rig.ctx)
+    assert result["ok"] is True and result["errors"] == [] and result["manual"] is None
+    assert any("already registered, but Claude Code did not say what it starts" in item for item in result["warnings"])
+
+
+def test_hooks_of_this_app_at_an_old_path_are_replaced_and_removed(tmp_path: Path) -> None:
+    rig = make_rig(tmp_path)
+    old = "C:/Program Files/Old Place/ClaudeUsageMonitor.exe"
+    rig.write({"hooks": {**ours(old), "Stop": [{"hooks": [{"type": "command", "command": old, "args": ["--hook"]}]}]}})
+    assert setup.status(rig.ctx)["hooks"]["events"] == dict.fromkeys(setup.EVENTS, "different")  # not "installed"
+    assert setup.install(rig.ctx)["ok"] is True
+    assert rig.load()["hooks"]["PostToolUse"] == ours()["PostToolUse"]                         # one set, the new path
+    assert setup.remove(rig.ctx)["ok"] is True
+    assert rig.load() == {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": old, "args": ["--hook"]}]}]}}
+
+
+def test_a_hook_written_as_one_command_line_is_recognised(tmp_path: Path) -> None:
+    rig = make_rig(tmp_path)
+    line = {"type": "command", "command": f'"{CMD}" --hook'}
+    rig.write({"hooks": {"PostToolUse": [{"matcher": "*", "hooks": [line]}]}})
+    assert setup.install(rig.ctx)["ok"] is True
+    assert rig.load()["hooks"]["PostToolUse"] == ours()["PostToolUse"]                         # replaced, not doubled
+
+
+def test_remove_needs_no_claude_and_the_status_says_it_can_run(tmp_path: Path) -> None:
+    rig = make_rig(tmp_path, claude_path=None)
+    rig.write({"hooks": ours()})
+    snapshot = setup.status(rig.ctx)
+    assert snapshot["available"] is False and snapshot["can_remove"] is True
+    assert setup.remove(rig.ctx)["ok"] is True and "hooks" not in rig.load()
+    assert setup.status(make_rig(tmp_path / "src", frozen=False).ctx)["can_remove"] is False
+
+
+def test_claude_installed_after_the_monitor_started_is_found_on_the_path_windows_holds_now(monkeypatch: Any) -> None:
+    monkeypatch.setattr(setup.shutil, "which", lambda name, path=None: r"C:\fresh\claude.exe" if path else None)
+    monkeypatch.setattr(setup, "_registry_path", lambda: r"C:\Windows;C:\fresh")
+    assert setup.find_command("claude") == (r"C:\fresh\claude.exe" if sys.platform == "win32" else None)
 
 
 def test_a_tool_without_the_mcp_argument_is_not_ours(tmp_path: Path) -> None:
@@ -661,8 +752,8 @@ def test_the_status_before_and_after_a_click(tmp_path: Path) -> None:
     rig = make_rig(tmp_path)
     before = setup.status(rig.ctx)
     assert before == {
-        "available": True, "reason": None, "manual": "docs/AGENT_HOOK.md", "exe": CMD, "settings_path": str(rig.settings),
-        "errors": [],
+        "available": True, "can_remove": True, "reason": None, "manual": "docs/AGENT_HOOK.md", "exe": CMD,
+        "settings_path": str(rig.settings), "errors": [],
         "hooks": {"state": "missing", "installed": 0, "total": 3,
                   "events": {"SessionStart": "missing", "UserPromptSubmit": "missing", "PostToolUse": "missing"}},
         "mcp": {"state": "missing"},
@@ -705,8 +796,8 @@ def test_the_status_says_when_the_settings_file_cannot_be_edited(tmp_path: Path)
 
 
 def test_the_status_is_the_same_shape_whether_or_not_setup_can_run() -> None:
-    assert set(setup.unavailable_status("why")) == {"available", "reason", "manual", "exe", "settings_path", "errors",
-                                                    "hooks", "mcp", "claude"}
+    assert set(setup.unavailable_status("why")) == {"available", "can_remove", "reason", "manual", "exe",
+                                                    "settings_path", "errors", "hooks", "mcp", "claude"}
     answer = setup.refused("install", "not here")
     assert answer["ok"] is False and answer["errors"] == ["not here"] and answer["action"] == "install"
     assert set(answer) == {"ok", "action", "changed", "unchanged", "backup", "warnings", "errors", "manual", "settings_path"}
@@ -785,30 +876,74 @@ def test_the_pure_merges_do_not_modify_the_document_they_are_given() -> None:
 def test_the_real_runner_uses_an_argument_list_a_timeout_and_no_console_window(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: dict[str, Any] = {}
 
-    def fake_run(argv: Any, **options: Any) -> Any:
-        seen.update(argv=argv, **options)
-        return subprocess.CompletedProcess(argv, 0, stdout="2.1.160 (Claude Code)\n", stderr="")
+    class Process:
+        pid, returncode = 4242, 0
 
-    monkeypatch.setattr(setup.subprocess, "run", fake_run)
+        def __init__(self, argv: Any, **options: Any) -> None:
+            seen.update(argv=argv, **options)
+
+        def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+            seen["timeout"] = timeout
+            return "2.1.160 (Claude Code)\n", ""
+
+    monkeypatch.setattr(setup.subprocess, "Popen", Process)
     assert setup.run_claude([CLAUDE_EXE, "--version"]) == Ran(0, "2.1.160 (Claude Code)\n", "")
     assert seen["argv"] == [CLAUDE_EXE, "--version"] and isinstance(seen["argv"], list)
     assert not seen.get("shell")                                                # never a shell
     assert seen["timeout"] == setup.CLAUDE_TIMEOUT_S and 0 < seen["timeout"] <= 20
     assert seen["creationflags"] == getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    assert seen["capture_output"] is True and seen["stdin"] == subprocess.DEVNULL
+    assert seen["stdout"] == seen["stderr"] == subprocess.PIPE and seen["stdin"] == subprocess.DEVNULL
 
 
 @pytest.mark.parametrize(("error", "stderr"), [
-    (subprocess.TimeoutExpired("claude", 20), "timed out"), (FileNotFoundError(2, "no such file"), "FileNotFoundError"),
-    (PermissionError(13, "denied"), "PermissionError"), (ValueError("embedded null"), "ValueError"),
+    (FileNotFoundError(2, "no such file"), "FileNotFoundError"), (PermissionError(13, "denied"), "PermissionError"),
+    (ValueError("embedded null"), "ValueError"),
 ])
-def test_the_real_runner_turns_a_failure_to_run_into_an_answer(monkeypatch: pytest.MonkeyPatch, error: Exception,
-                                                                stderr: str) -> None:
+def test_the_real_runner_turns_a_failure_to_start_into_an_answer(monkeypatch: pytest.MonkeyPatch, error: Exception,
+                                                                  stderr: str) -> None:
     def fail(argv: Any, **options: Any) -> Any:
         raise error
 
-    monkeypatch.setattr(setup.subprocess, "run", fail)
+    monkeypatch.setattr(setup.subprocess, "Popen", fail)
     assert setup.run_claude(["claude", "--version"]) == Ran(None, "", stderr)
+
+
+def test_at_the_timeout_the_runner_ends_the_whole_process_tree(monkeypatch: pytest.MonkeyPatch) -> None:
+    ended: list[Any] = []
+    waits: list[float | None] = []
+
+    class Process:
+        pid, returncode = 4242, None
+
+        def __init__(self, argv: Any, **options: Any) -> None:
+            pass
+
+        def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+            waits.append(timeout)
+            if len(waits) == 1:
+                raise subprocess.TimeoutExpired("claude", timeout or 0)
+            return "", ""
+
+        def kill(self) -> None:
+            ended.append("kill")
+
+    monkeypatch.setattr(setup.subprocess, "Popen", Process)
+    monkeypatch.setattr(setup.subprocess, "run", lambda argv, **options: ended.append(argv[1:]))
+    assert setup.run_claude(["claude.cmd", "mcp", "get", "claude-usage"]) == Ran(None, "", "timed out")
+    assert waits == [setup.CLAUDE_TIMEOUT_S, 5]                                 # a bounded last read, not a wait forever
+    assert ended[-1] == "kill" and (sys.platform != "win32" or ended[0] == ["/T", "/F", "/PID", "4242"])
+
+
+@pytest.mark.skipif(os.environ.get("CUM_UI_TESTS") != "1" or sys.platform != "win32",
+                    reason="starts processes: set CUM_UI_TESTS=1")
+def test_a_cmd_shim_whose_child_holds_the_pipes_still_times_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    shim = tmp_path / "claude.cmd"           # as npm's shim runs node.exe, this runs a child that keeps the pipes open
+    shim.write_text("@ping -n 30 127.0.0.1 >nul\r\n", encoding="ascii")
+    monkeypatch.setattr(setup, "CLAUDE_TIMEOUT_S", 1.0)
+    monkeypatch.setattr(setup.subprocess, "run", REAL_RUN)    # taskkill ends the tree
+    started = time.monotonic()
+    assert setup.run_claude([str(shim), "--version"]) == Ran(None, "", "timed out")
+    assert time.monotonic() - started < 10
 
 
 def test_the_default_context_describes_the_real_machine(monkeypatch: pytest.MonkeyPatch) -> None:

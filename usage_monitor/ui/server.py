@@ -455,6 +455,9 @@ class _TimedValue:
         self._generation = 0
 
     def get(self) -> Any:
+        with self._state_lock:  # a kept answer never waits behind a computation that is running
+            if self._entry is not None and self._clock() < self._entry[0]:
+                return self._entry[1]
         with self._compute_lock:
             with self._state_lock:
                 if self._entry is not None and self._clock() < self._entry[0]:

@@ -3247,7 +3247,7 @@
       capRow("guard_scoped_cap", "Model weekly cap", "Percent of a model’s own weekly limit, such as Fable’s, 1 to 100. Blank leaves it unwatched.", "OFF", 1, 100) +
       capRow("guard_resume_stagger_s", "Stagger", "Seconds between waking the sessions that wait, so they do not all start at once. 0 to 600.", "120", 0, 600) +
       '<div class="nm-row-set is-stack"><span><span class="t">Status</span></span><div id="guard-live"></div></div>' +
-      '<div class="nm-row-set is-stack"><span><span class="t">One-click setup</span><span class="d">Adds the hooks and the MCP tool to Claude Code for you. Your other settings stay as they are, and a backup is kept.</span></span>' +
+      '<div class="nm-row-set is-stack"><span><span class="t">One-click setup</span><span class="d">Adds the hooks and the MCP tool to Claude Code for you. Your other settings keep their values, a backup is kept, and the file is saved in a standard layout.</span></span>' +
       '<div id="guard-setup"></div></div></div></div></section>';
   }
 
@@ -3326,6 +3326,10 @@
       chip = '<span class="nm-chip solid is-crit">HOLDING</span>';
       story = "A cap was reached. Working sessions are told once to wrap up, and sessions that wait wake when every watched limit is under its cap again.";
     }
+    var hooks = v.setup && v.setup.hooks ? v.setup.hooks.state : "";
+    if (v.state !== "off" && (hooks === "missing" || hooks === "partial")) {
+      story += " The hooks are not all installed, so sessions may not be told: press Install below.";  // the guard speaks through them
+    }
     var rows = [];
     if (v.state === "holding") {
       v.over.forEach(function (item) {
@@ -3351,10 +3355,11 @@
         rows.push(["AND " + (v.waiting.length - GUARD_LISTED) + " MORE", ""]);
       }
     }
-    var can = v.waiting.length > 0 && !S.resumeBusy;
+    // While it is sent the button only says it is busy (aria-disabled keeps the keyboard focus on it); it is disabled when nothing waits.
+    var state = S.resumeBusy ? ' aria-disabled="true"' : v.waiting.length > 0 ? "" : " disabled";
     return '<div class="nm-verdict">' + chip + '</div><p class="nm-story" role="status">' + esc(story) + "</p>" +
       (rows.length ? kvGrid(rows, "is-one") : "") +
-      '<div class="nm-actions"><button class="nm-btn" type="button" data-action="guard-resume" data-fid="guard-resume"' + (can ? "" : " disabled") + ">" +
+      '<div class="nm-actions"><button class="nm-btn" type="button" data-action="guard-resume" data-fid="guard-resume"' + state + ">" +
       (S.resumeBusy ? "Resuming…" : "Resume now") + "</button></div>";
   }
 
@@ -3410,22 +3415,29 @@
     if (!s) {
       rows = kvGrid([["HOOKS", "NOT INSTALLED", true], ["MCP TOOL", "NOT REGISTERED", true], ["CLAUDE CODE", "2.1.160", true]], "is-one");
     } else {
-      rows = kvGrid([["HOOKS", hooksWords(s.hooks)], ["MCP TOOL", MCP_WORDS[(s.mcp || {}).state] || "UNKNOWN"], ["CLAUDE CODE", claudeWords(s.claude)]], "is-one");
+      var where = s.claude && s.claude.path ? String(s.claude.path) : "";
+      rows = kvGrid([["HOOKS", hooksWords(s.hooks)], ["MCP TOOL", MCP_WORDS[(s.mcp || {}).state] || "UNKNOWN"], ["CLAUDE CODE", claudeWords(s.claude), false, where]], "is-one");
       if (!s.available) {
         notes += '<div class="nm-callout is-warn" role="note"><b>Setup is not available here.</b> ' + esc(s.reason || "") +
           ' Set it up by hand instead: <a href="' + esc(LINKS.hooks) + '" data-external="1">docs/AGENT_HOOK.md</a>.</div>';
       } else if (s.claude && s.claude.supported === false) {
-        notes += '<div class="nm-callout is-warn" role="note">Claude Code ' + esc(s.claude.version) + " is older than " + esc(s.claude.min_version) +
+        // Which claude: an old npm copy can come first on the PATH while another one is up to date.
+        notes += '<div class="nm-callout is-warn" role="note">Claude Code ' + esc(s.claude.version) +
+          (where ? ' (<span class="nm-path">' + esc(where) + "</span>)" : "") + " is older than " + esc(s.claude.min_version) +
           ", which the hooks need. Update it with <span class=\"nm-path\">claude update</span> first.</div>";
       }
       (Array.isArray(s.errors) ? s.errors : []).forEach(function (error) {
         notes += '<p class="nm-error" role="alert">' + esc(error) + "</p>";
       });
     }
-    var off = !s || !s.available || !!busy;
+    // A button that cannot work here is disabled; one waiting on a click is only aria-disabled, so it keeps the keyboard focus.
+    // Remove needs no Claude Code: it edits the settings file, and leaves the MCP tool to the manual line when claude is missing.
+    var canRemove = !!s && (s.can_remove === undefined ? !!s.available : !!s.can_remove);
+    var installState = !s || !s.available ? " disabled" : busy ? ' aria-disabled="true"' : "";
+    var removeState = !canRemove ? " disabled" : busy ? ' aria-disabled="true"' : "";
     return rows + notes + '<div class="nm-actions">' +
-      '<button class="nm-btn solid" type="button" data-action="guard-install" data-fid="guard-install"' + (off ? " disabled" : "") + ">" + (busy === "install" ? "Installing…" : "Install") + "</button>" +
-      '<button class="nm-btn" type="button" data-action="guard-remove" data-fid="guard-remove"' + (off ? " disabled" : "") + ">" + (busy === "remove" ? "Removing…" : "Remove") + "</button></div>" +
+      '<button class="nm-btn solid" type="button" data-action="guard-install" data-fid="guard-install"' + installState + ">" + (busy === "install" ? "Installing…" : "Install") + "</button>" +
+      '<button class="nm-btn" type="button" data-action="guard-remove" data-fid="guard-remove"' + removeState + ">" + (busy === "remove" ? "Removing…" : "Remove") + "</button></div>" +
       guardResultHtml(S.setup.result) + '<p class="nm-lede">' + esc(GUARD_COST) + "</p>";
   }
 
@@ -4087,7 +4099,10 @@
       value = parseInt(el.value, 10);
     } else if (key === "guard_session_cap" || key === "guard_weekly_cap" || key === "guard_scoped_cap") {
       var cap = String(el.value).trim();
-      if (cap === "") {
+      if (el.validity && el.validity.badInput) {          // text a number box cannot hold ("9e", "-") reads as "": not a blank
+        fieldError(key, "Enter a whole number from 1 to 100, or leave it blank to stop watching this limit.");
+        return;
+      } else if (cap === "") {
         value = null;                                     // blank is off: the limit is not watched
       } else if (!/^\d{1,3}$/.test(cap) || +cap < 1 || +cap > 100) {
         fieldError(key, "Enter a whole number from 1 to 100, or leave it blank to stop watching this limit.");
