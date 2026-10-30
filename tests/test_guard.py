@@ -114,6 +114,19 @@ def test_a_reader_uses_the_policy_written_with_the_reading_else_the_settings_fil
     assert verdict["state"] == guard.HOLDING and verdict["policy"]["weekly_cap"] == 90  # the default
 
 
+def test_a_reader_reads_the_settings_file_as_the_app_does(tmp_path):
+    path = tmp_path / guard.SETTINGS_NAME
+    path.write_bytes(b"\xef\xbb\xbf" + json.dumps({"guard_enabled": True, "guard_weekly_cap": 70}).encode())
+    policy = guard.policy_from_file(path)
+    assert policy["enabled"] is True and policy["weekly_cap"] == 70           # a byte-order mark is fine
+    path.write_text(json.dumps({"guard_enabled": "yes", "guard_weekly_cap": "70", "guard_session_cap": None}),
+                    encoding="utf-8")
+    policy = guard.policy_from_file(path)                                     # refused values: the defaults
+    assert policy["enabled"] is False and policy["weekly_cap"] == 90 and policy["session_cap"] is None
+    held = guard.evaluate(reading(96.0, 96.0), {"enabled": True, "session_cap": "95", "weekly_cap": 90}, NOW)
+    assert [item["name"] for item in held["over"]] == ["weekly"]             # a cap that is not a number watches nothing
+
+
 def test_limits_doc_reads_a_snapshot():
     snap = UsageSnapshot(fetched_at=NOW, limits=[
         Limit(kind="session", group="session", percent=12.0, severity=None, resets_at=NOW + timedelta(hours=1),
@@ -142,17 +155,47 @@ def test_told_lists_the_sessions_told_of_this_episode(tmp_path):
     assert sessions.told(tmp_path, "") == []
 
 
-def test_waiting_lists_live_waits_and_skips_leftovers(tmp_path):
+def test_a_session_told_of_two_limits_has_heard_of_either_one_alone(tmp_path):
+    from usage_monitor.agent import sessions
+
+    assert sessions.same_episode("session@S|weekly@W", "weekly@W")       # the session window reset: same episode
+    assert sessions.same_episode("weekly@W", "weekly@W")
+    assert not sessions.same_episode("weekly@W", "session@S|weekly@W")   # a limit newly over its cap: a new one
+    assert not sessions.same_episode("weekly@W", "weekly@W2")            # a new week over its cap: a new one
+    assert not sessions.same_episode(None, "weekly@W") and not sessions.same_episode("weekly@W", "")
+    (tmp_path / sessions.SEEN_NAME).write_text(json.dumps({
+        "s1": {"at": "x", "guard": {"episode": "session@S|weekly@W", "told_at": "2026-10-28T21:05:00Z"}},
+    }), encoding="utf-8")
+    assert [entry["session_id"] for entry in sessions.told(tmp_path, "weekly@W")] == ["s1"]
+
+
+def test_waiting_lists_live_waits_and_removes_leftovers(tmp_path):
     import os
 
     from usage_monitor.agent import sessions
 
     mine = sessions.register_wait(tmp_path, "s1", NOW)
-    (tmp_path / sessions.WAITING_DIR / "999999.json").write_text(
-        json.dumps({"pid": 999999, "session_id": "gone", "since": "2026-10-28T20:00:00Z"}), encoding="utf-8")
+    folder = tmp_path / sessions.WAITING_DIR
+    gone = folder / "999999.json"
+    gone.write_text(json.dumps({"pid": 999999, "session_id": "gone", "since": "2026-10-28T20:00:00Z"}),
+                    encoding="utf-8")
+    reused = folder / "reused.json"   # a wait that was killed, whose id Windows gave to a live process (this one)
+    reused.write_text(json.dumps({"pid": os.getpid(), "started": 1, "session_id": "old",
+                                  "since": "2026-10-28T19:00:00Z"}), encoding="utf-8")
+    torn = folder / "torn.json"       # a file being written: left alone
+    torn.write_text('{"pid": ', encoding="utf-8")
     assert [(entry["pid"], entry["session_id"]) for entry in sessions.waiting(tmp_path)] == [(os.getpid(), "s1")]
+    assert not gone.exists() and not reused.exists() and torn.exists()
     sessions.unregister_wait(mine)
     assert sessions.waiting(tmp_path) == []
+
+
+def test_the_last_release_is_remembered(tmp_path):
+    from usage_monitor.agent import sessions
+
+    assert sessions.released_at(tmp_path) is None
+    sessions.mark_released(tmp_path, NOW)
+    assert sessions.released_at(tmp_path) == NOW
 
 
 def test_resume_now_releases_waits_that_started_before_it(tmp_path):

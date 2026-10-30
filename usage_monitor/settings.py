@@ -176,6 +176,13 @@ _RULES: dict[str, Callable[[Any], bool]] = {
 }
 
 
+def is_valid(key: str, value: Any) -> bool:
+    """Whether the settings file may hold ``value`` for ``key``: the rule the app reads it with
+    (unknown keys take anything)."""
+    rule = _RULES.get(key)
+    return rule is None or rule(value)
+
+
 def _describe(value: Any) -> str:
     return f"{type(value).__name__} {value!r}"[:80]
 

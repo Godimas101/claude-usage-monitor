@@ -364,8 +364,9 @@ def _scoped_name(limit: Limit, index: int) -> str:
 # and every skin marks the rows it is told about.
 
 def _guard_mark(block: Any, usage: UsageSnapshot | None, now: datetime) -> GuardMark | None:
-    """The guard block of the state as a mark, or None when it is off, missing or empty."""
-    if not isinstance(block, Mapping) or block.get("state") not in GUARD_STATES:
+    """The guard block of the state as a mark, or None when it is off, missing or empty, and while there is
+    no reading (no sign-in, still loading): the guard cannot act on nothing, so no surface says it is armed."""
+    if not isinstance(block, Mapping) or block.get("state") not in GUARD_STATES or usage is None:
         return None
     holding = block["state"] == GUARD_HOLDING
     policy = block.get("policy") if isinstance(block.get("policy"), Mapping) else {}

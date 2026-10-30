@@ -263,7 +263,15 @@ def current(folder: Path, *, now: datetime, fetch: bool, wait_s: float = 0.0, ap
 
 @contextlib.contextmanager
 def _fetch_lock(folder: Path) -> Iterator[bool]:
-    """Yields True once this process holds the fetch lock, or False after FETCH_LOCK_S without it.
+    """Yields True once this process holds the fetch lock, or False after FETCH_LOCK_S without it."""
+    with file_lock(folder, LOCK_NAME, FETCH_LOCK_S) as held:
+        yield held
+
+
+@contextlib.contextmanager
+def file_lock(folder: Path, name: str, wait_s: float) -> Iterator[bool]:
+    """Yields True once this process holds the lock ``name`` in ``folder``, or False after ``wait_s``
+    without it.
 
     A byte-range lock that Windows releases when its holder exits or is killed, as Claude Code does
     to a hook at its timeout, so no stale lock file can block the others. Elsewhere it is a no-op.
@@ -275,12 +283,12 @@ def _fetch_lock(folder: Path) -> Iterator[bool]:
 
     try:
         folder.mkdir(parents=True, exist_ok=True)
-        fd = os.open(folder / LOCK_NAME, os.O_RDWR | os.O_CREAT)
-    except OSError:  # an unwritable folder: ask anyway, as before the lock existed
+        fd = os.open(folder / name, os.O_RDWR | os.O_CREAT)
+    except OSError:  # an unwritable folder: go ahead, as before the lock existed
         yield True
         return
     try:
-        deadline = time.monotonic() + FETCH_LOCK_S
+        deadline = time.monotonic() + wait_s
         while True:
             try:
                 msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
@@ -529,10 +537,11 @@ def _iso(value: datetime | None) -> str | None:
 
 
 def parse_time(value: Any) -> datetime | None:
+    """An ISO time as the readers write it ("...Z"; fromisoformat takes a Z only from Python 3.11)."""
     if not isinstance(value, str):
         return None
     try:
-        parsed = datetime.fromisoformat(value)
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
     except ValueError:
         return None
     return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed

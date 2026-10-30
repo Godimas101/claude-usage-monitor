@@ -1478,6 +1478,13 @@ def test_the_tray_tooltip_carries_the_usage_guard_while_it_is_on():
     assert tray_tooltip(no_reset) == "Claude usage - session 13% - weekly 2% - guard holding"
 
 
+def test_without_a_reading_no_surface_says_the_guard_is_armed():
+    state = sample_state("no_credentials")
+    state.guard = {"state": "armed", "over": [], "resume_at": None, "policy": {"enabled": True, "session_cap": 95}}
+    model = build_model(state, NOW)
+    assert model.guard is None and tray_tooltip(model) == "Claude usage - no login"  # it cannot act without a reading
+
+
 def test_the_longest_guard_tooltip_still_fits_the_shell_limit():
     model = model_for("rate_limited")
     rows = [dataclasses.replace(row, percent=100.0) for row in model.rows]

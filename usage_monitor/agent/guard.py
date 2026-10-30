@@ -19,6 +19,7 @@ from typing import Any
 
 from usage_monitor.data.models import UsageSnapshot
 from usage_monitor.settings import DEFAULTS as _SETTINGS
+from usage_monitor.settings import is_valid as _valid
 
 OFF, ARMED, HOLDING = "off", "armed", "holding"
 SETTING_KEYS = {  # setting -> policy field
@@ -43,15 +44,16 @@ def policy_from(get: Callable[[str], Any]) -> dict:
 
 
 def policy_from_file(path: Path) -> dict:
-    """The policy in a settings file, for a reader running while the app is closed. Defaults when
-    the file is missing or unreadable."""
+    """The policy in a settings file, for a reader running while the app is closed, read as the app
+    reads it: a byte-order mark is fine, and a value its rule refuses gives the default. Defaults
+    when the file is missing or unreadable."""
     try:
-        stored = json.loads(path.read_text(encoding="utf-8"))
+        stored = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         stored = {}
     if not isinstance(stored, dict):
         stored = {}
-    return policy_from(lambda key: stored.get(key, DEFAULTS[key]))
+    return policy_from(lambda key: stored[key] if key in stored and _valid(key, stored[key]) else DEFAULTS[key])
 
 
 def for_reader(doc: Mapping[str, Any] | None, now: datetime, folder: Path) -> dict:
@@ -92,7 +94,7 @@ def evaluate(doc: Mapping[str, Any], policy: Mapping[str, Any], now: datetime) -
     over = []
     for name, label, entry, cap in _watched(doc, policy):
         percent = entry.get("percent") if isinstance(entry, Mapping) else None
-        if cap is None or not _is_number(percent) or percent < cap:
+        if not _is_number(cap) or not _is_number(percent) or percent < cap:
             continue
         resets = _parse(entry.get("resets_at"))
         if resets is not None and resets <= now:
@@ -127,8 +129,8 @@ def _is_number(value: Any) -> bool:
 def _parse(value: Any) -> datetime | None:
     if not isinstance(value, str):
         return None
-    try:
-        parsed = datetime.fromisoformat(value)
+    try:  # fromisoformat takes the "Z" that _iso writes only from Python 3.11
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
     except ValueError:
         return None
     return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed

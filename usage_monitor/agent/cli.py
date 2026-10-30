@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import sys
 import time
 from collections.abc import Callable, Mapping
@@ -24,6 +25,8 @@ HOOK_THRESHOLD = 80.0      # --hook speaks once a limit reaches this percent...
 HOOK_STEP = 5.0            # ...and again each time one climbs another step
 HOOK_MEMORY = sessions.SEEN_NAME
 HOOK_MEMORY_DAYS = 7
+HOOK_LOCK = "hook-seen.lock"  # one hook at a time reads and rewrites the memory (parallel subagents run hooks at once)
+HOOK_LOCK_S = 2.0             # past this a hook still speaks, and leaves the memory to the others
 SESSION_START = "SessionStart"
 GATE_SESSION_CAP = 95.0    # --gate refuses new agents and workflows from these percents
 GATE_WEEKLY_CAP = 90.0
@@ -45,8 +48,9 @@ def run_hook(*, threshold: float, always: bool, folder: Path, clock: Callable[[]
              app_version: str, stdin: BinaryIO | None, out: BinaryIO) -> int:
     """--hook: a Claude Code hook (SessionStart, UserPromptSubmit, PostToolUse) that adds to the context.
 
-    - The summary line, when a limit first reaches ``threshold`` in a session and again each time one
-      climbs another HOOK_STEP, or every time with ``always``.
+    - The summary line, in the main conversation, when a limit first reaches ``threshold`` in a session
+      and again each time one climbs another HOOK_STEP, or every time with ``always``. A subagent's
+      tool calls never use it up: the session's memory is the main conversation's.
     - The usage guard's notice (#27) while the guard holds: once per holding episode for each agent of
       a session (the main conversation and each subagent), and at every SessionStart, which also comes
       after a compaction. Only the main conversation is offered --wait.
@@ -59,17 +63,19 @@ def run_hook(*, threshold: float, always: bool, folder: Path, clock: Callable[[]
     try:
         now = clock()
         doc, running = status.current(folder, now=now, fetch=name == SESSION_START, app_version=app_version)
-        memory = _load_memory(folder, now)
         session, agent = str(event.get("session_id") or ""), str(event.get("agent_id") or "")
         parts = []
-        heard = doc is not None and not always and _should_speak(memory, session, doc, threshold, now)
-        if doc is not None and (always or heard):
-            parts.append(status.summary(doc, now=now, running=running))
-        notice = _guard_notice(memory, folder, session, agent, doc, now, every_time=name == SESSION_START)
-        if notice:
-            parts.append(notice)
-        if heard or notice:
-            _save_memory(folder, memory)
+        with status.file_lock(folder, HOOK_LOCK, HOOK_LOCK_S) as held:
+            loaded = _load_memory(folder, now)
+            memory = {} if loaded is None else loaded
+            heard = doc is not None and not always and not agent and _should_speak(memory, session, doc, threshold, now)
+            if doc is not None and (always or heard):
+                parts.append(status.summary(doc, now=now, running=running))
+            notice = _guard_notice(memory, folder, session, agent, doc, now, every_time=name == SESSION_START)
+            if notice:
+                parts.append(notice)
+            if (heard or notice) and held and loaded is not None:
+                _save_memory(folder, memory)
     except Exception:  # a broken hook must never get in the way of the prompt
         log.exception("the usage hook failed")
         return 0
@@ -85,16 +91,20 @@ def run_wait(*, session_id: str | None, folder: Path, clock: Callable[[], dateti
     guard. It exits when work can resume, and the exit wakes the session:
 
     - the guard no longer holds: every watched limit is under its cap (or its window has reset), or
-      the guard was turned off. Several waits are released ``stagger_s`` apart, oldest first;
+      the guard was turned off. Several waits go one at a time, oldest first, each ``stagger_s`` after
+      the one before (the time of the last release is kept in a file, since a wait that went is gone);
     - "Resume now" was pressed in the tray or the dashboard: every wait ends at once.
 
     With no reading at all it keeps waiting. It only reads: with the app running the app fetches,
     and with it closed a stale reading is replaced by one request, as for --status.
     """
     started = epoch()
-    entry = sessions.register_wait(folder, session_id, clock())
     try:
-        due: datetime | None = None
+        entry: Path | None = sessions.register_wait(folder, session_id, clock())
+    except OSError as exc:  # it still waits; the tray and the dashboard just cannot count it
+        log.warning("could not record the usage wait (%s)", type(exc).__name__)
+        entry = None
+    try:
         asked: datetime | None = None
         while True:
             now = clock()
@@ -105,11 +115,11 @@ def run_wait(*, session_id: str | None, folder: Path, clock: Callable[[], dateti
                 asked = now
                 doc, running = status.current(folder, now=now, fetch=True, app_version=app_version)
             verdict = guard.for_reader(doc, now, folder) if doc and doc.get("usage_fetched_at") else None
-            if verdict is None or verdict["state"] == guard.HOLDING:
-                due = None
-            elif due is None:
-                due = now + timedelta(seconds=_slot(folder) * _stagger(verdict))
+            due = None
+            if verdict is not None and verdict["state"] != guard.HOLDING and _slot(folder) == 0:
+                due = _due(folder, now, _stagger(verdict))
             if due is not None and now >= due:
+                sessions.mark_released(folder, now)
                 reason = ("the usage guard was turned off" if verdict and verdict["state"] == guard.OFF
                           else "every watched limit is under its cap again")
                 return _released(out, reason, doc, now, running)
@@ -120,15 +130,17 @@ def run_wait(*, session_id: str | None, folder: Path, clock: Callable[[], dateti
                   "folder says which). Check the plan usage before resuming.")
         return 1
     finally:
-        sessions.unregister_wait(entry)
+        if entry is not None:
+            sessions.unregister_wait(entry)
 
 
 def wait_command(session_id: str | None) -> str:
-    """The command line that starts --wait, with forward slashes, which every shell on Windows takes."""
+    """The command line that starts --wait: forward slashes, which every shell on Windows takes, and
+    the program quoted. The session id is cleaned as main.py cleans --session."""
     exe = Path(sys.executable).as_posix()
     words = [exe] if getattr(sys, "frozen", False) else [exe, (Path(__file__).resolve().parents[2] / "main.py").as_posix()]
-    words += ["--wait"] + (["--session", session_id] if session_id else [])
-    return " ".join(f'"{word}"' if " " in word else word for word in words)
+    cleaned = re.sub(r"[^A-Za-z0-9_-]", "", session_id or "")[:64]
+    return " ".join([f'"{word}"' for word in words] + ["--wait"] + (["--session", cleaned] if cleaned else []))
 
 
 def run_gate(*, session_cap: float, weekly_cap: float, folder: Path, clock: Callable[[], datetime],
@@ -209,7 +221,7 @@ def _guard_notice(memory: dict, folder: Path, session_id: str, agent_id: str, do
     episode = guard.episode(verdict)
     entry = memory.setdefault(session_id, {})
     told = entry.get("guard") if isinstance(entry.get("guard"), dict) else {}
-    same = told.get("episode") == episode
+    same = sessions.same_episode(told.get("episode"), episode)
     agents = [str(item) for item in told.get("agents") or []] if same else []
     if agent_id in agents and not every_time:
         return None
@@ -228,15 +240,22 @@ def guard_text(verdict: Mapping[str, Any], now: datetime, *, wait: str | None) -
             f"Nothing is blocked. Wrap up at a safe point. Work can resume{when} every watched limit is under "
             f"its cap again.")
     if wait:
-        text += (f" To be woken then, run this as a background command: `{wait}` (in PowerShell, put & in "
-                 f"front). It exits when work can resume, or when the user presses Resume now.")
+        text += (f" To be woken then, run this as a background command: `{wait}`. In PowerShell run "
+                 f"`& {wait} | Out-String` instead: PowerShell does not wait for this program otherwise. It "
+                 f"exits when work can resume, or when the user presses Resume now.")
     return text
 
 
 def _slot(folder: Path) -> int:
-    """This wait's place among the running waits, oldest first: 0 is released first."""
+    """This wait's place among the running waits, oldest first: only 0 may go."""
     pids = [entry["pid"] for entry in sessions.waiting(folder)]
     return pids.index(os.getpid()) if os.getpid() in pids else 0
+
+
+def _due(folder: Path, now: datetime, stagger_s: float) -> datetime:
+    """When the oldest wait may go: now, or ``stagger_s`` after the last wait went."""
+    last = sessions.released_at(folder)
+    return now if last is None or last > now else last + timedelta(seconds=stagger_s)
 
 
 def _stagger(verdict: Mapping[str, Any]) -> float:
@@ -275,10 +294,17 @@ def _steps(doc: Mapping[str, Any], threshold: float, now: datetime) -> dict[str,
     return steps
 
 
-def _load_memory(folder: Path, now: datetime) -> dict:
+def _load_memory(folder: Path, now: datetime) -> dict | None:
+    """The memory without entries older than HOOK_MEMORY_DAYS: {} when there is none or it is
+    broken (the next save replaces it), None when it could not be read just now (it must not be
+    replaced by this hook's part alone)."""
     try:
         memory = json.loads((folder / HOOK_MEMORY).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except FileNotFoundError:
+        return {}
+    except OSError:
+        return None
+    except ValueError:
         return {}
     if not isinstance(memory, dict):
         return {}

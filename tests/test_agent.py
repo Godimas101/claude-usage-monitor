@@ -430,6 +430,7 @@ def test_a_holding_guard_tells_each_agent_of_a_session_once(folder):
     assert said.startswith("Claude Usage Monitor: plan usage has reached the wind-down point")
     assert "weekly 78% (cap 75%)" in said and "Nothing is blocked" in said and "Wrap up at a safe point" in said
     assert "--wait --session s1`" in said and "Resume now" in said
+    assert "In PowerShell run `& \"" in said and "--wait --session s1 | Out-String`" in said  # or it returns at once
     assert hook(folder, TOOL) is None                       # told already
     assert hook(folder, PROMPT) is None                     # the main conversation heard it after a tool call
     sub = context(hook(folder, {**TOOL, "agent_id": "a1", "agent_type": "Explore"}))
@@ -446,6 +447,29 @@ def test_a_new_holding_episode_is_told_again(folder):
     said = context(hook(folder, TOOL))
     assert "session 96% (cap 95%), weekly 78% (cap 75%)" in said
     assert hook(folder, TOOL) is None
+
+
+def test_a_window_that_resets_while_another_limit_holds_is_not_a_new_episode(folder):
+    save(folder, guarded(document(session=96.0, weekly=78.0)))
+    assert hook(folder, TOOL) is not None
+    save(folder, guarded(document(session=4.0, weekly=78.0)))  # the session reset; the week is still over its cap
+    assert hook(folder, TOOL) is None
+    assert told(folder) == ["s1"]                            # the card still counts s1 as told
+
+
+def test_a_subagent_does_not_use_up_the_threshold_line(folder):
+    save(folder, document(weekly=81.0))
+    assert hook(folder, {**TOOL, "agent_id": "a1"}) is None  # a subagent hears no summary line...
+    assert context(hook(folder, PROMPT)).startswith("Claude plan usage")  # ...so the main conversation still does
+
+
+def test_a_memory_that_cannot_be_read_is_not_overwritten(folder, monkeypatch):
+    save(folder, guarded(document(weekly=78.0)))
+    (folder / cli.HOOK_MEMORY).write_text(json.dumps({"s9": {"at": NOW.isoformat(), "steps": {"x": 1}}}),
+                                          encoding="utf-8")
+    monkeypatch.setattr(cli, "_load_memory", lambda *_a: None)  # another process holds it for a moment
+    assert "wind-down point" in context(hook(folder, TOOL))  # it still speaks...
+    assert "s9" in json.loads((folder / cli.HOOK_MEMORY).read_text(encoding="utf-8"))  # ...and saves nothing
 
 
 def test_session_start_repeats_the_notice_after_a_compaction(folder):
@@ -538,10 +562,38 @@ def test_waits_are_released_one_stagger_apart_oldest_first(folder, monkeypatch):
     save(folder, guarded(document(weekly=50.0), stagger_s=120))
     me = {"pid": os.getpid(), "session_id": "s1", "since": "2026-10-24T16:00:00Z", "cwd": None}
     older = {**me, "pid": 1, "session_id": "s0", "since": "2026-10-24T15:00:00Z"}
-    monkeypatch.setattr(sessions, "waiting", lambda _folder: [older, me])
+    alive = [older, me]
+    monkeypatch.setattr(sessions, "waiting", lambda _folder: list(alive))
+
+    def older_goes(nap: int) -> None:
+        if nap == 2:  # the older wait is let go now, and is gone by the next look
+            sessions.mark_released(folder, clock.now)
+            alive.remove(older)
+
+    clock = Clock(during=older_goes)
+    code, _said = wait(folder, clock)
+    went = NOW + timedelta(seconds=2 * cli.WAIT_POLL_S)
+    assert code == 0 and clock.now == went + timedelta(seconds=120) and max(clock.naps) <= cli.WAIT_POLL_S
+    assert sessions.released_at(folder) == clock.now        # the next one goes a stagger after this one
+
+
+def test_a_lone_wait_still_keeps_the_stagger_after_the_last_release(folder):
+    save(folder, guarded(document(weekly=50.0), stagger_s=120))
+    sessions.mark_released(folder, NOW - timedelta(seconds=45))  # another wait went 45 s ago, and is gone
     clock = Clock()
     code, _said = wait(folder, clock)
-    assert code == 0 and clock.now == NOW + timedelta(seconds=120) and max(clock.naps) <= cli.WAIT_POLL_S
+    assert code == 0 and clock.now == NOW + timedelta(seconds=75)
+
+
+def test_a_wait_that_cannot_register_still_waits(folder, monkeypatch):
+    def refused(*_a: Any, **_k: Any) -> Any:
+        raise PermissionError("waiting/ is not writable")
+
+    monkeypatch.setattr(sessions, "register_wait", refused)
+    save(folder, guarded(document(weekly=78.0)))
+    clock = Clock(during=lambda nap: save(folder, guarded(document(weekly=50.0))) if nap == 2 else None)
+    code, said = wait(folder, clock)
+    assert code == 0 and len(clock.naps) == 2 and "every watched limit is under its cap again" in said
 
 
 def test_a_wait_turned_off_with_the_guard_says_so(folder):
@@ -575,6 +627,8 @@ def test_the_wait_command_line_and_its_flags(monkeypatch):
     assert cli.wait_command("s1") == ('"C:/Users/A B/AppData/Local/ClaudeUsageMonitor/ClaudeUsageMonitor.exe" '
                                       '--wait --session s1')
     assert cli.wait_command(None).endswith('ClaudeUsageMonitor.exe" --wait')
+    monkeypatch.setattr(cli.sys, "executable", r"C:\Apps\O'Neil\ClaudeUsageMonitor.exe")  # no space: still quoted
+    assert cli.wait_command('s"1; rm x') == '"C:/Apps/O\'Neil/ClaudeUsageMonitor.exe" --wait --session s1rmx'
 
 
 def test_a_wait_runs_even_with_no_stdout(monkeypatch):
