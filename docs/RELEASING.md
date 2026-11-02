@@ -100,7 +100,9 @@ signature as well as the digest.
 - [ ] **The pipeline has run on a runner.** Run the workflow by hand with publish left off (a rehearsal), from a
       branch that holds the release's `VERSION` and `CHANGELOG.md` section. It is green, and the `smoke-report` artifact
       says `"ok": true` with `page_booted` true in the dashboard step. The first run of the smoke step on a hosted runner
-      is the one that can fail for a reason of that machine: read its report before blaming the build.
+      is the one that can fail for a reason of that machine: read its report before blaming the build. The workflow
+      reads the WebView2 runtime's files before the smoke test. On a fresh runner they are cold, and a cold runtime
+      started the dashboard in up to 32 s (image win25-vs2026/20261030), past the smoke test's 15 s.
 - [ ] The frozen smoke run is clean on your own machine too: with `CUM_DEV_INSTANCE=1`, `CUM_APPDATA_DIR=<scratch folder>` and
       `CLAUDE_CONFIG_DIR=<empty folder>` (so your own transcripts stay out of it) run
       `dist\ClaudeUsageMonitor\ClaudeUsageMonitor.exe --smoke-test 45 report.json`. Exit code 0 and `"ok": true`.

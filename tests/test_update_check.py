@@ -2367,10 +2367,14 @@ def test_the_release_workflow_can_be_rehearsed_gates_on_tests_and_smoke_and_only
     smoke = _workflow_step(workflow, "Smoke-test the built exe")
     assert "throw 'the frozen smoke test failed'" in smoke and "'--smoke-test', '45'" in smoke
     assert "if: always()" in _workflow_step(workflow, "Keep the smoke report and logs")
+    # On a fresh runner a cold WebView2 runtime started the dashboard in up to 32 s, so its files are read first.
+    warm = _workflow_step(workflow, "Warm up the WebView2 runtime")
+    assert "Microsoft\\EdgeWebView\\Application" in warm and "CopyTo([IO.Stream]::Null)" in warm
+    assert workflow.index("- name: Warm up the WebView2 runtime") < workflow.index("- name: Smoke-test the built exe")
     # Nothing can hang for the default six hours, and two runs cannot race to create the same release.
     assert re.search(r"^    timeout-minutes: \d+$", workflow, re.M)
-    for name in ("Install dependencies", "Run the tests", "Build the exe", "Smoke-test the built exe", "Install Inno Setup",
-                 "Build the installer"):
+    for name in ("Install dependencies", "Run the tests", "Build the exe", "Warm up the WebView2 runtime",
+                 "Smoke-test the built exe", "Install Inno Setup", "Build the installer"):
         assert re.search(r"timeout-minutes: \d+", _workflow_step(workflow, name)), name
     assert "concurrency:" in workflow and "cancel-in-progress: false" in workflow
     # And the checklist says how to use all of it.
