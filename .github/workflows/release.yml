@@ -118,7 +118,8 @@ jobs:
         # dashboard's first WebView2 start took 8 to 32 s there in four runs, past the smoke test's 15 s and the app's
         # own 20 s browser fallback. After these files had been read once it took 5 to 6 s in two runs, as on a
         # desktop. Reading them first keeps the smoke test about the app, not a cold disk (#36's rehearsal, 2026-11-02).
-        timeout-minutes: 5
+        # The reading itself took 24 s to 3 min on runners, so it gets room.
+        timeout-minutes: 15
         shell: pwsh
         run: |
           $started = Get-Date
