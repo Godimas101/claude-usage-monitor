@@ -3114,6 +3114,34 @@ def test_the_real_server_serves_the_update_block_the_banner_reads(wired, tmp_pat
                      "skipped": False, "info": dict(INFO, can_self_update=False), "skip_version": ""}
 
 
+def test_the_smoke_test_puts_back_the_colour_that_applies_when_a_retired_one_is_stored(wired, tmp_path):
+    """A stored Nostromo colour retired in 2.2 (cyan) reads as blue, and /api/settings refuses "cyan", so the
+    live_settings step restores blue instead of failing in its finally and leaving the settings changed."""
+    from usage_monitor.ui.server import ApiServer
+
+    wired.settings.update({"theme_id": "nostromo", "theme_variant": "cyan"})
+    server = ApiServer(lambda: None, wired.settings, refresh_cb=None, update_cb=wired.app.server.kwargs["update_cb"],
+                       version="t", dev=True)
+    server.start()
+    try:
+        smoke = SmokeTest(45, tmp_path / "r.json")
+        smoke._app = types.SimpleNamespace(server=server)
+        wanted = smoke._settings_to_restore(smoke._get_json("/api/state"))
+        smoke._post("/api/settings", wanted)                                # raises on anything but a 200
+    finally:
+        server.stop()
+    assert (wanted["theme_id"], wanted["theme_variant"]) == ("nostromo", "blue")
+    assert (wired.settings.get("theme_id"), wired.settings.get("theme_variant")) == ("nostromo", "blue")
+
+
+def test_the_smoke_tests_restore_keeps_a_gates_accent_and_its_mode():
+    payload = {"settings": {"theme_id": "gates", "theme_variant": "teal", "theme_mode": "system", "show_taskbar": True,
+                            "reduce_motion": False, "poll_interval_ms": 60000},
+               "theme": {"id": "gates", "variant": "teal-light"}}
+    assert SmokeTest._settings_to_restore(payload) == {"theme_id": "gates", "theme_variant": "teal", "theme_mode": "system",
+                                                        "show_taskbar": True, "reduce_motion": False}
+
+
 def test_shutdown_runs_in_the_documented_order_and_only_once(wired, monkeypatch):
     app, events = wired.app, wired.events
     events.log.clear()

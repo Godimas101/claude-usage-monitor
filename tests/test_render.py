@@ -775,7 +775,7 @@ def test_get_skin_returns_each_theme_skin_and_falls_back_to_nostromo():
 
 # ── Palette and tokens ────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("variant_id", ["amber", "green", "white", "red", "blue", "cyan", "orange", "purple"])
+@pytest.mark.parametrize("variant_id", ["amber", "green", "white", "red", "blue", "purple"])
 def test_palette_tokens_come_from_the_variant(variant_id):
     theme = nostromo()
     variant = theme.variant(variant_id)
@@ -809,7 +809,7 @@ def test_variant_tokens_are_read_when_variant_has_no_extras():
 
 # ── Floating widget: every variant x state x scale ───────────────────────────
 
-@pytest.mark.parametrize("variant_id", ["amber", "green", "white", "red", "blue", "cyan", "orange", "purple"])
+@pytest.mark.parametrize("variant_id", ["amber", "green", "white", "red", "blue", "purple"])
 def test_every_variant_renders_every_state_at_every_scale(variant_id):
     theme = nostromo()
     variant = theme.variant(variant_id)
@@ -1199,7 +1199,7 @@ def test_the_strip_keeps_its_size_on_a_taskbar_as_tall_as_it_or_taller(height, s
 @pytest.mark.parametrize("name", ALL_STATES)
 def test_taskbar_strip_renders_every_state(name):
     theme = nostromo()
-    image = get_skin("nostromo").render_taskbar(dump.sample_model(name), theme, theme.variant("cyan"), 34, 1.0,
+    image = get_skin("nostromo").render_taskbar(dump.sample_model(name), theme, theme.variant("blue"), 34, 1.0,
                                                 None)
     assert image.size == (264, 34)
     assert alpha_extrema(image)[1] == 255
@@ -1291,10 +1291,10 @@ def test_tray_icon_is_deterministic():
 
 # ── Dump helper ───────────────────────────────────────────────────────────────
 
-def test_shipped_nostromo_theme_has_eight_variants_and_the_expected_fonts():
+def test_shipped_nostromo_theme_has_six_variants_and_the_expected_fonts():
     theme = nostromo()
     assert theme.name == "Nostromo"
-    assert len(theme.variants) == 8
+    assert len(theme.variants) == 6
     assert theme.variant(None).id == "amber"
     assert theme.variant("amber").colors["bg"] == "#090909"
     assert theme.fonts["body"]["family"] == "IBM Plex Mono"

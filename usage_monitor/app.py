@@ -1533,11 +1533,22 @@ class SmokeTest:
         widget.hide_tooltip()
         return visible
 
-    def _step_live_settings(self) -> dict[str, Any]:
-        """Switch themes and toggle widgets through the API, and check that the UI follows live."""
-        original = self._get_json("/api/state")["settings"]
+    @staticmethod
+    def _settings_to_restore(payload: Mapping[str, Any]) -> dict[str, Any]:
+        """The settings _step_live_settings puts back, from a /api/state payload. The colour is the accent of the
+        variant that applies, not the stored string: a stored colour retired in 2.2 (cyan) reads as the one that
+        replaced it (blue), and /api/settings refuses the retired id. For every other choice the two are the same."""
+        original = payload.get("settings") or {}
         wanted = {key: original[key] for key in ("theme_id", "theme_variant", "theme_mode", "show_taskbar",
                                                   "reduce_motion") if key in original}
+        applied = (payload.get("theme") or {}).get("variant")
+        if isinstance(applied, str) and "theme_variant" in wanted:
+            wanted["theme_variant"] = applied.removesuffix("-dark").removesuffix("-light")   # a Gates id is accent-mode
+        return wanted
+
+    def _step_live_settings(self) -> dict[str, Any]:
+        """Switch themes and toggle widgets through the API, and check that the UI follows live."""
+        wanted = self._settings_to_restore(self._get_json("/api/state"))
         seen: dict[str, Any] = {}
         try:
             for label, change in (

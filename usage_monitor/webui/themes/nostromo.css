@@ -114,7 +114,7 @@ h1, h2, h3, p, figure, dl, dd { margin: 0; }
 .nm-kv b { font: 400 22px/18px var(--f-read); letter-spacing: .02em; color: var(--bright); text-align: right; }
 .nm-kv b.ok, .nm-kv b.is-down { display: flex; align-items: center; gap: 6px; }
 .nm-phos { margin-top: 14px; }
-.nm-sw { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+.nm-sw { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }   /* six phosphors by name, two to a row */
 .nm-sw button { font: 600 11px/1 var(--f-body); letter-spacing: .06em; padding: 6px 0; cursor: pointer;
   color: var(--label); background: var(--crt); border: 1px solid var(--edge); }
 .nm-sw button:hover { color: var(--main); border-color: var(--main); }

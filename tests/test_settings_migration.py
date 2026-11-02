@@ -34,10 +34,11 @@ FIXTURE_KEYS = {
     "poll_interval_ms", "position", "show_floating", "show_taskbar", "check_updates", "skip_version",
     "theme", "taskbar_transparent_bg",
 }
-# v1 theme.py THEMES -> the Nostromo variant of the same colour.
+# v1 theme.py THEMES -> the Nostromo variant of the same colour. Cyan and Orange were retired in 2.2, so
+# they get Blue and Amber (the fixture's "Cyan" checks that path).
 V1_THEMES = {
     "Default": "amber", "Red": "red", "Blue": "blue", "Green": "green",
-    "Purple": "purple", "Cyan": "cyan", "Orange": "orange", "White": "white",
+    "Purple": "purple", "Cyan": "blue", "Orange": "amber", "White": "white",
 }
 
 
@@ -191,7 +192,7 @@ def test_the_fixture_theme_becomes_its_nostromo_variant(v1_file: Path, opened: C
 
 
 @pytest.mark.parametrize(("v1_name", "variant_id"), list(V1_THEMES.items()))
-def test_every_v1_theme_name_maps_to_the_nostromo_variant_of_the_same_colour(
+def test_every_v1_theme_name_maps_to_its_nostromo_variant(
     v1_name: str, variant_id: str, v1_file: Path, opened: Callable[[Path], Settings],
 ) -> None:
     with_values(v1_file, theme=v1_name)

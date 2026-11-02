@@ -3,7 +3,7 @@
 Geometry is the approved 1x layout in logical pixels (see design/mockups/nostromo/DESIGN_NOTES.md
 and the CSS in final.html). Canvas draws it at twice the scale and downsamples, so every surface
 is crisp at 1, 1.25, 1.5 and 2. Every colour comes from the variant tokens through Palette, so
-all eight variants render with the same code and no per-variant rules.
+all six variants render with the same code and no per-variant rules.
 
 Draw order per frame: background, glow halos, crisp marks, then scanlines and the hazard band.
 That is the CSS painting order, with halos kept under the marks they belong to.

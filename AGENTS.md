@@ -57,8 +57,10 @@ theme's `.motion.css` and script, see `docs/UI_ARCHITECTURE.md` "Motion") and th
 Windows' own animation switch. A new effect that does not is a bug.
 
 - **Nostromo** (default): amber phosphor on CRT black, the shipped identity — *preserve it*. Variants
-  amber (default), green, white, red, blue, cyan, orange, purple. The only theme whose widgets blink
-  (the alive mark). Every theme has a skin of its own in `usage_monitor/render/skins/`.
+  amber (default), green, white, red, blue, purple, shown as RAY TUBE, TERMINAL, STATIC, ALERT, CRYO
+  and PLASMA. Cyan and orange were retired in 2.2 and read as blue and amber (`extras.retired_variants`).
+  The only theme whose widgets blink (the alive mark). Every theme has a skin of its own in
+  `usage_monitor/render/skins/`.
 - **Night City**: Blackwall (default), Relic, Edgerun, Mox; chamfered frames, RAM-meter tray icon.
 - **Gates**: Fluent surfaces; accents (system by default) in light, dark or system mode; Windows
   fonts, never bundled.

@@ -154,9 +154,10 @@
     no_credentials: { text: "NO LOGIN", ok: false },
     paused: { text: "PAUSED", ok: false }
   };
+  // The sidebar's short names for the Gates accents. Nostromo's sidebar names its phosphors in full (accentLabel), and
+  // any other id shows its first three letters.
   var ACCENT_ABBR = {
-    amber: "AMB", green: "GRN", white: "WHT", red: "RED", blue: "BLU", cyan: "CYN", orange: "ORG",
-    purple: "PUR", system: "SYS", teal: "TEA", rose: "ROS"
+    system: "SYS", blue: "BLU", teal: "TEA", purple: "PUR", rose: "ROS", orange: "ORG", green: "GRN"
   };
   var WINDOW_ORDER = ["session", "today", "week", "month", "cycle", "all"];
   var WINDOW_LABEL = {
@@ -3549,6 +3550,16 @@
     });
   }
 
+  /* The words on a colour button, in capitals. A theme with one variant per colour shows that variant's name (Nostromo's
+   * RAY TUBE for amber, Night City's RELIC). Gates has a dark and a light variant of each accent, so it shows the accent. */
+  function accentLabel(theme, accent) {
+    var perMode = theme && theme.modes && theme.modes.length;
+    var named = theme && !perMode ? (theme.variants || []).filter(function (v) {
+      return (v.accent || accentOf(v.id)) === accent;
+    })[0] : null;
+    return String(named && named.name ? named.name : accent).toUpperCase();
+  }
+
   function syncThemePicker(main) {
     var cards = $("#set-themes", main);
     var accents = $("#set-accents", main);
@@ -3584,8 +3595,10 @@
     });
     var active = current ? accentOf(current.variant) : "";
     var accentHtml = accentList.map(function (a) {
-      return '<button type="button" class="nm-btn' + (a === active ? " solid" : "") + '" data-accent="' + esc(a) + '" aria-pressed="' + (a === active ? "true" : "false") + '">' +
-        esc(a.toUpperCase()) + "</button>";
+      var label = accentLabel(theme, a);                  // a name that is not the colour's id keeps the id as its tooltip
+      return '<button type="button" class="nm-btn' + (a === active ? " solid" : "") + '" data-accent="' + esc(a) + '"' +
+        (label === a.toUpperCase() ? "" : ' title="' + esc(a) + '"') + ' aria-pressed="' + (a === active ? "true" : "false") + '">' +
+        esc(label) + "</button>";
     }).join("");
     if (accents.getAttribute("data-sig") !== accentHtml) {
       accents.setAttribute("data-sig", accentHtml);
@@ -4013,6 +4026,11 @@
     saveSettings(patch, name.toUpperCase());
   }
 
+  // A colour button in Settings or the sidebar: save the colour, named on the status line as its button names it.
+  function chooseAccent(accent) {
+    saveSettings({ theme_variant: accent }, accentLabel(findTheme((currentTheme() || {}).id), accent));
+  }
+
   function quietChange(el) {
     var kind = el.getAttribute("data-quiet");
     var main = $("#main");
@@ -4138,8 +4156,7 @@
       return;
     }
     if (target.hasAttribute("data-accent")) {
-      var accent = target.getAttribute("data-accent");
-      saveSettings({ theme_variant: accent }, accent.toUpperCase());
+      chooseAccent(target.getAttribute("data-accent"));
       return;
     }
     if (target.hasAttribute("data-mode")) {
@@ -4535,9 +4552,10 @@
       }
     });
     var active = theme ? accentOf(theme.variant) : "";
+    var full = theme && theme.id === "nostromo";          // Nostromo's six phosphors fit by name, two to a row
     var html = accents.slice(0, 8).map(function (a) {
       return '<button type="button" data-accent="' + esc(a) + '" class="' + (a === active ? "on" : "") + '" aria-pressed="' + (a === active ? "true" : "false") +
-        '" title="' + esc(a) + '">' + esc(ACCENT_ABBR[a] || a.slice(0, 3).toUpperCase()) + "</button>";
+        '" title="' + esc(a) + '">' + esc(full ? accentLabel(meta, a) : ACCENT_ABBR[a] || a.slice(0, 3).toUpperCase()) + "</button>";
     }).join("");
     if (box.getAttribute("data-sig") !== html) {
       box.setAttribute("data-sig", html);
@@ -4833,7 +4851,7 @@
       variants.addEventListener("click", function (event) {
         var button = event.target.closest ? event.target.closest("button[data-accent]") : null;
         if (button) {
-          saveSettings({ theme_variant: button.getAttribute("data-accent") }, button.getAttribute("data-accent").toUpperCase());
+          chooseAccent(button.getAttribute("data-accent"));
         }
       });
     }
@@ -4926,7 +4944,8 @@
       planFromState: planFromState, pipelineCard: pipelineCard, topModels: topModels, railHTML: railHTML,
       limitCard: limitCard, remainHTML: remainHTML, buildModel: buildModel, statEntry: statEntry, entryState: entryState,
       averageRateForecast: averageRateForecast, pacingChart: pacingChart, limitFacts: limitFacts, pendingUpdate: pendingUpdate,
-      updateBanner: updateBanner, themeSwatches: themeSwatches, currentPage: currentPage, skelCost: skelCost,
+      updateBanner: updateBanner, themeSwatches: themeSwatches, accentLabel: accentLabel, renderVariants: renderVariants,
+      syncThemePicker: syncThemePicker, chooseAccent: chooseAccent, currentPage: currentPage, skelCost: skelCost,
       skelEfficiency: skelEfficiency, skelHistory: skelHistory, errorSwap: errorSwap, tagCard: tagCard, cardPart: cardPart,
       playEnterIfDue: playEnterIfDue, wantEnter: wantEnter, loadPrefs: loadPrefs, PAGE_KEYS: PAGE_KEYS, clockText: clockText,
       errorText: errorText, failedText: failedText, checkUpdateText: checkUpdateText, settingsClick: settingsClick,

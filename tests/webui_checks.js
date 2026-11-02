@@ -347,9 +347,48 @@ out.swatches = {
   gatesDark: api.themeSwatches({ id: "gates", variants: gatesVariants }, { id: "gates", mode: "dark" }),
   gatesLight: api.themeSwatches({ id: "gates", variants: gatesVariants }, { id: "gates", mode: "light" }),
   gatesOther: api.themeSwatches({ id: "gates", variants: gatesVariants }, { id: "nostromo", mode: "" }),
-  nostromo: api.themeSwatches({ id: "nostromo", variants: ["amber", "green", "white", "red", "blue", "cyan", "orange", "purple"].map((id, i) => ({ id, accent: id, colors: { accent: "#" + (0x200000 * (i + 1)).toString(16).padStart(6, "0") } })) }, null),
+  nostromo: api.themeSwatches({ id: "nostromo", variants: ["amber", "green", "white", "red", "blue", "purple"].map((id, i) => ({ id, accent: id, colors: { accent: "#" + (0x200000 * (i + 1)).toString(16).padStart(6, "0") } })) }, null),
   nightCity: api.themeSwatches({ id: "night_city", variants: ["blackwall", "relic", "edgerun", "mox"].map((id, i) => ({ id, colors: { accent: "#" + (0x300000 * (i + 1)).toString(16).padStart(6, "0") } })) }, null),
 };
+
+// ── the colour buttons say each colour's name: Nostromo's phosphors and Night City's colourways by name, Gates by accent ──
+// The themes are made up the way /api/themes sends them: a theme with a light variant lists its modes.
+const nostromoMeta = { id: "nostromo", modes: [], variants: [["amber", "RAY TUBE"], ["green", "TERMINAL"], ["white", "STATIC"], ["red", "ALERT"], ["blue", "CRYO"], ["purple", "PLASMA"]].map(([id, name]) => ({ id, name, accent: id, mode: "dark", colors: {} })) };
+const nightCityMeta = { id: "night_city", modes: [], variants: [["blackwall", "Blackwall"], ["relic", "Relic"], ["edgerun", "Edgerun"], ["mox", "Mox"]].map(([id, name]) => ({ id, name, accent: id, mode: "dark", colors: {} })) };
+const gatesMeta = { id: "gates", modes: ["dark", "light", "system"], variants: gatesVariants.map((v) => Object.assign({}, v, { name: v.accent + " · " + v.mode })) };
+out.accentLabels = {
+  nostromo: nostromoMeta.variants.map((v) => api.accentLabel(nostromoMeta, v.accent)),
+  nightCity: nightCityMeta.variants.map((v) => api.accentLabel(nightCityMeta, v.accent)),
+  gates: accents.map((accent) => api.accentLabel(gatesMeta, accent)),
+  retired: api.accentLabel(nostromoMeta, "cyan"),                                       // no variant has it: the id, in capitals
+  noTheme: api.accentLabel(null, "amber"),
+};
+{
+  // the sidebar: Nostromo names its six phosphors in full, the other themes keep their short labels
+  elements.variants = element("variants");
+  elements["phos-label"] = element("phos-label");
+  const sidebar = (meta, variant) => {
+    S.themes = [meta];
+    S.data = { theme: { id: meta.id, variant } };
+    api.renderVariants();
+    return { label: elements["phos-label"].textContent, html: elements.variants.innerHTML };
+  };
+  out.sidebar = { nostromo: sidebar(nostromoMeta, "blue"), nightCity: sidebar(nightCityMeta, "relic"), gates: sidebar(gatesMeta, "teal-dark") };
+  delete elements.variants;
+  delete elements["phos-label"];
+  // the Settings page: the same names, and a name that is not the colour's id keeps the id as its tooltip
+  const picker = (meta, variant) => {
+    const parts = { "#set-themes": element("set-themes"), "#set-accents": element("set-accents"), "#set-mode": element("set-mode"), "#set-theme-meta": element("set-theme-meta") };
+    const main = Object.assign(element("main"), { querySelector: (selector) => parts[selector] || null });
+    S.themes = [meta];
+    S.data = { theme: { id: meta.id, name: meta.id, variant, variant_name: api.accentLabel(meta, variant.replace(/-(dark|light)$/, "")) } };
+    api.syncThemePicker(main);
+    return { accents: parts["#set-accents"].innerHTML, meta: parts["#set-theme-meta"].textContent };
+  };
+  out.settingsAccents = { nostromo: picker(nostromoMeta, "blue"), nightCity: picker(nightCityMeta, "relic"), gates: picker(gatesMeta, "teal-dark") };
+  S.themes = null;
+  reset();
+}
 
 // ── the forecast of a weekly limit: from now at the average rate so far ─────────────────────────────────────────
 const HOUR = 3600 * 1000;
@@ -934,4 +973,40 @@ async function signInActions() {
   out.signInActions = out2;
 }
 
-failures().then(guardPolling).then(guardActions).then(signInActions).then(() => console.log(JSON.stringify(out)), (error) => { console.error(error && error.stack ? error.stack : String(error)); process.exit(1); });
+// ── saving a colour names it on the status line (SAVED CRYO, not SAVED BLUE) and sends the colour's id ──────────────
+async function colourSaves() {
+  const saved = { fetch: box.fetch, clear: box.clearTimeout };
+  const posts = [];
+  box.document.querySelector = (selector) => (selector === "#main" ? mainElement : null);
+  box.clearTimeout = () => {};                                                  // poll() reschedules itself
+  box.fetch = (url, init) => {
+    if (init && init.method === "POST") {
+      posts.push(url + " " + init.body);
+      return answer(200, { settings: {} })();
+    }
+    return answer(404, { error: "not in this test" })();
+  };
+  const accentClick = (accent) => ({ target: { closest: () => ({ hasAttribute: (name) => name === "data-accent", getAttribute: (name) => (name === "data-accent" ? accent : null) }) } });
+  const saveOf = async (meta, variant, click) => {
+    reset();
+    posts.length = 0;
+    S.themes = [meta];
+    S.data = { state: { status: "live" }, model_names: {}, theme: { id: meta.id, variant } };
+    click();
+    const saving = S.status.text;
+    await settle();
+    return { saving, saved: S.status.text, posts: posts.slice() };
+  };
+  out.colourSaves = {
+    nostromo: await saveOf(nostromoMeta, "amber", () => api.settingsClick(accentClick("blue"))),
+    gates: await saveOf(gatesMeta, "system-dark", () => api.settingsClick(accentClick("teal"))),
+    sidebar: await saveOf(nostromoMeta, "amber", () => api.chooseAccent("purple")),       // what the sidebar's buttons call
+  };
+  box.document.querySelector = savedQuery;
+  box.fetch = saved.fetch;
+  box.clearTimeout = saved.clear;
+  S.themes = null;
+  reset();
+}
+
+failures().then(guardPolling).then(guardActions).then(signInActions).then(colourSaves).then(() => console.log(JSON.stringify(out)), (error) => { console.error(error && error.stack ? error.stack : String(error)); process.exit(1); });

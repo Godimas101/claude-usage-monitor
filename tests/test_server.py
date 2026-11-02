@@ -89,7 +89,7 @@ def _variant(vid: str, name: str, mode: str = "dark", default: bool = False) -> 
 
 FAKE_THEMES = {
     "nostromo": FakeTheme("nostromo", "Nostromo", "Amber on CRT black", (
-        _variant("amber", "AMBER P3", default=True), _variant("green", "TERMINAL GREEN P1"))),
+        _variant("amber", "RAY TUBE", default=True), _variant("green", "TERMINAL"))),
     "night_city": FakeTheme("night_city", "Night City", "Neon", (
         _variant("cyan", "CYAN", default=True),)),
     "gates": FakeTheme("gates", "Gates", "Fluent", (
@@ -1261,12 +1261,21 @@ def test_real_theme_loader_serves_the_shipped_themes(make_server: Any,
     server, _ = make_server()
     themes = json.loads(request(server, "GET", "/api/themes")[2])["themes"]
     assert [t["id"] for t in themes][:3] == ["nostromo", "night_city", "gates"]
-    nostromo, gates = themes[0], themes[2]
+    nostromo, night_city, gates = themes[0], themes[1], themes[2]
     assert nostromo["variants"][0]["css_vars"]["--bg"]
     assert gates["modes"] == ["dark", "light", "system"]
+    # The colour buttons and the save status read these names, and name a colour by its variant only in a theme
+    # without modes (accentLabel in app.js): Nostromo's six phosphors, and Night City, whose names are its ids.
+    assert [(v["accent"], v["name"]) for v in nostromo["variants"]] == [
+        ("amber", "RAY TUBE"), ("green", "TERMINAL"), ("white", "STATIC"), ("red", "ALERT"), ("blue", "CRYO"),
+        ("purple", "PLASMA")]
+    assert nostromo["modes"] == [] == night_city["modes"]
+    assert [(v["accent"], v["name"].upper()) for v in night_city["variants"]] == [
+        (vid, vid.upper()) for vid in ("blackwall", "relic", "edgerun", "mox")]
     state = json.loads(request(server, "GET", "/api/state")[2])
     assert state["theme"]["id"] == "nostromo"
     assert state["theme"]["css_vars"]["--bg"] == "#090909"
+    assert state["theme"]["variant_name"] == "RAY TUBE"
     status, _ = post_json(server, "/api/settings", {"theme_id": "gates", "theme_variant": "blue", "theme_mode": "light"})
     assert status == 200
     state = json.loads(request(server, "GET", "/api/state")[2])
@@ -1295,6 +1304,22 @@ def test_partial_and_whole_variant_posts_resolve_to_what_was_asked_for(make_serv
     assert post_json(server, "/api/settings", {"theme_id": "gates", "theme_variant": "teal-dark",
                                               "theme_mode": "system"})[0] == 200
     assert _applied_theme(server)[1] in ("teal-dark", "teal-light")        # the mode follows the machine
+
+
+@pytest.mark.parametrize(("saved", "shown", "name"), [("cyan", "blue", "CRYO"), ("orange", "amber", "RAY TUBE")])
+def test_a_saved_retired_nostromo_colour_is_served_as_the_one_that_replaced_it(
+    make_server: Any, settings: Settings, saved: str, shown: str, name: str
+) -> None:
+    """Against the shipped loader: a colour retired in 2.2 opens as its replacement, so the page presses that button.
+    The stored id is read through the theme's map and never rewritten, and a POST of it is refused (the page never
+    sends one)."""
+    importlib.import_module("usage_monitor.themes")
+    settings.update({"theme_id": "nostromo", "theme_variant": saved})
+    server, _ = make_server()
+    theme = json.loads(request(server, "GET", "/api/state")[2])["theme"]
+    assert (theme["id"], theme["variant"], theme["variant_name"]) == ("nostromo", shown, name)
+    assert settings.get("theme_variant") == saved
+    assert post_json(server, "/api/settings", {"theme_variant": saved})[0] == 400
 
 
 def test_the_picker_and_the_applied_theme_agree_on_the_system_accent(make_server: Any,

@@ -33,11 +33,13 @@ ROLES = (
 )
 FONT_ROLES = ("display", "body", "mono")
 ACCENTS = ("system", "blue", "teal", "purple", "rose", "orange", "green")
-NOSTROMO_IDS = ("amber", "green", "white", "red", "blue", "cyan", "orange", "purple")
+NOSTROMO_IDS = ("amber", "green", "white", "red", "blue", "purple")
+NOSTROMO_NAMES = ("RAY TUBE", "TERMINAL", "STATIC", "ALERT", "CRYO", "PLASMA")
+NOSTROMO_RETIRED = {"cyan": "blue", "orange": "amber"}       # 2.2: too close to Blue and Amber
 NIGHT_CITY_IDS = ("blackwall", "relic", "edgerun", "mox")
 V1_NAMES = {
     "Default": "amber", "Red": "red", "Blue": "blue", "Green": "green",
-    "Purple": "purple", "Cyan": "cyan", "Orange": "orange", "White": "white",
+    "Purple": "purple", "Cyan": "blue", "Orange": "amber", "White": "white",
 }
 HEX = re.compile(r"#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})")
 
@@ -88,6 +90,17 @@ def test_the_three_shipped_files_load_in_design_order(shipped: dict[str, themes.
     assert tuple(v.id for v in shipped["night_city"].variants) == NIGHT_CITY_IDS
     gate_ids = {v.id for v in shipped["gates"].variants}
     assert gate_ids == {f"{a}-{m}" for a in ACCENTS for m in ("dark", "light")}
+
+
+def test_the_nostromo_phosphors_carry_their_names(shipped: dict[str, themes.Theme]) -> None:
+    assert tuple(v.name for v in shipped["nostromo"].variants) == NOSTROMO_NAMES
+
+
+def test_retired_nostromo_ids_are_gone_from_every_per_variant_table(shipped: dict[str, themes.Theme]) -> None:
+    extras = shipped["nostromo"].extras
+    assert extras["retired_variants"] == NOSTROMO_RETIRED
+    for table in ("accent_map", "variant_tokens", "contrast_label_tier_on_crt_approx"):
+        assert set(extras[table]) == set(NOSTROMO_IDS), table
 
 
 def test_default_variants_are_amber_blackwall_and_system_dark(
@@ -158,6 +171,23 @@ def test_variant_lookup_falls_back_to_the_default(shipped: dict[str, themes.Them
     assert theme.variant(None).id == "blackwall"
 
 
+@pytest.mark.parametrize(("retired", "replacement"), list(NOSTROMO_RETIRED.items()))
+def test_a_retired_variant_id_gives_the_variant_that_replaced_it(
+    retired: str, replacement: str, shipped: dict[str, themes.Theme]
+) -> None:
+    assert shipped["nostromo"].variant(retired).id == replacement
+
+
+def test_a_retired_id_is_read_through_the_map_not_through_the_default(shipped: dict[str, themes.Theme]) -> None:
+    """orange -> amber is also what the default gives, so move the default to green to tell the two apart."""
+    nostromo = shipped["nostromo"]
+    moved = dataclasses.replace(nostromo, variants=tuple(dataclasses.replace(v, default=v.id == "green")
+                                                         for v in nostromo.variants))
+    assert moved.variant("orange").id == "amber"
+    assert moved.variant("cyan").id == "blue"
+    assert moved.variant("pink").id == "green"                 # an id that is not retired still gives the default
+
+
 def test_colour_roles_match_the_documented_sixteen() -> None:
     assert themes.ROLES == ROLES
 
@@ -192,6 +222,14 @@ BREAKAGES: list[tuple[str, Callable[[dict[str, Any]], None], str]] = [
      "missing keys colors"),
     ("unknown variant mode", lambda d: d["variants"][0].update(mode="grey"),
      "mode must be dark, light or null"),
+    ("retired id still a variant", lambda d: d["extras"]["retired_variants"].update(green="amber"),
+     "retired variant 'green' is still a variant"),
+    ("retired id pointing nowhere", lambda d: d["extras"]["retired_variants"].update(cyan="teal"),
+     "retired variant 'cyan' points to 'teal', which is not a variant"),
+    ("retired id pointing at a list", lambda d: d["extras"]["retired_variants"].update(cyan=["blue"]),
+     "retired variant 'cyan' points to ['blue'], which is not a variant"),
+    ("retired ids not an object", lambda d: d["extras"].update(retired_variants=["cyan"]),
+     "extras.retired_variants must be an object"),
 ]
 
 
@@ -291,6 +329,14 @@ def test_unknown_or_missing_variants_use_the_theme_default() -> None:
     assert themes.resolve({"theme_id": "night_city", "theme_variant": "nope"})[1].id == "blackwall"
     theme, variant = themes.resolve({"theme_id": "no-such-theme", "theme_variant": "red"})
     assert (theme.id, variant.id) == ("nostromo", "red")
+
+
+@pytest.mark.parametrize(("retired", "replacement"), list(NOSTROMO_RETIRED.items()))
+def test_a_saved_retired_nostromo_id_resolves_to_its_replacement_without_a_write(retired: str, replacement: str) -> None:
+    settings: dict[str, Any] = {"theme_id": "nostromo", "theme_variant": retired}
+    theme, variant = themes.resolve(settings)
+    assert (theme.id, variant.id) == ("nostromo", replacement)
+    assert settings == {"theme_id": "nostromo", "theme_variant": retired}
 
 
 @pytest.mark.parametrize("light", [False, True])
@@ -475,9 +521,9 @@ def test_migrate_v1_maps_every_v1_name(v1_name: str, variant_id: str) -> None:
 def test_migrate_v1_runs_once() -> None:
     settings: dict[str, Any] = {"theme": "Red"}
     assert themes.migrate_v1(settings) is True
-    settings["theme_variant"] = "cyan"  # a later choice must survive a second call
+    settings["theme_variant"] = "purple"  # a later choice must survive a second call
     assert themes.migrate_v1(settings) is False
-    assert settings["theme_variant"] == "cyan"
+    assert settings["theme_variant"] == "purple"
 
 
 def test_migrate_v1_leaves_settings_that_already_have_a_theme_id_alone() -> None:
@@ -497,15 +543,19 @@ def test_migrate_v1_uses_amber_for_missing_and_unknown_names() -> None:
 
 
 def test_resolve_reads_the_v1_name_without_writing_it() -> None:
-    settings: dict[str, Any] = {"theme": "Cyan"}
+    settings: dict[str, Any] = {"theme": "Cyan"}                # a v1 colour retired in 2.2 reads as Blue
     theme, variant = themes.resolve(settings)
-    assert (theme.id, variant.id) == ("nostromo", "cyan")
+    assert (theme.id, variant.id) == ("nostromo", "blue")
     assert settings == {"theme": "Cyan"}
 
 
 def test_v1_map_agrees_with_the_nostromo_accent_map(shipped: dict[str, themes.Theme]) -> None:
-    accent_map = shipped["nostromo"].extras["accent_map"]
-    assert {v1: variant for variant, v1 in accent_map.items()} == themes.V1_NAME_TO_VARIANT
+    """Every live variant carries the v1 name of its colour, and each retired v1 colour gets the variant that
+    replaced it (v1's "Cyan" was the variant id "cyan")."""
+    nostromo = shipped["nostromo"]
+    expected = {v1: variant for variant, v1 in nostromo.extras["accent_map"].items()}
+    expected.update({retired.title(): new for retired, new in nostromo.extras["retired_variants"].items()})
+    assert expected == themes.V1_NAME_TO_VARIANT
 
 
 def test_a_v1_settings_file_is_migrated_and_saved(tmp_path: Path) -> None:

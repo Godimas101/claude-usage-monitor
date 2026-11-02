@@ -1168,8 +1168,60 @@ def test_the_theme_picker_shows_one_swatch_per_accent(checks: dict[str, Any]) ->
     swatches = checks["swatches"]
     for key in ("gatesDark", "gatesLight", "gatesOther"):
         assert len(swatches[key]) == 7 == len(set(swatches[key])), key               # Gates has seven accents, not fourteen swatches
-    assert len(swatches["nostromo"]) == 8 and len(swatches["nightCity"]) == 4
+    assert len(swatches["nostromo"]) == 6 and len(swatches["nightCity"]) == 4
     assert swatches["gatesDark"] != swatches["gatesLight"]                           # the mode of the page picks the colours shown
+
+
+NOSTROMO_PHOSPHORS = ["amber", "green", "white", "red", "blue", "purple"]
+NOSTROMO_NAMES = ["RAY TUBE", "TERMINAL", "STATIC", "ALERT", "CRYO", "PLASMA"]
+
+
+@ui_only
+def test_the_colour_buttons_say_each_colours_name(checks: dict[str, Any]) -> None:
+    labels = checks["accentLabels"]
+    assert labels["nostromo"] == NOSTROMO_NAMES
+    assert labels["nightCity"] == ["BLACKWALL", "RELIC", "EDGERUN", "MOX"]                   # its names are its ids
+    assert labels["gates"] == ["SYSTEM", "BLUE", "TEAL", "PURPLE", "ROSE", "ORANGE", "GREEN"]  # a dark and a light variant each
+    assert labels["retired"] == "CYAN" and labels["noTheme"] == "AMBER"
+
+
+@ui_only
+def test_the_sidebar_names_nostromos_phosphors_and_keeps_the_short_labels_elsewhere(checks: dict[str, Any]) -> None:
+    sidebar = checks["sidebar"]
+    nostromo = Markup(sidebar["nostromo"]["html"])
+    buttons = nostromo.find("button")
+    assert sidebar["nostromo"]["label"] == "PHOSPHOR"
+    assert nostromo.text == NOSTROMO_NAMES
+    assert [b["data-accent"] for b in buttons] == NOSTROMO_PHOSPHORS == [b["title"] for b in buttons]   # the tooltip says the colour
+    assert [b["aria-pressed"] for b in buttons] == ["false", "false", "false", "false", "true", "false"]
+    assert sidebar["nightCity"]["label"] == "ACCENT" and Markup(sidebar["nightCity"]["html"]).text == ["BLA", "REL", "EDG", "MOX"]
+    assert Markup(sidebar["gates"]["html"]).text == ["SYS", "BLU", "TEA", "PUR", "ROS", "ORG", "GRN"]
+
+
+@ui_only
+def test_the_settings_colour_buttons_use_the_names_and_keep_the_colour_as_a_tooltip(checks: dict[str, Any]) -> None:
+    picker = checks["settingsAccents"]
+    nostromo = Markup(picker["nostromo"]["accents"])
+    assert nostromo.text == NOSTROMO_NAMES
+    assert [b["title"] for b in nostromo.find("button")] == NOSTROMO_PHOSPHORS
+    assert [b["data-accent"] for b in nostromo.find("button") if "solid" in (b["class"] or "")] == ["blue"]
+    assert picker["nostromo"]["meta"] == "NOSTROMO · CRYO"
+    for key, words in (("nightCity", ["BLACKWALL", "RELIC", "EDGERUN", "MOX"]),
+                       ("gates", ["SYSTEM", "BLUE", "TEAL", "PURPLE", "ROSE", "ORANGE", "GREEN"])):
+        page = Markup(picker[key]["accents"])
+        assert page.text == words, key
+        assert all("title" not in b for b in page.find("button")), key                  # the name is the colour: no tooltip
+
+
+@ui_only
+def test_saving_a_colour_names_it_and_sends_its_id(checks: dict[str, Any]) -> None:
+    saves = checks["colourSaves"]
+    assert saves["nostromo"] == {"saving": "SAVING CRYO…", "saved": "SAVED CRYO",
+                                 "posts": ['/api/settings {"theme_variant":"blue"}']}
+    assert saves["gates"] == {"saving": "SAVING TEAL…", "saved": "SAVED TEAL",
+                              "posts": ['/api/settings {"theme_variant":"teal"}']}
+    assert saves["sidebar"] == {"saving": "SAVING PLASMA…", "saved": "SAVED PLASMA",
+                                "posts": ['/api/settings {"theme_variant":"purple"}']}
 
 
 # ── Gates: the live accent ────────────────────────────────────────────────────────

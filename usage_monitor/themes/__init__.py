@@ -6,7 +6,9 @@ files. Callers get frozen dataclasses. Colour values are lowercase #rrggbb or #r
 
 Selection (resolve)
   theme_id       "nostromo" | "night_city" | "gates". An unknown id gives Nostromo.
-  theme_variant  Nostromo: amber, green, white, red, blue, cyan, orange, purple.
+  theme_variant  Nostromo: amber, green, white, red, blue, purple. The two ids retired in 2.2
+                 read as the variant that replaced them (extras.retired_variants): cyan as blue,
+                 orange as amber.
                  Night City: blackwall, relic, edgerun, mox.
                  Gates: an accent id (system, blue, teal, purple, rose, orange, green).
   theme_mode     Gates only: "system" (the default), "light" or "dark".
@@ -69,10 +71,11 @@ ROLES: tuple[str, ...] = (
 )
 FONT_ROLES: tuple[str, ...] = ("display", "body", "mono")
 GATES_ACCENTS: tuple[str, ...] = ("system", "blue", "teal", "purple", "rose", "orange", "green")
-# v1 "theme" names (theme.py THEMES) -> the Nostromo variant of the same colour.
+# v1 "theme" names (theme.py THEMES) -> the Nostromo variant of the same colour. Cyan and Orange
+# were retired in 2.2 (too close to Blue and Amber), so they get those two.
 V1_NAME_TO_VARIANT: dict[str, str] = {
     "Default": "amber", "Red": "red", "Blue": "blue", "Green": "green",
-    "Purple": "purple", "Cyan": "cyan", "Orange": "orange", "White": "white",
+    "Purple": "purple", "Cyan": "blue", "Orange": "amber", "White": "white",
 }
 # Gates system accent: accent_alt sits this fraction of the way from the fill accent to the surface.
 SYSTEM_ACCENT_ALT_MIX = 0.30
@@ -167,7 +170,11 @@ class Theme:
         return next(variant for variant in self.variants if variant.default)
 
     def variant(self, variant_id: str | None) -> Variant:
-        """The variant with this id. An unknown or None id gives the default variant."""
+        """The variant with this id. A retired id (extras.retired_variants) gives the variant that
+        replaced it, and an unknown or None id gives the default variant."""
+        retired = self.extras.get("retired_variants")
+        if isinstance(retired, dict) and isinstance(variant_id, str):
+            variant_id = retired.get(variant_id, variant_id)
         for variant in self.variants:
             if variant.id == variant_id:
                 return variant
@@ -240,6 +247,8 @@ def _parse_theme(data: object, stem: str) -> Theme:
     _check_fonts(data.get("fonts"), problems)
     extras = data.get("extras") if isinstance(data.get("extras"), dict) else {}
     variants = _parse_variants(data.get("variants"), extras, problems)
+    if variants:
+        _check_retired(extras.get("retired_variants"), {variant.id for variant in variants}, problems)
     if problems:
         raise ThemeError("; ".join(problems))
     return Theme(
@@ -311,6 +320,20 @@ def _parse_variants(
                 extras=_variant_extras(extras, variant_id),
             ))
     return tuple(variants)
+
+
+def _check_retired(retired: object, live: set[str], problems: list[str]) -> None:
+    """extras.retired_variants maps each retired id to the variant that replaced it."""
+    if retired is None:
+        return
+    if not isinstance(retired, dict):
+        problems.append("extras.retired_variants must be an object")
+        return
+    for old, new in retired.items():
+        if old in live:
+            problems.append(f"retired variant {old!r} is still a variant")
+        elif not isinstance(new, str) or new not in live:
+            problems.append(f"retired variant {old!r} points to {new!r}, which is not a variant")
 
 
 def _check_colors(raw: object, label: str, problems: list[str]) -> dict[str, str] | None:

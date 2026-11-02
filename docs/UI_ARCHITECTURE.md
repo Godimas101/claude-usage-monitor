@@ -131,7 +131,7 @@ usage_monitor/
 ```python
 @dataclass(frozen=True) class Variant: id, name, default: bool, mode: str | None, colors: dict[str, str], extras: dict
 @dataclass(frozen=True) class Theme:   id, name, tagline, fonts, shape, effects, bar, widget, variants: tuple[Variant, ...], extras
-    def variant(self, variant_id: str | None) -> Variant          # unknown/None -> the default variant
+    def variant(self, variant_id: str | None) -> Variant          # a retired id -> its replacement; unknown/None -> the default variant
 load_themes(directory: Path | None = None) -> dict[str, Theme]     # validates; shipped files must pass
 get_theme(theme_id: str | None) -> Theme                          # cached; unknown -> nostromo
 resolve(settings) -> tuple[Theme, Variant]                        # theme_id / theme_variant / theme_mode (+ v1 "theme")
@@ -141,7 +141,10 @@ font_path(theme, role: "display" | "body" | "mono", weight: str = "regular") -> 
 ```
 Gates "system" variants take the live Windows accent and light/dark mode through injected
 callables (defaults read the registry via `ui/platform.py`). v1 map: Default→amber, Red, Blue,
-Green, Purple, Cyan, Orange, White → the Nostromo variants of the same colour.
+Green, Purple, White → the Nostromo variants of the same colour, and Cyan→blue, Orange→amber (both
+retired in 2.2). A stored `cyan` or `orange` reads as `blue` or `amber` the same way, through the
+theme's `extras.retired_variants`; `Theme.variant()` applies it, and the loader checks that every
+retired id is gone and points to a variant that exists.
 
 The system accent is made usable once, in `themes/colour.py` (`lift_accent`), and every surface reads the
 result: Pillow, `/api/state`, `/api/themes` and the CSS variables, so the dashboard and the widgets show the
@@ -210,7 +213,7 @@ ring) and `no_credentials` like `stale`, which is what the lamp kinds say.
 
 **Nostromo tray icon.** The icon is one opaque plate (the variant's `crt` token) with an opaque track, so it reads the same on a
 dark and a light taskbar: the track is the translucent token laid over the plate, then dimmed until it sits at least 3.2 : 1
-under the weakest lit colour (measured 3.21 to 8.74 over 8 variants, 3 severities and 4 sizes; plate against `#f3f3f3` at
+under the weakest lit colour (measured 3.21 to 8.74 over 6 variants, 3 severities and 4 sizes; plate against `#f3f3f3` at
 least 17.9 : 1).
 
 **Gates floating card.** It shows the session and weekly rows, then a row for every scoped limit the model carries, in

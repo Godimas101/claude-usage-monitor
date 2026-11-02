@@ -26,6 +26,8 @@ Phosphor Console keeps the shipped amber-on-CRT identity and sharpens it. Widget
 VARIANTS (ids and names; all dark, default = amber)
 amber "AMBER P3" (default, app "Default"); green "TERMINAL GREEN P1"; white "WHITE P4"; red "RED ALERT"; blue "BLUE BRIDGE"; cyan "CYAN"; orange "ORANGE"; purple "PURPLE". The app's THEMES dict has Default, Red, Blue, Green, Purple, Cyan, Orange, White, so all eight are covered. The accent map is in extras.accent_map.
 
+Changed 2026-11-02 for v2.2 (issue #34): Cyan and Orange were retired because they were too close to Blue and Amber, and the six left were renamed: amber "RAY TUBE", green "TERMINAL", white "STATIC", red "ALERT", blue "CRYO", purple "PLASMA". A stored cyan or orange reads as blue or amber (extras.retired_variants), and v1's Cyan and Orange map to them in V1_NAME_TO_VARIANT (usage_monitor/themes/__init__.py). This mockup and its captures still show the eight.
+
 FONTS AND LICENCES
 - Michroma (display): SIL Open Font License 1.1
 - IBM Plex Mono SemiBold 600 and Regular 400 (labels): SIL OFL 1.1

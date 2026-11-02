@@ -6,12 +6,13 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ## [2.2.0] — 2026-10-30
 
-Claude Usage Monitor 2.2 adds a usage guard: when your plan reaches a cap you set, the Claude Code sessions that are working are told to wind down, and sessions that wait wake up again once there is room. It also helps people who use Claude only on the web or in the app, and keeps the taskbar strip in sight.
+Claude Usage Monitor 2.2 adds a usage guard: when your plan reaches a cap you set, the Claude Code sessions that are working are told to wind down, and sessions that wait wake up again once there is room. It also helps people who use Claude only on the web or in the app, keeps the taskbar strip in sight and gives Nostromo's colours new names.
 
 ### Highlights
 - **Usage guard:** switch it on in Settings → Usage guard and set a cap for the session, the week or a model's own weekly limit, such as Fable's. When usage reaches a cap, each working Claude Code session is told to wrap up at a safe point, and nothing is blocked. Sessions that wait wake up when every watched limit is under its cap again. **Install** on the same card sets up Claude Code's side in one click.
 - **For people who use Claude on the web or in the app:** with no Claude sign-in on the PC, the dashboard explains why the monitor needs one and how to sign in to Claude Code, with a **Check again** button. Pages that need Claude Code's activity say why they are empty instead of showing zeros.
 - **The taskbar strip stays put:** it is now part of the taskbar, so Start, Search, tray flyouts and taskbar previews no longer hide it.
+- **Nostromo's colours have new names:** Ray Tube (amber), Terminal (green), Static (white), Alert (red), Cryo (blue) and Plasma (purple). Cyan and Orange were too close to Blue and Amber, so they are gone: if you used one, you now have Cryo or Ray Tube.
 
 ### Added
 - **The usage guard.** It starts off: switch it on with **Arm the guard** in Settings → Usage guard, or with **Usage guard** in the tray menu. It watches a cap for the session limit (95% at first), the weekly limit (90%) and a model's own weekly limit such as Fable's (off until you set one). When usage reaches a cap, each Claude Code session that is working is told at its next prompt or tool call: which limit is over, that nothing is blocked, to wrap up at a safe point, and when work can resume. The guard goes by the monitor's latest reading, fetched every 15 minutes by default. Idle sessions are left alone, and the guard never stops anything ([#27](https://github.com/Godimas101/claude-usage-monitor/issues/27)).
@@ -29,6 +30,7 @@ Claude Usage Monitor 2.2 adds a usage guard: when your plan reaches a cap you se
 - When a limit's window resets, the monitor fetches the new numbers about a minute later, instead of at its next poll ([#27](https://github.com/Godimas101/claude-usage-monitor/issues/27)).
 - The monitor now runs `claude` for the usage guard's setup: `claude --version` and `claude mcp get` to show where setup stands, and `claude mcp add` or `remove` when you click Install or Remove. It still never sends a model request ([#27](https://github.com/Godimas101/claude-usage-monitor/issues/27)).
 - With no sign-in, the widgets send you to the dashboard, which has the steps, instead of to Claude Code, which you may not have. The dashboard says **NO LOGIN** instead of **NO CREDENTIALS** (Gates still says "Not signed in") ([#28](https://github.com/Godimas101/claude-usage-monitor/issues/28)).
+- **Nostromo has six colours instead of eight, with new names:** **Ray Tube** (amber, the default), **Terminal** (green), **Static** (white), **Alert** (red), **Cryo** (blue) and **Plasma** (purple). Cyan and Orange were too close to Blue and Amber, so they are gone. A saved Cyan opens as Cryo and a saved Orange as Ray Tube, and v1's Cyan and Orange themes move the same way. The colour buttons in Settings and in the sidebar show the new names ([#34](https://github.com/Godimas101/claude-usage-monitor/issues/34)).
 
 ### Fixed
 - The taskbar strip stays in sight while Start, Search or a tray flyout is open, and while you peek at a window from its taskbar preview. It is now part of the taskbar itself, not a window floating over it; if the taskbar refuses it, it floats over the taskbar as before ([#29](https://github.com/Godimas101/claude-usage-monitor/issues/29)).

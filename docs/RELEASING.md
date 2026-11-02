@@ -128,7 +128,8 @@ signature as well as the digest.
       Do it once with the entry **off** and once with it **on**. Pass: nothing prompts; the app is back within about
       15 seconds; `DisplayVersion` is the new version under `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Claude Usage Monitor_is1`;
       and the Run value is still **missing** (it was off), or is the quoted exe and nothing else (it was on). The theme
-      becomes its Nostromo phosphor, and the position and widget toggles stay. Then run the installer once
+      becomes its Nostromo phosphor (v1's Cyan and Orange, retired in 2.2, become Cryo and Ray Tube), and the
+      position and widget toggles stay. Then run the installer once
       interactively over a v1 install with the entry off: the **Start with Windows** box on the tasks page is unticked.
       Last, with a file in `<install folder>\_internal` held open (in PowerShell,
       `$f = [IO.File]::Open('<install folder>\_internal\base_library.zip', 'Open', 'Read', 'ReadWrite')`), the same run
