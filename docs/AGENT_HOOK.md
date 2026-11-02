@@ -58,7 +58,8 @@ the week has gone is 39 points ahead of it.
 
 For unattended runs, allow the tool so that it never stops at a permission prompt: add
 `"mcp__claude-usage__get_plan_usage"` to `permissions.allow` in your settings. Installing a monitor
-update closes the server; reconnect it with `/mcp`, or start a new session.
+update ends the server. A session starts it again the next time it uses the tool; if one does not,
+reconnect it with `/mcp`, or start a new session.
 
 ## Hooks
 

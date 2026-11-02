@@ -1310,9 +1310,9 @@ def pascal_code(text: str) -> str:
     return "\n".join(lines)
 
 
-def iss_routine(name: str) -> str:
+def iss_routine(name: str, text: str = ISS) -> str:
     """One [Code] procedure or function, from its header to the next routine or section comment, without comments."""
-    match = re.search(rf"^(?:procedure|function) {name}\b.*?(?=^(?:procedure|function) |^// ----|\Z)", ISS, re.M | re.S)
+    match = re.search(rf"^(?:procedure|function) {name}\b.*?(?=^(?:procedure|function) |^// ----|\Z)", text, re.M | re.S)
     assert match, f"[Code] has no routine {name}"
     return pascal_code(match.group(0))
 
@@ -1332,9 +1332,65 @@ def test_setup_stops_while_the_monitor_runs() -> None:
 
 
 def test_restart_manager_closes_what_is_using_the_files_and_restarts_nothing() -> None:
-    assert iss_setup("CloseApplications") == "force"  # also ends the windowless --mcp, --hook and --gate readers
+    assert iss_setup("CloseApplications") == "force"  # for anything else; the exe's own processes are ended earlier
     assert iss_setup("RestartApplications") == "no"
     assert "*.exe" in iss_setup("CloseApplicationsFilter")
+
+
+def test_setup_ends_the_exes_other_processes_before_the_folder_check() -> None:
+    """Restart Manager closes applications only once the installation has started, after CurStepChanged(ssInstall),
+    where RequireBundleFolderFree must already find the folder free. Left to it, one --mcp reader of an open Claude
+    Code session stopped every update with "in use". So PrepareToInstall ends them, after asking the dashboard to
+    close, and Uninstall does the same at usUninstall, before it deletes."""
+    prepare = iss_routine("PrepareToInstall")
+    assert prepare.index("CloseDashboardWindow;") < prepare.index("EndOtherProcesses;")
+    assert re.search(r"if CurUninstallStep = usUninstall then begin\s+CloseDashboardWindow;\s+EndOtherProcesses;\s+end;",
+                     iss_routine("CurUninstallStepChanged"))
+    assert re.search(r"if CurStep = ssInstall then\s+RequireBundleFolderFree;", iss_routine("CurStepChanged"))
+    ending = iss_routine("EndOtherProcesses")
+    assert ending.index("OtherProcesses(True)") < ending.index("OtherProcesses(False)")    # end them, then wait
+
+
+def assert_terminate_is_guarded(text: str) -> None:
+    """In OtherProcesses, Terminate is reached only past the full-path check and the mode check, each of which skips the
+    process with Continue, and only on the pass that ends processes (EndThem), never on the polls that wait. The path
+    check is what keeps Setup off any other copy of the exe: in a sandbox run, the owner's own install."""
+    body = iss_routine("OtherProcesses", text)
+    assert "Exe := ExpandConstant('{app}\\{#ExeName}');" in body
+    assert body.count("Item.Terminate()") == 1
+    path_check = body.index("if not SameText(Item.ExecutablePath, Exe) then begin")
+    mode_check = body.index("if Mode = '' then begin")
+    ending = body.index("Item.Terminate()")
+    assert path_check < body.index("Mode := OtherMode(Item.CommandLine);") < mode_check
+    assert mode_check < body.index("Result := Result + 1;") < ending
+    for check in (path_check, mode_check):
+        assert "Continue;" in body[check:body.index("end;", check)], "a guard no longer skips the process"
+    ending_pass = body.rindex("if EndThem then begin", 0, ending)
+    assert ending_pass > mode_check and "end;" not in body[ending_pass:ending]
+
+
+def test_only_the_install_folders_own_exe_is_ended_and_never_the_monitor() -> None:
+    """A copy of the exe elsewhere (a second install, a dev build, the owner's install during a sandbox run) is not
+    touched: the full path must match. The monitor, started with no mode, is left to AppMutex and
+    RequireBundleFolderFree."""
+    assert_terminate_is_guarded(ISS)
+
+
+def test_the_modes_setup_ends_are_every_mode_of_the_exe_but_the_monitor() -> None:
+    """OtherModes is main.py's list of modes, all of them: a mode added there and not here would leave its process
+    running, and Setup would stop with "in use". Checked both ways: the flags parse_args looks for, and the kinds of
+    command they give."""
+    import main
+
+    constant = iss_code_constant("OtherModes")
+    modes = constant.split()
+    assert constant == " ".join(modes)                                      # one space apart, as OtherMode reads them
+    main_py = (ROOT / "main.py").read_text(encoding="utf-8")
+    assert set(re.findall(r'^    if "(--[\w-]+)" in args:$', main_py, re.M)) == set(modes)
+    words_after = {"--dashboard": ["--port", "8765"], "--dump-frames": ["out"], "--smoke-test": ["5", "report.json"]}
+    kinds = {main.parse_args([mode, *words_after.get(mode, [])]).kind for mode in modes}
+    assert kinds == set(re.findall(r'Command\("(\w+)"', main_py)) - {"app", "error"}
+    assert main.parse_args([]).kind == "app"
 
 
 def test_the_dashboard_window_setup_closes_is_the_one_the_app_opens() -> None:
@@ -1343,8 +1399,8 @@ def test_the_dashboard_window_setup_closes_is_the_one_the_app_opens() -> None:
     assert iss_code_constant("DashboardTitle") == dashboard.WINDOW_TITLE
     assert "PostMessage(Wnd, WmClose" in ISS and "FindWindowByWindowName(DashboardTitle)" in ISS
     # Asked to close before the files are replaced, and again before they are removed.
-    assert "CloseDashboardWindow;" in ISS[ISS.index("function PrepareToInstall"):ISS.index("procedure CurStepChanged")]
-    assert "CloseDashboardWindow;" in ISS[ISS.index("procedure CurUninstallStepChanged"):]
+    assert "CloseDashboardWindow;" in iss_routine("PrepareToInstall")
+    assert "CloseDashboardWindow;" in iss_routine("CurUninstallStepChanged")
 
 
 def test_the_start_with_windows_task_is_checked_by_default() -> None:
@@ -1502,6 +1558,10 @@ def test_the_iss_is_ascii() -> None:
 # runs the real installer or touches an installed copy: the sandbox is the real script with every identity renamed
 # (AppId, install folder, Run value, mutex, Start menu group, user-data folder), and it is refused unless none of the
 # real names is left in it. The runs are opt-in because they install and uninstall (a renamed) program.
+# One name is not renamed: Setup finds the exe's other processes by the exe's real name, which the stand-ins below must
+# carry, so only the full-path check in OtherProcesses keeps a run off the owner's own processes. sandbox_script refuses
+# a script without that check, the reader test runs one more stand-in in another folder that must survive, and
+# keeps_real_readers checks after every run that the owner's long-running processes are all still there.
 
 SANDBOX = "CUM Test Sandbox"                         # AppId and AppName: the uninstall key is "CUM Test Sandbox_is1"
 SANDBOX_RUN_VALUE = "CUMTestSandbox"
@@ -1623,6 +1683,7 @@ def sandbox_script(real: str, app: Path) -> str:
     left = [name for name in REAL_IDENTITY if name in text]
     assert not left, f"the sandbox script still holds the real identity {left}: running it could replace an installed copy"
     assert text.count(f'AppIdValue "{SANDBOX}"') == 1 and "AppId={#AppIdValue}" in text
+    assert_terminate_is_guarded(text)      # what keeps a run off the owner's processes, which share the exe's name
     return text
 
 
@@ -1756,6 +1817,33 @@ def real_install_state() -> dict[str, Any]:
     return state
 
 
+def real_readers() -> set[tuple[int, str]]:
+    """The processes of the owner's real install that have run for over a minute, as (process id, start time): an open
+    Claude Code session's --mcp reader, a --wait, the monitor. Read-only. The minute leaves out a --hook, which can come
+    and go between two readings."""
+    exe = Path(os.environ.get("LOCALAPPDATA", "")) / "ClaudeUsageMonitor" / "ClaudeUsageMonitor.exe"
+    powershell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    script = ("Get-CimInstance Win32_Process -Filter \"Name = 'ClaudeUsageMonitor.exe'\" | "
+              "Where-Object { $_.CreationDate -and $_.CreationDate -lt (Get-Date).AddMinutes(-1) } | "
+              "ForEach-Object { '{0}|{1}|{2}' -f $_.ProcessId, $_.CreationDate.ToFileTimeUtc(), $_.ExecutablePath }")
+    done = subprocess.run([str(powershell), "-NoProfile", "-NonInteractive", "-Command", script], capture_output=True,
+                          text=True, timeout=120, creationflags=NO_WINDOW)
+    assert done.returncode == 0, done.stdout + done.stderr
+    rows = [line.split("|", 2) for line in done.stdout.splitlines() if line.count("|") >= 2]
+    return {(int(pid), started) for pid, started, path in rows if path.strip().lower() == str(exe).lower()}
+
+
+@pytest.fixture
+def keeps_real_readers() -> Iterator[None]:
+    """Setup lists the exe's processes by the exe's real name, which a sandbox cannot rename, so only the full-path check
+    keeps a sandbox run off the owner's own. This checks it from the outside: every long-running process of the real
+    install that ran before the test still runs after it."""
+    before = real_readers()
+    yield
+    gone = before - real_readers()
+    assert not gone, f"processes of the real install ended during a sandbox run: {sorted(gone)}"
+
+
 @UI
 @needs_iscc
 def test_the_sandboxed_installers_build_and_hold_none_of_the_real_names(tmp_path: Path) -> None:
@@ -1770,9 +1858,11 @@ def test_the_sandboxed_installers_build_and_hold_none_of_the_real_names(tmp_path
     assert str(box.app).startswith(str(tmp_path))          # the install folder is inside the test's own folder
     assert box.files() == []                               # nothing has been installed: this test never starts Setup
     assert set(real_install_state()) == {"run", "version", "exe"}   # the read-only snapshot of the real install works
+    assert isinstance(real_readers(), set)                 # and so does the one of its running processes
 
 
 @SANDBOX_RUNS
+@pytest.mark.usefixtures("keeps_real_readers")
 def test_sandboxed_silent_upgrades_keep_each_users_start_with_windows_choice(tmp_path: Path) -> None:
     """Runs the renamed installer the way each updater runs it, over each kind of existing install, and reads the Run value."""
     box = Sandbox(tmp_path)
@@ -1800,6 +1890,7 @@ def test_sandboxed_silent_upgrades_keep_each_users_start_with_windows_choice(tmp
 
 
 @SANDBOX_RUNS
+@pytest.mark.usefixtures("keeps_real_readers")
 def test_a_sandboxed_update_with_a_file_held_open_stops_and_changes_nothing(tmp_path: Path) -> None:
     """A virus scanner, a backup agent or an indexer can hold a file open without delete sharing (Python's open() does
     the same). Without the probe, [InstallDelete] would stop half way and leave no program. With it, Setup exits with
@@ -1820,6 +1911,169 @@ def test_a_sandboxed_update_with_a_file_held_open_stops_and_changes_nothing(tmp_
         assert box.display_version() == "2.0.0"
     finally:
         box.cleanup()
+    assert real_install_state() == before
+
+
+# A stand-in for the exe in any of its modes, built with the C# compiler of the .NET Framework that Windows carries. A
+# windowed program with no window, as the real exe is, it holds the file named next to last on its command line open
+# without delete sharing (as a loaded DLL is held), writes the file named last once it does, and waits to be ended.
+# Built over the sandbox install's exe, it is to Setup what a reader of Claude Code is: a process of
+# {app}\ClaudeUsageMonitor.exe, with a mode on its command line or (the monitor) without one.
+CSC = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Microsoft.NET" / "Framework64" / "v4.0.30319" / "csc.exe"
+STAND_IN_SOURCE = """\
+using System.IO;
+using System.Threading;
+
+static class StandIn {
+    static void Main(string[] args) {
+        using (File.Open(args[args.Length - 2], FileMode.Open, FileAccess.Read, FileShare.Read)) {
+            File.WriteAllText(args[args.Length - 1], "holding");
+            Thread.Sleep(180000);
+        }
+    }
+}
+"""
+needs_csc = pytest.mark.skipif(not CSC.is_file(), reason="the .NET Framework C# compiler (csc.exe) is not on this PC")
+
+
+def build_stand_in(box: Sandbox) -> Path:
+    """Compile the stand-in over the sandbox install's exe. Returns the exe."""
+    source = box.root / "stand_in.cs"
+    source.write_text(STAND_IN_SOURCE, encoding="ascii")
+    exe = box.app / "ClaudeUsageMonitor.exe"
+    done = subprocess.run([str(CSC), "/nologo", "/target:winexe", f"/out:{exe}", str(source)], capture_output=True,
+                          text=True, timeout=120, creationflags=NO_WINDOW)
+    assert done.returncode == 0, done.stdout + done.stderr
+    return exe
+
+
+def start_stand_in(box: Sandbox, exe: Path, *words: str, hold: Path | None = None) -> subprocess.Popen[bytes]:
+    """Start the stand-in at ``exe`` with ``words`` (a mode, or none for the monitor) and wait until it holds ``hold``,
+    by default the sandbox bundle's DLL. A stand-in that does not get there is ended before the test fails."""
+    held = hold if hold is not None else box.app / "_internal" / "python.dll"
+    ready = box.root / f"holding-{len(list(box.root.glob('holding-*')))}"
+    process = subprocess.Popen([str(exe), *words, str(held), str(ready)], stdin=subprocess.DEVNULL,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=NO_WINDOW)
+    try:
+        deadline = time.monotonic() + 30
+        while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.1)
+        assert ready.exists(), f"the stand-in {words} did not start holding its file (exit code {process.poll()})"
+    except BaseException:
+        end_stand_ins([process])
+        raise
+    return process
+
+
+def end_stand_ins(processes: list[subprocess.Popen[bytes]]) -> None:
+    """End every stand-in still running and wait for each; one that will not go does not keep the others running."""
+    for process in processes:
+        if process.poll() is None:
+            process.kill()
+    for process in processes:
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+
+
+@SANDBOX_RUNS
+@needs_csc
+@pytest.mark.usefixtures("keeps_real_readers")
+def test_a_sandboxed_update_ends_the_readers_of_claude_code_and_goes_through(tmp_path: Path) -> None:
+    """While Claude Code is open, its --mcp reader runs from the install folder for as long as the session, and a --wait
+    can run for days. Setup ends them before it checks the folder, and the update goes through. Before, the check came
+    first, found the folder in use and stopped every update, by hand or through the app. A reader of the same name in
+    another folder (another install, or the owner's own during this run) is left alone."""
+    box = Sandbox(tmp_path)
+    before = real_install_state()
+    readers: list[subprocess.Popen[bytes]] = []
+    try:
+        box.reset("v2", None)
+        exe = build_stand_in(box)
+        elsewhere = box.root / "elsewhere" / "ClaudeUsageMonitor.exe"
+        elsewhere.parent.mkdir()
+        shutil.copy(exe, elsewhere)
+        (elsewhere.parent / "held.dll").write_bytes(b"stand-in")
+        neighbour = start_stand_in(box, elsewhere, "--mcp", hold=elsewhere.parent / "held.dll")
+        readers.append(neighbour)
+        readers.append(start_stand_in(box, exe, "--mcp"))
+        readers.append(start_stand_in(box, exe, "--wait", "--session", "abc"))
+        assert box.run(box.v2, V2_SWITCHES, "readers running") == 0
+        for reader in readers[1:]:
+            reader.wait(timeout=10)                                           # ended: this raises if one still runs
+        assert neighbour.poll() is None, "Setup ended a reader of another folder"
+        log = (box.logs / "readers_running.log").read_text(encoding="utf-8", errors="replace")
+        assert log.count("Ending process") == 2 and "started with --mcp" in log and "started with --wait" in log
+        assert f"Left alone: process {neighbour.pid}, started from another folder." in log
+        assert exe.read_bytes().startswith(b"MZ a stand-in")                  # the new files are in place
+        assert box.display_version() == "2.0.0"
+        assert not (box.app / "_internal.probe").exists()
+    finally:
+        try:
+            end_stand_ins(readers)
+        finally:
+            box.cleanup()
+    assert real_install_state() == before
+
+
+@SANDBOX_RUNS
+@needs_csc
+@pytest.mark.usefixtures("keeps_real_readers")
+def test_a_sandboxed_update_leaves_a_running_monitor_alone_and_stops(tmp_path: Path) -> None:
+    """Setup checks AppMutex at startup only, so a monitor can be started while it runs. That one is not ended: the
+    folder check stops Setup with "close the program", and the install is as it was."""
+    box = Sandbox(tmp_path)
+    before = real_install_state()
+    monitor: list[subprocess.Popen[bytes]] = []
+    try:
+        box.reset("v2", None)
+        exe = build_stand_in(box)
+        monitor.append(start_stand_in(box, exe))
+        listing = box.files()
+        assert box.run(box.v2, V2_SWITCHES, "monitor running") != 0
+        log = (box.logs / "monitor_running.log").read_text(encoding="utf-8", errors="replace")
+        assert "stopping before anything is changed" in log and "Ending process" not in log
+        assert f"Left alone: process {monitor[0].pid}, the monitor (no mode on its command line)." in log
+        assert monitor[0].poll() is None, "Setup ended the monitor"
+        assert box.files() == listing
+        assert not (box.app / "_internal.probe").exists()
+    finally:
+        try:
+            end_stand_ins(monitor)
+        finally:
+            box.cleanup()
+    assert real_install_state() == before
+
+
+@SANDBOX_RUNS
+@needs_csc
+@pytest.mark.usefixtures("keeps_real_readers")
+def test_a_sandboxed_uninstall_ends_the_readers_and_removes_their_files(tmp_path: Path) -> None:
+    """Uninstall ends them too. Otherwise the exe and the bundle files a reader holds would be left behind."""
+    box = Sandbox(tmp_path)
+    before = real_install_state()
+    readers: list[subprocess.Popen[bytes]] = []
+    try:
+        box.reset("v2", None)
+        exe = build_stand_in(box)
+        readers.append(start_stand_in(box, exe, "--mcp"))
+        log = box.logs / "uninstall-with-a-reader.log"
+        subprocess.run(f'"{box.app / "unins000.exe"}" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG="{log}"',
+                       stdin=subprocess.DEVNULL, capture_output=True, timeout=240, creationflags=NO_WINDOW)
+        deadline = time.monotonic() + 90
+        while not log_closed(log) and time.monotonic() < deadline:   # the uninstaller hands over to a copy in %TEMP%
+            time.sleep(0.3)
+        assert log_closed(log)
+        readers[0].wait(timeout=10)
+        assert "started with --mcp" in log.read_text(encoding="utf-8", errors="replace")
+        assert not exe.exists() and not (box.app / "_internal").exists()
+        assert box.display_version() is None
+    finally:
+        try:
+            end_stand_ins(readers)
+        finally:
+            box.cleanup()
     assert real_install_state() == before
 
 

@@ -113,6 +113,12 @@ signature as well as the digest.
   - running the installer again while the monitor runs makes Setup ask you to close it, and the dashboard
     window closes with it;
   - uninstalling removes that Run value and asks before deleting `%APPDATA%\ClaudeUsageMonitor` (No keeps it).
+- [ ] **With Claude Code open.** In a Claude Code session that started after the monitor's MCP tool was registered,
+      `/mcp` shows `claude-usage` as connected. Close the monitor, and run the new installer by hand over that install
+      (your own install is fine for this one). It goes through without an "in use" stop. In that session the tool
+      answers again on its next use, or after `/mcp`. The sandboxed runs (`CUM_UI_TESTS=1` and `CUM_INSTALLER_E2E=1`;
+      the stand-in tests also need the .NET Framework's `csc.exe`) cover the same with stand-in readers, and the
+      uninstall.
 - [ ] **Upgrade from v1, the way v1.1.5's updater does it.** That updater cannot be changed and is the one every v1
       user will run, so this is the check that matters most. On the same spare user or VM, install v1.1.5 and make the
       state you want to test: **on** is what v1 wrote (the exe followed by the path of a script, see
