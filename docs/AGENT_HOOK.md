@@ -165,9 +165,10 @@ guard's **Install** button adds the first three for you (below), exactly as show
 
 ## The usage guard
 
-The guard lets a long run wind down by itself before it uses up the plan, and pick up again when the
-limits allow. It only informs: it never blocks a tool, stops a session or decides how Claude wraps
-up. Claude Code's own handling of a limit that is actually reached is unchanged.
+The guard tells working Claude Code sessions when usage reaches a cap you set, so a long run can wind down
+before it uses up the plan, and it wakes the sessions that wait when the limits allow work again. It
+only informs: it never pauses or stops anything, never blocks a tool and does not decide how Claude
+wraps up. Claude Code's own handling of a limit that is actually reached is unchanged.
 
 **Turning it on.** Open Settings → Usage guard and switch on **Arm the guard**, or tick **Usage guard**
 in the tray menu. The guard stays off until you do: opening the card or setting its caps does not arm
@@ -178,17 +179,32 @@ model-limited week such as Fable (off by default). Then press **Install** on the
 - Each Claude session that is working hears it at its next prompt or tool call, once the app's
   reading shows the cap reached. The app fetches every 15 minutes by default (Settings → Data &
   plan), so the notice can come that much later. It is told which limits are over their caps, that
-  nothing is blocked, to wrap up at a safe point, and when work can resume. Each subagent hears it
-  once too, but only the main conversation is offered the wait command. Idle sessions are not
+  nothing is blocked, to wrap up at a safe point, and when work can resume. Idle sessions are not
   disturbed.
-- Each session hears it once per holding episode. A new window over a cap is a new episode. A
-  session that starts, resumes or is compacted while the guard holds hears it again.
+- Each subagent hears it once too, at its own next tool call. That includes the agents of a workflow.
+  Only the main conversation is offered the wait command.
+- The guard's hooks run only when a session gets a prompt, makes a tool call or starts. Nothing
+  reaches a session in between:
+  - A conversation that waits for a workflow or a background agent is idle. Nothing tells it while
+    it waits. It hears the notice only at its next prompt or tool call.
+  - An agent in the middle of a long model call is not reached until that call ends. It hears the
+    notice after its next tool call. If its last step is its answer, it never does.
+  - "Told" means the notice was handed over, not that it was read. A workflow agent handed it on the
+    call that returns its result never reads it. The card counts a session as told when the notice
+    reached its main conversation or any of its agents.
+- The notice goes into Claude's context. Claude Code does not show it in the chat.
+- The guard pauses nothing. A workflow or a background agent carries on until it wraps up, or until
+  you stop it.
+- Each session hears it once per holding episode. A new window over a cap is a new episode, and so
+  is a changed cap. Switching the guard off and on again in the same window, with the same caps, is
+  not. A session that starts, resumes or is compacted while the guard holds hears it again.
 - The floating widget shows the guard holding, with the time left until work can resume (in Gates,
   while the numbers are live). The taskbar strip shows only a hold mark; the hover card and the tray
   icon's tooltip give the time.
 
-**When work can resume:** when every watched limit is under its cap again (**Resume now**, or turning
-the guard off, lets the waits go as well: below). The guard holds
+**When work can resume:** when every watched limit is under its cap again. **Resume now** lets the
+waits go sooner without ending the hold, and turning the guard off ends the hold and lets them go
+(below). The guard holds
 until the latest reset among the limits that are over their caps, so a fresh 5-hour window while
 the week is still over its cap wakes nobody. After a window resets, the app fetches the new numbers
 at its first check from 30 seconds on, about a minute after the reset.
@@ -215,7 +231,9 @@ PowerShell does not wait for a windowed program unless its output goes through a
 - When several sessions wait, they are woken one after another, two minutes apart by default
   (**Stagger** on the card), oldest first, so they don't all start at once.
 - **Resume now** on the card, or **Resume waiting sessions** in the tray menu, wakes them all at once,
-  whatever the limits say. Turning the guard off wakes them too, one at a time at the stagger.
+  whatever the limits say. The guard itself keeps holding: the widget still shows it, and a session
+  that has not heard the notice yet still hears it. Turning the guard off wakes them too, one at a
+  time at the stagger.
 - `--wait` reads `state.json` every 30 seconds. With the app closed, it asks the usage API itself
   once its reading is stale (about 30 minutes old by default), and then at most every 15 minutes.
   With no reading at all, it keeps waiting.
@@ -254,7 +272,8 @@ Claude Code; with no `claude` on the PATH, the card gives the command that remov
 **Before you uninstall the app, press Remove.** The uninstaller does not edit Claude Code's settings,
 so the hooks and the MCP tool would stay behind, starting a program that is no longer there.
 
-The VS Code extension has its own Claude Code version, and needs 2.1.139 or newer too. Setup works only
+The VS Code extension has its own Claude Code version, and needs 2.1.139 or newer too. The card checks
+only the `claude` command, so check the extension yourself: in VS Code, under Extensions. Setup works only
 in the installed app: a copy run from source, or a dev instance, never edits your Claude Code settings,
 so set those up by hand from this page.
 

@@ -53,8 +53,9 @@ def told(folder: Path, episode: str) -> list[dict]:
 
 def same_episode(told_key: Any, key: str) -> bool:
     """Whether a session told of ``told_key`` has heard of ``key`` (guard.episode keys). It has when
-    every limit over its cap now was over it then: a window that resets while another limit stays
-    over its cap ends no episode, and only a limit that newly goes over one starts a new one."""
+    every limit over its cap now was over the same cap then: a window that resets while another limit
+    stays over its cap ends no episode, and only a limit that newly goes over a cap, or a changed cap,
+    starts a new one."""
     if not isinstance(told_key, str) or not told_key or not key:
         return False
     return set(key.split("|")) <= set(told_key.split("|"))

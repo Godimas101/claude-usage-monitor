@@ -3610,6 +3610,64 @@ def test_launcher_starts_one_child_and_focuses_it_while_alive(make_server: Any, 
     assert len(FakePopen.instances) == 2
 
 
+class _RecordingUser32:
+    """The user32 calls focus_window makes, in order."""
+
+    def __init__(self, iconic: bool, *, enabled: bool = True, posts: bool = True) -> None:
+        self.iconic, self.enabled, self.posts = iconic, enabled, posts
+        self.calls: list[tuple[Any, ...]] = []
+
+    def IsIconic(self, hwnd: int) -> bool:  # noqa: N802  (the Win32 name)
+        self.calls.append(("IsIconic", hwnd))
+        return self.iconic
+
+    def IsWindowEnabled(self, hwnd: int) -> bool:  # noqa: N802
+        self.calls.append(("IsWindowEnabled", hwnd))
+        return self.enabled
+
+    def PostMessageW(self, hwnd: int, msg: int, wparam: int, lparam: int) -> bool:  # noqa: N802
+        self.calls.append(("PostMessageW", hwnd, msg, wparam, lparam))
+        return self.posts
+
+    def ShowWindow(self, hwnd: int, command: int) -> bool:  # noqa: N802
+        self.calls.append(("ShowWindow", hwnd, command))
+        return True
+
+    def SetForegroundWindow(self, hwnd: int) -> bool:  # noqa: N802
+        self.calls.append(("SetForegroundWindow", hwnd))
+        return True
+
+
+RESTORE_MESSAGE = ("PostMessageW", 4242, 0x0112, 0xF120, 0)     # WM_SYSCOMMAND, SC_RESTORE
+SHOW_RESTORE = ("ShowWindow", 4242, 9)                           # SW_RESTORE
+
+
+@pytest.mark.parametrize(("window", "between"), [
+    # #39: ShowWindow(SW_RESTORE) from the monitor brought the window back with WebView2's page black. The window
+    # menu's Restore, posted to the window, has the window's own thread restore it, and the page is drawn again.
+    ({"iconic": True}, [("IsWindowEnabled", 4242), RESTORE_MESSAGE]),
+    # A window that owns a modal dialog (Export's Save As) is disabled and ignores the posted Restore: ShowWindow
+    # still brings it and its dialog back.
+    ({"iconic": True, "enabled": False}, [("IsWindowEnabled", 4242), SHOW_RESTORE]),
+    ({"iconic": True, "posts": False}, [("IsWindowEnabled", 4242), RESTORE_MESSAGE, SHOW_RESTORE]),
+    # A window that is not minimized is only brought forward: a maximized one stays maximized.
+    ({"iconic": False}, []),
+], ids=["minimized", "minimized-with-a-dialog", "message-not-posted", "open"])
+def test_focus_window_restores_a_minimized_dashboard_with_the_window_menus_restore(
+    monkeypatch: pytest.MonkeyPatch, window: dict[str, bool], between: list[tuple[Any, ...]],
+) -> None:
+    user32 = _RecordingUser32(**window)
+    monkeypatch.setattr(dashboard, "_user32", lambda: user32)
+    monkeypatch.setattr(dashboard, "find_window_of", lambda pid: 4242 if pid == 7 else None)
+
+    assert dashboard.focus_window(7) is True
+    assert user32.calls == [("IsIconic", 4242), *between, ("SetForegroundWindow", 4242)]
+
+    user32.calls.clear()
+    assert dashboard.focus_window(8) is False      # no window of that process: nothing is touched
+    assert user32.calls == []
+
+
 def test_the_dashboard_child_goes_into_a_kill_on_close_job_owned_by_the_monitor(
     make_server: Any, settings: Settings, monkeypatch: pytest.MonkeyPatch, job_calls: list[Any],
 ) -> None:
@@ -4400,6 +4458,125 @@ def test_launcher_focuses_the_open_dashboard_instead_of_starting_another(make_se
         assert focused, "the dashboard window was not found by its process id"
         assert launcher.open() is True
         assert launcher.pid == first  # the second open focused the window; it did not start a second one
+    finally:
+        launcher.close()
+    assert launcher.running is False
+
+
+# The page the restore test serves: its top half white, its bottom half black. Drawn, about half of the client area
+# differs clearly from the most common colour. A window whose web view draws nothing shows its own flat background: 0.
+LOUD_PAGE = ('<!doctype html><html><head><meta name="monitor-token" content=""></head><body style="margin:0">'
+             '<div style="height:50vh;background:#fff"></div><div style="height:50vh;background:#000"></div>'
+             '</body></html>')
+DRAWN_SHARE = 0.25
+
+
+def _client_pixels(hwnd: int) -> list[tuple[int, int, int]] | None:
+    """The window's client area as Windows composes it, every 4th pixel each way, as (r, g, b). PrintWindow with
+    PW_CLIENTONLY | PW_RENDERFULLCONTENT also captures WebView2's DirectComposition content, wherever the window
+    is on screen. None while the window has no client area (minimized) or the capture fails."""
+    import ctypes  # noqa: PLC0415
+    from ctypes import wintypes  # noqa: PLC0415
+
+    from usage_monitor.ui import win32  # noqa: PLC0415
+    rect = wintypes.RECT()
+    if not win32.GetClientRect(hwnd, ctypes.byref(rect)) or rect.right < 50 or rect.bottom < 50:
+        return None
+    width, height = rect.right, rect.bottom
+    user32 = ctypes.WinDLL("user32")
+    user32.PrintWindow.argtypes = [wintypes.HWND, wintypes.HDC, wintypes.UINT]
+    user32.PrintWindow.restype = wintypes.BOOL
+    hbitmap, bits = win32.create_dib_section(width, height)
+    dc = win32.CreateCompatibleDC(None)
+    try:
+        old = win32.SelectObject(dc, hbitmap)
+        drew = user32.PrintWindow(hwnd, dc, 3)
+        win32.SelectObject(dc, old)
+        raw = ctypes.string_at(bits, width * height * 4) if drew else b""
+    finally:
+        win32.DeleteDC(dc)
+        win32.DeleteObject(hbitmap)
+    if not raw:
+        return None
+    stride = width * 4
+    return [(raw[i + 2], raw[i + 1], raw[i])                 # BGRA
+            for row in range(0, height, 4) for i in range(row * stride, row * stride + stride, 16)]
+
+
+def _drawn_share(pixels: list[tuple[int, int, int]]) -> float:
+    """The share of ``pixels`` that differ clearly from the most common colour, the page's background."""
+    counts = collections.Counter(pixels)
+    background = counts.most_common(1)[0][0]
+    far = sum(n for colour, n in counts.items() if sum(abs(a - b) for a, b in zip(colour, background)) > 60)
+    return far / len(pixels)
+
+
+@ui_only
+def test_a_minimized_dashboard_shows_its_page_again_when_it_is_opened(make_server: Any, settings: Settings, webui: Path,
+                                                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    """#39: opening the dashboard (tray, widget or strip) while it was minimized brought the window back black, and
+    only a second minimize and restore from its own taskbar button showed the page. It must be drawn again."""
+    from usage_monitor.ui import platform as ui_platform  # noqa: PLC0415
+    from usage_monitor.ui import win32  # noqa: PLC0415
+    if ui_platform.is_locked():
+        pytest.skip("the screen is locked: WebView2 draws nothing then, so the page cannot be checked")
+    (webui / "index.html").write_text(LOUD_PAGE, encoding="utf-8")
+    server, _ = make_server()
+    for key, value in REAL_PROFILE_ENV.items():  # the launcher's child inherits this environment
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(dashboard, "build_command", lambda port, **_kw: [
+        sys.executable, "-m", "usage_monitor.ui.dashboard", "--port", str(port)])
+    launcher = dashboard.DashboardLauncher(server, settings)
+
+    def drawn(hwnd: int) -> float:
+        pixels = None if win32.IsIconic(hwnd) else _client_pixels(hwnd)
+        return _drawn_share(pixels) if pixels else 0.0
+
+    def within(seconds: float, check: Callable[[], bool]) -> bool:
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            if check():
+                return True
+            time.sleep(0.25)
+        return check()
+
+    def page_up(hwnd: int, seconds: float) -> bool:
+        """The page is drawn within ``seconds``, and still drawn a second later. A lock skips the test: WebView2 draws
+        nothing while the screen is locked."""
+        up = within(seconds, lambda: drawn(hwnd) > DRAWN_SHARE)
+        if up:
+            time.sleep(1.0)
+            up = drawn(hwnd) > DRAWN_SHARE
+        if not up and ui_platform.is_locked():
+            pytest.skip("the screen was locked during the test: WebView2 draws nothing then")
+        return up
+
+    try:
+        assert launcher.open() is True
+        pid = launcher.pid
+        assert pid is not None
+        hwnd = None
+        deadline = time.monotonic() + 25
+        while time.monotonic() < deadline and hwnd is None and launcher.running:
+            time.sleep(0.5)
+            hwnd = dashboard.find_window_of(pid)
+        if not launcher.running and launcher.exit_code == dashboard.EXIT_BROWSER_FALLBACK:
+            pytest.skip("the dashboard fell back to the browser: pywebview or WebView2 is not available here")
+        assert hwnd is not None, f"no dashboard window (exit code {launcher.exit_code})"
+        # Always on top, so no other window can cover it: WebView2 also stops drawing a window that is covered, and
+        # a test process, unlike the monitor right after a click, may not bring a window to the front.
+        win32.SetWindowPos(hwnd, win32.HWND_TOPMOST, 0, 0, 0, 0, win32.SWP_NOMOVE | win32.SWP_NOSIZE | win32.SWP_NOACTIVATE)
+        assert page_up(hwnd, 30), f"the page never drew (share {drawn(hwnd):.4f})"
+
+        win32.PostMessageW(hwnd, dashboard.WM_SYSCOMMAND, 0xF020, 0)   # SC_MINIMIZE: the minimize button
+        assert within(5, lambda: bool(win32.IsIconic(hwnd))), "the window did not minimize"
+        time.sleep(5.0)              # minimized as long as in the repro that showed the black window (#39)
+
+        assert dashboard.focus_window(pid) is True                       # what every "open the dashboard" does
+        assert within(5, lambda: not win32.IsIconic(hwnd)), "the window was not restored"
+        time.sleep(1.0)              # a frame kept from before the minimize must not pass for a drawn page
+        assert page_up(hwnd, 6), f"the window came back without its page (share {drawn(hwnd):.4f})"
+        assert launcher.pid == pid
     finally:
         launcher.close()
     assert launcher.running is False

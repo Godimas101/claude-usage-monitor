@@ -76,13 +76,19 @@ def test_a_limit_with_no_reset_time_holds_with_no_resume_time():
     assert verdict["state"] == guard.HOLDING and verdict["resume_at"] is None
 
 
-def test_an_episode_is_the_limits_over_their_caps_and_their_windows():
+def test_an_episode_is_the_limits_over_their_caps_their_windows_and_the_caps():
     first = guard.episode(guard.evaluate(reading(96.0, 90.0), ARMED_POLICY, NOW))
     same = guard.episode(guard.evaluate(reading(97.0, 91.0), ARMED_POLICY, NOW))
     new_window = guard.episode(guard.evaluate(
         reading(96.0, 90.0, session_resets=NOW + timedelta(hours=7)), ARMED_POLICY, NOW))
+    new_cap = guard.episode(guard.evaluate(reading(97.0, 91.0), {**ARMED_POLICY, "session_cap": 96}, NOW))
     assert first == same and first != new_window
+    assert first != new_cap                     # #40: a hold at a changed cap is told again
     assert guard.episode(guard.evaluate(reading(), ARMED_POLICY, NOW)) == ""
+    # A cap reads the same whichever number type it arrives as, so readers that load it differently agree.
+    as_float = {**ARMED_POLICY, "session_cap": float(ARMED_POLICY["session_cap"]),
+                "weekly_cap": float(ARMED_POLICY["weekly_cap"])}
+    assert guard.episode(guard.evaluate(reading(96.0, 90.0), as_float, NOW)) == first
 
 
 def test_the_policy_defaults_come_from_settings():

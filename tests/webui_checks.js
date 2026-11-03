@@ -720,7 +720,7 @@ out.guard = {
     unreadable: setupFor(setupWith({ errors: ["The Claude Code settings file is not valid JSON, so setup left it alone."], hooks: { state: "unknown", installed: 0, total: 3, events: {} } })),
     installing: setupFor(SETUP_OK, null, "install"),
     removing: setupFor(SETUP_OK, null, "remove"),
-    installed_ok: setupFor(SETUP_OK, done({ changed: ["Added the SessionStart hook.", "Registered the claude-usage MCP tool."], backup: "C:\\Users\\t\\.claude\\settings.json.cum-backup-20261028-180509", warnings: ["The VS Code extension has its own Claude Code version; it also needs 2.1.139 or newer."] })),
+    installed_ok: setupFor(SETUP_OK, done({ changed: ["Added the SessionStart hook.", "Registered the claude-usage MCP tool."], backup: "C:\\Users\\t\\.claude\\settings.json.cum-backup-20261028-180509", warnings: ["This card checks only the claude command. Claude Code in VS Code has its own version: in VS Code, check under Extensions that it is 2.1.139 or newer."] })),
     nothing: setupFor(SETUP_OK, done({ unchanged: ["The three hooks were already in place."] })),
     removed_ok: setupFor(SETUP_OK, done({ action: "remove", changed: ["Removed the PostToolUse hook."], backup: "C:\\b" })),
     refused: setupFor(SETUP_OK, done({ ok: false, errors: ["Claude Code 2.1.94 is older than 2.1.139, which hooks need, so setup changed nothing. Update it with: claude update"] })),

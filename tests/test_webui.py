@@ -1559,7 +1559,7 @@ def test_a_click_shows_what_changed_the_backup_the_warnings_and_the_errors_each_
     done = setup["installed_ok"]
     assert '<div class="nm-callout" role="status"><b>Installed.</b> Added the SessionStart hook. Registered the claude-usage MCP tool.<br>' in done
     assert 'Backup: <span class="nm-path">C:\\Users\\t\\.claude\\settings.json.cum-backup-20261028-180509</span>' in done
-    assert '<div class="nm-callout is-warn" role="note">The VS Code extension has its own Claude Code version; it also needs 2.1.139 or newer.</div>' in done
+    assert '<div class="nm-callout is-warn" role="note">This card checks only the claude command. Claude Code in VS Code has its own version: in VS Code, check under Extensions that it is 2.1.139 or newer.</div>' in done
     assert "<b>Removed.</b> Removed the PostToolUse hook." in setup["removed_ok"]
     assert "<b>Nothing to change.</b> The three hooks were already in place." in setup["nothing"]
     refused = setup["refused"]

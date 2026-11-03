@@ -53,7 +53,8 @@ CLAUDE_COMMAND = "claude"
 CLAUDE_TIMEOUT_S = 20.0
 CONFIG_ENV = "CLAUDE_CONFIG_DIR"   # Claude Code's own override of its config folder
 GATE_FLAG = "--gate"
-VSCODE_WARNING = "The VS Code extension has its own Claude Code version; it also needs 2.1.139 or newer."
+VSCODE_WARNING = ("This card checks only the claude command. Claude Code in VS Code has its own version: "
+                  f"in VS Code, check under Extensions that it is {MIN_CLAUDE_TEXT} or newer.")  # #38: not a check
 NOT_INSTALLED_REASON = "One-click setup works in the installed app. This copy runs from source."
 NO_CLAUDE_REASON = ("Claude Code was not found on this PC: there is no claude command on the PATH. The copy inside "
                     "the VS Code extension is not on it; install Claude Code itself (see the README).")

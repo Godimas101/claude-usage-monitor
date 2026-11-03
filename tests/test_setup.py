@@ -188,6 +188,14 @@ def test_a_fresh_install_writes_the_three_hooks_and_registers_the_tool(tmp_path:
     assert rig.claude.tool == (EXE, ["--mcp"])
 
 
+def test_the_vs_code_note_says_what_the_card_does_not_check() -> None:
+    """#38: the note read as a detected problem ("it also needs ...") whatever the extension's version. It says that
+    the card checks only the claude command, and how to check the extension."""
+    assert setup.VSCODE_WARNING.startswith("This card checks only the claude command.")
+    assert "under Extensions" in setup.VSCODE_WARNING and f"{setup.MIN_CLAUDE_TEXT} or newer" in setup.VSCODE_WARNING
+    assert "also needs" not in setup.VSCODE_WARNING
+
+
 def test_the_file_is_utf8_json_with_two_space_indent_and_a_trailing_newline(tmp_path: Path) -> None:
     rig = make_rig(tmp_path)
     rig.write({"env": {"NOTE": "naïve ✓"}})

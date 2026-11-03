@@ -457,6 +457,22 @@ def test_a_window_that_resets_while_another_limit_holds_is_not_a_new_episode(fol
     assert told(folder) == ["s1"]                            # the card still counts s1 as told
 
 
+def test_a_hold_at_a_changed_cap_in_the_same_window_is_told_again(folder):
+    """#40: the guard held at a low cap, the cap went back up, and the same window then reached the new cap. The
+    sessions and agents told of the first hold kept working after it, so they are told of the second one."""
+    save(folder, guarded(document(session=45.0, weekly=20.0), session_cap=40))
+    assert "session 45% (cap 40%)" in context(hook(folder, TOOL))
+    assert "wind-down point" in context(hook(folder, {**TOOL, "agent_id": "a1"}))
+    assert hook(folder, {**TOOL, "session_id": "s2"}) is not None
+    save(folder, guarded(document(session=45.0, weekly=20.0), session_cap=95))   # the cap went back up: no hold
+    assert hook(folder, TOOL) is None and told(folder) == []
+    save(folder, guarded(document(session=96.0, weekly=20.0), session_cap=95))   # the same window reaches it
+    assert "session 96% (cap 95%)" in context(hook(folder, TOOL))
+    assert "wind-down point" in context(hook(folder, {**TOOL, "agent_id": "a1"}))
+    assert hook(folder, TOOL) is None                        # once per episode, as before
+    assert told(folder) == ["s1"]                            # the card lists who heard this hold, not the first one
+
+
 def test_a_subagent_does_not_use_up_the_threshold_line(folder):
     save(folder, document(weekly=81.0))
     assert hook(folder, {**TOOL, "agent_id": "a1"}) is None  # a subagent hears no summary line...

@@ -36,7 +36,7 @@ A free Windows tray utility that keeps your **Claude Code plan usage** where you
 | 🗓️ | **History that lasts:** a year of use as a heatmap, streaks, an all-time token odometer and CSV or JSON export. It outlives Claude Code's transcript cleanup. |
 | 🔔 | **Alerts** as Windows notifications at the levels you choose (80, 90 and 100% by default), when a limit resets, and when usage credits start being used. Quiet hours included. |
 | 🎨 | **Three themes**, switched live: Nostromo, Night City and Gates, each with motion of its own. |
-| 🤖 | **Claude can check it too:** an MCP tool, `get_plan_usage`, and optional Claude Code hooks let a long run see how much of the plan is left. The usage guard has it wind down when usage reaches a cap you set, and wakes it when the limits allow work again. [Set it up](docs/AGENT_HOOK.md). |
+| 🤖 | **Claude can check it too:** an MCP tool, `get_plan_usage`, and optional Claude Code hooks let a long run see how much of the plan is left. The usage guard tells working sessions when usage reaches a cap you set, so they can wrap up, and wakes the ones that wait when the limits allow work again. It pauses nothing. [Set it up](docs/AGENT_HOOK.md). |
 | 🔒 | **All local.** No account, no telemetry, no server of ours. The only network calls are listed [below](#-privacy). |
 | 😴 | **Polite:** it pauses while your screen is locked (unless a Claude session asked for the usage in the last hour), hides the strip while a fullscreen app runs, and only redraws when something changes. **Reduce motion** stops every animation, and the dashboard and the widgets' pointer response also follow Windows' own animation setting. |
 

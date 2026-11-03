@@ -107,9 +107,12 @@ def evaluate(doc: Mapping[str, Any], policy: Mapping[str, Any], now: datetime) -
 
 
 def episode(evaluation: Mapping[str, Any]) -> str:
-    """A key for one holding episode: the limits over their caps and their windows. A session is
-    told once per episode; a new window over a cap is a new episode."""
-    return "|".join(sorted(f"{item['name']}@{item['resets_at']}" for item in evaluation.get("over") or []))
+    """A key for one holding episode: the limits over their caps, their windows and the caps. A session
+    is told once per episode. A new window over a cap is a new episode, and so is a changed cap: a hold
+    that ended because a cap was raised, and that starts again at the new cap in the same window, is told
+    again (#40). Switching the guard off and on again with the same caps is not a new episode."""
+    return "|".join(sorted(f"{item['name']}@{item['resets_at']} cap {item['cap']:g}"
+                           for item in evaluation.get("over") or []))
 
 
 def _watched(doc: Mapping[str, Any], policy: Mapping[str, Any]) -> Iterator[tuple[str, str, Any, Any]]:

@@ -98,6 +98,8 @@ _LOOPBACK_BASE = re.compile(r"http://127\.0\.0\.1:[0-9]{1,5}")
 _EXPORT_FILTERS = {"csv": "CSV file (*.csv)", "json": "JSON file (*.json)"}
 
 SW_RESTORE = 9
+WM_SYSCOMMAND = 0x0112
+SC_RESTORE = 0xF120
 DWMWA_USE_IMMERSIVE_DARK_MODE = 20
 DWMWA_BORDER_COLOR = 34
 DWMWA_CAPTION_COLOR = 35
@@ -129,6 +131,10 @@ def _user32() -> Any:
         user32.GetWindowTextW.restype = ctypes.c_int
         user32.IsIconic.argtypes = [wintypes.HWND]
         user32.IsIconic.restype = wintypes.BOOL
+        user32.IsWindowEnabled.argtypes = [wintypes.HWND]
+        user32.IsWindowEnabled.restype = wintypes.BOOL
+        user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        user32.PostMessageW.restype = wintypes.BOOL
         user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
         user32.ShowWindow.restype = wintypes.BOOL
         user32.SetForegroundWindow.argtypes = [wintypes.HWND]
@@ -192,7 +198,17 @@ _find_window_of = find_window_of     # the name this function had while it was p
 
 
 def focus_window(pid: int) -> bool:
-    """Bring the dashboard window of process ``pid`` to the front. False when no such window is found."""
+    """Bring the dashboard window of process ``pid`` to the front. False when no such window is found.
+
+    A minimized window is restored with the window menu's Restore (WM_SYSCOMMAND SC_RESTORE), posted to the
+    window, not with ShowWindow(SW_RESTORE) from this process. After ShowWindow the window and WebView2's own
+    windows come back at full size, but WebView2 does not draw the page again, so the window stays black
+    (#39). The posted Restore is handled by the window's own thread, as when the user restores it.
+
+    A disabled window ignores that Restore: the dashboard is disabled while it owns a modal dialog, such as
+    the Save As of an export. Then, or when the message cannot be posted, ShowWindow restores it as before,
+    so the window and its dialog still come back. SetForegroundWindow follows either way.
+    """
     if sys.platform != "win32":
         return False
     hwnd = find_window_of(pid)
@@ -200,7 +216,8 @@ def focus_window(pid: int) -> bool:
         return False
     user32 = _user32()
     if user32.IsIconic(hwnd):
-        user32.ShowWindow(hwnd, SW_RESTORE)
+        if not user32.IsWindowEnabled(hwnd) or not user32.PostMessageW(hwnd, WM_SYSCOMMAND, SC_RESTORE, 0):
+            user32.ShowWindow(hwnd, SW_RESTORE)
     user32.SetForegroundWindow(hwnd)
     return True
 
