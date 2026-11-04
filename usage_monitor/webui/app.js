@@ -3101,8 +3101,6 @@
     if (S.formKey !== "settings") {
       S.formKey = "settings";
       S.sig = "";
-      var plan = planFromState();
-      var detected = plan.price !== null ? plan.name + ", " + fmtPlanPrice(plan.price) + " a month" : "no price known";
       main.innerHTML = pageHead("settings") +
         '<div class="nm-pgrid">' +
         '<section class="nm-card wide" aria-label="Theme"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Theme</h2><span class="nm-meta-t" id="set-theme-meta"></span></div>' +
@@ -3123,7 +3121,7 @@
         '<label class="nm-row-set"><span><span class="t">Billing day</span><span class="d">The day of the month your billing cycle starts. Blank uses the calendar month.</span></span>' +
         '<select class="nm-select" data-key="billing_day" aria-describedby="err-billing_day"><option value="">CALENDAR MONTH</option>' +
         Array.from({ length: 31 }, function (_, i) { return '<option value="' + (i + 1) + '">DAY ' + (i + 1) + "</option>"; }).join("") + "</select></label>" + errLine("billing_day") +
-        '<label class="nm-row-set"><span><span class="t">Plan price override</span><span class="d" id="plan-hint">USD a month. Blank uses the detected price (' + esc(detected) + ").</span></span>" +
+        '<label class="nm-row-set"><span><span class="t">Plan price override</span><span class="d" id="plan-hint">' + esc(planHintText()) + "</span></span>" +
         '<input class="nm-input" type="number" data-key="plan_price_override" min="0.01" max="10000" step="0.01" placeholder="AUTO" inputmode="decimal" aria-describedby="plan-hint err-plan_price_override"></label>' + errLine("plan_price_override") +
         '</div><div class="nm-actions"><button class="nm-btn" type="button" data-action="refresh">Refresh now</button></div></div></section>' +
         alertsCard() +
@@ -3184,10 +3182,27 @@
         el.value = value === null || value === undefined ? "" : String(value);
       }
     });
+    syncPlanHint(main);
     syncThemePicker(main);
     syncAlerts(main);
     syncGuard(main);
     syncUpdate(main);
+  }
+
+  /* The hint beside the override names the detected price, never the override: that is what a blank field goes back to. */
+  function planHintText() {
+    var plan = planFromState();
+    var detected = plan.price !== null ? plan.name + ", " + fmtPlanPrice(plan.price) + " a month" : "no price known";
+    return "USD a month. Blank uses the detected price (" + detected + ").";
+  }
+
+  /* The page can be drawn before the first state, and a first sign-in or a new plan changes the plan under a page that is open. */
+  function syncPlanHint(main) {
+    var hint = $("#plan-hint", main);
+    var text = planHintText();
+    if (hint && hint.textContent !== text) {
+      hint.textContent = text;
+    }
   }
 
   function alertLevels() {
@@ -4974,7 +4989,7 @@
       settingsPage: settingsPage, settingsChange: settingsChange, labelFor: labelFor, guardCard: guardCard, guardView: guardView,
       guardLiveHtml: guardLiveHtml, guardSetupHtml: guardSetupHtml, guardResultHtml: guardResultHtml, syncGuard: syncGuard,
       pollGuard: pollGuard, guardTick: guardTick, statusBanner: statusBanner, limitsOnly: limitsOnly, pageStats: pageStats,
-      checkAgain: checkAgain, syncCheck: syncCheck, copyCommand: copyCommand, helpAction: helpAction
+      checkAgain: checkAgain, syncCheck: syncCheck, copyCommand: copyCommand, helpAction: helpAction, renderPage: renderPage, poll: poll
     };
     return;
   }
