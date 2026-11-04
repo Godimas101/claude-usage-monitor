@@ -4,7 +4,7 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
-## [2.2.0] — 2026-10-30
+## [2.2.0] — 2026-11-03
 
 Claude Usage Monitor 2.2 adds a usage guard: when your plan reaches a cap you set, the Claude Code sessions that are working are told to wind down, and sessions that wait wake up again once there is room. It also helps people who use Claude only on the web or in the app, keeps the taskbar strip in sight and gives Nostromo's colours new names.
 
