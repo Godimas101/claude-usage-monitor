@@ -1058,4 +1058,61 @@ async function colourSaves() {
   reset();
 }
 
-failures().then(guardPolling).then(guardActions).then(signInActions).then(colourSaves).then(() => console.log(JSON.stringify(out)), (error) => { console.error(error && error.stack ? error.stack : String(error)); process.exit(1); });
+// the plan price hint: loaded on #settings, the page is drawn before the first state, and a first sign-in or a new plan changes the plan
+// under a page that is open. These are init()'s two steps and then polls, on a fake page that keeps the hint's text as a browser does:
+// parsed out of what the page drew, and changed after that only through the hint's own element.
+async function planHint() {
+  const saved = { hash: box.location.hash, main: elements.main, fetch: box.fetch, clear: box.clearTimeout };
+  const main = element("main");
+  const hint = element("plan-hint");
+  const parsed = (html) => html.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&");
+  let drawn = "";
+  let text = null;
+  let writes = 0;
+  let asMarkup = 0;
+  Object.defineProperty(main, "innerHTML", {
+    get: () => drawn,
+    set: (html) => { drawn = html; const found = /id="plan-hint">([^<]*)</.exec(html); text = found ? parsed(found[1]) : null; },
+  });
+  Object.defineProperty(hint, "textContent", { get: () => text, set: (value) => { writes += 1; text = value; } });
+  Object.defineProperty(hint, "innerHTML", { get: () => "", set: () => { asMarkup += 1; } });
+  main.querySelector = (selector) => (selector === "#plan-hint" ? hint : null);
+  elements.main = main;
+  box.location.hash = "#settings";
+  box.clearTimeout = () => {};
+  let answerWith = null;
+  box.fetch = (url) => (String(url).indexOf("/api/state") >= 0 ? answer(200, answerWith)() : answer(404, { error: "not in this test" })());
+  const stateWith = (plan, settings) => ({ state: { status: "live", plan }, settings: settings || {}, model_names: {} });
+  const planOf = (name, price) => ({ name, monthly_price_usd: price });
+  const seen = () => ({ text, writes });
+  const arrives = async (state) => { answerWith = state; api.poll(true); await settle(); return seen(); };
+
+  reset();
+  S.page = null;
+  api.renderPage();
+  out.planHint = { before: seen() };
+  out.planHint.firstState = await arrives(stateWith(planOf("Max 5x", 100)));
+  out.planHint.sameState = await arrives(stateWith(planOf("Max 5x", 100)));
+  out.planHint.override = await arrives(stateWith(planOf("Max 5x", 100), { plan_price_override: 50 }));   // it names the detected price
+  out.planHint.newPlan = await arrives(stateWith(planOf("Max 20x", 200)));
+  out.planHint.noPrice = await arrives(stateWith(planOf("Unknown plan", null)));
+  out.planHint.signedIn = await arrives(stateWith(planOf("Pro", 20)));
+  out.planHint.noPlan = await arrives(stateWith(undefined));
+  out.planHint.hostile = await arrives(stateWith(planOf(hostile, 20)));
+  S.page = null;                                                                 // what leaving Settings and coming back does
+  api.renderPage();
+  out.planHint.drawnAgain = seen();
+  out.planHint.hostileName = hostile;
+  out.planHint.drawnEscaped = drawn.indexOf(api.esc(hostile)) >= 0 && drawn.indexOf(hostile) < 0;
+  out.planHint.asMarkup = asMarkup;
+
+  box.location.hash = saved.hash;
+  elements.main = saved.main;
+  box.fetch = saved.fetch;
+  box.clearTimeout = saved.clear;
+  S.page = null;
+  S.formKey = null;
+  reset();
+}
+
+failures().then(guardPolling).then(guardActions).then(signInActions).then(colourSaves).then(planHint).then(() => console.log(JSON.stringify(out)), (error) => { console.error(error && error.stack ? error.stack : String(error)); process.exit(1); });

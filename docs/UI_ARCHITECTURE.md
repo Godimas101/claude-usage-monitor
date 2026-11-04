@@ -722,7 +722,9 @@ default browser instead, and the exit code says so (below).
   `Intl.NumberFormat` with the ISO code the usage API reports; USD where it reports none). API-equivalent cost
   stays dollars. `/api/state.plan` carries the detected plan and price only: `plan_price_override` is a setting,
   applied where a price is used (the reports, and `effectivePlanPrice()` in the page), so setting or clearing it
-  never rewrites state.
+  never rewrites state. The hint beside the override names the detected plan and price, and `syncPlanHint` keeps it
+  to the latest state: loaded on `#settings` the page is drawn before the first state, and a first sign-in or a new
+  plan changes the plan under a page that is open. It writes only when the words change.
 - **The plan multiple** is a row of cells of one plan-month each. Past 24 months a cell stands for N months
   (`ratioScale`) and its caption and aria-label say so ("1 cell = 5 months of Pro plan").
 - **Time remaining.** Every limit card carries `.nm-remain` (`--r` the share of the window left, `.l` the label,

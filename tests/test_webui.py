@@ -821,6 +821,29 @@ def test_the_price_override_wins_where_a_price_is_used_and_the_detected_price_st
 
 
 @ui_only
+def test_the_plan_price_hint_says_what_the_latest_state_says(checks: dict[str, Any]) -> None:
+    """The hint was built once, with the page. Loaded on #settings that is before the first state, and a first sign-in or a new
+    plan changes the plan under a page that is open, so it kept the text of that moment until Settings was left (#46)."""
+    hint = checks["planHint"]
+
+    def said(detected: str, writes: int) -> dict[str, Any]:
+        return {"text": f"USD a month. Blank uses the detected price ({detected}).", "writes": writes}
+
+    assert hint["before"] == said("no price known", 0)
+    assert hint["firstState"] == said("Max 5x, $100 a month", 1)
+    assert hint["sameState"] == said("Max 5x, $100 a month", 1)         # a poll that changes nothing writes nothing
+    assert hint["override"] == said("Max 5x, $100 a month", 1)          # the override is not the detected price
+    assert hint["newPlan"] == said("Max 20x, $200 a month", 2)
+    assert hint["noPrice"] == said("no price known", 3)
+    assert hint["signedIn"] == said("Pro, $20 a month", 4)
+    assert hint["noPlan"] == said("no price known", 5)
+    hostile = hint["hostileName"]
+    assert "<img" in hostile and hint["hostile"] == said(f"{hostile}, $20 a month", 6)    # a plan name is text, on update
+    assert hint["drawnAgain"] == said(f"{hostile}, $20 a month", 6)     # the page draws the same words, so nothing is written over them
+    assert hint["drawnEscaped"] is True and hint["asMarkup"] == 0       # and on first paint
+
+
+@ui_only
 def test_the_time_left_in_a_window_is_a_bar_the_themes_may_draw(checks: dict[str, Any]) -> None:
     """Edgerun's approved limit card has a TIME REMAINING bar where the other themes have the RESETS and IN facts."""
     def bar(html: str) -> tuple[dict[str, str | None], list[str]]:
