@@ -64,7 +64,7 @@ Amber P3 phosphor on CRT black: segmented pip bars, chamfered panels, scanlines 
 <p align="center"><img src="docs/images/dashboard-nostromo-cost.png" width="880" alt="Nostromo, Cost and value page" /></p>
 <p align="center"><img src="docs/images/dashboard-nostromo-efficiency.png" width="880" alt="Nostromo, Efficiency page" /></p>
 <p align="center"><img src="docs/images/dashboard-nostromo-history.png" width="880" alt="Nostromo, History page" /></p>
-<p align="center"><img src="docs/images/dashboard-nostromo-settings.png" width="880" alt="Nostromo, Settings page" /></p>
+<p align="center"><img src="docs/images/dashboard-nostromo-settings.png" width="880" alt="Nostromo, Settings page: the Usage guard card" /></p>
 
 </details>
 
@@ -88,7 +88,7 @@ Chamfered frames, red line art and cyan RAM cells, numbers that decode and lock 
 <p align="center"><img src="docs/images/dashboard-night-city-cost.png" width="880" alt="Night City, Cost and value page" /></p>
 <p align="center"><img src="docs/images/dashboard-night-city-efficiency.png" width="880" alt="Night City, Efficiency page" /></p>
 <p align="center"><img src="docs/images/dashboard-night-city-history.png" width="880" alt="Night City, History page" /></p>
-<p align="center"><img src="docs/images/dashboard-night-city-settings.png" width="880" alt="Night City, Settings page" /></p>
+<p align="center"><img src="docs/images/dashboard-night-city-settings.png" width="880" alt="Night City, Settings page: the Usage guard card" /></p>
 
 </details>
 
@@ -114,7 +114,7 @@ Native Windows 11 Fluent surfaces: rounded cards, a thin time rail above every u
 <p align="center"><img src="docs/images/dashboard-gates-cost.png" width="880" alt="Gates, Cost and value page" /></p>
 <p align="center"><img src="docs/images/dashboard-gates-efficiency.png" width="880" alt="Gates, Efficiency page" /></p>
 <p align="center"><img src="docs/images/dashboard-gates-history.png" width="880" alt="Gates, History page" /></p>
-<p align="center"><img src="docs/images/dashboard-gates-settings.png" width="880" alt="Gates, Settings page" /></p>
+<p align="center"><img src="docs/images/dashboard-gates-settings.png" width="880" alt="Gates, Settings page: the Usage guard card" /></p>
 
 </details>
 
