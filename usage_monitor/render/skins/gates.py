@@ -155,6 +155,18 @@ SIZE_STRIP_K = 11.0
 SIZE_STRIP_V = 11.0
 SIZE_ICON = 14.0
 ICON_GLYPH = "\ue916"           # Segoe Fluent Icons: timer
+SHIELD_GLYPH = "\uea18"         # Segoe Fluent Icons: shield, the usage guard's mark
+SIZE_GUARD_ICON = 13.0
+GUARD_CAPSULE_W = 24            # the guard's mark in the header: the holding capsule (shield in a tinted capsule) ...
+GUARD_ARMED_W = 14              # ... and the armed one (the bare shield), left of the status pill
+GUARD_PILL_GAP = 6
+BADGE_H = 15                    # the "Cap 95%" badge after the name of a row the guard holds on
+BADGE_PAD = 6
+BADGE_GAP = 8
+BAR_PAD = 8                     # the hover card's guard bar: padding, icon and text
+BAR_ICON_W = 14
+BAR_TEXT_GAP = 8
+BAR_GAP = 8
 
 # Text coverage gamma (see _text_gamma)
 GAMMA_LIGHT_MIN = 0.43
@@ -627,6 +639,7 @@ class Palette:
     time_track: Color
     lamp_halo: Color
     pill_ok: Color
+    pill_alert: Color           # the usage guard's holding capsule and cap badge: the alert colour at the pill's alpha
     pill_track: Color
     shadow_main: Color
     shadow_tight: Color
@@ -687,6 +700,7 @@ class Palette:
             time_track=pick(modes, "time_track", with_alpha(text, 0x14 if dark else 0x12)),
             lamp_halo=pick(derived, "lamp_halo", with_alpha(ok, 0x3D)),
             pill_ok=pick(derived, "pill_ok_bg", with_alpha(ok, round(255 * float(pill_alpha)))),
+            pill_alert=pick(derived, "pill_alert_bg", with_alpha(alert, round(255 * float(pill_alpha)))),
             pill_track=pick(derived, "pill_track_bg", track),
             shadow_main=pick(modes, "shadow_main", (0, 0, 0, 0x57 if dark else 0x24)),
             shadow_tight=pick(modes, "shadow_tight", (0, 0, 0, 0x66 if dark else 0x1F)),
@@ -730,7 +744,7 @@ _STATUS_COPY: dict[ApiStatus, tuple[str, str, str]] = {
     ApiStatus.OFFLINE: ("", "No connection. Retrying every minute.", "text_3"),
     ApiStatus.PAUSED: ("", "Paused. Resume to keep usage live.", "text_3"),
     ApiStatus.RATE_LIMITED: ("Rate limited.", " Showing the last reading.", "warn"),
-    ApiStatus.NO_CREDENTIALS: ("No sign-in found.", " Open Claude Code to sign in.", "warn"),
+    ApiStatus.NO_CREDENTIALS: ("No sign-in found.", " Open the dashboard for help.", "warn"),
     ApiStatus.LOADING: ("", "Fetching your usage.", "text_3"),
 }
 
@@ -823,11 +837,29 @@ def _driver(model: WidgetModel) -> Row | None:
     return max(rows, key=lambda row: (_RANK.get(row.severity, 0), -rows.index(row)))
 
 
+def _hold_runs(model: WidgetModel) -> list[tuple[str, int, str]]:
+    """The footer while the usage guard holds: "Guard holding · Resumes 6:26 PM (in 2h 14m)", the lead in the alert
+    colour. Empty while the guard is off or only armed."""
+    guard = model.guard
+    if guard is None or not guard.holding:
+        return []
+    runs = [("Guard holding", 600, "alert")]
+    if guard.resume_clock:
+        countdown = (guard.resume_in or "").lower()
+        runs.append((f" · Resumes {guard.resume_clock} (in {countdown})", 400, "text_3"))
+    return runs
+
+
 def _footer_runs(model: WidgetModel) -> list[tuple[str, int, str]]:
-    """The footer as (text, weight, colour role) runs. LIVE reads the pace of the driving row."""
+    """The footer as (text, weight, colour role) runs. LIVE reads the pace of the driving row, or the guard while it
+    holds: the pace of a limit that is at its cap is not news. A state that needs the user (the sign-in, the
+    connection) keeps its own words."""
     if model.status is not ApiStatus.LIVE:
         lead, rest, role = _STATUS_COPY[model.status]
         return ([(lead, 600, role)] if lead else []) + [(rest, 400, "text_3")]
+    holding = _hold_runs(model)
+    if holding:
+        return holding
     row = _driver(model)
     if row is None:
         return [("Waiting for your first reading.", 400, "text_3")]
@@ -869,10 +901,18 @@ def _role(pal: Palette, name: str) -> Color:
     return getattr(pal, name)
 
 
+def _over_cap(model: WidgetModel, row: Row) -> bool:
+    """Whether the usage guard (#27) holds because of this row, and the card is live to say so (a dimmed card is
+    drawn flat): the row is at or past the cap the guard watches for it."""
+    guard = model.guard
+    return (guard is not None and guard.holding and not _dim(model) and row.key in guard.over_keys
+            and row.percent is not None)
+
+
 def _usage_color(pal: Palette, model: WidgetModel, row: Row) -> Color:
     if _dim(model):
         return pal.stale
-    if row.severity == SEVERITY_CRITICAL:
+    if row.severity == SEVERITY_CRITICAL or _over_cap(model, row):
         return pal.usage_alert
     if row.severity == SEVERITY_WARNING:
         return pal.usage_warn
@@ -882,11 +922,20 @@ def _usage_color(pal: Palette, model: WidgetModel, row: Row) -> Color:
 def _value_color(pal: Palette, model: WidgetModel, row: Row) -> Color:
     if _dim(model):
         return _fade(pal.text, DIM_VALUE)
-    if row.severity == SEVERITY_CRITICAL:
+    if row.severity == SEVERITY_CRITICAL or _over_cap(model, row):
         return pal.alert
     if row.severity == SEVERITY_WARNING:
         return pal.warn
     return pal.text
+
+
+def _number(value: float) -> str:
+    """A cap as people write it: 95, not 95.0."""
+    return str(int(value)) if float(value).is_integer() else f"{value:g}"
+
+
+def _holding(model: WidgetModel) -> bool:
+    return model.guard is not None and model.guard.holding
 
 
 def _lamp(ink: Ink, pal: Palette, kind: str, cx: float, cy: float) -> None:
@@ -912,6 +961,48 @@ def _timer_glyph(ink: Ink, color: Color, cx: float, cy: float) -> None:
     ink.disc(cx, cy + 1.2, 5.6, color, ring=1.3)
     ink.rect(cx - 2.0, cy - 6.2, cx + 2.0, cy - 4.9, color)
     ink.rect(cx - 0.65, cy - 2.2, cx + 0.65, cy + 1.6, color)
+
+
+def _shield_shape(ink: Ink, cx: float, cy: float, height: float, color: Color) -> None:
+    """A filled shield ``height`` px tall (and 0.86 of that wide) centred on (cx, cy). The strip draws it, where the
+    icon font's thin outline does not read at 7 to 11 px, and the card uses it on a machine without the font."""
+    width = height * 0.86
+    left, top = cx - width / 2, cy - height / 2
+    shoulder, waist = top + 0.16 * height, top + 0.55 * height
+    ink.stamp(ink.polygon_layer([(left, shoulder), (cx, top), (left + width, shoulder), (left + width, waist),
+                                 (cx, top + height), (left, waist)]), color)
+
+
+def _guard_mark_width(model: WidgetModel) -> float:
+    """The room the usage guard's mark takes in the header: 0 while the guard is off, the bare shield while it is
+    armed and the shield in its capsule while it holds."""
+    if model.guard is None:
+        return 0.0
+    return GUARD_CAPSULE_W if model.guard.holding else GUARD_ARMED_W
+
+
+def _guard_mark(ink: Ink, pal: Palette, model: WidgetModel, left: float) -> None:
+    """The guard's mark in the header, its left edge at ``left``: while it holds, the shield in the alert colour on a
+    capsule tinted with it (the pill's own look); while it is armed, the bare shield in the dim tone."""
+    holding = _holding(model)
+    width = GUARD_CAPSULE_W if holding else GUARD_ARMED_W
+    if holding:
+        ink.rrect(left, HEAD_TOP, left + width, HEAD_TOP + PILL_H, PILL_H / 2, pal.pill_alert)
+    color = pal.alert if holding else pal.text_3
+    if ink.fonts.icons is not None:
+        icon = ink.face(Typeface(((400, ink.fonts.icons),), False), SIZE_GUARD_ICON, 400)
+        glyph_w = ink.advance(SHIELD_GLYPH, icon)
+        ink.put(SHIELD_GLYPH, left + width / 2 - glyph_w / 2, ink.baseline(HEAD_TOP, HEAD_H, icon), icon, color)
+    else:
+        _shield_shape(ink, left + width / 2, HEAD_MID, SIZE_GUARD_ICON - 1, color)
+
+
+def _strip_shield(ink: Ink, pal: Palette, plate_h: float) -> None:
+    """The guard holds: a small filled shield in the alert colour above the lamp, in the strip's right-hand column.
+    The strip has no room for the countdown or for an armed mark, so the hover card says both."""
+    lamp_top = plate_h / 2 - (LAMP_SIZE / 2 + LAMP_HALO)
+    height = max(7.0, min(11.0, lamp_top - 4))
+    _shield_shape(ink, STRIP_LAMP_X, lamp_top / 2, height, pal.alert)
 
 
 @functools.lru_cache(maxsize=12)
@@ -958,7 +1049,9 @@ def _header(ink: Ink, pal: Palette, model: WidgetModel, *, more: bool) -> None:
     age = _age_label(model)
     text = f"{model.status_text} · {age}" if age else model.status_text
     chrome = PILL_PAD_LEFT + LAMP_SIZE + PILL_GAP + PILL_PAD_RIGHT
-    if right - (chrome + ink.advance(text, pill)) < TITLE_X + title_w + TITLE_GAP:
+    guard_room = _guard_mark_width(model)
+    guard_room = guard_room + GUARD_PILL_GAP if guard_room else 0.0     # the usage guard's mark sits left of the pill
+    if right - (chrome + ink.advance(text, pill)) < TITLE_X + title_w + TITLE_GAP + guard_room:
         text = model.status_text                     # a long word leaves the age out before it collides
     width = chrome + ink.advance(text, pill)
     left = right - width
@@ -966,6 +1059,8 @@ def _header(ink: Ink, pal: Palette, model: WidgetModel, *, more: bool) -> None:
     ink.rrect(left, HEAD_TOP, right, HEAD_TOP + PILL_H, PILL_H / 2, tint)
     _lamp(ink, pal, _LAMP_KIND[model.status], left + PILL_PAD_LEFT + LAMP_SIZE / 2, HEAD_MID)
     ink.put(text, left + PILL_PAD_LEFT + LAMP_SIZE + PILL_GAP, ink.baseline(HEAD_TOP, HEAD_H, pill), pill, ink_color)
+    if guard_room:
+        _guard_mark(ink, pal, model, left - guard_room)
     if more:
         for x in MORE_X:
             ink.disc(x, HEAD_MID, MORE_DOT, pal.text_dim)
@@ -978,6 +1073,25 @@ def _fit(ink: Ink, text: str, face: Face, limit: float) -> str:
     while len(text) > 1 and ink.advance(text + "…", face) > limit:
         text = text[:-1]
     return text.rstrip() + "…"
+
+
+def _cap_badge(ink: Ink, pal: Palette, model: WidgetModel, row: Row, name_end: float, limit: float, top: float) -> None:
+    """"Cap 95%" in a capsule tinted with the alert colour, after the name of a row the usage guard holds on. It is
+    drawn only where it fits between the name and the value (``limit``): a long scoped name keeps its room, and the
+    value in the alert colour and the footer carry the state."""
+    guard = model.guard
+    cap = guard.caps.get(row.key) if guard is not None and _over_cap(model, row) else None
+    if cap is None:
+        return
+    face = ink.face(ink.fonts.body, SIZE_PILL, 600)
+    text = f"Cap {_number(cap)}%"
+    left = name_end + BADGE_GAP
+    width = BADGE_PAD + ink.advance(text, face) + BADGE_PAD
+    if left + width > limit:
+        return
+    top += (LINE_H - BADGE_H) / 2
+    ink.rrect(left, top, left + width, top + BADGE_H, BADGE_H / 2, pal.pill_alert)
+    ink.put(text, left + BADGE_PAD, ink.baseline(top, BADGE_H, face), face, pal.alert)
 
 
 def _row(ink: Ink, pal: Palette, model: WidgetModel, row: Row, top: float, *, exact: bool = False) -> None:
@@ -1001,9 +1115,12 @@ def _row(ink: Ink, pal: Palette, model: WidgetModel, row: Row, top: float, *, ex
         label = _fit(ink, label, label_face, room)
     label_w = ink.put(label, LEFT, ink.baseline(top, LINE_H, label_face), label_face,
                       pal.text_3 if dim else pal.text_dim)
+    name_end = LEFT + label_w
     if tag:
         ink.put(tag, LEFT + label_w + 6, ink.baseline(top, LINE_H, tag_face), tag_face, pal.text_3)
+        name_end += 6 + tag_w
     ink.put(value, RIGHT, ink.baseline(top, LINE_H, value_face), value_face, _value_color(pal, model, row), "right")
+    _cap_badge(ink, pal, model, row, name_end, RIGHT - value_w - 10, top)
 
     # time rail: the share of the window already gone, with an index tick at its end
     rail_top = top + RAIL_DY
@@ -1036,6 +1153,74 @@ def _footer(ink: Ink, pal: Palette, model: WidgetModel, top: float) -> None:
         face = faces[weight]
         text = _fit(ink, text, face, limit - (x - LEFT))
         x += ink.put(text, x, baseline, face, _role(pal, role))
+
+
+# ── Tooltip: the usage guard's bar ────────────────────────────────────────────
+
+def _guard_statement(model: WidgetModel) -> tuple[str, str] | None:
+    """(lead, rest) of the hover card's guard line, or None while the guard is off:
+    ("Guard armed:", "session 95%, weekly 90%") and
+    ("Guard holding:", "weekly 91% (cap 90%). Resumes Fri 7:12 PM (in 2d 3h).")."""
+    guard = model.guard
+    if guard is None:
+        return None
+    if not guard.holding:
+        caps = ", ".join(engine.glue(f"{label} {_number(cap)}%") for label, cap in guard.watched())
+        return "Guard armed:", caps
+    limits = []
+    for label, reading, cap in guard.over_limits():
+        text = engine.glue(label if reading is None else f"{label} {_percent_text(reading)}")
+        if cap is not None:
+            text += " " + engine.glue(f"(cap {_number(cap)}%)")
+        limits.append(text)
+    rest = ", ".join(limits)
+    rest = f"{rest}." if rest else ""
+    if guard.resume_clock:
+        clock = engine.glue(guard.resume_clock)
+        countdown = engine.glue("(in " + (guard.resume_in or "").lower() + ")")
+        rest = f"{rest} Resumes {clock} {countdown}."
+    return "Guard holding:", rest.strip()
+
+
+def _guard_bar_lines(ink: Ink, model: WidgetModel) -> tuple[str, list[str]]:
+    """(the lead, the rest of the guard's line broken to the bar's text width), measured on ``ink`` (any canvas of the
+    frame's scale). The first line leaves room for the lead. No lines while the guard is off; a guard with nothing to
+    list (no caps) is its lead alone, without the colon."""
+    statement = _guard_statement(model)
+    if statement is None:
+        return "", []
+    lead, rest = statement
+    if not rest:
+        return lead.removesuffix(":"), []
+    lead_w = ink.advance(lead, ink.face(ink.fonts.body, SIZE_FOOT, 600))
+    body = ink.face(ink.fonts.body, SIZE_FOOT, 400)
+    room = RIGHT - LEFT - 2 * BAR_PAD - BAR_ICON_W - BAR_TEXT_GAP
+    return lead, engine.wrap_words(rest, lambda line: ink.advance(line, body), room, room - lead_w - 4)
+
+
+def _guard_bar(ink: Ink, pal: Palette, model: WidgetModel, lead: str, lines: list[str], top: float,
+               height: float) -> None:
+    """An InfoBar under the rows: a rounded bar tinted with the alert colour while the guard holds (a neutral tint
+    while it is armed), the shield at its left, the lead in semibold and the rest of the sentence after it,
+    wrapping under it."""
+    holding = _holding(model)
+    ink.rrect(LEFT, top, RIGHT, top + height, STRIP_RADIUS, pal.pill_alert if holding else pal.time_track)
+    color = pal.alert if holding else pal.text_3
+    if ink.fonts.icons is not None:
+        icon = ink.face(Typeface(((400, ink.fonts.icons),), False), SIZE_ICON, 400)
+        glyph_w = ink.advance(SHIELD_GLYPH, icon)
+        ink.put(SHIELD_GLYPH, LEFT + BAR_PAD + BAR_ICON_W / 2 - glyph_w / 2,
+                ink.baseline(top + BAR_PAD, FOOT_LINE, icon), icon, color)
+    else:
+        _shield_shape(ink, LEFT + BAR_PAD + BAR_ICON_W / 2, top + BAR_PAD + FOOT_LINE / 2, SIZE_ICON - 2, color)
+    x = LEFT + BAR_PAD + BAR_ICON_W + BAR_TEXT_GAP
+    lead_face = ink.face(ink.fonts.body, SIZE_FOOT, 600)
+    body = ink.face(ink.fonts.body, SIZE_FOOT, 400)
+    lead_w = ink.put(lead, x, ink.baseline(top + BAR_PAD, FOOT_LINE, lead_face), lead_face,
+                     pal.alert if holding else pal.text)
+    for index, line in enumerate(lines):
+        line_top = top + BAR_PAD + FOOT_LINE * index
+        ink.put(line, x + lead_w + 4 if index == 0 else x, ink.baseline(line_top, FOOT_LINE, body), body, pal.text_dim)
 
 
 # ── Frames ────────────────────────────────────────────────────────────────────
@@ -1122,7 +1307,10 @@ class GatesSkin:
         rows = _rows(model)
         footer = model.status is not ApiStatus.LIVE
         rows_end = TIP_ROW0 + TIP_PITCH * len(rows) - (TIP_PITCH - TIP_ROW_H)
-        height = rows_end + TIP_BOTTOM + (TIP_FOOT_H if footer else 0)
+        lead_w, bar_lines = _guard_bar_lines(_card_canvas(1, scale, theme), model)      # measured at this scale
+        bar_h = 2 * BAR_PAD + FOOT_LINE * max(1, len(bar_lines)) if model.guard is not None else 0
+        bar_room = BAR_GAP + bar_h if bar_h else 0                  # the guard's bar and the gap above it
+        height = rows_end + TIP_BOTTOM + (TIP_FOOT_H if footer else 0) + bar_room
         ink = _card_canvas(height, scale, theme)
         _paint_card(ink, pal, False)
         _header(ink, pal, model, more=False)
@@ -1137,8 +1325,10 @@ class GatesSkin:
             text, role = _pace_text(row)
             if text and not _dim(model):
                 ink.put(text, RIGHT, base, lead, _role(pal, role), "right")
+        if bar_h:
+            _guard_bar(ink, pal, model, lead_w, bar_lines, rows_end + BAR_GAP, bar_h)
         if footer:
-            _footer(ink, pal, model, rows_end + 6)
+            _footer(ink, pal, model, rows_end + 6 + bar_room)
         return _compose(ink.finish(), scale, pal, False)
 
     def render_taskbar(self, model: WidgetModel, theme: Any, variant: Any, height_px: int, scale: float = 1.0,
@@ -1273,6 +1463,8 @@ def _render_strip(model: WidgetModel, pal: Palette, theme: Any, height_px: int, 
         color = _value_color(pal, model, row) if row is not None else _fade(pal.text, DIM_VALUE)
         ink.put(value, STRIP_VALUE_RIGHT, ink.baseline(top, STRIP_ROW_LINE, value_face), value_face, color, "right")
     _lamp(ink, pal, _LAMP_KIND[model.status], STRIP_LAMP_X, plate_h / 2)
+    if _holding(model):
+        _strip_shield(ink, pal, plate_h)
     plate = ink.finish()
     out = Image.new("RGBA", (plate.width, max(int(height_px), plate.height)), TRANSPARENT)
     out.alpha_composite(plate, (0, (out.height - plate.height) // 2))

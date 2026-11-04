@@ -142,14 +142,16 @@ def register_window_class(name: str, *, style: int = 0) -> None:
 
 
 def create_window(
-    class_name: str, ex_style: int, handler: WindowHandler, *, title: str = ""
+    class_name: str, ex_style: int, handler: WindowHandler, *, title: str = "",
+    style: int = win32.WS_POPUP, parent: int | None = None,
 ) -> int:
-    """Create a zero-sized WS_POPUP window of ``class_name`` and route its messages to ``handler``.
-    Must be called on the thread that will pump its messages."""
+    """Create a zero-sized window of ``class_name`` and route its messages to ``handler``: a WS_POPUP
+    unless ``style`` says otherwise, the child of ``parent`` when one is given. Must be called on the
+    thread that will pump its messages."""
     ctypes.set_last_error(0)
     hwnd = win32.CreateWindowExW(
-        ex_style, class_name, title, win32.WS_POPUP, 0, 0, 0, 0,
-        None, None, win32.GetModuleHandleW(None), None,
+        ex_style, class_name, title, style, 0, 0, 0, 0,
+        parent or None, None, win32.GetModuleHandleW(None), None,
     )
     if not hwnd:
         raise OSError(f"CreateWindowExW({class_name!r}) failed: {win32.error_text()}")

@@ -51,13 +51,18 @@ WizardStyle=modern
 MinVersion=10.0
 ArchitecturesAllowed=x64compatible
 ; The monitor holds this mutex for as long as it runs (usage_monitor/app.py MUTEX_NAME). Setup and Uninstall
-; stop with "please close it" while it exists. The dashboard window is a second process of the same exe that
-; holds no mutex: Restart Manager (CloseApplications) finds it through the files it has open and closes it,
-; and PrepareToInstall below asks it to close first. "force" also ends the windowless readers Claude Code
-; starts from the same exe (--mcp lives as long as a Claude session; --hook and --gate briefly): they hold
-; no state, and while one held the files a silent update stopped with exit code 5 and changed nothing. Nothing is restarted by Setup: a closed dashboard cannot
-; come back without the port and token of a monitor, and the monitor is relaunched by the Finish page (or
-; by the update helper after a silent update).
+; stop with "please close it" while it exists; both check it at startup only. The exe's other processes hold no
+; mutex: the dashboard window, and the windowless readers Claude Code starts from the same exe (--mcp lives as
+; long as a Claude session; --hook and --gate briefly; --wait until the usage guard lets its session go, which
+; can be days). They hold no state. PrepareToInstall asks the dashboard to close and then ends what is left of
+; them (EndOtherProcesses); Uninstall does the same before it deletes. Restart Manager (CloseApplications) cannot
+; be left to do that: it closes applications only once the installation has started, after
+; CurStepChanged(ssInstall), and RequireBundleFolderFree must find the folder free before then. Left to it, one
+; --mcp reader stopped every update with "in use" while Claude Code was open (2.1.0). "force" stays for anything
+; else Restart Manager finds. A --wait that is ended wakes its session without the "wait is over" line, and an
+; ended --mcp is started again when its session next uses the tool, or with /mcp (docs/AGENT_HOOK.md says both).
+; Nothing is restarted by Setup: a closed dashboard cannot come back without the port and token of a monitor, and
+; the monitor is relaunched by the Finish page (or by the update helper after a silent update).
 AppMutex=Global\ClaudeUsageMonitor
 CloseApplications=force
 CloseApplicationsFilter=*.exe,*.dll,*.pyd
@@ -105,6 +110,8 @@ const
   RunValue = 'ClaudeUsageMonitor';
   UninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#AppIdValue}_is1';
   DashboardTitle = 'Claude Usage Monitor';     // title of the dashboard window; the controller window's differs
+  // The exe's modes other than the monitor's (main.py parse_args), one space apart. The monitor is started with none.
+  OtherModes = '--dashboard --mcp --hook --gate --wait --status --print-version --dump-frames --smoke-test';
   WmClose = $0010;
   // The Microsoft Edge WebView2 Runtime (Evergreen) registers its version, "pv", under this client id.
   WebView2Client = 'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
@@ -272,10 +279,10 @@ begin
       mbInformation, MB_OK, IDOK);
 end;
 
-// ---- The running dashboard ----------------------------------------------------------------------
+// ---- The exe's other processes ------------------------------------------------------------------
 
 // The dashboard is a separate process of the monitor's exe and holds no mutex. If one is open, ask it to close
-// and give it a few seconds; Restart Manager (CloseApplications) deals with a window that stays.
+// and give it a few seconds; EndOtherProcesses ends a window that stays.
 procedure CloseDashboardWindow;
 var
   Wnd: HWND;
@@ -294,6 +301,107 @@ begin
     end;
   end;
   Log('The dashboard window is still open.');
+end;
+
+// The mode word on a command line of the exe, or '' when it has none (the monitor is started with no mode). Quotes
+// and tabs become spaces and the line is padded with spaces, so a mode matches only as a whole word, as in main.py.
+// (StringSplit would read better, but it needs Inno Setup 6.4 and this script promises 6.3.)
+function OtherMode(CommandLine: String): String;
+var
+  Modes, Mode: String;
+  At: Integer;
+begin
+  Result := '';
+  StringChangeEx(CommandLine, '"', ' ', True);
+  StringChangeEx(CommandLine, #9, ' ', True);
+  CommandLine := ' ' + CommandLine + ' ';
+  Modes := OtherModes + ' ';
+  while Modes <> '' do begin
+    At := Pos(' ', Modes);
+    Mode := Copy(Modes, 1, At - 1);
+    Delete(Modes, 1, At);
+    if (Mode <> '') and (Pos(' ' + Mode + ' ', CommandLine) > 0) then begin
+      Result := Mode;
+      Exit;
+    end;
+  end;
+end;
+
+// Counts the processes of this install's exe that run in one of its other modes, or returns -1 when Windows cannot
+// list them. With EndThem True it also ends each one it counts, and logs why any other process of that name is left
+// alone (by its number; command lines are never logged). Windows reports the path a process was started by; the
+// dashboard and the readers are started by this full path. A copy of the exe in another folder is left alone, and so
+// is the monitor: AppMutex made Setup wait for it, and one started since then makes RequireBundleFolderFree stop.
+function OtherProcesses(const EndThem: Boolean): Integer;
+var
+  Wmi, Found, Item: Variant;
+  Exe, Mode: String;
+  I, Count, Pid, Code: Integer;
+begin
+  Result := 0;
+  Exe := ExpandConstant('{app}\{#ExeName}');
+  if not FileExists(Exe) then
+    Exit;                                   // a first install: nothing runs from here
+  try
+    Wmi := CreateOleObject('WbemScripting.SWbemLocator');
+    Wmi := Wmi.ConnectServer('.', 'root\CIMV2');
+    Found := Wmi.ExecQuery('SELECT ProcessId, ExecutablePath, CommandLine FROM Win32_Process ' +
+                           'WHERE Name = ''{#ExeName}''');
+    Count := Found.Count;
+    for I := 0 to Count - 1 do begin
+      Item := Found.ItemIndex(I);
+      Pid := Item.ProcessId;
+      if VarIsNull(Item.ExecutablePath) or VarIsNull(Item.CommandLine) then begin
+        if EndThem then
+          Log(Format('Left alone: process %d, whose path Windows hides (another user''s or elevated).', [Pid]));
+        Continue;
+      end;
+      if not SameText(Item.ExecutablePath, Exe) then begin
+        if EndThem then
+          Log(Format('Left alone: process %d, started from another folder.', [Pid]));
+        Continue;
+      end;
+      Mode := OtherMode(Item.CommandLine);
+      if Mode = '' then begin
+        if EndThem then
+          Log(Format('Left alone: process %d, the monitor (no mode on its command line).', [Pid]));
+        Continue;
+      end;
+      Result := Result + 1;
+      if EndThem then begin
+        Log(Format('Ending process %d of the install folder, started with %s.', [Pid, Mode]));
+        try
+          Code := Item.Terminate();
+          if Code <> 0 then
+            Log(Format('Windows did not end it (Win32_Process.Terminate returned %d).', [Code]));
+        except
+          Log('It could not be ended: ' + GetExceptionMessage);
+        end;
+      end;
+    end;
+  except
+    Log('The processes of ' + Exe + ' could not be listed: ' + GetExceptionMessage);
+    Result := -1;
+  end;
+end;
+
+// Ends the exe's other processes, then checks up to 30 times, 100 ms apart, that they are gone, so that Restart
+// Manager does not list them and RequireBundleFolderFree finds their files closed. Ended processes are usually gone
+// by the first check. What cannot be ended makes RequireBundleFolderFree stop.
+procedure EndOtherProcesses;
+var
+  Tries: Integer;
+begin
+  if OtherProcesses(True) <= 0 then
+    Exit;
+  for Tries := 1 to 30 do begin
+    Sleep(100);
+    if OtherProcesses(False) = 0 then begin
+      Log('The other processes of the install folder have ended.');
+      Exit;
+    end;
+  end;
+  Log('Processes of the install folder are still running.');
 end;
 
 // ---- Setup events -------------------------------------------------------------------------------
@@ -332,15 +440,18 @@ end;
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   CloseDashboardWindow;
+  EndOtherProcesses;
   Result := '';
 end;
 
 // [InstallDelete] empties {app}\_internal before one new file is copied. If a file in it is still held open by a
-// program Setup could not close (a virus scanner, a backup agent, an indexer), the delete stops half way and the
-// copy never happens: no program is left, and v1.1.5's updater, which cannot be changed, then starts an exe that
-// is gone. A folder with nothing open below it can be renamed, so prove that first (the rename changes nothing:
-// it is undone at once) and stop with the old install untouched when it cannot be done. This is stricter than
-// the delete itself, which can step round a file opened with delete sharing; the price is a clean, retryable stop.
+// program Setup did not close (a virus scanner, a backup agent, an indexer, a monitor started after Setup began), the
+// delete stops half way and the copy never happens: no program is left, and v1.1.5's updater, which cannot be
+// changed, then starts an exe that is gone. A folder with nothing open below it can be renamed, so prove that first
+// (the rename changes nothing: it is undone at once) and stop with the old install untouched when it cannot be done.
+// This is stricter than the delete itself, which can step round a file opened with delete sharing; the price is a
+// clean, retryable stop. It has to run here: an Abort from anything later (an [InstallDelete] Check or BeforeInstall)
+// is only logged, and the installation goes on.
 procedure RequireBundleFolderFree;
 var
   Folder, Probe: String;
@@ -389,7 +500,7 @@ end;
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssInstall then
-    RequireBundleFolderFree;                // after Restart Manager has had its turn, before [InstallDelete]
+    RequireBundleFolderFree;                // after EndOtherProcesses, before [InstallDelete]
   if (CurStep = ssPostInstall) and WebView2Downloaded then
     InstallWebView2;
 end;
@@ -439,8 +550,10 @@ end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
-  if CurUninstallStep = usUninstall then
+  if CurUninstallStep = usUninstall then begin
     CloseDashboardWindow;      // the monitor itself is already gone: AppMutex made Uninstall wait for it
+    EndOtherProcesses;         // a running reader would keep the exe and bundle files from being deleted
+  end;
   if CurUninstallStep = usPostUninstall then begin
     RemoveStartupEntry;
     AskToDeleteUserData;

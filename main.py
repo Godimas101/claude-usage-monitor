@@ -10,9 +10,11 @@
     main.py --hook [--threshold N] [--always]   a Claude Code hook that adds the usage to the context
     main.py --gate [--session N] [--weekly N]   a PreToolUse hook that refuses new agents past a cap
     main.py --mcp                        an MCP server on stdio with the tool get_plan_usage
+    main.py --wait [--session ID]        wait until the usage guard lets work resume (a Claude session's
+                                         background command; its exit wakes the session)
 
 The build is windowed, so there is no console: results go to files, and an unhandled exception is
-written to the log. --status, --hook, --gate and --mcp answer on stdout, which exists when the caller
+written to the log. --status, --hook, --gate, --mcp and --wait answer on stdout, which exists when the caller
 gives the process a pipe, as Claude Code does. Dev isolation: CUM_APPDATA_DIR puts settings, database and log in another
 folder, and CUM_DEV_INSTANCE=1 uses its own single-instance mutex and tags the tray tooltip.
 """
@@ -20,6 +22,7 @@ from __future__ import annotations
 
 import faulthandler
 import math
+import re
 import sys
 import threading
 from collections.abc import Sequence
@@ -31,7 +34,7 @@ import version
 
 DASHBOARD_LOG = "dashboard.log"
 AGENT_LOG = "agent.log"             # --status, --hook, --gate and --mcp: many can run at once, beside the app
-AGENT_KINDS = ("status", "hook", "gate", "mcp")
+AGENT_KINDS = ("status", "hook", "gate", "mcp", "wait")
 HOOK_KINDS = ("hook", "gate")       # Claude Code hooks: exit 0 whatever happens, never blocking a prompt or a tool
 FAULT_LOG = "faults.log"
 UNKNOWN_VERSION = "0.0.0"           # what version.py reports when it cannot read the VERSION file
@@ -41,7 +44,7 @@ _fault_file: IO[str] | None = None  # faulthandler needs its file open for the l
 @dataclass(frozen=True)
 class Command:
     """What the command line asks for. ``kind`` is "app", "dashboard", "print_version",
-    "dump_frames", "smoke_test", "status", "hook", "gate", "mcp" or "error" (then ``error`` says why)."""
+    "dump_frames", "smoke_test", "status", "hook", "gate", "mcp", "wait" or "error" (then ``error`` says why)."""
 
     kind: str = "app"
     port: int = 0
@@ -53,6 +56,7 @@ class Command:
     always: bool = False
     session_cap: float | None = None  # --gate --session N / --weekly N; None is the gate's default
     weekly_cap: float | None = None
+    session_id: str | None = None    # --wait --session ID
 
 
 def _values(args: list[str], flag: str, count: int) -> list[str] | None:
@@ -87,10 +91,17 @@ def _percent(args: list[str], flag: str) -> float | None:
     return value if math.isfinite(value) and 0 <= value <= 1000 else None
 
 
+def _session_id(args: list[str]) -> str | None:
+    """``--session ID`` for --wait: a Claude session id, kept to letters, digits, dashes and underscores."""
+    words = _values(args, "--session", 1) if "--session" in args else None
+    cleaned = re.sub(r"[^A-Za-z0-9_-]", "", words[0])[:64] if words else ""
+    return cleaned or None
+
+
 def parse_args(argv: Sequence[str]) -> Command:
     """Read the command line. Unknown words are ignored (a windowed app must not die on them), and
     when several modes are given the first of print-version, dashboard, dump-frames, smoke-test,
-    status, hook, gate, mcp wins."""
+    status, hook, gate, wait, mcp wins."""
     args = list(argv)
     if "--print-version" in args:
         words = _values(args, "--print-version", 1)
@@ -118,6 +129,8 @@ def parse_args(argv: Sequence[str]) -> Command:
         return Command("hook", threshold=_percent(args, "--threshold"), always="--always" in args)
     if "--gate" in args:
         return Command("gate", session_cap=_percent(args, "--session"), weekly_cap=_percent(args, "--weekly"))
+    if "--wait" in args:
+        return Command("wait", session_id=_session_id(args))
     if "--mcp" in args:
         return Command("mcp")
     return Command("app")
@@ -195,7 +208,7 @@ def _smoke_test(seconds: float, report: str) -> int:
 
 
 def _agent(command: Command) -> int:
-    """--status, --hook, --gate and --mcp. No UI and no single-instance mutex, so they run beside the app."""
+    """--status, --hook, --gate, --mcp and --wait. No UI and no single-instance mutex, so they run beside the app."""
     from datetime import datetime, timezone
 
     from usage_monitor import paths
@@ -203,15 +216,18 @@ def _agent(command: Command) -> int:
     from usage_monitor.log import setup_logging
 
     setup_logging("WARNING", path=paths.app_data_dir() / AGENT_LOG)
-    if sys.stdout is None:  # a windowed build started without a pipe has nowhere to answer
-        return 0 if command.kind in HOOK_KINDS else 1
-    out = sys.stdout.buffer
-    stdin = sys.stdin.buffer if sys.stdin is not None else None
     folder = paths.app_data_dir()
 
     def clock() -> datetime:
         return datetime.now(timezone.utc)
 
+    if command.kind == "wait":  # its ending wakes the session, so it runs even with nowhere to answer
+        return cli.run_wait(session_id=command.session_id, folder=folder, clock=clock,
+                            app_version=version.APP_VERSION, out=sys.stdout.buffer if sys.stdout else None)
+    if sys.stdout is None:  # a windowed build started without a pipe has nowhere to answer
+        return 0 if command.kind in HOOK_KINDS else 1
+    out = sys.stdout.buffer
+    stdin = sys.stdin.buffer if sys.stdin is not None else None
     if command.kind == "status":
         return cli.run_status(as_json=command.as_json, folder=folder, clock=clock,
                               app_version=version.APP_VERSION, out=out)

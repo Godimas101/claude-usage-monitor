@@ -359,3 +359,4 @@ class MonitorState:
     unpriced_models: list[str]
     ingest: IngestProgress
     updated_at: datetime
+    guard: dict = field(default_factory=dict)  # agent/guard.py evaluate(): state, over, resume_at, policy

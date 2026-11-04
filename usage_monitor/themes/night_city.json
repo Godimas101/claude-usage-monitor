@@ -1337,6 +1337,7 @@
     },
     "copy": {
       "stale_auth": "RELINK // OPEN CLAUDE CODE",
+      "no_login": "NO LOGIN // OPEN DASHBOARD",
       "offline": "NO SIGNAL // NET DOWN",
       "age_tag": "14 M OLD",
       "live": "LIVE",

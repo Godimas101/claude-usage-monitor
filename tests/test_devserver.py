@@ -26,7 +26,7 @@ from typing import Any
 
 import pytest
 
-from usage_monitor.data import analytics
+from usage_monitor.data import analytics, usage_api
 from usage_monitor.data import models as m
 from usage_monitor.data.pricing import Pricing
 from usage_monitor.data.store import Store
@@ -268,9 +268,281 @@ def test_the_export_comes_from_the_synthetic_history_too(started: Callable[..., 
 
 
 def test_the_existing_scenarios_are_unchanged() -> None:
-    assert devserver.SCENARIOS == ("normal", "warning", "critical", "stale")
+    assert devserver.SCENARIOS[:4] == ("normal", "warning", "critical", "stale")
     state = devserver.fake_state("normal", NOW)
     assert state.windows["month"].totals.cost_usd == pytest.approx(1659.14, abs=0.05)
+    assert state.guard == {}                                      # the guard's verdict is the server's, from its settings
+
+
+# ── The usage guard (#27) ─────────────────────────────────────────────────────────
+
+GUARD_DIR = "guard-dev"                                           # the dev server's own folder for the session files
+SESSION_RESET = "2026-10-21T19:39:00Z"                      # NOW + 3 h 27 min, the fake session's reset
+
+
+def post(server: ApiServer, path: str, payload: Any = None) -> tuple[int, Any]:
+    conn = http.client.HTTPConnection("127.0.0.1", server.port, timeout=30)
+    try:
+        body = json.dumps(payload).encode("utf-8") if payload is not None else None
+        headers = {TOKEN_HEADER: server.token, **({"Content-Type": "application/json"} if body else {})}
+        conn.request("POST", path, body=body, headers=headers)
+        response = conn.getresponse()
+        data = response.read()
+        return response.status, json.loads(data) if data else None
+    finally:
+        conn.close()
+
+
+def test_the_guard_scenario_is_a_holding_guard_with_two_sessions_told_and_one_waiting(
+        started: Callable[..., ApiServer]) -> None:
+    server = started("guard")
+    state = get_json(server, "/api/state")
+    guard = state["state"]["guard"]
+    assert guard["state"] == "holding" and guard["resume_at"] == SESSION_RESET
+    assert guard["over"] == [{"name": "session", "label": "session", "percent": 96.0, "cap": 95,
+                              "resets_at": SESSION_RESET}]
+    assert guard["policy"] == {"enabled": True, "session_cap": 95, "weekly_cap": 90, "scoped_cap": None, "stagger_s": 120}
+    assert state["settings"]["guard_enabled"] is True
+    answer = get_json(server, "/api/guard")
+    assert answer["guard"] == guard
+    assert [entry["session_id"][:8] for entry in answer["told"]] == ["3f9a1c2e", "c81d04b7"]          # oldest first
+    assert [entry["told_at"] for entry in answer["told"]] == ["2026-10-21T15:48:00Z", "2026-10-21T15:51:00Z"]
+    assert len(answer["waiting"]) == 1
+    waiting = answer["waiting"][0]
+    assert waiting["pid"] == os.getpid() and waiting["cwd"] == r"C:\Demo\atlas-web" and waiting["since"] == "2026-10-21T15:54:00Z"
+    assert waiting["session_id"].startswith("77b0aa10")
+
+
+def test_every_scenario_carries_the_guards_verdict_for_the_dev_settings(started: Callable[..., ApiServer]) -> None:
+    server = started("normal")
+    assert get_json(server, "/api/state")["state"]["guard"]["state"] == "off"
+    assert get_json(server, "/api/guard")["told"] == [] and get_json(server, "/api/guard")["waiting"] == []
+    assert post(server, "/api/settings", {"guard_enabled": True})[0] == 200
+    assert get_json(server, "/api/state")["state"]["guard"]["state"] == "armed"                # 13 % is under the 95 % cap
+    assert post(server, "/api/settings", {"guard_session_cap": 10})[0] == 200
+    holding = get_json(server, "/api/state")["state"]["guard"]
+    assert holding["state"] == "holding" and [item["name"] for item in holding["over"]] == ["session"]
+    assert holding["over"][0]["percent"] == 13.0 and holding["over"][0]["cap"] == 10
+    assert get_json(server, "/api/guard")["waiting"] == []                                      # only the guard scenario seeds sessions
+
+
+def test_resume_now_in_the_dev_server_ends_the_wait_and_touches_only_its_own_folder(
+        started: Callable[..., ApiServer], tmp_path: Path) -> None:
+    server = started("guard")
+    assert len(get_json(server, "/api/guard")["waiting"]) == 1
+    assert post(server, "/api/guard/resume") == (200, {"ok": True})
+    after = get_json(server, "/api/guard")
+    assert after["waiting"] == [] and len(after["told"]) == 2 and after["guard"]["state"] == "holding"
+    assert (tmp_path / "dev" / GUARD_DIR / "resume-now").is_file()
+    assert not (tmp_path / "app" / "resume-now").exists() and not (tmp_path / "app" / "hook-seen.json").exists()
+
+
+def test_the_told_sessions_follow_the_episode_as_the_fake_reset_times_slide(started: Callable[..., ApiServer]) -> None:
+    moment = [NOW]
+    server = started("guard", clock=lambda: moment[0])
+    first = get_json(server, "/api/guard")
+    moment[0] = NOW + timedelta(minutes=1)                                            # the fake resets move: a new episode key
+    second = get_json(server, "/api/guard")
+    assert second["guard"]["resume_at"] != first["guard"]["resume_at"]
+    assert second["told"] == first["told"] and len(second["told"]) == 2                  # still the same two, still 24 and 21 minutes ago
+
+
+def test_setup_in_the_dev_server_runs_the_real_code_on_a_sandbox(started: Callable[..., ApiServer], tmp_path: Path) -> None:
+    server = started("guard")
+    before = get_json(server, "/api/guard")["setup"]
+    assert before["available"] is True and before["hooks"]["state"] == "missing" and before["mcp"] == {"state": "missing"}
+    assert before["claude"]["version"] == "2.1.160" and before["claude"]["supported"] is True
+    sandbox = tmp_path / "dev" / "claude-config" / "settings.json"
+    assert before["settings_path"] == str(sandbox)
+
+    status, result = post(server, "/api/guard/setup", {"action": "install"})
+    assert status == 200 and result["ok"] is True and result["changed"][-1] == "Registered the claude-usage MCP tool."
+    hooks = json.loads(sandbox.read_text(encoding="utf-8"))["hooks"]
+    assert hooks["PostToolUse"][0]["hooks"][0]["command"] == "C:/Dev/ClaudeUsageMonitor/ClaudeUsageMonitor.exe"
+    after = get_json(server, "/api/guard")["setup"]                                       # the click made the next look a fresh one
+    assert after["hooks"]["state"] == "installed" and after["mcp"] == {"state": "registered"}
+
+    status, result = post(server, "/api/guard/setup", {"action": "remove"})
+    assert status == 200 and result["ok"] is True and json.loads(sandbox.read_text(encoding="utf-8")) == {}
+    assert get_json(server, "/api/guard")["setup"]["hooks"]["state"] == "missing"
+    assert not (tmp_path / "home" / ".claude").exists()                                   # the owner's folder is never touched
+
+
+def test_the_dev_server_keeps_every_guard_file_in_its_own_folder(started: Callable[..., ApiServer], tmp_path: Path) -> None:
+    server = started("guard")
+    get_json(server, "/api/guard")
+    folder = tmp_path / "dev" / GUARD_DIR
+    assert (folder / "hook-seen.json").is_file() and list((folder / "waiting").glob("*.json"))
+    assert not (tmp_path / "app").exists() or not list((tmp_path / "app").glob("hook-seen.json"))
+
+
+def test_main_accepts_the_guard_scenario(capsys: pytest.CaptureFixture[str]) -> None:
+    assert devserver.main(["--port", "0", "--scenario", "guard"], wait=interrupted) == 0
+    assert capsys.readouterr().out.startswith("devserver scenario=guard url=http://127.0.0.1:")
+
+
+# ── No sign-in, and a sign-in with no Claude Code on this PC (#28) ────────────────
+
+NO_CLAUDE_CODE = ("no_login", "limits_only")                      # someone who uses Claude on the web or in the app
+NO_SIGN_IN = usage_api.NO_SIGN_IN_DETAIL                         # UsageClient's words for a missing sign-in
+WINDOWS = ("session", "today", "week", "month", "all")
+
+
+def assert_nothing_counted(server: ApiServer) -> None:
+    """Every statistics route answers and holds no record. None is an error: the pages decide what to say."""
+    cost = get_json(server, "/api/analytics/cost?window=all")
+    assert {name: row["requests"] for name, row in cost["windows"].items()} == dict.fromkeys(cost["windows"], 0)
+    assert all(row["cost_usd"] == 0 and row["tokens"]["total"] == 0 for row in cost["windows"].values())
+    assert cost["monthly"] == [] and cost["top_sessions_week"] == [] and cost["breakdowns"]["by_model"] == []
+    efficiency = get_json(server, "/api/analytics/efficiency?window=all")
+    assert efficiency["cache"]["hit_rate"] is None and efficiency["tools"]["total"] == 0
+    assert efficiency["active_days"] == 0 and efficiency["productivity"]["commits"] == 0
+    history = get_json(server, "/api/analytics/history")
+    assert len(history["days"]) == 371 and not any(day["requests"] for day in history["days"])
+    assert history["active_days"] == 0 and history["first_use"] is None and history["busiest_day"] is None
+    assert sum(sum(row) for row in history["hour_weekday"]["requests"]) == 0
+    assert get_json(server, "/api/analytics/sessions?window=all&limit=50")["sessions"] == []
+    status, _headers, body = get(server, "/api/export?format=csv")
+    assert status == 200 and list(csv.DictReader(io.StringIO(body.decode("utf-8"), newline=""))) == []
+    assert get_json(server, "/api/export?format=json")["rows"] == []
+
+
+def test_the_scenarios_of_someone_with_no_claude_code_end_the_list_and_the_usage_line_names_them() -> None:
+    assert devserver.SCENARIOS == ("normal", "warning", "critical", "stale", "guard", *NO_CLAUDE_CODE)
+    assert devserver.NO_TRANSCRIPTS == NO_CLAUDE_CODE
+    docstring = " ".join((devserver.__doc__ or "").split())
+    assert "--scenario normal|warning|critical|stale|guard|no_login|limits_only" in docstring
+    assert all(f"``{name}``" in docstring for name in NO_CLAUDE_CODE), "each is explained in the module's docstring"
+
+
+@pytest.mark.parametrize("scenario", NO_CLAUDE_CODE)
+def test_main_accepts_the_scenarios_of_someone_with_no_claude_code(scenario: str, capsys: pytest.CaptureFixture[str]) -> None:
+    assert devserver.main(["--port", "0", "--scenario", scenario], wait=interrupted) == 0
+    assert capsys.readouterr().out.startswith(f"devserver scenario={scenario} url=http://127.0.0.1:")
+
+
+def test_no_login_found_no_sign_in_and_has_no_limits_and_no_plan(started: Callable[..., ApiServer]) -> None:
+    state = get_json(started("no_login"), "/api/state")["state"]
+    assert state["status"] == "no_credentials" and state["status_detail"] == NO_SIGN_IN
+    assert state["usage"] is None and state["usage_fetched_at"] is None
+    assert state["plan"] == {"subscription_type": None, "rate_limit_tier": None, "name": "Unknown plan",
+                             "monthly_price_usd": None}
+    assert state["burn"]["velocity"] == "IDLE" and state["unpriced_models"] == []
+
+
+def test_limits_only_is_signed_in_with_the_limits_of_normal(started: Callable[..., ApiServer]) -> None:
+    state = get_json(started("limits_only"), "/api/state")["state"]
+    assert state["status"] == "live" and state["status_detail"] == "Live usage from the Claude API."
+    assert state["usage"] is not None and state["usage_fetched_at"] == state["usage"]["fetched_at"]
+    assert state["plan"]["name"] == "Max 5x" and state["burn"]["velocity"] == "IDLE"
+
+    def limits(scenario: str) -> list[tuple[Any, ...]]:
+        return [(item.kind, item.label, item.percent, item.severity, item.resets_at)
+                for item in devserver.fake_state(scenario, NOW).usage.limits]
+
+    assert limits("limits_only") == limits("normal") and len(limits("normal")) == 3
+    assert [item["percent"] for item in state["usage"]["limits"]] == [13.0, 2.0, 0.0]
+
+
+@pytest.mark.parametrize("scenario", NO_CLAUDE_CODE)
+def test_with_no_claude_code_every_window_is_empty_and_the_first_read_is_finished(
+        started: Callable[..., ApiServer], scenario: str) -> None:
+    """What the dashboard decides limits-only on: no request in the all-time window, and an ingest that has finished."""
+    state = get_json(started(scenario), "/api/state")["state"]
+    assert set(state["windows"]) == set(WINDOWS)
+    for name, window in state["windows"].items():
+        assert window["totals"]["requests"] == 0 and window["totals"]["cost_usd"] == 0, name
+        assert window["totals"]["input"] == window["totals"]["output"] == 0, name
+    assert state["windows"]["all"]["start"] is None, "the all-time window starts at the first request, and there is none"
+    assert state["ingest"] == {"running": False, "files_done": 0, "files_total": 0, "last_duration_s": 0.01,
+                               "last_error": None}
+
+
+def test_the_other_scenarios_still_count_their_requests_and_read_their_files() -> None:
+    """The mirror of the test above: that the two are empty means something only if the rest are not."""
+    for other in set(devserver.SCENARIOS) - set(NO_CLAUDE_CODE):
+        state = devserver.fake_state(other, NOW)
+        assert state.windows["all"].totals.requests > 0 and state.windows["all"].start is not None, other
+        assert state.ingest.files_total > 0, other
+
+
+@pytest.mark.parametrize("scenario", NO_CLAUDE_CODE)
+def test_the_statistics_of_someone_with_no_claude_code_are_empty_not_errors(started: Callable[..., ApiServer],
+                                                                           scenario: str) -> None:
+    assert_nothing_counted(started(scenario))
+
+
+@pytest.mark.parametrize("scenario", NO_CLAUDE_CODE)
+def test_no_invented_year_is_built_for_someone_with_no_claude_code(started: Callable[..., ApiServer],
+                                                                  monkeypatch: pytest.MonkeyPatch, scenario: str) -> None:
+    def forbidden(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("the synthetic year must not be built for a PC with no Claude Code")
+
+    monkeypatch.setattr(devserver, "_History", forbidden)
+    assert_nothing_counted(started(scenario))
+
+
+@pytest.mark.parametrize("scenario, has_readings", [("limits_only", True), ("no_login", False)])
+def test_the_store_holds_no_request_and_keeps_the_usage_readings_only_when_there_are_limits(
+        scenario: str, has_readings: bool) -> None:
+    """A poll stores the usage readings whatever Claude Code did, so the pace works on a PC with none; a monitor with no
+    sign-in has no reading to store."""
+    store = devserver.SyntheticHistory(scenario, now=lambda: NOW).open()
+    try:
+        assert store.table_counts()["requests"] == 0 and store.first_request_ts() is None
+        readings = store.query("SELECT COUNT(*) AS n FROM usage_snapshots")[0]["n"]
+        assert readings > 100 if has_readings else readings == 0
+    finally:
+        store.close()
+
+
+@pytest.mark.parametrize("scenario", NO_CLAUDE_CODE)
+def test_a_database_is_still_served_instead_of_the_empty_store_of_these_scenarios(
+        started: Callable[..., ApiServer], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scenario: str) -> None:
+    monkeypatch.setattr(devserver, "SyntheticHistory", lambda *_args, **_kwargs: pytest.fail("--db names the statistics"))
+    server = started(scenario, db=usage_db(tmp_path / "copy.db", requests=3))
+    assert get_json(server, "/api/analytics/cost")["windows"]["all"]["requests"] == 3
+    assert get_json(server, "/api/state")["state"]["status"] == ("no_credentials" if scenario == "no_login" else "live")
+
+
+def test_limits_only_still_has_a_pace_to_show(started: Callable[..., ApiServer]) -> None:
+    pacing = get_json(started("limits_only"), "/api/analytics/pacing")
+    assert pacing["session"]["verdict"] == "SAFE" and pacing["session"]["percent"] == 13.0
+    assert len(pacing["session"]["points"]) >= 10 and pacing["session"]["slope_pct_per_hour"] > 0
+    assert pacing["weekly"]["percent"] == 2.0
+
+
+def test_no_login_has_no_pace_to_show(started: Callable[..., ApiServer]) -> None:
+    pacing = get_json(started("no_login"), "/api/analytics/pacing")
+    for limit in (pacing["session"], pacing["weekly"]):
+        assert limit["verdict"] == "UNKNOWN" and limit["percent"] is None and not limit["points"]
+    assert pacing["scoped"] == []
+
+
+@pytest.mark.parametrize("scenario", devserver.SCENARIOS)
+def test_a_refresh_moves_updated_at_as_a_real_monitors_cycle_does(started: Callable[..., ApiServer], scenario: str) -> None:
+    """The page tells that the cycle it asked for ("Check again") has run by the new updated_at, and its state request
+    is a conditional one: the changed state must not come back as 304."""
+    server = started(scenario)
+
+    def state_request(etag: str | None) -> tuple[int, str | None, str | None]:
+        conn = http.client.HTTPConnection("127.0.0.1", server.port, timeout=30)
+        try:
+            conn.request("GET", "/api/state", headers={TOKEN_HEADER: server.token, **({"If-None-Match": etag} if etag else {})})
+            response = conn.getresponse()
+            body = response.read()
+            return response.status, response.getheader("ETag"), json.loads(body)["state"]["updated_at"] if body else None
+        finally:
+            conn.close()
+
+    status, etag, updated = state_request(None)
+    assert status == 200 and updated == "2026-10-21T16:11:48.000Z", "unchanged until something asks for a cycle"
+    assert state_request(etag) == (304, etag, None)
+    for millisecond in (1, 2):
+        assert post(server, "/api/refresh") == (200, {"ok": True})
+        status, new_etag, updated = state_request(etag)
+        assert (status, updated) == (200, f"2026-10-21T16:11:48.00{millisecond}Z") and new_etag != etag
+        etag = new_etag
 
 
 # ── --db ──────────────────────────────────────────────────────────────────────────

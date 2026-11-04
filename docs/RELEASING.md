@@ -100,7 +100,9 @@ signature as well as the digest.
 - [ ] **The pipeline has run on a runner.** Run the workflow by hand with publish left off (a rehearsal), from a
       branch that holds the release's `VERSION` and `CHANGELOG.md` section. It is green, and the `smoke-report` artifact
       says `"ok": true` with `page_booted` true in the dashboard step. The first run of the smoke step on a hosted runner
-      is the one that can fail for a reason of that machine: read its report before blaming the build.
+      is the one that can fail for a reason of that machine: read its report before blaming the build. The workflow
+      reads the WebView2 runtime's files before the smoke test. On a fresh runner they are cold, and a cold runtime
+      started the dashboard in up to 32 s (image win25-vs2026/20261030), past the smoke test's 15 s.
 - [ ] The frozen smoke run is clean on your own machine too: with `CUM_DEV_INSTANCE=1`, `CUM_APPDATA_DIR=<scratch folder>` and
       `CLAUDE_CONFIG_DIR=<empty folder>` (so your own transcripts stay out of it) run
       `dist\ClaudeUsageMonitor\ClaudeUsageMonitor.exe --smoke-test 45 report.json`. Exit code 0 and `"ok": true`.
@@ -113,6 +115,12 @@ signature as well as the digest.
   - running the installer again while the monitor runs makes Setup ask you to close it, and the dashboard
     window closes with it;
   - uninstalling removes that Run value and asks before deleting `%APPDATA%\ClaudeUsageMonitor` (No keeps it).
+- [ ] **With Claude Code open.** In a Claude Code session that started after the monitor's MCP tool was registered,
+      `/mcp` shows `claude-usage` as connected. Close the monitor, and run the new installer by hand over that install
+      (your own install is fine for this one). It goes through without an "in use" stop. In that session the tool
+      answers again on its next use, or after `/mcp`. The sandboxed runs (`CUM_UI_TESTS=1` and `CUM_INSTALLER_E2E=1`;
+      the stand-in tests also need the .NET Framework's `csc.exe`) cover the same with stand-in readers, and the
+      uninstall.
 - [ ] **Upgrade from v1, the way v1.1.5's updater does it.** That updater cannot be changed and is the one every v1
       user will run, so this is the check that matters most. On the same spare user or VM, install v1.1.5 and make the
       state you want to test: **on** is what v1 wrote (the exe followed by the path of a script, see
@@ -128,7 +136,8 @@ signature as well as the digest.
       Do it once with the entry **off** and once with it **on**. Pass: nothing prompts; the app is back within about
       15 seconds; `DisplayVersion` is the new version under `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Claude Usage Monitor_is1`;
       and the Run value is still **missing** (it was off), or is the quoted exe and nothing else (it was on). The theme
-      becomes its Nostromo phosphor, and the position and widget toggles stay. Then run the installer once
+      becomes its Nostromo phosphor (v1's Cyan and Orange, retired in 2.2, become Cryo and Ray Tube), and the
+      position and widget toggles stay. Then run the installer once
       interactively over a v1 install with the entry off: the **Start with Windows** box on the tasks page is unticked.
       Last, with a file in `<install folder>\_internal` held open (in PowerShell,
       `$f = [IO.File]::Open('<install folder>\_internal\base_library.zip', 'Open', 'Read', 'ReadWrite')`), the same run

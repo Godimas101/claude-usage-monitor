@@ -6,8 +6,10 @@ the status wording are decided once here, so every skin tells the same story.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime
+import math
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 from usage_monitor.data.models import ApiStatus, Limit, MonitorState, UsageSnapshot
@@ -21,9 +23,14 @@ WEEKLY_WINDOW_S = 7 * 24 * 60 * 60      # weekly and scoped limits are 7 d windo
 WARNING_PERCENT = 75.0                  # severity thresholds when the API gives none
 CRITICAL_PERCENT = 90.0
 AUTO_SCOPED_MIN_PERCENT = 1.0           # "auto" shows a scoped row at 1 % or more, or when active
+DAY_S = 24 * 60 * 60                    # a guard resume under a day away reads as a countdown, past it as a reset time
+
+GUARD_ARMED = "armed"                   # the usage guard (#27): watching its caps ...
+GUARD_HOLDING = "holding"               # ... or a watched limit is at its cap and Claude sessions were told to wind down
+GUARD_STATES: tuple[str, ...] = (GUARD_ARMED, GUARD_HOLDING)
 
 STALE_MESSAGE_EXPIRED = "LOGIN EXPIRED - OPEN CLAUDE CODE"
-STALE_MESSAGE_NO_LOGIN = "NO LOGIN FOUND - OPEN CLAUDE CODE"
+STALE_MESSAGE_NO_LOGIN = "NO LOGIN FOUND - OPEN THE DASHBOARD"   # it has the steps for a claude.ai or app user (#28)
 
 STATUS_TEXT: dict[ApiStatus, str] = {
     ApiStatus.LOADING: "LOADING",
@@ -91,6 +98,52 @@ class Row:
 
 
 @dataclass(frozen=True, slots=True)
+class GuardMark:
+    """The usage guard (#27) as the widgets show it: armed (watching its caps) or holding (a watched
+    limit is at its cap, so Claude sessions were told to wind down and will be woken when every watched
+    limit is under its cap again).
+
+    WidgetModel.guard is None while the guard is off, and a skin that draws nothing for None draws exactly
+    what it drew before the guard existed.
+
+    over_keys are the Row keys of the limits at or past their caps, in the guard's order. caps are the
+    caps being watched, in percent, by Row key (a limit without a cap is not in it). labels is the name
+    people read for each key ("session", "weekly", "Fable weekly"), and readings the percent of each limit
+    over its cap, so a hover card can say it even for a scoped row the widget does not show.
+
+    resume_at is the latest reset among the limits over their caps (None when one has no reset time or the
+    guard is only armed). resume_text is that moment in one word for a surface with room for one: a countdown
+    ("2H 14M", "9M", "<1M") under a day, past a day a reset time as the rows give it ("Wed 4:00 PM"); no skin
+    draws it today (each picks resume_in or resume_clock itself), the dump and the tests read it. resume_in is always the
+    countdown ("2D 3H" past a day) and resume_clock always the reset time, for a surface with room for both.
+    """
+    state: str
+    over_keys: tuple[str, ...] = ()
+    caps: dict[str, int | float] = field(default_factory=dict)
+    resume_at: datetime | None = None
+    resume_text: str | None = None
+    resume_in: str | None = None
+    resume_clock: str | None = None
+    labels: dict[str, str] = field(default_factory=dict)
+    readings: dict[str, float] = field(default_factory=dict)
+
+    @property
+    def holding(self) -> bool:
+        """True while a watched limit is at its cap."""
+        return self.state == GUARD_HOLDING
+
+    def over_limits(self) -> list[tuple[str, float | None, int | float | None]]:
+        """(label, reading, cap) of each limit over its cap, in the guard's order. A reading or a cap the guard did
+        not give is None."""
+        return [(self.labels.get(key, key), self.readings.get(key), self.caps.get(key)) for key in self.over_keys]
+
+    def watched(self) -> list[tuple[str, int | float]]:
+        """(label, cap) of each limit the guard has a cap for, in the order of ``caps``: session, weekly, then the
+        scoped limits."""
+        return [(self.labels.get(key, key), cap) for key, cap in self.caps.items()]
+
+
+@dataclass(frozen=True, slots=True)
 class WidgetModel:
     """Everything a skin needs to draw the floating widget, the strip, the tray and the tooltip.
 
@@ -98,6 +151,7 @@ class WidgetModel:
     NO LOGIN). age_text is "12 S AGO" style, or None before the first fetch. stale is True when
     the values are not live (everything except LIVE and PAUSED). stale_message is set when the
     user must act (expired or missing login). blink_on drives the alive mark (animation only).
+    guard is the usage guard when it is armed or holding, None while it is off.
     """
     status: ApiStatus
     status_text: str
@@ -107,6 +161,7 @@ class WidgetModel:
     stale_message: str | None
     blink_on: bool
     updated_at: datetime
+    guard: GuardMark | None = None
 
     @property
     def lamp(self) -> str:
@@ -175,6 +230,7 @@ def build_model(
         stale_message=_stale_message(status),
         blink_on=bool(blink_on),
         updated_at=state.updated_at if state is not None else now,
+        guard=_guard_mark(getattr(state, "guard", None), usage, now),
     )
 
 
@@ -264,6 +320,21 @@ def share_text(allowance_pct: float | None) -> str | None:
     return f"{round(allowance_pct)}% SHARE"
 
 
+def format_countdown(seconds: float) -> str:
+    """Time left as "2D 3H", "2H 14M", "9M" or "<1M": whole minutes rounded down, and days once a day or
+    more is left (minutes are noise by then). A whole hour or day has no zero tail: "2H", "1D"."""
+    minutes = max(0, int(seconds)) // 60
+    if minutes < 1:
+        return "<1M"
+    days, rest = divmod(minutes, 24 * 60)
+    hours, minutes = divmod(rest, 60)
+    if days:
+        return f"{days}D {hours}H" if hours else f"{days}D"
+    if hours:
+        return f"{hours}H {minutes}M" if minutes else f"{hours}H"
+    return f"{minutes}M"
+
+
 # ── Internals ─────────────────────────────────────────────────────────────────
 
 def _rows(usage: UsageSnapshot | None, now: datetime, show_scoped: str) -> list[Row]:
@@ -276,11 +347,108 @@ def _rows(usage: UsageSnapshot | None, now: datetime, show_scoped: str) -> list[
     for index, limit in enumerate(usage.scoped):
         if show_scoped == "auto" and not _auto_shows(limit):
             continue
-        name = (limit.scope_model or limit.label or "").strip().lower() or str(index)
+        name = _scoped_name(limit, index)
         rows.append(_limit_row(
             f"scoped:{name}", limit.label or name.upper(), limit, now, WEEKLY_WINDOW_S, True,
         ))
     return rows
+
+
+def _scoped_name(limit: Limit, index: int) -> str:
+    """What a scoped row's key is made of: the limit's model, else its label, else its place in the list."""
+    return (limit.scope_model or limit.label or "").strip().lower() or str(index)
+
+
+# The usage guard. agent/guard.py judges a reading against the caps and says which limits are over, by name
+# ("session", "weekly", or a scoped limit's own label) and by a label for people ("Fable weekly"). The widgets
+# key a row by "session", "weekly" or "scoped:<model>", so the guard's answer is mapped onto the rows here, once,
+# and every skin marks the rows it is told about.
+
+def _guard_mark(block: Any, usage: UsageSnapshot | None, now: datetime) -> GuardMark | None:
+    """The guard block of the state as a mark, or None when it is off, missing or empty, and while there is
+    no reading (no sign-in, still loading): the guard cannot act on nothing, so no surface says it is armed."""
+    if not isinstance(block, Mapping) or block.get("state") not in GUARD_STATES or usage is None:
+        return None
+    holding = block["state"] == GUARD_HOLDING
+    policy = block.get("policy") if isinstance(block.get("policy"), Mapping) else {}
+    scoped = []                         # (key, name, label) of every scoped limit: the guard watches the hidden ones too
+    for index, limit in enumerate(usage.scoped if usage is not None else ()):
+        model = limit.scope_model
+        label = f"{model} weekly" if model else str(limit.label or "scoped").lower()   # as agent/guard.py names it
+        scoped.append((f"scoped:{_scoped_name(limit, index)}", str(limit.label or label), label))
+
+    labels = {"session": "session", "weekly": "weekly", **{key: label for key, _name, label in scoped}}
+    caps: dict[str, int | float] = {}
+    for key, setting in (("session", "session_cap"), ("weekly", "weekly_cap")):
+        cap = _cap(policy.get(setting))
+        if cap is not None:
+            caps[key] = cap
+    scoped_cap = _cap(policy.get("scoped_cap"))
+    if scoped_cap is not None:
+        caps.update({key: scoped_cap for key, _name, _label in scoped})
+
+    over_keys: list[str] = []
+    readings: dict[str, float] = {}
+    over = block.get("over") if holding else None
+    for item in over or ():
+        if not isinstance(item, Mapping):
+            continue
+        key = _over_key(item, scoped)
+        if key is None or key in over_keys:
+            continue
+        over_keys.append(key)
+        labels.setdefault(key, str(item.get("label") or key))
+        if _is_number(item.get("percent")):
+            readings[key] = float(item["percent"])
+        cap = _cap(item.get("cap"))
+        if cap is not None:
+            caps[key] = cap             # the cap the guard applied is the one that counts
+
+    resume_at = _moment(block.get("resume_at")) if holding else None
+    resume_in = resume_clock = resume_text = None
+    if resume_at is not None:
+        remaining = (resume_at - now).total_seconds()
+        resume_in = format_countdown(remaining)
+        resume_clock = format_resets(resume_at, now)
+        resume_text = resume_in if remaining < DAY_S else resume_clock
+    return GuardMark(
+        state=block["state"], over_keys=tuple(over_keys), caps=caps, resume_at=resume_at, resume_text=resume_text,
+        resume_in=resume_in, resume_clock=resume_clock, labels=labels, readings=readings,
+    )
+
+
+def _over_key(item: Mapping[str, Any], scoped: list[tuple[str, str, str]]) -> str | None:
+    """The Row key of a limit the guard says is over its cap."""
+    name, label = item.get("name"), item.get("label")
+    if name in ("session", "weekly"):
+        return name
+    for key, scoped_name, scoped_label in scoped:
+        if (name, label) == (scoped_name, scoped_label):
+            return key
+    text = str(label or name or "").strip().lower()      # a reading that is gone: key it as a model's row would be
+    text = text.removesuffix(" weekly").strip() or text
+    return f"scoped:{text}" if text else None
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _cap(value: Any) -> int | float | None:
+    """A cap as a number above zero (settings keep whole percentages from 1 to 100), else None."""
+    return value if _is_number(value) and value > 0 else None
+
+
+def _moment(value: Any) -> datetime | None:
+    """An aware datetime from the guard's ISO text ("2026-10-29T02:00:00Z"), a datetime, or None."""
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if not isinstance(value, datetime):
+        return None
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
 
 
 def _auto_shows(limit: Limit) -> bool:

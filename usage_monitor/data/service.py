@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from usage_monitor import paths
+from usage_monitor.agent import guard as agent_guard
 from usage_monitor.agent import status as agent_status
 from usage_monitor.data import analytics
 from usage_monitor.data import windows as win
@@ -55,7 +56,8 @@ BURN_MINUTES = win.DEFAULT_BURN_MINUTES
 SESSION_LOOKBACK_START = 2 * win.SESSION_LENGTH
 SESSION_LOOKBACK_MAX = timedelta(days=14)
 # Changing one of these settings changes the next cycle, so it wakes the loop. Other keys do not.
-WAKE_KEYS = frozenset({"poll_interval_ms", "ingest_interval_s", "billing_day"})
+WAKE_KEYS = frozenset({"poll_interval_ms", "ingest_interval_s", "billing_day", *agent_guard.SETTING_KEYS})
+RESET_FETCH_DELAY = timedelta(seconds=30)  # after a window resets, its fresh numbers are asked for this soon
 PAUSED_DETAIL = "Paused"
 LOADING_DETAIL = "Loading usage"
 
@@ -308,7 +310,16 @@ class DataService:
         gate = self._client.next_allowed_at
         if self._last_fetch is not None and not self._last_fetch.fresh and gate is not None:
             return now >= gate or (self._last_fetch_at is not None and now < self._last_fetch_at)
-        return _due(self._last_fetch_at, self._poll_interval(), now)
+        return _due(self._last_fetch_at, self._poll_interval(), now) or self._window_reset_since_fetch(now)
+
+    def _window_reset_since_fetch(self, now: datetime) -> bool:
+        """A limit's window reset after the last reading (plus RESET_FETCH_DELAY): its numbers are new.
+        Sessions waiting on the usage guard are released by the fresh reading, not 15 minutes later."""
+        snapshot = self._last_fetch.snapshot if self._last_fetch is not None else None
+        if snapshot is None or self._last_fetch_at is None:
+            return False
+        return any(limit.resets_at is not None and self._last_fetch_at < limit.resets_at <= now - RESET_FETCH_DELAY
+                   for limit in snapshot.limits)
 
     def _ingest_once(self, now: datetime) -> None:
         store, pricing = self._open()
@@ -402,7 +413,7 @@ class DataService:
             store, _pricing = self._open()
             doc = agent_status.build(
                 status=state.status.value, status_detail=state.status_detail, usage=state.usage,
-                plan=state.plan, burn=state.burn,
+                plan=state.plan, burn=state.burn, guard=state.guard,
                 pacing=analytics.pacing_report(store, now=now, usage=self._live_usage(now)),
                 now=now, poll_interval_s=self._poll_interval().total_seconds(), app_version=_app_version())
             path = self._status_dir / agent_status.STATUS_NAME
@@ -452,6 +463,8 @@ class DataService:
             unpriced_models=list(self._unpriced),
             ingest=dataclasses.replace(self._ingest, last_error=self._cycle_error or self._ingest_error),
             updated_at=now,
+            guard=agent_guard.evaluate(agent_guard.limits_doc(self._live_usage(now)),
+                                       agent_guard.policy_from(self._settings.get), now),
         )
 
     # ── Helpers ──

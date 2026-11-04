@@ -13,7 +13,7 @@ Theme objects come from usage_monitor.themes.load_themes(), the one reader of th
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -21,6 +21,7 @@ from typing import Any, Iterable, Mapping
 from PIL import Image, ImageDraw
 
 from usage_monitor import themes as theme_registry
+from usage_monitor.agent import guard
 from usage_monitor.data.models import (
     ApiStatus,
     BurnRate,
@@ -61,12 +62,26 @@ STATE_NAMES: tuple[str, ...] = (
 # and third of these are what a widget shows when the sign-in was lost or the network is down on an
 # account that has the row. dump_frames() renders them with the rest, the contact sheet leaves them out.
 SCOPED_STATE_NAMES: tuple[str, ...] = ("stale3", "offline3", "paused3", "rate_limited3")
-DUMP_STATE_NAMES: tuple[str, ...] = STATE_NAMES + SCOPED_STATE_NAMES
+
+# The usage guard (#27) on a live account that has the Fable row: armed with the default caps (session 95 %,
+# weekly 90 %), and held by each of the two windows. The session one resumes within hours, the weekly one days away.
+GUARD_STATE_NAMES: tuple[str, ...] = ("guard_armed", "guard_hold_session", "guard_hold_weekly")
+DUMP_STATE_NAMES: tuple[str, ...] = STATE_NAMES + SCOPED_STATE_NAMES + GUARD_STATE_NAMES
 
 _SAMPLE_VALUES: dict[str, tuple[float, float]] = {
     # state -> (session percent, weekly percent); fable is derived below
     "normal3": (13, 2), "normal2": (13, 2), "warning": (78, 21), "critical": (93, 58),
     "stale": (13, 2), "offline": (13, 2), "paused": (13, 2), "rate_limited": (13, 2),
+}
+
+_GUARD_VALUES: dict[str, tuple[float, float, float, timedelta, timedelta]] = {
+    # state -> (session %, weekly %, fable %, session resets in, weekly resets in)
+    "guard_armed": (38.0, 52.0, 4.0, timedelta(hours=3, minutes=27), timedelta(days=3)),
+    "guard_hold_session": (96.0, 58.0, 12.0, timedelta(hours=2, minutes=14), timedelta(days=3)),
+    "guard_hold_weekly": (41.0, 91.0, 12.0, timedelta(hours=3, minutes=27), timedelta(days=2, hours=3)),
+}
+GUARD_SAMPLE_POLICY: dict[str, Any] = {
+    "enabled": True, "session_cap": 95, "weekly_cap": 90, "scoped_cap": None, "stagger_s": 120,
 }
 
 
@@ -76,6 +91,8 @@ def sample_state(name: str, now: datetime = SAMPLE_NOW) -> MonitorState | None:
         return None
     if name == "no_credentials":
         return _state(now, ApiStatus.NO_CREDENTIALS, None, 0)
+    if name in GUARD_STATE_NAMES:
+        return _guard_state(name, now)
     scoped = name in SCOPED_STATE_NAMES
     kind = name[:-1] if scoped else name       # "stale3" is "stale" with the third row
     session, weekly = _SAMPLE_VALUES[kind]
@@ -101,6 +118,22 @@ def sample_state(name: str, now: datetime = SAMPLE_NOW) -> MonitorState | None:
     }[kind]
     age = {"stale": 41 * 60, "offline": 2 * 60, "rate_limited": 6 * 60}.get(kind, 12)
     return _state(now, status, limits, age)
+
+
+def _guard_state(name: str, now: datetime) -> MonitorState:
+    """A live reading judged by the real guard (agent/guard.py), so the sample has the shape the app publishes."""
+    session, weekly, fable, session_resets, weekly_resets = _GUARD_VALUES[name]
+    limits = [
+        Limit(kind="session", group="session", percent=session, severity=None, resets_at=now + session_resets,
+              is_active=True, label="SESSION", window_seconds=18000),
+        Limit(kind="weekly_all", group="weekly", percent=weekly, severity=None, resets_at=now + weekly_resets,
+              is_active=True, label="WEEKLY", window_seconds=604800),
+        Limit(kind="weekly_scoped", group="weekly", percent=fable, severity=None, resets_at=now + weekly_resets,
+              is_active=True, label="FABLE WEEKLY", scope_model="Fable", window_seconds=604800, allowance_pct=50.0),
+    ]
+    state = _state(now, ApiStatus.LIVE, limits, 12)
+    verdict = guard.evaluate(guard.limits_doc(state.usage), GUARD_SAMPLE_POLICY, now)
+    return replace(state, guard=verdict)
 
 
 def _state(now: datetime, status: ApiStatus, limits: list[Limit] | None, age_s: int) -> MonitorState:

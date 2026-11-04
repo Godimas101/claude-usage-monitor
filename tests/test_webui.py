@@ -11,8 +11,8 @@ The scripts themselves run under node, in tests/webui_checks.js: charts.js and a
 context with a small fake DOM and window.__CUM_TEST__ set, so app.js hands back its helpers (the test hook at its
 end) and the tests below assert on what they return: escaping, the percent formats, the pace band, the model mix,
 the currency of real money, the plan multiple, the health rows, the plan price, the card layout of every page before
-any number has arrived, the update banner, the forecast line. A syntax error, a lost x100 or an unescaped title fails
-there. Those tests start node, so they need CUM_UI_TESTS=1 like every test that starts a
+any number has arrived, the update banner, the forecast line, the sign-in help and the pages of a PC with no Claude Code.
+A syntax error, a lost x100 or an unescaped title fails there. Those tests start node, so they need CUM_UI_TESTS=1 like every test that starts a
 process; .github/workflows/tests.yml sets it for this file (and a test below checks that it does).
 
 What these cannot show is how the page looks and behaves; that is checked by loading it in a browser
@@ -25,6 +25,7 @@ import os
 import re
 import shutil
 import subprocess
+from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
@@ -35,7 +36,7 @@ from usage_monitor import paths, themes
 from usage_monitor.data import analytics, windows
 from usage_monitor.render import model as widget_model
 from usage_monitor.themes import colour
-from usage_monitor.ui import server
+from usage_monitor.ui import dashboard, server
 
 WEBUI = paths.resource_dir() / "usage_monitor" / "webui"
 CHECKS_JS = Path(__file__).resolve().parent / "webui_checks.js"
@@ -178,7 +179,7 @@ def test_money_is_labelled_apart_from_list_price_cost() -> None:
 
 def posted_setting_keys() -> set[str]:
     keys: set[str] = set()
-    for pattern in (r'toggleRow\("([a-z_]+)"', r'selectRow\("([a-z_]+)"', r'data-key="([a-z_]+)"',
+    for pattern in (r'toggleRow\("([a-z_]+)"', r'selectRow\("([a-z_]+)"', r'capRow\("([a-z_]+)"', r'data-key="([a-z_]+)"',
                     r"saveSettings\(\{ ([a-z_]+):", r"patch = \{ ([a-z_]+):"):
         keys.update(re.findall(pattern, APP_CODE))
     return keys
@@ -276,10 +277,16 @@ def test_index_html_is_the_shell_the_server_and_the_scripts_expect() -> None:
 def test_the_pages_make_no_requests_beyond_the_monitor_and_the_about_links() -> None:
     links = re.search(r"var LINKS = \{(.*?)\};", APP_CODE, re.S).group(1)
     allowed = set(re.findall(r'"(https://[^"]+)"', links))
-    assert len(allowed) == 3
+    # the repository, the bug form, Patreon, the guard's manual setup (docs/AGENT_HOOK.md), and the README section on using
+    # Claude on the web or in the app, which the sign-in help links (#28)
+    assert len(allowed) == 5
+    # The install command the sign-in help shows for the user to run in PowerShell (#28). It is text in a code element: nothing
+    # links, opens or fetches it (test_the_commands_are_shown_and_copied_and_never_linked_or_fetched), so the page still asks
+    # claude.ai for nothing.
+    shown = {"https://claude.ai/install.ps1"}
     namespaces = {"http://www.w3.org/2000/svg"}          # the name of the SVG markup language: an identifier, never fetched
     for name, text in ALL_SCRIPTS.items():
-        assert set(re.findall(r"https?://[^\s\"')]+", strip_comments(text))) <= allowed | namespaces, name
+        assert set(re.findall(r"https?://[^\s\"')]+", strip_comments(text))) <= allowed | shown | namespaces, name
     for theme_id, css in THEME_CSS.items():
         assert not re.findall(r"https?://", strip_comments(css)), theme_id
         assert not re.search(r"@import|url\(\s*(?![\"']?/static/)", strip_comments(css)), theme_id
@@ -1162,8 +1169,60 @@ def test_the_theme_picker_shows_one_swatch_per_accent(checks: dict[str, Any]) ->
     swatches = checks["swatches"]
     for key in ("gatesDark", "gatesLight", "gatesOther"):
         assert len(swatches[key]) == 7 == len(set(swatches[key])), key               # Gates has seven accents, not fourteen swatches
-    assert len(swatches["nostromo"]) == 8 and len(swatches["nightCity"]) == 4
+    assert len(swatches["nostromo"]) == 6 and len(swatches["nightCity"]) == 4
     assert swatches["gatesDark"] != swatches["gatesLight"]                           # the mode of the page picks the colours shown
+
+
+NOSTROMO_PHOSPHORS = ["amber", "green", "white", "red", "blue", "purple"]
+NOSTROMO_NAMES = ["RAY TUBE", "TERMINAL", "STATIC", "ALERT", "CRYO", "PLASMA"]
+
+
+@ui_only
+def test_the_colour_buttons_say_each_colours_name(checks: dict[str, Any]) -> None:
+    labels = checks["accentLabels"]
+    assert labels["nostromo"] == NOSTROMO_NAMES
+    assert labels["nightCity"] == ["BLACKWALL", "RELIC", "EDGERUN", "MOX"]                   # its names are its ids
+    assert labels["gates"] == ["SYSTEM", "BLUE", "TEAL", "PURPLE", "ROSE", "ORANGE", "GREEN"]  # a dark and a light variant each
+    assert labels["retired"] == "CYAN" and labels["noTheme"] == "AMBER"
+
+
+@ui_only
+def test_the_sidebar_names_nostromos_phosphors_and_keeps_the_short_labels_elsewhere(checks: dict[str, Any]) -> None:
+    sidebar = checks["sidebar"]
+    nostromo = Markup(sidebar["nostromo"]["html"])
+    buttons = nostromo.find("button")
+    assert sidebar["nostromo"]["label"] == "PHOSPHOR"
+    assert nostromo.text == NOSTROMO_NAMES
+    assert [b["data-accent"] for b in buttons] == NOSTROMO_PHOSPHORS == [b["title"] for b in buttons]   # the tooltip says the colour
+    assert [b["aria-pressed"] for b in buttons] == ["false", "false", "false", "false", "true", "false"]
+    assert sidebar["nightCity"]["label"] == "ACCENT" and Markup(sidebar["nightCity"]["html"]).text == ["BLA", "REL", "EDG", "MOX"]
+    assert Markup(sidebar["gates"]["html"]).text == ["SYS", "BLU", "TEA", "PUR", "ROS", "ORG", "GRN"]
+
+
+@ui_only
+def test_the_settings_colour_buttons_use_the_names_and_keep_the_colour_as_a_tooltip(checks: dict[str, Any]) -> None:
+    picker = checks["settingsAccents"]
+    nostromo = Markup(picker["nostromo"]["accents"])
+    assert nostromo.text == NOSTROMO_NAMES
+    assert [b["title"] for b in nostromo.find("button")] == NOSTROMO_PHOSPHORS
+    assert [b["data-accent"] for b in nostromo.find("button") if "solid" in (b["class"] or "")] == ["blue"]
+    assert picker["nostromo"]["meta"] == "NOSTROMO · CRYO"
+    for key, words in (("nightCity", ["BLACKWALL", "RELIC", "EDGERUN", "MOX"]),
+                       ("gates", ["SYSTEM", "BLUE", "TEAL", "PURPLE", "ROSE", "ORANGE", "GREEN"])):
+        page = Markup(picker[key]["accents"])
+        assert page.text == words, key
+        assert all("title" not in b for b in page.find("button")), key                  # the name is the colour: no tooltip
+
+
+@ui_only
+def test_saving_a_colour_names_it_and_sends_its_id(checks: dict[str, Any]) -> None:
+    saves = checks["colourSaves"]
+    assert saves["nostromo"] == {"saving": "SAVING CRYO…", "saved": "SAVED CRYO",
+                                 "posts": ['/api/settings {"theme_variant":"blue"}']}
+    assert saves["gates"] == {"saving": "SAVING TEAL…", "saved": "SAVED TEAL",
+                              "posts": ['/api/settings {"theme_variant":"teal"}']}
+    assert saves["sidebar"] == {"saving": "SAVING PLASMA…", "saved": "SAVED PLASMA",
+                                "posts": ['/api/settings {"theme_variant":"purple"}']}
 
 
 # ── Gates: the live accent ────────────────────────────────────────────────────────
@@ -1206,6 +1265,772 @@ def test_the_quiet_hours_fields_are_as_wide_as_the_time_the_locale_writes_in_the
     rule = re.search(r"\.nm-input\.is-time \{([^}]*)\}", strip_comments(THEME_CSS[theme_id])).group(1)
     assert "width: auto" in rule, theme_id
     assert int(re.search(r"min-width: (\d+)px", rule).group(1)) >= 140, theme_id
+
+
+# ── The usage guard card (#27) ─────────────────────────────────────────────────────
+
+GUARD_KEYS = ["guard_enabled", "guard_session_cap", "guard_weekly_cap", "guard_scoped_cap", "guard_resume_stagger_s"]
+GUARD_CAPS, GUARD_STAGGER = GUARD_KEYS[1:4], GUARD_KEYS[4]
+GUARD_EXPLANATION = ("When plan usage reaches a cap, working Claude sessions are told to wrap up, and sessions that wait are "
+                     "woken when every limit is under its cap again. Nothing is blocked.")
+GUARD_COST = "Adds a quick check after each tool call (about a quarter of a second)."
+GUARD_FUNCTIONS = ("capRow", "guardCard", "guardView", "guardLiveHtml", "guardSetupHtml", "guardResultHtml", "syncGuard",
+                   "pollGuard", "guardTick", "guardResume", "guardSetup")
+
+
+def js_string(name: str) -> str:
+    """The text of ``var NAME = "...";`` in app.js."""
+    return re.search(rf'var {name} = "([^"]*)";', APP_CODE).group(1)
+
+
+def test_the_guard_card_sits_between_alerts_and_system_and_has_a_control_for_every_guard_setting() -> None:
+    page = function_body(APP_CODE, "settingsPage")
+    assert page.index("alertsCard() +") < page.index("guardCard() +") < page.index('aria-label="System"')
+    card = function_body(APP_CODE, "guardCard")
+    assert 'aria-label="Usage guard"' in card and 'toggleRow("guard_enabled", "Arm the guard", GUARD_EXPLAIN)' in card
+    for key in GUARD_CAPS + [GUARD_STAGGER]:
+        assert f'capRow("{key}"' in card, key
+    assert 'id="guard-live"' in card and 'id="guard-setup"' in card
+    assert set(GUARD_KEYS) <= posted_setting_keys() <= set(server.SETTING_SPECS)
+    assert "errLine(key)" in function_body(APP_CODE, "capRow")                    # a refusal lands under its field, announced
+
+
+def test_the_guard_says_what_it_does_in_the_words_it_was_given() -> None:
+    assert js_string("GUARD_EXPLAIN") == GUARD_EXPLANATION and js_string("GUARD_COST") == GUARD_COST
+    assert "GUARD_COST" in function_body(APP_CODE, "guardSetupHtml")
+
+
+def test_the_guard_fields_apply_the_limits_the_server_and_settings_apply() -> None:
+    specs = server.SETTING_SPECS
+    for key in GUARD_CAPS:
+        check = specs[key].check
+        assert check(None) and check(1) and check(100) and not check(0) and not check(101) and not check(True)
+    stagger = specs[GUARD_STAGGER].check
+    assert stagger(0) and stagger(600) and not stagger(601) and not stagger(-1) and not stagger(None)
+    change = function_body(APP_CODE, "settingsChange")
+    assert 'key === "guard_session_cap" || key === "guard_weekly_cap" || key === "guard_scoped_cap"' in change
+    assert re.search(r"\+cap < 1 \|\| \+cap > 100", change) and re.search(r"\+stagger > 600", change)
+    assert 'value = null;' in change[change.index("guard_session_cap"):]               # a blank cap is "not watched"
+
+
+def test_the_guard_talks_to_the_monitor_only_through_its_three_routes() -> None:
+    routes = set(re.findall(r'api\("(?:GET|POST)", "(/api/guard[^"]*)"', APP_CODE))
+    assert routes == {"/api/guard", "/api/guard/resume", "/api/guard/setup"}
+    assert 'api("POST", "/api/guard/setup", { action: action })' in function_body(APP_CODE, "guardSetup")
+    click = function_body(APP_CODE, "settingsClick")
+    for action in ("guard-resume", "guard-install", "guard-remove"):
+        assert f'"{action}"' in click, action
+    assert 'failedText("RESUME FAILED", res)' in strip_comments(APP_CODE)             # in capitals all the way, like every failure line
+
+
+def test_the_guard_asks_again_only_while_the_settings_page_is_on_screen_and_one_ask_at_a_time() -> None:
+    tick = function_body(APP_CODE, "guardTick")
+    for needle in ('S.page !== "settings"', 'S.formKey !== "settings"', 'visibilityState === "hidden"', "S.guardFlight", "GUARD_POLL_MS"):
+        assert needle in tick, needle
+    assert "guardTick();" in function_body(APP_CODE, "tick") and "var GUARD_POLL_MS = 3000;" in APP_CODE
+    assert "if (S.guardFlight) {" in function_body(APP_CODE, "pollGuard")
+    assert "pollGuard();" in function_body(APP_CODE, "saveSettings")                   # a change of a guard setting shows at once
+
+
+def test_the_guard_has_no_motion_of_its_own_and_never_touches_a_token() -> None:
+    """Whatever moves in the card is the theme's (the entrance, the pending shimmer, the hover), and so it obeys reduce_motion."""
+    for name in GUARD_FUNCTIONS:
+        body = strip_comments(function_body(APP_CODE, name))
+        assert not re.search(r"requestAnimationFrame|setTimeout|setInterval|\.animate\(|animation|transition", body), name
+        assert not re.search(r"TOKEN|token|credential|Authorization|localStorage|sessionStorage", body, re.I), name
+
+
+def test_the_guard_blocks_are_built_from_the_existing_parts_and_open_as_placeholders() -> None:
+    live, setup = function_body(APP_CODE, "guardLivePlaceholder"), function_body(APP_CODE, "guardSetupHtml")
+    assert 'data-pending=""' in live and "disabled" in live                             # the shape of the common case, no button live yet
+    assert 'kvGrid([["HOOKS", "NOT INSTALLED", true]' in setup                          # the rows exist from the first frame, pending
+    for name in ("guardLiveHtml", "guardSetupHtml", "guardResultHtml"):
+        assert "esc(" in function_body(APP_CODE, name), name                            # everything it was told is escaped
+    assert 'function kvGrid(pairs, cls)' in APP_CODE and 'row[3] ? \' title="\'' in function_body(APP_CODE, "kvGrid")
+
+
+def test_the_gates_theme_gives_the_guard_card_its_icon_and_the_other_themes_need_none() -> None:
+    assert re.search(r'\.nm-card\[aria-label="Usage guard"\] \{ --g-ico: "\\[0-9A-F]{4}"; \}', THEME_CSS["gates"])
+    for theme_id in ("nostromo", "night_city"):
+        assert "--g-ico" not in THEME_CSS[theme_id]
+
+
+def test_the_gates_theme_keeps_the_tone_of_the_guard_chips_its_script_calls_neutral() -> None:
+    """gates.js tones a chip from its words and calls a word it does not know neutral, which would wash ARMED and HOLDING
+    out: the two chips carry their tone as a class (is-ok, is-crit), and Gates lets that class win inside the guard block."""
+    css = THEME_CSS["gates"]
+    for tone, colour in (("is-ok", "--ok"), ("is-crit", "--alert")):
+        assert f'#guard-live .nm-chip.{tone}[data-g-tone="neutral"] {{ color: var({colour});' in css, tone
+
+
+def test_the_manual_setup_the_card_points_at_is_in_the_repository() -> None:
+    links = re.search(r"var LINKS = \{(.*?)\};", APP_CODE, re.S).group(1)
+    assert 'hooks: "https://github.com/Godimas101/claude-usage-monitor/blob/main/docs/AGENT_HOOK.md"' in links
+    assert 'data-external="1">docs/AGENT_HOOK.md</a>' in function_body(APP_CODE, "guardSetupHtml")
+    assert (paths.resource_dir() / "docs" / "AGENT_HOOK.md").is_file()
+
+
+def kv(html: str) -> list[tuple[str, str]]:
+    """The label and value of each row of a kvGrid, as text."""
+    rows = re.findall(r'<div class="nm-kv"><span[^>]*>([^<]*)</span><b[^>]*>([^<]*)</b></div>', html)
+    return [(unescape(label), unescape(value)) for label, value in rows]
+
+
+def chip(html: str) -> tuple[str, str]:
+    found = re.search(r'<span class="nm-chip([^"]*)"[^>]*>([^<]*)</span>', html)
+    return found.group(1), found.group(2)
+
+
+def story(html: str) -> str:
+    return unescape(re.search(r'<p class="nm-story"[^>]*>([^<]*)</p>', html).group(1))
+
+
+def resume_disabled(html: str) -> bool:
+    return bool(re.search(r'<button[^>]*(?:data-action="guard-resume"|data-fid="guard-resume")[^>]* disabled', html))
+
+
+def resume_busy(html: str) -> bool:
+    """A Resume now on its way: aria-disabled, not disabled, so the keyboard focus stays on it."""
+    return bool(re.search(r'<button[^>]*data-action="guard-resume"[^>]* aria-disabled="true"', html)) and not resume_disabled(html)
+
+
+@ui_only
+def test_the_guard_card_has_its_toggle_four_fields_and_the_two_blocks_the_page_fills(checks: dict[str, Any]) -> None:
+    card = Markup(checks["guard"]["card"])
+    fields = {attrs["data-key"]: attrs for attrs in card.find("input") if attrs.get("data-key")}
+    assert list(fields) == GUARD_KEYS and fields["guard_enabled"]["type"] == "checkbox"
+    for key in GUARD_CAPS:
+        assert (fields[key]["type"], fields[key]["min"], fields[key]["max"], fields[key]["placeholder"]) == ("number", "1", "100", "OFF")
+        assert "err-" + key in fields[key]["aria-describedby"]                           # the field says where its refusal is announced
+    assert (fields[GUARD_STAGGER]["min"], fields[GUARD_STAGGER]["max"], fields[GUARD_STAGGER]["placeholder"]) == ("0", "600", "120")
+    ids = {attrs["id"] for _tag, attrs in card.tags if attrs.get("id")}
+    assert {"guard-live", "guard-setup", *("err-" + key for key in GUARD_CAPS + [GUARD_STAGGER])} <= ids
+    assert card.find("section")[0]["aria-label"] == "Usage guard"
+    assert GUARD_EXPLANATION in " ".join(card.text)
+    for title in ("Session cap", "Weekly cap", "Model weekly cap", "Stagger", "One-click setup"):
+        assert title in card.text, title
+    assert checks["guard"]["labels"] == ["USAGE GUARD", "SESSION CAP", "WEEKLY CAP", "MODEL WEEKLY CAP", "STAGGER", "POLL INTERVAL MS"]
+
+
+@ui_only
+def test_the_guard_status_says_off_armed_or_holding(checks: dict[str, Any]) -> None:
+    live = checks["guard"]["live"]
+    assert chip(live["off"]) == ("", "OFF") and "The guard is off" in story(live["off"])
+    assert chip(live["armed"]) == (" is-ok", "ARMED")
+    assert story(live["armed"]) == "Watching the session limit at 95% and the weekly limit at 90%. Every watched limit is under its cap."
+    assert "each model’s weekly limit at 80%" in story(live["armedThree"]) and "the weekly limit at 90% and each" in story(live["armedThree"])
+    assert story(live["armedNoCaps"]) == "No cap is set, so no limit is watched. Set at least one cap above."
+    assert chip(live["holding"]) == (" solid is-crit", "HOLDING") and story(live["holding"]).startswith("A cap was reached.")
+    for state in ("off", "armed", "armedThree", "armedNoCaps"):
+        assert kv(live[state]) == [], state                                              # nothing but the sentence until something waits
+
+
+@ui_only
+def test_while_holding_it_names_what_is_over_when_it_ends_who_was_told_and_who_waits(checks: dict[str, Any]) -> None:
+    rows, clock = kv(checks["guard"]["live"]["holding"]), checks["guard"]["clock"]
+    assert rows[:2] == [("SESSION", "96% OF A 95% CAP"), ("FABLE WEEKLY", "91.5% OF A 90% CAP")]      # percent against cap, as the limit is named
+    assert rows[2] == ("RESUMES", f"{clock['resumes']} · IN 3 H 27 M")                                 # local time and a countdown
+    assert rows[3] == ("TOLD THIS EPISODE", "2 SESSIONS")
+    assert rows[4] == ("3f9a1c2e", clock["told"]) and rows[5][0] == "3f9a1c2e" and rows[5][1] != rows[4][1]   # short ids, and when
+    assert rows[6] == ("WAITING", "1 SESSION") and rows[7] == ("atlas-web · 77b0aa10", f"SINCE {clock['since']}")   # the folder, and since when
+    assert 'title="C:\\Demo\\atlas-web"' in checks["guard"]["live"]["holding"]                          # the whole path is one hover away
+    assert len(rows) == 8
+
+
+@ui_only
+def test_resume_now_is_enabled_only_while_something_waits(checks: dict[str, Any]) -> None:
+    live = checks["guard"]["live"]
+    for state in ("off", "armed", "armedThree", "armedNoCaps", "holdingNobody", "holdingNoResetTime", "holdingAMomentLeft", "pending",
+                  "beforeTheFirstCycle"):
+        assert resume_disabled(live[state]), state
+    for state in ("holding", "holdingMany", "armedStillWaiting", "holdingHostile"):
+        assert not resume_disabled(live[state]), state                                   # a session that is still waiting can be released
+    assert 'data-action="guard-resume"' in live["holding"] and ">Resume now</button>" in live["holding"]
+    assert ">Resuming…</button>" in live["holdingBusy"] and resume_busy(live["holdingBusy"])  # a click on its way keeps the focus
+
+
+@ui_only
+def test_the_status_says_when_no_session_can_hear_the_guard(checks: dict[str, Any]) -> None:
+    live = checks["guard"]["live"]
+    said = "The hooks are not all installed, so sessions may not be told: press Install below."
+    assert said in live["armedNoHooks"] and said in live["holdingPartHooked"]
+    assert said not in live["armedHooked"] and said not in live["armed"]                # installed, or setup not known yet
+
+
+@ui_only
+def test_the_hold_says_so_when_it_does_not_know_when_it_ends_and_when_it_is_about_to(checks: dict[str, Any]) -> None:
+    live = checks["guard"]["live"]
+    assert ("RESUMES", "NO RESET TIME KNOWN") in kv(live["holdingNoResetTime"])
+    assert kv(live["holdingAMomentLeft"])[1] == ("RESUMES", f"{checks['guard']['clock']['resumes']} · NOW")
+    assert kv(live["holdingNobody"])[2:] == [("TOLD THIS EPISODE", "NONE YET"), ("WAITING", "NONE")]
+    assert kv(live["armedStillWaiting"])[0] == ("WAITING", "1 SESSION")                  # the hold just ended but a session has not woken yet
+
+
+@ui_only
+def test_a_long_list_of_sessions_is_cut_and_counted(checks: dict[str, Any]) -> None:
+    rows = kv(checks["guard"]["live"]["holdingMany"])
+    labels = [label for label, _value in rows]
+    assert rows[labels.index("TOLD THIS EPISODE")][1] == "7 SESSIONS" and rows[labels.index("WAITING")][1] == "7 SESSIONS"
+    # the limit, when it ends, the told header and its five and a "more" row, the waiting header and its five and a "more" row
+    assert labels.count("AND 2 MORE") == 2 and len(rows) == 1 + 1 + 1 + 5 + 1 + 1 + 5 + 1
+    assert [row for row in rows if row[0] == "AND 2 MORE"] == [("AND 2 MORE", "")] * 2
+
+
+@ui_only
+def test_the_guard_blocks_open_as_placeholders_and_say_so_when_the_monitor_does_not_answer(checks: dict[str, Any]) -> None:
+    live, setup = checks["guard"]["live"], checks["guard"]["setup"]["pending"]
+    for html in (live["pending"], live["beforeTheFirstCycle"], live["odd"]):
+        assert 'class="nm-chip" data-pending=""' in html and '<p class="nm-story" data-pending=""' in html and resume_disabled(html)
+        assert html.count('data-pending=""') == 2 == html.count('data-pending="" aria-hidden="true"')     # nothing to read yet, so nothing is read out
+    assert setup.count('data-pending=""') == 3 == setup.count('data-pending="" aria-hidden="true"') and kv(setup)[0][0] == "HOOKS"
+    assert 'class="nm-error"' in live["lost"] and "could not get the guard" in live["lost"] and "data-pending" not in live["lost"]
+    assert live["pending"] != live["off"]
+
+
+@ui_only
+def test_everything_the_card_was_told_is_escaped(checks: dict[str, Any]) -> None:
+    """Session ids, folders, limit labels and every message of setup arrive from outside the page: none may become markup."""
+    for html in (checks["guard"]["live"]["holdingHostile"], checks["guard"]["setup"]["hostile"]):
+        page = Markup(html)
+        assert page.find("img") == [] and not any("onerror" in attrs for _tag, attrs in page.tags)
+        assert "<img" not in html.lower()
+    shown = " ".join(Markup(checks["guard"]["setup"]["hostile"]).text)
+    assert shown.count(HOSTILE) == 7                      # the reason, what changed and what did not, the backup, the warning, the error, the command
+    assert HOSTILE.upper() in " ".join(Markup(checks["guard"]["live"]["holdingHostile"]).text)   # a label is shown in capitals, as text
+
+
+@ui_only
+def test_the_setup_status_line_says_hooks_the_tool_and_the_claude_code_version(checks: dict[str, Any]) -> None:
+    setup = checks["guard"]["setup"]
+    assert kv(setup["missing"]) == [("HOOKS", "NOT INSTALLED"), ("MCP TOOL", "NOT REGISTERED"), ("CLAUDE CODE", "2.1.160")]
+    assert kv(setup["installed"]) == [("HOOKS", "INSTALLED"), ("MCP TOOL", "REGISTERED"), ("CLAUDE CODE", "2.1.160")]
+    assert kv(setup["partial"]) == [("HOOKS", "PARTLY INSTALLED (2 OF 3)"), ("MCP TOOL", "A DIFFERENT PROGRAM"), ("CLAUDE CODE", "2.1.160")]
+    assert kv(setup["tooOld"])[2] == ("CLAUDE CODE", "2.1.94 · NEEDS 2.1.139 OR NEWER") and "older than 2.1.139" in setup["tooOld"]
+    assert kv(setup["versionUnknown"])[2] == ("CLAUDE CODE", "VERSION UNKNOWN") and kv(setup["noClaude"])[2] == ("CLAUDE CODE", "NOT FOUND")
+    assert kv(setup["fromSource"])[:2] == [("HOOKS", "UNKNOWN"), ("MCP TOOL", "UNKNOWN")]
+    assert "The Claude Code settings file is not valid JSON" in setup["unreadable"]       # what setup would refuse, said before the click
+
+
+def buttons(html: str) -> dict[str, str]:
+    """Install and Remove: "disabled" (it cannot work here), "busy" (aria-disabled while a click is on its way, so the
+    keyboard focus stays) or "" (it can be pressed)."""
+    def state(name: str) -> str:
+        tag = re.search(rf'<button[^>]*data-action="guard-{name}"[^>]*>', html)
+        attrs = tag.group(0) if tag else ""
+        return "disabled" if " disabled" in attrs else "busy" if 'aria-disabled="true"' in attrs else ""
+
+    return {name: state(name) for name in ("install", "remove")}
+
+
+@ui_only
+def test_install_and_remove_are_there_when_setup_can_run_and_the_cost_is_always_said(checks: dict[str, Any]) -> None:
+    setup = checks["guard"]["setup"]
+    for name in ("missing", "installed", "partial", "tooOld", "versionUnknown", "unreadable"):
+        assert buttons(setup[name]) == {"install": "", "remove": ""}, name
+    for name in ("pending", "fromSource"):                                                    # no answer yet, or no setup here
+        assert buttons(setup[name]) == {"install": "disabled", "remove": "disabled"}, name
+    assert buttons(setup["noClaude"]) == {"install": "disabled", "remove": ""}                 # Remove needs no Claude Code
+    for name in ("installing", "removing"):                                                   # one click on its way
+        assert buttons(setup[name]) == {"install": "busy", "remove": "busy"}, name
+    assert '(<span class="nm-path">C:\\Users\\t\\AppData\\Roaming\\npm\\claude.CMD</span>) is older than 2.1.139' in setup["tooOldAt"]
+    for name, html in setup.items():
+        assert f'<p class="nm-lede">{GUARD_COST}</p>' in html, name                              # what it costs is said whatever the state
+        install = "Installing…" if name == "installing" else "Install"                          # the label of a click on its way says so
+        remove = "Removing…" if name == "removing" else "Remove"
+        assert re.findall(r'data-action="guard-(?:install|remove)"[^>]*>([^<]*)</button>', html) == [install, remove], name
+
+
+@ui_only
+def test_when_setup_cannot_run_it_says_why_and_points_at_the_manual_setup(checks: dict[str, Any]) -> None:
+    setup = checks["guard"]["setup"]
+    for name, reason in (("fromSource", "One-click setup works in the installed app. This copy runs from source."),
+                         ("noClaude", "Claude Code was not found on this PC")):
+        page = Markup(setup[name])
+        assert "Setup is not available here." in page.text and any(reason in text for text in page.text), name
+        link = [attrs for attrs in page.find("a")][0]
+        assert link["href"].endswith("/docs/AGENT_HOOK.md") and link["data-external"] == "1", name
+        assert "docs/AGENT_HOOK.md" in page.text, name
+        assert buttons(setup[name])["install"] == "disabled", name
+    assert "Setup is not available" not in setup["missing"]
+
+
+@ui_only
+def test_a_click_shows_what_changed_the_backup_the_warnings_and_the_errors_each_in_its_place(checks: dict[str, Any]) -> None:
+    setup = checks["guard"]["setup"]
+    done = setup["installed_ok"]
+    assert '<div class="nm-callout" role="status"><b>Installed.</b> Added the SessionStart hook. Registered the claude-usage MCP tool.<br>' in done
+    assert 'Backup: <span class="nm-path">C:\\Users\\t\\.claude\\settings.json.cum-backup-20261028-180509</span>' in done
+    assert '<div class="nm-callout is-warn" role="note">This card checks only the claude command. Claude Code in VS Code has its own version: in VS Code, check under Extensions that it is 2.1.139 or newer.</div>' in done
+    assert "<b>Removed.</b> Removed the PostToolUse hook." in setup["removed_ok"]
+    assert "<b>Nothing to change.</b> The three hooks were already in place." in setup["nothing"]
+    refused = setup["refused"]
+    assert '<p class="nm-error" role="alert">Claude Code 2.1.94 is older than 2.1.139' in refused and "nm-callout" not in refused   # no empty box above it
+    by_hand = setup["byHand"]
+    assert "To do it by hand, run: <span class=\"nm-path\">claude mcp add --transport stdio --scope user claude-usage" in by_hand
+    assert "<b>Installed.</b> Added the SessionStart hook." in by_hand and '<div class="nm-callout is-warn" role="note">The MCP tool was not registered.' in by_hand
+
+
+@ui_only
+def test_each_block_is_rewritten_only_when_it_changed(checks: dict[str, Any]) -> None:
+    sync = checks["guard"]["sync"]
+    assert sync["first"] == 2 and sync["unchanged"] == 2 and sync["afterOneChange"] == 3 and sync["liveHasButtonDisabled"] is True
+
+
+@ui_only
+def test_the_card_asks_for_the_guard_once_the_page_is_up_and_visible_and_it_is_time(checks: dict[str, Any]) -> None:
+    polling = checks["guard"]["polling"]
+    assert polling["due"] == ["GET /api/guard"]
+    for name in ("notYet", "inFlight", "elsewhere", "hidden", "pageNotBuilt"):
+        assert polling[name] == [], name
+
+
+@ui_only
+def test_resume_now_posts_once_says_so_and_asks_for_the_new_state(checks: dict[str, Any]) -> None:
+    actions = checks["guard"]["actions"]
+    assert actions["resume"]["calls"] == ["POST /api/guard/resume", "GET /api/guard"] and actions["resume"]["learned"] is True
+    assert actions["resume"]["status"] == {"text": "RESUME REQUESTED", "error": False} and actions["resume"]["busy"] is False
+    assert actions["resumeTwice"] == []                                                  # a click while one is on its way is ignored
+    for name, text in (("resumeRefused", "RESUME FAILED: COULD NOT RECORD THE RESUME REQUEST"),
+                       ("resumeLost", "RESUME FAILED: THE DASHBOARD LOST ITS LINK")):
+        assert actions[name]["status"] == {"text": text, "error": True} and actions[name]["busy"] is False, name
+        assert re.search(r"[A-Z]", text) and not re.search(r"[a-z]", text)               # capitals all the way: Gates writes it in sentence case
+
+
+@ui_only
+def test_install_and_remove_post_their_action_show_the_result_and_look_again(checks: dict[str, Any]) -> None:
+    actions = checks["guard"]["actions"]
+    assert actions["install"]["calls"] == ['POST /api/guard/setup {"action":"install"}', "GET /api/guard"]
+    assert actions["whileRunning"]["busy"] == "install" and "Installing…" not in actions["install"]["shown"]
+    assert actions["install"]["busy"] == "" and actions["install"]["result"]["changed"] == ["Added the SessionStart hook."]
+    assert "<b>Installed.</b> Added the SessionStart hook." in actions["install"]["shown"]                  # the block shows what it said
+    assert actions["remove"]["calls"] == ['POST /api/guard/setup {"action":"remove"}', "GET /api/guard"]
+    assert actions["remove"]["result"]["action"] == "remove"
+    assert actions["refusedByTheMonitor"]["result"]["errors"] == ["not valid JSON"]
+    assert actions["serverError"]["result"] == {"ok": False, "action": "install", "changed": [], "unchanged": [], "backup": None,
+                                                "warnings": [], "errors": ["The monitor could not run setup (setup install failed)."],
+                                                "manual": None}
+    assert actions["setupLost"]["result"]["errors"] == ["The dashboard lost its link to the monitor."] and actions["setupLost"]["busy"] == ""
+    assert actions["setupLost"]["calls"] == ['POST /api/guard/setup {"action":"remove"}']
+    assert actions["setupTwice"] == []                                                   # one at a time
+
+
+@ui_only
+@pytest.mark.parametrize(("label", "key", "posted"), [
+    ("capBlank", "guard_session_cap", None), ("capSpaces", "guard_weekly_cap", None), ("cap1", "guard_session_cap", 1),
+    ("cap95", "guard_session_cap", 95), ("cap100", "guard_scoped_cap", 100), ("stagger0", "guard_resume_stagger_s", 0),
+    ("stagger120", "guard_resume_stagger_s", 120), ("stagger600", "guard_resume_stagger_s", 600),
+])
+def test_a_field_the_server_would_take_is_posted_as_a_whole_number_or_null(checks: dict[str, Any], label: str, key: str,
+                                                                          posted: int | None) -> None:
+    result = checks["guard"]["actions"]["fields"][label]
+    assert result["wrote"] == [{key: posted}] and result["error"] == "" and result["shown"] is False
+    assert result["status"].startswith("SAVED ") and server.SETTING_SPECS[key].check(posted)
+
+
+@ui_only
+@pytest.mark.parametrize(("label", "key", "value", "line"), [
+    ("cap0", "guard_session_cap", "0", "Enter a whole number from 1 to 100"), ("cap101", "guard_weekly_cap", "101", "Enter a whole number from 1 to 100"),
+    ("capDecimal", "guard_session_cap", "9.5", "Enter a whole number from 1 to 100"), ("capNegative", "guard_scoped_cap", "-5", "Enter a whole number from 1 to 100"),
+    ("capText", "guard_session_cap", "abc", "Enter a whole number from 1 to 100"), ("capExp", "guard_session_cap", "1e2", "Enter a whole number from 1 to 100"),
+    ("capLong", "guard_session_cap", "0095", "Enter a whole number from 1 to 100"),
+    ("capBadInput", "guard_session_cap", "", "Enter a whole number from 1 to 100"),  # "9e" in the box: not a blank cap
+    ("stagger601", "guard_resume_stagger_s", "601", "Enter a whole number of seconds from 0 to 600"),
+    ("staggerBlank", "guard_resume_stagger_s", "", "Enter a whole number of seconds from 0 to 600"),
+    ("staggerNegative", "guard_resume_stagger_s", "-1", "Enter a whole number of seconds from 0 to 600"),
+    ("staggerDecimal", "guard_resume_stagger_s", "1.5", "Enter a whole number of seconds from 0 to 600"),
+])
+def test_a_field_the_server_would_refuse_is_refused_in_the_page_under_the_field(checks: dict[str, Any], label: str, key: str,
+                                                                               value: str, line: str) -> None:
+    result = checks["guard"]["actions"]["fields"][label]
+    assert result["wrote"] == [] and result["lines"] == 0 and result["shown"] is True and result["error"].startswith(line)
+
+
+@ui_only
+def test_a_guard_setting_asks_the_guard_for_its_new_status_and_no_other_setting_does(checks: dict[str, Any]) -> None:
+    actions = checks["guard"]["actions"]
+    assert actions["toggle"]["calls"] == ['POST /api/settings {"guard_enabled":true}', "GET /api/state", "GET /api/guard"]
+    assert actions["toggle"]["status"] == "SAVED USAGE GUARD"
+    assert actions["otherSettingDoesNotAskTheGuard"] == []
+
+
+# ── The sign-in help and the pages of a PC with no Claude Code (#28) ────────────────
+
+# Someone who uses Claude on the web or in the app has no Claude Code on this PC: no sign-in for the monitor to read the plan's
+# limits with, and no transcript for the cost, efficiency and history pages to count. These are the words the page was given.
+README_WEB_AND_APP = "https://github.com/Godimas101/claude-usage-monitor#-using-claude-on-the-web-or-in-the-app"
+INSTALL_COMMAND = "irm https://claude.ai/install.ps1 | iex"
+# Anthropic's installer leaves the PATH alone, so "claude" is not found after it (#42): this runs it from the installer's folder,
+# for any user name
+START_COMMAND = r'& "$env:USERPROFILE\.local\bin\claude.exe"'
+SIGNIN_HEAD = "NO CLAUDE SIGN-IN YET"
+SIGNIN_WHY = ("The monitor reads your plan's limits through the sign-in that Claude Code saves on this PC. Signing in to Claude Code "
+              "once is enough, even if you use Claude on the web or in the Claude app. Claude Code needs a paid plan such as Pro or Max.")
+SIGNIN_STEPS = ["Open PowerShell: press Start and type PowerShell.", "Install Claude Code:", "Start Claude Code:",
+                "Come back here and press Check again."]
+SIGNIN_PATH_NOTE = "If it warns that a folder is not in your PATH, carry on. The next step does not need it."      # under the second step's command
+SIGNIN_SIGN_IN = "Then sign in with your Claude account in the browser that opens."      # the end of the third step, under its command
+SIGNIN_RENEWS = "Claude Code renews the sign-in each time it runs. If the monitor later says the sign-in has expired, open Claude Code again."
+SIGNIN_EXPIRED = "Claude Code renews the sign-in each time it runs. Open Claude Code, or run claude in PowerShell, then press Check again."
+# an older Claude app took the name "claude" on some PCs, so typing it opens the app (Anthropic's install troubleshooting page)
+SIGNIN_NOT_FOUND = "If PowerShell says claude is not recognized, or the Claude app opens instead, run this:"
+COPY_TITLES = {"install": "Copy the install command", "start": "Copy the command that starts Claude Code"}
+CHECK_NONE, CHECK_STALE, CHECK_FAILED = "Still no sign-in found.", "Still no working sign-in.", "Could not check just now. Try again."
+NO_ACTIVITY = "No Claude Code activity on this PC"
+NO_ACTIVITY_WHY = ("These pages count the work Claude Code records on this PC. Claude on the web and in the Claude app keeps no records "
+                   "here, so there is nothing to count. Your limits, pace and alerts work as usual.")
+HELP_FUNCTIONS = ("needsSignIn", "codeText", "copyButton", "commandRow", "signInHelp", "checkAgain", "syncCheck", "selectCommand",
+                  "copyCommand", "helpAction", "limitsOnly", "noActivityPage")
+JARGON = r"\b(token|oauth|credentials?|api|json|http)\b"            # words the page's own copy keeps out of a reader's way
+
+
+def plain(html: str) -> str:
+    """The text of a piece of markup, as a reader sees it (blocks run together: the markup has no whitespace between them)."""
+    return unescape(re.sub(r"<[^>]+>", "", html))
+
+
+def paragraphs(html: str) -> list[str]:
+    return [plain(p) for p in re.findall(r"<p>(.*?)</p>", html, re.S)]
+
+
+def commands(html: str) -> list[str]:
+    return [unescape(c) for c in re.findall(r'<code class="nm-path">(.*?)</code>', html)]
+
+
+def test_the_help_and_the_no_activity_pages_say_what_they_were_given_to_say() -> None:
+    assert js_string("INSTALL_COMMAND") == INSTALL_COMMAND and js_string("SIGNIN_HEAD") == SIGNIN_HEAD
+    # the one command in single quotes (it holds double ones), each backslash written twice
+    assert "var START_COMMAND = '" + START_COMMAND.replace("\\", "\\\\") + "';" in APP_CODE
+    assert "var COMMANDS = { install: INSTALL_COMMAND, start: START_COMMAND };" in APP_CODE
+    assert re.search(r"var COPY_TITLES = \{ install: \"([^\"]*)\", start: \"([^\"]*)\" \};", APP_CODE).groups() == tuple(COPY_TITLES.values())
+    assert js_string("SIGNIN_WHY") == SIGNIN_WHY and js_string("SIGNIN_RENEWS") == SIGNIN_RENEWS
+    assert (js_string("CHECK_NONE"), js_string("CHECK_STALE"), js_string("CHECK_FAILED")) == (CHECK_NONE, CHECK_STALE, CHECK_FAILED)
+    assert js_string("NO_ACTIVITY") == NO_ACTIVITY and js_string("NO_ACTIVITY_WHY") == NO_ACTIVITY_WHY
+    links = re.search(r"var LINKS = \{(.*?)\};", APP_CODE, re.S).group(1)
+    assert f'readme: "{README_WEB_AND_APP}"' in links
+    body = function_body(APP_CODE, "signInHelp")
+    for step in (SIGNIN_STEPS[0], SIGNIN_STEPS[3], "Claude Code renews the sign-in each time it runs. Open Claude Code, or run "):
+        assert f'esc("{step}")' in body, step
+    assert f'esc("{SIGNIN_STEPS[1]}") + commandRow("install") + esc("{SIGNIN_PATH_NOTE}")' in body  # the installer's note must not stop anyone
+    assert f'esc("{SIGNIN_STEPS[2]}") + commandRow("start") + esc("{SIGNIN_SIGN_IN}")' in body      # no "new window": the PATH does not matter
+    one_line = re.sub(r"\s+", " ", body)
+    assert ('esc("If PowerShell says ") + codeText("claude") + esc(" is not recognized, or the Claude app opens instead, run this:") + "</p>" + '
+            'commandRow("start")') in one_line
+    # the heading is all capitals, which is what Gates sets in sentence case ("No Claude sign-in yet"; CLAUDE is one of its names)
+    assert SIGNIN_HEAD.isupper() and 'CLAUDE: "Claude"' in THEME_JS["gates"]
+
+
+def test_the_help_copy_keeps_jargon_out_of_a_readers_way() -> None:
+    for text in (SIGNIN_HEAD, SIGNIN_WHY, *SIGNIN_STEPS, SIGNIN_PATH_NOTE, SIGNIN_SIGN_IN, SIGNIN_RENEWS, SIGNIN_EXPIRED, SIGNIN_NOT_FOUND,
+                 *COPY_TITLES.values(), CHECK_NONE, CHECK_STALE, CHECK_FAILED, NO_ACTIVITY, NO_ACTIVITY_WHY, "Copy", "Copied", "Press Ctrl+C",
+                 "More in the README"):
+        assert not re.search(JARGON, text, re.I), text
+
+
+def test_the_readme_link_is_one_the_dashboard_will_open_and_the_install_command_is_not_a_link() -> None:
+    assert dashboard._external_allowed(README_WEB_AND_APP)                 # github.com: the bridge opens it in the browser
+    assert not dashboard._external_allowed("https://claude.ai/install.ps1")
+    assert "claude.ai" not in dashboard.EXTERNAL_HOSTS
+    body = function_body(APP_CODE, "signInHelp")
+    link = re.search(r'<a href="\' \+ esc\(LINKS\.readme\) \+ \'" data-external="1">More in the README</a>', body)
+    assert link, "the README link opens the way the page opens its other external links"
+
+
+def test_the_commands_are_shown_and_copied_and_never_linked_or_fetched() -> None:
+    code = strip_comments(APP_CODE)
+    assert code.count("claude.ai") == 1                                    # the one constant
+    for name in ("INSTALL_COMMAND", "START_COMMAND"):                      # each is only defined and put in COMMANDS
+        uses = [line.strip() for line in code.splitlines() if re.search(rf"\b{name}\b", line)]
+        assert len(uses) == 2 and uses[0].startswith(f"var {name} = ") and uses[1].startswith("var COMMANDS = {"), (name, uses)
+    uses = [line.strip() for line in code.splitlines() if re.search(r"\bCOMMANDS\b", line)]
+    assert len(uses) == 4, uses                                            # defined, shown, the key checked, copied
+    assert uses[0].startswith("var COMMANDS = {") and "codeText(COMMANDS[which])" in uses[1]
+    assert "hasOwnProperty.call(COMMANDS, which)" in uses[2] and "clip.writeText(COMMANDS[which])" in uses[3]
+    assert not re.search(r"COMMAND[^\n]*(href|fetch|open|api\()|(href|fetch|open|api\()[^\n]*COMMAND", code)
+
+
+def test_the_help_buttons_are_wired_like_the_update_banners_and_nothing_is_inline() -> None:
+    code = strip_comments(APP_CODE)
+    assert 'closest(".nm-help button[data-action]")' in code
+    assert 'helpAction(help.getAttribute("data-action"), help.getAttribute("data-command"))' in code
+    action = function_body(APP_CODE, "helpAction")
+    assert 'action === "check-again"' in action and "checkAgain()" in action
+    assert 'action === "copy-command"' in action and "copyCommand(which)" in action
+    html = function_body(APP_CODE, "signInHelp") + function_body(APP_CODE, "copyButton") + function_body(APP_CODE, "commandRow")
+    assert 'data-action="check-again"' in html and 'data-action="copy-command" data-command="' in html
+    assert not re.search(r"""\bon[a-z]+\s*=\s*["']""", html)
+
+
+def test_check_again_asks_the_monitor_to_look_through_the_pages_own_client_and_one_at_a_time() -> None:
+    check = function_body(APP_CODE, "checkAgain")
+    assert 'api("POST", "/api/refresh")' in check and "fetch(" not in check
+    assert check.index("if (S.check.busy) {") < check.index('api("POST", "/api/refresh")')        # a click while one is on its way sends nothing
+    assert "poll(true)" in check                                                                # and the state of the cycle it started is asked for
+    # busy, not disabled: a disabled button drops the keyboard focus of whoever pressed it, and the redraw cannot give it back
+    html = function_body(APP_CODE, "signInHelp")
+    assert "aria-disabled" in html and " disabled" not in html
+    assert "syncCheck()" in function_body(APP_CODE, "onState") and "syncCheck()" in function_body(APP_CODE, "tick")
+
+
+def test_the_help_has_no_motion_of_its_own_and_touches_no_storage() -> None:
+    """What moves on these pages is the theme's (the entrance, the pending shimmer, the hover), so it obeys reduce_motion."""
+    for name in HELP_FUNCTIONS:
+        body = strip_comments(function_body(APP_CODE, name))
+        assert not re.search(r"requestAnimationFrame|setInterval|\.animate\(|animation|transition|localStorage|sessionStorage|TOKEN", body), name
+        if name != "copyCommand":
+            assert "setTimeout" not in body, name
+    assert strip_comments(function_body(APP_CODE, "copyCommand")).count("window.setTimeout(") == 1     # how long the button's answer stays
+
+
+@pytest.mark.parametrize("theme_id", THEME_IDS)
+def test_every_theme_draws_the_help_panel_its_command_row_and_a_busy_button(theme_id: str) -> None:
+    css = strip_comments(THEME_CSS[theme_id])
+    panel = re.search(r"\.nm-help \{([^}]*)\}", css)
+    assert panel and "flex-direction: column" in panel.group(1), theme_id           # the status line, grown into a panel
+    for selector in (r"\.nm-help > b", r"\.nm-help ol", r"\.nm-help li::marker", r"\.nm-help code", r"\.nm-cmd \{", r"\.nm-cmd code",
+                     r"\.nm-help \.nm-status"):
+        assert re.search(selector, css), (theme_id, selector)
+    assert re.search(r'\.nm-btn\[aria-disabled="true"\][^{]*\{[^}]*opacity', css), theme_id      # a button that is checking looks it
+    assert re.search(r"\.nm-help p, \.nm-help ol \{[^}]*max-width", css), theme_id      # one measure for the sentences and the steps
+
+
+def test_nostromo_sets_the_help_in_natural_case_under_a_heading_in_capitals() -> None:
+    """The dashed status line is all capitals in Nostromo; the steps are read, so the panel takes that off the text only."""
+    css = strip_comments(THEME_CSS["nostromo"])
+    assert "text-transform: none" in re.search(r"\.nm-help \{([^}]*)\}", css).group(1)
+    assert "text-transform: uppercase" in re.search(r"\.nm-help > b \{([^}]*)\}", css).group(1)
+
+
+def test_gates_gives_the_no_activity_card_an_icon_like_its_neighbours() -> None:
+    assert re.search(r'\.nm-card\[aria-label="No Claude Code activity on this PC"\][^{]*\{ --g-ico: "\\[0-9A-F]{4}"; \}', THEME_CSS["gates"])
+
+
+@ui_only
+def test_the_help_is_the_status_banner_for_a_missing_or_an_expired_sign_in_only(checks: dict[str, Any]) -> None:
+    banner = checks["signIn"]["banner"]
+    assert banner["live"] == ""
+    for status in ("stale", "no_credentials"):
+        assert Markup(banner[status]).find("div")[0]["class"] == "nm-msg nm-help", status
+    # every other state stays the plain line it was: the heading and the monitor's reason
+    for status, heading in (("loading", "ACQUIRING"), ("offline", "NO CARRIER"), ("rate_limited", "RATE LIMITED"), ("paused", "PAUSED")):
+        assert banner[status] == f'<div class="nm-msg" role="status"><b>{heading}</b>detail of {status}</div>', status
+
+
+@ui_only
+@pytest.mark.parametrize("page", ["overview", "limits", "cost", "efficiency", "history"])
+def test_the_help_is_on_every_page_that_has_a_status_banner(checks: dict[str, Any], page: str) -> None:
+    html = checks["signIn"]["onPages"][page]
+    assert Markup(html).find("div")[0]["class"] == "nm-msg nm-help" and f"<b>{SIGNIN_HEAD}</b>" in html
+
+
+@ui_only
+def test_with_no_sign_in_the_help_says_what_to_do_in_the_words_it_was_given(checks: dict[str, Any]) -> None:
+    html = checks["signIn"]["banner"]["no_credentials"]
+    page = Markup(html)
+    panel = page.find("div")[0]
+    assert panel["role"] == "region" and panel["aria-label"] == "Claude sign-in"          # a landmark, not a live region that re-reads itself
+    assert html.startswith(f'<div class="nm-msg nm-help" role="region" aria-label="Claude sign-in"><b>{SIGNIN_HEAD}</b><p>')
+    assert paragraphs(html) == [SIGNIN_WHY, SIGNIN_RENEWS]
+    steps = [plain(item) for item in re.findall(r"<li>(.*?)</li>", html, re.S)]
+    assert steps == [SIGNIN_STEPS[0], SIGNIN_STEPS[1] + INSTALL_COMMAND + "Copy" + SIGNIN_PATH_NOTE,
+                     SIGNIN_STEPS[2] + START_COMMAND + "Copy" + SIGNIN_SIGN_IN, SIGNIN_STEPS[3]]
+    assert commands(html) == [INSTALL_COMMAND, START_COMMAND]                             # each command as code, the way it is typed
+    assert '<div class="nm-cmd" data-command="install"><code class="nm-path">irm https://claude.ai/install.ps1 | iex</code><button class="nm-btn"' in html
+    assert (r'<div class="nm-cmd" data-command="start"><code class="nm-path">&amp; &quot;$env:USERPROFILE\.local\bin\claude.exe&quot;</code>'
+            '<button class="nm-btn"') in html
+    buttons = page.find("button")
+    assert [(attrs["data-action"], attrs.get("data-command")) for attrs in buttons] == [
+        ("copy-command", "install"), ("copy-command", "start"), ("check-again", None)]
+    assert all(attrs["type"] == "button" for attrs in buttons)
+    copy_install, copy_start, check = buttons
+    assert check["class"] == "nm-btn solid" and "aria-disabled" not in check
+    assert (copy_install["aria-label"], copy_start["aria-label"]) == (COPY_TITLES["install"], COPY_TITLES["start"])
+    assert (copy_install["data-fid"], copy_start["data-fid"]) == ("signin-copy-install", "signin-copy-start")    # each keeps its own focus
+    assert page.text.count("Copy") == 2
+    assert "Check again" in page.text and not [t for t in page.text if "Still no" in t or "Checking" in t]      # nothing found yet
+    (link,) = page.find("a")
+    assert link["href"] == README_WEB_AND_APP and link["data-external"] == "1" and "More in the README" in page.text
+    assert not any(name.startswith("on") for _tag, attrs in page.tags for name in attrs)             # no inline handler
+    assert not re.search(JARGON, plain(html), re.I)
+
+
+@ui_only
+def test_an_expired_sign_in_keeps_the_monitors_reason_and_adds_the_one_thing_to_do(checks: dict[str, Any]) -> None:
+    html = checks["signIn"]["expired"]
+    assert html.startswith('<div class="nm-msg nm-help" role="region" aria-label="Claude sign-in"><b>AUTH LOST</b>')       # the banner's own heading
+    assert paragraphs(html) == ["The Claude sign-in has expired; open Claude Code to renew it", SIGNIN_EXPIRED, SIGNIN_NOT_FOUND]
+    page = Markup(html)
+    assert page.find("ol") == [] and page.find("a") == []                              # no steps to start from nothing, no manual to read
+    # no install command to copy; the command that starts Claude Code where claude is not found (#42)
+    assert [(attrs["data-action"], attrs.get("data-command")) for attrs in page.find("button")] == [("copy-command", "start"), ("check-again", None)]
+    assert commands(html) == ["claude", "claude", START_COMMAND]
+    assert html.index("opens instead, run this:</p>") < html.index('<div class="nm-cmd" data-command="start">') < html.index('class="nm-actions"')
+    assert paragraphs(checks["signIn"]["noDetail"]) == [SIGNIN_EXPIRED, SIGNIN_NOT_FOUND]   # no reason sent: the heading and what to do
+
+
+@ui_only
+def test_everything_the_help_was_told_is_escaped(checks: dict[str, Any]) -> None:
+    html = checks["signIn"]["hostile"]
+    page = Markup(html)
+    assert page.find("img") == [] and not any("onerror" in attrs for _tag, attrs in page.tags) and "<img" not in html.lower()
+    assert HOSTILE in " ".join(page.text)                                              # the monitor's reason is shown as text
+
+
+@ui_only
+def test_check_again_posts_the_refresh_says_checking_and_then_what_it_found(checks: dict[str, Any]) -> None:
+    actions = checks["signInActions"]
+    still = actions["still"]
+    assert still["calls"] == ["POST /api/refresh", "GET /api/state"]                   # one request to look, one to learn what it found
+    busy = still["during"]
+    assert busy["check"]["busy"] is True and ">Checking…</button>" in busy["html"] and 'aria-disabled="true"' in busy["html"]
+    assert "Still no" not in busy["html"]
+    assert (still["check"]["busy"], still["check"]["still"]) == (False, True)
+    assert f'<p class="nm-status" role="status">{CHECK_NONE}</p>' in still["html"] and ">Check again</button>" in still["html"]
+    assert "aria-disabled" not in still["html"]
+    expired = actions["stillExpired"]
+    assert (expired["check"]["busy"], expired["check"]["still"]) == (False, True)
+    assert f'<p class="nm-status" role="status">{CHECK_STALE}</p>' in expired["html"]        # it says "working", for a sign-in that is there but expired
+
+
+@ui_only
+def test_check_again_sends_one_request_at_a_time(checks: dict[str, Any]) -> None:
+    actions = checks["signInActions"]
+    assert actions["twice"] == ["POST /api/refresh", "GET /api/state"]                 # three clicks, one check
+    assert actions["busyIgnores"] == []                                                # a click while a check is on its way sends nothing
+
+
+@ui_only
+def test_a_check_ends_when_the_cycle_it_asked_for_is_published_or_after_a_while(checks: dict[str, Any]) -> None:
+    actions = checks["signInActions"]
+    found = actions["found"]
+    assert found["check"]["busy"] is False and found["check"]["still"] is False and found["html"] == ""      # signed in: nothing left to say
+    assert actions["waiting"]["ended"] is False and actions["waiting"]["check"]["busy"] is True        # updated_at has not moved: still looking
+    late = actions["late"]
+    assert late["ended"] is True and late["check"]["still"] is True and f">{CHECK_NONE}</p>" in late["html"]     # waited long enough
+    assert actions["notSentYet"]["ended"] is False                                     # not before the monitor has answered the click
+    assert actions["outlived"]["ended"] is True and actions["outlived"]["check"]["still"] is False       # what it said goes with the panel
+
+
+@ui_only
+def test_a_check_the_monitor_refuses_or_cannot_hear_says_so(checks: dict[str, Any]) -> None:
+    for name in ("refused", "lost"):
+        failed = checks["signInActions"][name]
+        assert failed["calls"] == ["POST /api/refresh"], name                          # no state is asked for: nothing was started
+        assert failed["check"]["busy"] is False and failed["check"]["failed"] is True, name
+        assert f'<p class="nm-status" role="status">{CHECK_FAILED}</p>' in failed["html"], name
+
+
+@ui_only
+def test_copy_puts_the_command_on_the_clipboard_or_selects_it_and_says_which(checks: dict[str, Any]) -> None:
+    copy = checks["signInActions"]["copy"]
+
+    def label(html: str, which: str = "install") -> str:
+        return re.search(rf'<button[^>]*data-command="{which}"[^>]*>([^<]*)</button>', html).group(1)
+
+    def spoken(html: str, which: str) -> str:
+        """What a screen reader says for the button."""
+        return re.search(rf'<button[^>]*data-command="{which}"[^>]*aria-label="([^"]*)"', html).group(1)
+
+    written = copy["written"]
+    assert written["writes"] == [INSTALL_COMMAND] and (written["copy"], written["copyOf"]) == ("copied", "install")
+    assert label(written["html"]) == "Copied" and label(written["html"], "start") == "Copy"      # only the button that was pressed answers
+    assert (spoken(written["html"], "install"), spoken(written["html"], "start")) == ("Copied to the clipboard", COPY_TITLES["start"])
+    assert written["timers"] == [3000] and (written["after"]["copy"], written["after"]["copyOf"]) == ("", "")      # for a moment
+    assert label(written["after"]["html"]) == "Copy"
+    assert written["after"]["painted"] == [["copied", "install"], ["", ""]]            # the page is drawn with the answer, then without it
+    for name in ("refused", "throws", "missing", "noClipboard"):                       # nothing to write to, or it says no: select it instead
+        shown = copy[name]
+        assert (shown["copy"], shown["copyOf"]) == ("select", "install") and label(shown["html"]) == "Press Ctrl+C", name
+        assert label(shown["html"], "start") == "Copy", name
+        assert spoken(shown["html"], "install") == "Press Ctrl+C to copy the selected command", name
+        assert spoken(shown["html"], "start") == COPY_TITLES["start"], name
+        assert shown["timers"] == [8000] and label(shown["after"]["html"]) == "Copy", name       # long enough to read it and act
+        assert shown["after"]["painted"] == [["select", "install"], ["", ""]], name
+    assert copy["refused"]["writes"] == [INSTALL_COMMAND] and copy["throws"]["writes"] == copy["missing"]["writes"] == []
+    # "Press Ctrl+C" must leave the command of the button pressed selected, or Ctrl+C takes the wrong one; a copy that worked selects nothing
+    target = '.nm-help .nm-cmd[data-command="{}"] code'
+    picked = checks["signInActions"]["selected"]
+    assert picked["install"] == [target.format("install")]
+    assert picked["start"] == picked["expiredStart"] == [target.format("start")]
+    assert picked["copied"] == []
+    # the second button pressed within the moment: the answer moves to it, and the first press's timer cannot end it early
+    moved = checks["signInActions"]["handOver"]
+    assert moved["writes"] == [INSTALL_COMMAND, START_COMMAND] and moved["copyOf"] == "start"
+    assert label(moved["html"]) == "Copy" and label(moved["html"], "start") == "Copied"
+    assert moved["cleared"][-1] == 1 and moved["timers"] == 2
+    for name in ("start", "expiredStart"):                                             # the second command, with no sign-in or an expired one
+        shown = copy[name]
+        assert shown["writes"] == [START_COMMAND] and (shown["copy"], shown["copyOf"]) == ("copied", "start"), name
+        assert label(shown["html"], "start") == "Copied" and label(shown["after"]["html"], "start") == "Copy", name
+    assert label(copy["start"]["html"]) == "Copy"                                      # the install command's button says nothing
+    assert "data-command=\"install\"" not in copy["expiredStart"]["html"]
+    for name in ("unknownCommand", "noCommand"):                                       # a command the panel does not have copies nothing
+        shown = copy[name]
+        assert shown["writes"] == [] and (shown["copy"], shown["copyOf"]) == ("", "") and shown["timers"] == [], name
+    unknown = checks["signInActions"]["unknownAction"]                                 # an action the panel does not have does nothing
+    assert unknown["calls"] == [] and unknown["copy"] == "" and unknown["check"]["busy"] is False
+
+
+@ui_only
+def test_limits_only_is_decided_only_after_an_ingest_has_finished(checks: dict[str, Any]) -> None:
+    decided = checks["limitsOnly"]
+    assert decided["done"] is True                                                     # an ingest is done, and the all-time window holds no request
+    for name in ("noState", "noIngest", "firstIngestRunning", "firstIngestFailed", "doneNoTotals", "noWindow", "withRequests"):
+        assert decided[name] is False, name                                            # not before a state, nor while the first ingest runs
+    assert decided["doneWithErrors"] is False                                          # nor when files could not be read: they may hold requests
+    assert decided["laterIngestFromNothing"] is False                                  # an ingest that runs before anything was decided decides nothing
+    assert decided["laterIngestHolds"] is True                                         # one that runs after (every minute) does not undo it
+    assert decided["aRequestEndsIt"] is False                                          # and a counted request ends it
+
+
+@ui_only
+@pytest.mark.parametrize("page", ["cost", "efficiency", "history"])
+def test_a_page_that_counts_claude_code_is_one_explanatory_card_where_there_is_none(checks: dict[str, Any], page: str) -> None:
+    model = checks["noRecords"]["pages"][page]
+    assert model["cls"] == "nm-pgrid" and model["top"] == ["hazard", "head", "update", "status", "problem", "stale"]
+    assert [(card["key"], card["state"]) for card in model["cards"]] == [("none", "ready")]
+    html = model["cards"][0]["html"]
+    assert html.startswith(f'<section class="nm-card wide" aria-label="{NO_ACTIVITY}" data-card="none" data-state="ready">')
+    parsed = Markup(html)
+    assert parsed.find("h2")[0]["class"] == "nm-ttl" and NO_ACTIVITY in parsed.text and NO_ACTIVITY_WHY in parsed.text
+    for left_out in ("data-needs", "nm-big", "nm-stat", "nm-cells", "nm-table", "nm-chart-host", "nm-toolbar", "nm-seg"):
+        assert left_out not in html, left_out                                          # no figure, no chart, no window to pick
+    assert checks["noRecords"]["top"][page] == {"problem": "", "stale": ""}            # and no banner about a report nobody asked for
+
+
+@ui_only
+def test_the_overviews_record_cards_say_so_and_the_others_stay(checks: dict[str, Any]) -> None:
+    cards = {card["key"]: card for card in checks["noRecords"]["overview"]["cards"]}
+    assert list(cards) == CARDS["overview"]                                            # the same eight cards, in the same places
+    titles = {"cost": "API-equivalent cost, this cycle", "efficiency": "Cache &amp; thinking", "models": "Model mix"}
+    for key, title in titles.items():
+        html = cards[key]["html"]
+        assert cards[key]["state"] == "ready" and "data-needs" not in html, key
+        assert f'<h2 class="nm-ttl">{title}</h2>' in html, key                          # the frame and the title stay
+        assert html.endswith(f'<p class="nm-empty">{NO_ACTIVITY}.</p></div></section>'), key
+        assert not re.search(r"nm-big|nm-mrow|nm-kpi|nm-tile|nm-chart|nm-cost|nm-cells", html), key
+    for key in ("limit-session", "limit-weekly", "limit-scoped", "surfaces", "burn"):
+        assert "No Claude Code activity" not in cards[key]["html"], key
+        assert cards[key]["state"] == "ready", key
+    assert [s.split(":")[0] for s in checks["noRecords"]["limits"]] == ["limit-session", "limit-weekly", "credits", "surfaces"]   # Limits is unchanged
+
+
+@ui_only
+def test_nothing_is_asked_for_that_there_is_nothing_to_count(checks: dict[str, Any]) -> None:
+    assert checks["noRecords"]["stats"] == {"overview": ["pacing"], "limits": ["pacing"], "cost": [], "efficiency": [], "history": []}
+    assert checks["records"]["stats"] == ["cost?window=cycle"]                         # with records the Cost page asks for its report as before
+    failed = checks["noRecords"]["failedReport"]
+    assert failed["problem"] == "" and failed["stale"] == ""                           # a report that was never wanted has not failed
+    assert [s.split(":")[1] for s in failed["states"]] == ["ready"] * 8
+
+
+@ui_only
+def test_a_pc_with_records_or_a_first_ingest_still_running_keeps_the_pages_it_had(checks: dict[str, Any]) -> None:
+    for name in ("records", "firstIngest"):
+        found = checks[name]
+        for page in ("overview", "cost", "efficiency", "history"):
+            assert [s.split(":")[0] for s in found[page]] == CARDS[page], (name, page)
+        assert {"cost:pending", "efficiency:pending", "models:pending"} <= set(found["overview"]), name       # waiting for the cost report, as before
+        assert "none:ready" not in found["cost"] + found["efficiency"] + found["history"], name
 
 
 # ── Top sessions ──────────────────────────────────────────────────────────────────

@@ -112,6 +112,24 @@ jobs:
             throw "the built exe reports '$built' (exit code $($p.ExitCode)), but VERSION says ${{ steps.ver.outputs.version }}"
           }
 
+      - name: Warm up the WebView2 runtime
+        if: steps.exists.outputs.skip == 'false'
+        # On a fresh runner the WebView2 runtime's files (about 900 MB) are cold. With image win25-vs2026/20261030 the
+        # dashboard's first WebView2 start took 8 to 32 s there in four runs, past the smoke test's 15 s and the app's
+        # own 20 s browser fallback. After these files had been read once it took 5 to 6 s in two runs, as on a
+        # desktop. Reading them first keeps the smoke test about the app, not a cold disk (#36's rehearsal, 2026-11-02).
+        # The reading itself took 24 s to 3 min on runners, so it gets room.
+        timeout-minutes: 15
+        shell: pwsh
+        run: |
+          $started = Get-Date
+          $files = Get-ChildItem 'C:\Program Files (x86)\Microsoft\EdgeWebView\Application' -Recurse -File -ErrorAction SilentlyContinue
+          $bytes = 0
+          foreach ($file in $files) {
+            try { $stream = [IO.File]::OpenRead($file.FullName); $stream.CopyTo([IO.Stream]::Null); $bytes += $stream.Length; $stream.Dispose() } catch {}
+          }
+          "Read $($files.Count) files of the WebView2 runtime ($([Math]::Round($bytes / 1MB)) MB) in $([Math]::Round(((Get-Date) - $started).TotalSeconds)) s"
+
       - name: Smoke-test the built exe
         if: steps.exists.outputs.skip == 'false'
         # Runs the real exe (widgets, dashboard, local API) for 45 seconds on empty data, and fails the release when it

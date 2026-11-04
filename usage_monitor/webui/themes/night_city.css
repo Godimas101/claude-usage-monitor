@@ -166,7 +166,7 @@ h1, h2, h3, p, figure, dl, dd { margin: 0; }
 .nm-btn:hover:not(:disabled), .nm-seg button:hover:not(:disabled), .nm-refresh:hover:not(:disabled), .nm-sw button:hover { --oc: var(--nc-line); color: var(--nc-fg-hi); }
 .nm-btn:focus-visible, .nm-seg button:focus-visible, .nm-refresh:focus-visible, .nm-sw button:focus-visible { --oc: var(--nc-sel); --of: var(--nc-bg-2); color: var(--nc-fg-hi); outline: 1px solid var(--nc-sel); outline-offset: -3px; }
 .nm-btn.solid, .nm-seg button.on, .nm-sw button.on { --oc: var(--nc-on-line); --of: var(--nc-on-bg); color: var(--nc-on-fg); }
-.nm-btn:disabled, .nm-seg button:disabled, .nm-refresh:disabled { opacity: .45; cursor: default; }
+.nm-btn:disabled, .nm-btn[aria-disabled="true"], .nm-seg button:disabled, .nm-refresh:disabled { opacity: .45; cursor: default; }
 .nm-refresh { height: 20px; padding: 0 9px; font: 400 11px/1 var(--f-data); letter-spacing: .1em; color: var(--nc-fg-hi); }
 .nm-seg { display: inline-grid; grid-auto-flow: column; gap: 4px; }
 .nm-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
@@ -666,6 +666,20 @@ h1, h2, h3, p, figure, dl, dd { margin: 0; }
 .nm-update .nm-actions { justify-content: flex-end; }
 .nm-update .nm-status { flex: 1 0 100%; min-height: 0; }
 .nm-update .nm-status:empty { display: none; }
+
+/* the sign-in help: the hazard-framed status line grown into a panel, for a missing or an expired sign-in */
+.nm-help { flex-direction: column; align-items: flex-start; gap: 8px; padding: 14px 18px; }
+.nm-help > b { margin: 0; font-size: 13px; }
+.nm-help p, .nm-help ol { max-width: 82ch; }
+.nm-help p { color: var(--nc-fg); }
+.nm-help ol { padding-left: 1.9em; }
+.nm-help li { padding-left: 3px; margin: 4px 0; color: var(--nc-fg); }
+.nm-help li::marker { color: var(--nc-signal); font-weight: 700; }
+.nm-help code { padding: 1px 5px; background: var(--nc-bg-0); box-shadow: inset 0 0 0 1px var(--nc-line-a); color: var(--nc-fg-hi); font: 400 13px/1.5 var(--f-data); letter-spacing: .02em; }
+.nm-cmd { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0 2px; }
+.nm-cmd code { padding: 4px 10px; }
+.nm-cmd .nm-btn { height: 24px; padding: 0 10px; }
+.nm-help .nm-status { min-height: 0; color: var(--nc-fg-hi); }
 
 /* ── charts (charts.js sets the colours through the --chart-* variables on .nm-screen) ──────────────── */
 .cum-spark, .cum-stack, .cum-ring, .cum-heat { display: block; }

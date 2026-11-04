@@ -686,6 +686,24 @@ def test_layered_window_styles(host):
 
 
 @UI
+def test_a_child_layered_window_takes_screen_coordinates_and_dies_with_its_parent(host):
+    parent = LayeredWindow(host, draggable=False)
+    assert parent.update(Image.new("RGBA", (100, 50), (0, 0, 0, 255)), *OFFSCREEN)
+    child = LayeredWindow(host, draggable=False, parent=parent.hwnd)
+    ex = exstyle(child.hwnd)
+    assert ex & win32.WS_EX_LAYERED and ex & win32.WS_EX_NOPARENTNOTIFY and not ex & win32.WS_EX_TOPMOST
+    assert win32.GetWindowLongPtrW(child.hwnd, win32.GWL_STYLE) & win32.WS_CHILD
+    assert child.parent == parent.hwnd and child.alive
+    x, y = OFFSCREEN[0] + 20, OFFSCREEN[1] + 10
+    assert child.update(Image.new("RGBA", (10, 10), (255, 0, 0, 255)), x, y)
+    assert (child.rect.left, child.rect.top) == (x, y)                 # screen in, screen out
+    child.move(x + 5, y + 5)
+    assert (child.rect.left, child.rect.top) == (x + 5, y + 5)
+    parent.destroy()
+    assert not child.alive                                             # gone with its parent, as with Explorer
+
+
+@UI
 def test_a_window_that_is_not_topmost_has_no_topmost_style(host):
     win = LayeredWindow(host, draggable=False, topmost=False)
     assert not exstyle(win.hwnd) & win32.WS_EX_TOPMOST
@@ -974,6 +992,19 @@ def test_a_dpi_change_reports_the_new_dpi_and_the_suggested_rect(host):
     suggested = wintypes.RECT(10, 20, 310, 120)
     win32.SendMessageW(win.hwnd, win32.WM_DPICHANGED, 144 | (144 << 16), ctypes.addressof(suggested))
     assert seen == [(144, Rect(10, 20, 310, 120))]
+
+
+@UI
+def test_a_child_window_hears_of_a_dpi_change_from_its_parent(host):
+    parent = LayeredWindow(host, draggable=False)
+    assert parent.update(Image.new("RGBA", (100, 50), (0, 0, 0, 255)), *OFFSCREEN)
+    child = LayeredWindow(host, draggable=False, parent=parent.hwnd)
+    assert child.update(Image.new("RGBA", (10, 10), (255, 0, 0, 255)), OFFSCREEN[0] + 20, OFFSCREEN[1] + 10)
+    seen = []
+    child.on_dpi_changed = lambda dpi, rect: seen.append((dpi, rect))
+    win32.SendMessageW(child.hwnd, win32.WM_DPICHANGED_AFTERPARENT, 0, 0)   # a child gets no WM_DPICHANGED
+    assert seen == [(child.dpi, child.rect)]
+    parent.destroy()
 
 
 @UI

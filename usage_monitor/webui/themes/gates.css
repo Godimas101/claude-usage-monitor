@@ -223,8 +223,9 @@ html[data-g-icons] .nm-card-t:not(.nm-chart-t) > .nm-ttl::before, html[data-g-ic
 .nm-card[aria-label="Widgets and display"], .nm-card[aria-label="Widgets & display"] { --g-ico: "\E7F4"; }
 .nm-card[aria-label="Data & plan"] { --g-ico: "\E8F1"; }
 .nm-card[aria-label="Alerts"] { --g-ico: "\EA8F"; }
+.nm-card[aria-label="Usage guard"] { --g-ico: "\EA18"; }
 .nm-card[aria-label="System"] { --g-ico: "\E713"; }
-.nm-card[aria-label="Claude Usage Monitor"] { --g-ico: "\E946"; }
+.nm-card[aria-label="Claude Usage Monitor"], .nm-card[aria-label="No Claude Code activity on this PC"] { --g-ico: "\E946"; }
 .nm-card[aria-label="Links"] { --g-ico: "\E71B"; }
 .nm-card[aria-label="Supporters"] { --g-ico: "\EB51"; }
 .nm-card[aria-label="Not priced yet"], .nm-card[aria-label="Not priced"] { --g-ico: "\E7BA"; }
@@ -238,6 +239,9 @@ html[data-g-icons] .nm-card-t:not(.nm-chart-t) > .nm-ttl::before, html[data-g-ic
 .nm-chip[data-g-tone="acc"] { color: var(--text); background: var(--accent-soft); }
 .nm-chip[data-g-tone="acc"]::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--g-fill-accent); }
 .nm-chip[data-g-tone="neutral"] { color: var(--text-dim); background: var(--g-hover); }
+/* the guard's ARMED and HOLDING chips carry their tone as a class; the tone script has no word for them and calls them neutral */
+#guard-live .nm-chip.is-ok[data-g-tone="neutral"] { color: var(--ok); background: color-mix(in srgb, var(--ok) 16%, transparent); }
+#guard-live .nm-chip.is-crit[data-g-tone="neutral"] { color: var(--alert); background: color-mix(in srgb, var(--alert) 16%, transparent); }
 .nm-pill { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 10px; font: 600 12px/20px var(--g-font); color: var(--text); background: var(--accent-soft); }
 
 /* ── values: figures, facts, notes ──────────────────────────────────────────────────────────────────────── */
@@ -440,7 +444,7 @@ html[data-g-icons] .nm-card-t:not(.nm-chart-t) > .nm-ttl::before, html[data-g-ic
 .nm-btn.solid { border-color: transparent; background: var(--g-accent); color: var(--g-on-accent); font-weight: 600; }
 .nm-btn.solid:hover { background: color-mix(in srgb, var(--g-accent) 90%, var(--g-on-accent)); }
 .nm-btn.solid:active { background: color-mix(in srgb, var(--g-accent) 80%, var(--g-on-accent)); }
-.nm-btn:disabled, .nm-refresh:disabled { opacity: .5; cursor: default; }
+.nm-btn:disabled, .nm-btn[aria-disabled="true"], .nm-refresh:disabled { opacity: .5; cursor: default; }
 html[data-g-icons] .nm-refresh::before { content: "\E72C"; font: 400 12px/1 var(--g-icons); }
 
 /* a pivot: text tabs with an accent underline on the chosen one */
@@ -616,6 +620,20 @@ html[data-g-swatches] .nm-variants .nm-btn[aria-pressed="true"]::before { box-sh
 .nm-update .nm-actions { justify-content: flex-end; }
 .nm-update .nm-status { grid-column: 1 / -1; min-height: 0; }
 .nm-update .nm-status:empty { display: none; }
+
+/* the sign-in help: the status bar grown into a panel, for a missing or an expired sign-in */
+.nm-help { flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px 16px; border-left: 3px solid color-mix(in srgb, var(--warn) 75%, var(--surface));
+  background: color-mix(in srgb, var(--warn) 7%, var(--surface)); }
+.nm-help > b { font: 600 14px/20px var(--g-font); }
+.nm-help p, .nm-help ol { max-width: 82ch; }
+.nm-help ol { padding-left: 1.7em; }
+.nm-help li { padding-left: 4px; margin: 2px 0; }
+.nm-help li::marker { color: var(--text-dim); }
+.nm-help code { padding: 1px 4px; border: 1px solid var(--border); border-radius: 4px; background: var(--g-layer); color: var(--text-bright); font: 400 13px/18px var(--g-mono); }
+.nm-cmd { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0 2px; }
+.nm-cmd code { padding: 5px 10px; }
+.nm-cmd .nm-btn { height: 28px; padding: 0 10px; font-size: 13px; }
+.nm-help .nm-status { min-height: 0; color: var(--text); }
 
 /* ── short and narrow windows ───────────────────────────────────────────────────────────────────────────── */
 @media (max-height: 769px), (min-width: 1001px) and (max-width: 1100px) {

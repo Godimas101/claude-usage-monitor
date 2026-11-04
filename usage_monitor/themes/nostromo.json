@@ -54,7 +54,7 @@
   "variants": [
     {
       "id": "amber",
-      "name": "AMBER P3",
+      "name": "RAY TUBE",
       "default": true,
       "mode": "dark",
       "colors": {
@@ -78,7 +78,7 @@
     },
     {
       "id": "green",
-      "name": "TERMINAL GREEN P1",
+      "name": "TERMINAL",
       "default": false,
       "mode": "dark",
       "colors": {
@@ -102,7 +102,7 @@
     },
     {
       "id": "white",
-      "name": "WHITE P4",
+      "name": "STATIC",
       "default": false,
       "mode": "dark",
       "colors": {
@@ -126,7 +126,7 @@
     },
     {
       "id": "red",
-      "name": "RED ALERT",
+      "name": "ALERT",
       "default": false,
       "mode": "dark",
       "colors": {
@@ -150,7 +150,7 @@
     },
     {
       "id": "blue",
-      "name": "BLUE BRIDGE",
+      "name": "CRYO",
       "default": false,
       "mode": "dark",
       "colors": {
@@ -173,56 +173,8 @@
       }
     },
     {
-      "id": "cyan",
-      "name": "CYAN",
-      "default": false,
-      "mode": "dark",
-      "colors": {
-        "bg": "#05090a",
-        "surface": "#081214",
-        "surface_alt": "#0a1213",
-        "border": "#174a50",
-        "border_dim": "#3fd9e040",
-        "text": "#3fd9e0",
-        "text_bright": "#e8ffff",
-        "text_dim": "#35b5bd",
-        "accent": "#9ff5ff",
-        "accent_alt": "#3fd9e0",
-        "ok": "#3fd9e0",
-        "warn": "#9ff5ff",
-        "alert": "#e8ffff",
-        "track": "#0e2a2e",
-        "glow": "#46e6f099",
-        "stale": "#46868b"
-      }
-    },
-    {
-      "id": "orange",
-      "name": "ORANGE",
-      "default": false,
-      "mode": "dark",
-      "colors": {
-        "bg": "#0a0704",
-        "surface": "#120b06",
-        "surface_alt": "#120c07",
-        "border": "#4f2c12",
-        "border_dim": "#ff8c2b40",
-        "text": "#ff8c2b",
-        "text_bright": "#ffe0c4",
-        "text_dim": "#d9702a",
-        "accent": "#ffb070",
-        "accent_alt": "#ff8c2b",
-        "ok": "#ff8c2b",
-        "warn": "#ffb070",
-        "alert": "#ffe0c4",
-        "track": "#2e1808",
-        "glow": "#ff8c3299",
-        "stale": "#9e7151"
-      }
-    },
-    {
       "id": "purple",
-      "name": "PURPLE",
+      "name": "PLASMA",
       "default": false,
       "mode": "dark",
       "colors": {
@@ -254,9 +206,11 @@
       "white": "White",
       "red": "Red",
       "blue": "Blue",
-      "cyan": "Cyan",
-      "orange": "Orange",
       "purple": "Purple"
+    },
+    "retired_variants": {
+      "cyan": "blue",
+      "orange": "amber"
     },
     "light_mode": "none. Every variant is a dark CRT plate. A light Windows taskbar is handled by the tray plate and the strip's own dark plate, not by a light variant.",
     "variant_tokens": {
@@ -309,26 +263,6 @@
         "edge_hi": "#b4ebff33",
         "tray_track": "#4fc3ff85",
         "crt_deep": "#030507"
-      },
-      "cyan": {
-        "ghost": "#0e2a2e",
-        "dim": "#1c5f66",
-        "ink": "#030a0b",
-        "glow_soft": "#46e6f038",
-        "rule_strong": "#3fd9e085",
-        "edge_hi": "#b4ffff33",
-        "tray_track": "#3fd9e085",
-        "crt_deep": "#030506"
-      },
-      "orange": {
-        "ghost": "#2e1808",
-        "dim": "#7a3c14",
-        "ink": "#0b0502",
-        "glow_soft": "#ff8c3238",
-        "rule_strong": "#ff8c2b85",
-        "edge_hi": "#ffc08a33",
-        "tray_track": "#ff8c2b85",
-        "crt_deep": "#050302"
       },
       "purple": {
         "ghost": "#1f1530",
@@ -532,8 +466,6 @@
       "white": 9.5,
       "red": 5.1,
       "blue": 7.4,
-      "cyan": 7.6,
-      "orange": 6.0,
       "purple": 5.3
     },
     "gates": {

@@ -38,7 +38,7 @@
   // The link states app.js writes, as Windows 11 words them (the widget's own words where it has them).
   var VOCAB = {
     "UPLINK LIVE": "Live", "LIVE": "Live", "ACQUIRING": "Connecting", "AUTH LOST": "Sign-in needed", "NO CARRIER": "Offline",
-    "RATE LIMITED": "Rate limited", "NO CREDENTIALS": "Not signed in", "PAUSED": "Paused", "NO LINK": "No connection"
+    "RATE LIMITED": "Rate limited", "NO LOGIN": "Not signed in", "PAUSED": "Paused", "NO LINK": "No connection"
   };
   var TONES = {
     "UNDER PACE": "ok", "ON PACE": "ok", "SAFE": "ok", "BEHIND": "ok", "NORMAL": "ok", "NOMINAL": "ok",
@@ -46,7 +46,7 @@
     "LIMITED": "alert", "CRITICAL": "alert", "FAST": "acc"
   };
   var ICON_PROBE = String.fromCharCode(0xE916);   // Segoe Fluent Icons: the stopwatch glyph
-  var PHRASES = { "NONE": "None", "TOK / MIN": "Tokens / min" };
+  var PHRASES = { "NONE": "None", "TOK / MIN": "Tokens / min", "CLAUDE CODE": "Claude Code" };
   var SVG_WORDS = { TODAY: "Today", NOW: "Now", LESS: "Less", MORE: "More", AVG: "Avg" };
 
   var FX = window.CUM_FX || null;
