@@ -4,7 +4,12 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
-- README screenshots: retake from the v2.2.0 build ([#35](https://github.com/Godimas101/claude-usage-monitor/issues/35)) — closed 2026-11-04 by @Godimas101
+## [2.2.1] — 2026-11-04
+
+A small fix to the Settings page.
+
+### Fixed
+- The hint beside **Plan price override** follows your plan. It kept its old text if you signed in or changed plan while Settings was open, and read "no price known" if you reloaded Settings in a browser ([#46](https://github.com/Godimas101/claude-usage-monitor/issues/46)).
 
 ## [2.2.0] — 2026-11-03
 
