@@ -686,12 +686,17 @@ default browser instead, and the exit code says so (below).
   a help panel (`.nm-msg.nm-help[role=region]`, built by `signInHelp`). With no sign-in it says why the monitor needs the
   sign-in Claude Code saves (even for someone who uses Claude on the web or in the app), gives four steps and links the
   README section on using Claude on the web or in the app. The second step shows the install command
-  (`irm https://claude.ai/install.ps1 | iex`) in `.nm-cmd` with a *Copy* button; the command is text, never linked or fetched.
-  An expired or rejected sign-in keeps the heading and the monitor's reason and adds what to do. *Check again* posts
+  (`irm https://claude.ai/install.ps1 | iex`) and the third the command that starts Claude Code from the installer's folder
+  (`& "$env:USERPROFILE\.local\bin\claude.exe"`; the installer leaves the PATH alone, so `claude` is not found after it, #42),
+  each in `.nm-cmd[data-command]` with its own *Copy* button; the commands are text (`COMMANDS`), never linked or fetched.
+  The second step also says to carry on past the installer's note about the PATH.
+  An expired or rejected sign-in keeps the heading and the monitor's reason and adds what to do, with the start command for a
+  PC where `claude` is not recognized or opens an older Claude app that took the name. *Check again* posts
   `/api/refresh`, one at a time, and keeps "Checking…" on the button (`aria-disabled`, so the focus stays) until the state's
   `updated_at` moves (the cycle it asked for is published) or 15 s pass; a state that still needs a sign-in then says so in
-  the panel's `.nm-status`. *Copy* writes the command with `navigator.clipboard`, or selects it and says "Press Ctrl+C"
-  where the page cannot. The check's state is `S.check`, the button's answer `S.copy`.
+  the panel's `.nm-status`. *Copy* writes its own command with `navigator.clipboard`, or selects it and says "Press Ctrl+C"
+  where the page cannot; only that button answers. The check's state is `S.check`, the button's answer `S.copy` and which
+  button gives it `S.copyOf`.
 - **No Claude Code activity (#28).** Someone who uses Claude on the web or in the app has limits but no transcripts. Once an
   ingest has finished (`ingest.running` false, `ingest.last_duration_s` set, no `last_error`) with no request in the all-time window
   (`windows.all.totals.requests` is 0), `limitsOnly()` decides that this PC has none. It is never decided before a state

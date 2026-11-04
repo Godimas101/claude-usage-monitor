@@ -243,8 +243,10 @@ PowerShell does not wait for a windowed program unless its output goes through a
 
 **What Install does:**
 - It checks Claude Code first: the `claude` command must be on the PATH, at 2.1.139 or newer. It
-  looks on the PATH as Windows holds it now, so a Claude Code installed while the monitor runs is
-  found. With an older one it changes nothing, names the `claude` it found, and tells you to run
+  looks on the PATH as Windows holds it now, so a folder added to the PATH while the monitor runs
+  is found. Anthropic's Windows installer doesn't add its folder itself: see
+  [Verify your PATH](https://code.claude.com/docs/en/troubleshoot-install#verify-your-path). With
+  an older one it changes nothing, names the `claude` it found, and tells you to run
   `claude update`.
 - It backs up your Claude Code user settings (`%USERPROFILE%\.claude\settings.json`, or the folder in
   `CLAUDE_CONFIG_DIR`) to `settings.json.cum-backup-<date>-<time>` beside the file, and keeps the five

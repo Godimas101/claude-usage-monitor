@@ -104,8 +104,8 @@ def default_context() -> Context:
 
 def find_command(name: str) -> str | None:
     """shutil.which, and when that finds nothing, again on the PATH that Windows holds now. A process keeps the PATH
-    it started with, so Claude Code installed while the monitor runs (the sign-in help sends people to do that) is
-    not on the monitor's own."""
+    it started with, so a folder added to the PATH while the monitor runs is not on the monitor's own. Anthropic's
+    Windows installer does not add its folder, so the sign-in help starts Claude Code by its full path (#42)."""
     found = shutil.which(name)
     if found or sys.platform != "win32":
         return found

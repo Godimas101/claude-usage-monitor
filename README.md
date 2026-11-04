@@ -244,13 +244,15 @@ Use `python main.py` instead if you want a console that shows errors (Ctrl+C qui
 The 5-hour and weekly limits are shared by claude.ai, the Claude apps and Claude Code, so the monitor is still useful if you never write code. It does need Claude Code's sign-in, though: the monitor gets your limits from Anthropic's usage API with the sign-in that Claude Code saves on your PC, and it reads no other sign-in. Sign in to Claude Code:
 
 1. Open PowerShell: press Start and type **PowerShell**.
-2. Install Claude Code with Anthropic's installer: `irm https://claude.ai/install.ps1 | iex`. [Anthropic's setup page](https://code.claude.com/docs/en/setup) has the other ways.
-3. Open a new PowerShell window, run `claude`, and sign in with your Claude account in the browser that opens. Claude Code needs a paid plan such as Pro or Max; the free plan doesn't include it.
+2. Install Claude Code with Anthropic's installer: `irm https://claude.ai/install.ps1 | iex`. [Anthropic's setup page](https://code.claude.com/docs/en/setup) has the other ways. If the installer warns that a folder is not in your PATH, carry on: the next step doesn't need it.
+3. Start Claude Code with `& "$env:USERPROFILE\.local\bin\claude.exe"`, then sign in with your Claude account in the browser that opens. If you installed it another way, such as WinGet or npm, run `claude` instead. Claude Code needs a paid plan such as Pro or Max; the free plan doesn't include it.
 4. In the monitor's dashboard, press **Check again**, or wait for the next fetch.
+
+Why not just `claude`? Anthropic's installer puts Claude Code in that folder but doesn't add the folder to your PATH, the list of folders Windows looks in for programs. So PowerShell says `claude` "is not recognized" until you add it: see [Verify your PATH](https://code.claude.com/docs/en/troubleshoot-install#verify-your-path) on Anthropic's troubleshooting page. An older Claude app can also take over `claude` and open itself instead; updating the app fixes that. The command in step 3 runs Claude Code straight from its folder, so neither gets in the way.
 
 - **What works:** the limits, their pace and forecasts, the alerts and the widgets. The usage guard only reaches Claude Code sessions, so it does nothing for chats on the web or in the app.
 - **What stays empty:** Cost & value, Efficiency and History, and on Overview the cost, cache and model cards. They count the work Claude Code records on your PC, and Claude on the web or in an app leaves no records here. The pages say so instead of showing zeros.
-- **How long a sign-in lasts:** Claude Code renews it each time it runs, but the monitor never renews it itself. If you don't use Claude Code, the sign-in runs out after a while and the widgets show **STALE** until you open Claude Code again (run `claude`). The monitor then picks up the renewed sign-in by itself.
+- **How long a sign-in lasts:** Claude Code renews it each time it runs, but the monitor never renews it itself. If you don't use Claude Code, the sign-in runs out after a while and the widgets show **STALE** until you start Claude Code again with the command in step 3 (or `claude`, if that starts Claude Code). The monitor then picks up the renewed sign-in by itself.
 - **What the monitor won't do:** read the Claude desktop app's sign-in or your browser's claude.ai cookies (a claude.ai session key is a full key to your account), or sign you in itself. Only Claude Code does that: the monitor just reads the sign-in file Claude Code saves, and never writes it.
 
 ## 🩺 Troubleshooting

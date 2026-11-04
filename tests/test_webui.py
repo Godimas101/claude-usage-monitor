@@ -280,8 +280,9 @@ def test_the_pages_make_no_requests_beyond_the_monitor_and_the_about_links() -> 
     # the repository, the bug form, Patreon, the guard's manual setup (docs/AGENT_HOOK.md), and the README section on using
     # Claude on the web or in the app, which the sign-in help links (#28)
     assert len(allowed) == 5
-    # The command the sign-in help shows for the user to run in PowerShell (#28). It is text in a code element: nothing links,
-    # opens or fetches it (test_the_install_command_is_shown_and_never_linked_or_fetched), so the page still asks claude.ai for nothing.
+    # The install command the sign-in help shows for the user to run in PowerShell (#28). It is text in a code element: nothing
+    # links, opens or fetches it (test_the_commands_are_shown_and_copied_and_never_linked_or_fetched), so the page still asks
+    # claude.ai for nothing.
     shown = {"https://claude.ai/install.ps1"}
     namespaces = {"http://www.w3.org/2000/svg"}          # the name of the SVG markup language: an identifier, never fetched
     for name, text in ALL_SCRIPTS.items():
@@ -1658,20 +1659,27 @@ def test_a_guard_setting_asks_the_guard_for_its_new_status_and_no_other_setting_
 # limits with, and no transcript for the cost, efficiency and history pages to count. These are the words the page was given.
 README_WEB_AND_APP = "https://github.com/Godimas101/claude-usage-monitor#-using-claude-on-the-web-or-in-the-app"
 INSTALL_COMMAND = "irm https://claude.ai/install.ps1 | iex"
+# Anthropic's installer leaves the PATH alone, so "claude" is not found after it (#42): this runs it from the installer's folder,
+# for any user name
+START_COMMAND = r'& "$env:USERPROFILE\.local\bin\claude.exe"'
 SIGNIN_HEAD = "NO CLAUDE SIGN-IN YET"
 SIGNIN_WHY = ("The monitor reads your plan's limits through the sign-in that Claude Code saves on this PC. Signing in to Claude Code "
               "once is enough, even if you use Claude on the web or in the Claude app. Claude Code needs a paid plan such as Pro or Max.")
-SIGNIN_STEPS = ["Open PowerShell: press Start and type PowerShell.", "Install Claude Code:",
-                "Open a new PowerShell window, run claude, and sign in with your Claude account in the browser that opens.",
+SIGNIN_STEPS = ["Open PowerShell: press Start and type PowerShell.", "Install Claude Code:", "Start Claude Code:",
                 "Come back here and press Check again."]
+SIGNIN_PATH_NOTE = "If it warns that a folder is not in your PATH, carry on. The next step does not need it."      # under the second step's command
+SIGNIN_SIGN_IN = "Then sign in with your Claude account in the browser that opens."      # the end of the third step, under its command
 SIGNIN_RENEWS = "Claude Code renews the sign-in each time it runs. If the monitor later says the sign-in has expired, open Claude Code again."
 SIGNIN_EXPIRED = "Claude Code renews the sign-in each time it runs. Open Claude Code, or run claude in PowerShell, then press Check again."
+# an older Claude app took the name "claude" on some PCs, so typing it opens the app (Anthropic's install troubleshooting page)
+SIGNIN_NOT_FOUND = "If PowerShell says claude is not recognized, or the Claude app opens instead, run this:"
+COPY_TITLES = {"install": "Copy the install command", "start": "Copy the command that starts Claude Code"}
 CHECK_NONE, CHECK_STALE, CHECK_FAILED = "Still no sign-in found.", "Still no working sign-in.", "Could not check just now. Try again."
 NO_ACTIVITY = "No Claude Code activity on this PC"
 NO_ACTIVITY_WHY = ("These pages count the work Claude Code records on this PC. Claude on the web and in the Claude app keeps no records "
                    "here, so there is nothing to count. Your limits, pace and alerts work as usual.")
-HELP_FUNCTIONS = ("needsSignIn", "codeText", "copyButton", "signInHelp", "checkAgain", "syncCheck", "selectCommand", "copyCommand",
-                  "helpAction", "limitsOnly", "noActivityPage")
+HELP_FUNCTIONS = ("needsSignIn", "codeText", "copyButton", "commandRow", "signInHelp", "checkAgain", "syncCheck", "selectCommand",
+                  "copyCommand", "helpAction", "limitsOnly", "noActivityPage")
 JARGON = r"\b(token|oauth|credentials?|api|json|http)\b"            # words the page's own copy keeps out of a reader's way
 
 
@@ -1690,22 +1698,31 @@ def commands(html: str) -> list[str]:
 
 def test_the_help_and_the_no_activity_pages_say_what_they_were_given_to_say() -> None:
     assert js_string("INSTALL_COMMAND") == INSTALL_COMMAND and js_string("SIGNIN_HEAD") == SIGNIN_HEAD
+    # the one command in single quotes (it holds double ones), each backslash written twice
+    assert "var START_COMMAND = '" + START_COMMAND.replace("\\", "\\\\") + "';" in APP_CODE
+    assert "var COMMANDS = { install: INSTALL_COMMAND, start: START_COMMAND };" in APP_CODE
+    assert re.search(r"var COPY_TITLES = \{ install: \"([^\"]*)\", start: \"([^\"]*)\" \};", APP_CODE).groups() == tuple(COPY_TITLES.values())
     assert js_string("SIGNIN_WHY") == SIGNIN_WHY and js_string("SIGNIN_RENEWS") == SIGNIN_RENEWS
     assert (js_string("CHECK_NONE"), js_string("CHECK_STALE"), js_string("CHECK_FAILED")) == (CHECK_NONE, CHECK_STALE, CHECK_FAILED)
     assert js_string("NO_ACTIVITY") == NO_ACTIVITY and js_string("NO_ACTIVITY_WHY") == NO_ACTIVITY_WHY
     links = re.search(r"var LINKS = \{(.*?)\};", APP_CODE, re.S).group(1)
     assert f'readme: "{README_WEB_AND_APP}"' in links
     body = function_body(APP_CODE, "signInHelp")
-    for step in (SIGNIN_STEPS[0], SIGNIN_STEPS[1], SIGNIN_STEPS[3], "Claude Code renews the sign-in each time it runs. Open Claude Code, or run "):
+    for step in (SIGNIN_STEPS[0], SIGNIN_STEPS[3], "Claude Code renews the sign-in each time it runs. Open Claude Code, or run "):
         assert f'esc("{step}")' in body, step
-    assert 'esc("Open a new PowerShell window, run ") + codeText("claude") + esc(", and sign in with your Claude account in the browser that opens.")' in body
+    assert f'esc("{SIGNIN_STEPS[1]}") + commandRow("install") + esc("{SIGNIN_PATH_NOTE}")' in body  # the installer's note must not stop anyone
+    assert f'esc("{SIGNIN_STEPS[2]}") + commandRow("start") + esc("{SIGNIN_SIGN_IN}")' in body      # no "new window": the PATH does not matter
+    one_line = re.sub(r"\s+", " ", body)
+    assert ('esc("If PowerShell says ") + codeText("claude") + esc(" is not recognized, or the Claude app opens instead, run this:") + "</p>" + '
+            'commandRow("start")') in one_line
     # the heading is all capitals, which is what Gates sets in sentence case ("No Claude sign-in yet"; CLAUDE is one of its names)
     assert SIGNIN_HEAD.isupper() and 'CLAUDE: "Claude"' in THEME_JS["gates"]
 
 
 def test_the_help_copy_keeps_jargon_out_of_a_readers_way() -> None:
-    for text in (SIGNIN_HEAD, SIGNIN_WHY, *SIGNIN_STEPS, SIGNIN_RENEWS, SIGNIN_EXPIRED, CHECK_NONE, CHECK_STALE, CHECK_FAILED, NO_ACTIVITY,
-                 NO_ACTIVITY_WHY, "Copy", "Copied", "Press Ctrl+C", "More in the README"):
+    for text in (SIGNIN_HEAD, SIGNIN_WHY, *SIGNIN_STEPS, SIGNIN_PATH_NOTE, SIGNIN_SIGN_IN, SIGNIN_RENEWS, SIGNIN_EXPIRED, SIGNIN_NOT_FOUND,
+                 *COPY_TITLES.values(), CHECK_NONE, CHECK_STALE, CHECK_FAILED, NO_ACTIVITY, NO_ACTIVITY_WHY, "Copy", "Copied", "Press Ctrl+C",
+                 "More in the README"):
         assert not re.search(JARGON, text, re.I), text
 
 
@@ -1718,24 +1735,28 @@ def test_the_readme_link_is_one_the_dashboard_will_open_and_the_install_command_
     assert link, "the README link opens the way the page opens its other external links"
 
 
-def test_the_install_command_is_shown_and_never_linked_or_fetched() -> None:
+def test_the_commands_are_shown_and_copied_and_never_linked_or_fetched() -> None:
     code = strip_comments(APP_CODE)
     assert code.count("claude.ai") == 1                                    # the one constant
-    uses = [line.strip() for line in code.splitlines() if "INSTALL_COMMAND" in line]
-    assert len(uses) == 3, uses
-    assert uses[0].startswith("var INSTALL_COMMAND = ")
-    assert "codeText(INSTALL_COMMAND)" in uses[1] and "clip.writeText(INSTALL_COMMAND)" in uses[2]
-    assert not re.search(r"INSTALL_COMMAND[^\n]*(href|fetch|open|api\()|(href|fetch|open|api\()[^\n]*INSTALL_COMMAND", code)
+    for name in ("INSTALL_COMMAND", "START_COMMAND"):                      # each is only defined and put in COMMANDS
+        uses = [line.strip() for line in code.splitlines() if re.search(rf"\b{name}\b", line)]
+        assert len(uses) == 2 and uses[0].startswith(f"var {name} = ") and uses[1].startswith("var COMMANDS = {"), (name, uses)
+    uses = [line.strip() for line in code.splitlines() if re.search(r"\bCOMMANDS\b", line)]
+    assert len(uses) == 4, uses                                            # defined, shown, the key checked, copied
+    assert uses[0].startswith("var COMMANDS = {") and "codeText(COMMANDS[which])" in uses[1]
+    assert "hasOwnProperty.call(COMMANDS, which)" in uses[2] and "clip.writeText(COMMANDS[which])" in uses[3]
+    assert not re.search(r"COMMAND[^\n]*(href|fetch|open|api\()|(href|fetch|open|api\()[^\n]*COMMAND", code)
 
 
 def test_the_help_buttons_are_wired_like_the_update_banners_and_nothing_is_inline() -> None:
     code = strip_comments(APP_CODE)
-    assert 'closest(".nm-help button[data-action]")' in code and 'helpAction(help.getAttribute("data-action"))' in code
+    assert 'closest(".nm-help button[data-action]")' in code
+    assert 'helpAction(help.getAttribute("data-action"), help.getAttribute("data-command"))' in code
     action = function_body(APP_CODE, "helpAction")
     assert 'action === "check-again"' in action and "checkAgain()" in action
-    assert 'action === "copy-command"' in action and "copyCommand()" in action
-    html = function_body(APP_CODE, "signInHelp") + function_body(APP_CODE, "copyButton")
-    assert 'data-action="check-again"' in html and 'data-action="copy-command"' in html
+    assert 'action === "copy-command"' in action and "copyCommand(which)" in action
+    html = function_body(APP_CODE, "signInHelp") + function_body(APP_CODE, "copyButton") + function_body(APP_CODE, "commandRow")
+    assert 'data-action="check-again"' in html and 'data-action="copy-command" data-command="' in html
     assert not re.search(r"""\bon[a-z]+\s*=\s*["']""", html)
 
 
@@ -1810,14 +1831,21 @@ def test_with_no_sign_in_the_help_says_what_to_do_in_the_words_it_was_given(chec
     assert html.startswith(f'<div class="nm-msg nm-help" role="region" aria-label="Claude sign-in"><b>{SIGNIN_HEAD}</b><p>')
     assert paragraphs(html) == [SIGNIN_WHY, SIGNIN_RENEWS]
     steps = [plain(item) for item in re.findall(r"<li>(.*?)</li>", html, re.S)]
-    assert len(steps) == 4 and steps[0] == SIGNIN_STEPS[0] and steps[2] == SIGNIN_STEPS[2] and steps[3] == SIGNIN_STEPS[3]
-    assert steps[1].startswith(SIGNIN_STEPS[1])
-    assert commands(html) == [INSTALL_COMMAND, "claude"]                                  # the command and the word to type, each as code
-    assert '<div class="nm-cmd"><code class="nm-path">irm https://claude.ai/install.ps1 | iex</code><button class="nm-btn"' in html
-    buttons = {attrs["data-action"]: attrs for attrs in page.find("button")}
-    assert list(buttons) == ["copy-command", "check-again"] and all(attrs["type"] == "button" for attrs in buttons.values())
-    assert buttons["check-again"]["class"] == "nm-btn solid" and "aria-disabled" not in buttons["check-again"]
-    assert buttons["copy-command"]["aria-label"] == "Copy the install command" and "Copy" in page.text
+    assert steps == [SIGNIN_STEPS[0], SIGNIN_STEPS[1] + INSTALL_COMMAND + "Copy" + SIGNIN_PATH_NOTE,
+                     SIGNIN_STEPS[2] + START_COMMAND + "Copy" + SIGNIN_SIGN_IN, SIGNIN_STEPS[3]]
+    assert commands(html) == [INSTALL_COMMAND, START_COMMAND]                             # each command as code, the way it is typed
+    assert '<div class="nm-cmd" data-command="install"><code class="nm-path">irm https://claude.ai/install.ps1 | iex</code><button class="nm-btn"' in html
+    assert (r'<div class="nm-cmd" data-command="start"><code class="nm-path">&amp; &quot;$env:USERPROFILE\.local\bin\claude.exe&quot;</code>'
+            '<button class="nm-btn"') in html
+    buttons = page.find("button")
+    assert [(attrs["data-action"], attrs.get("data-command")) for attrs in buttons] == [
+        ("copy-command", "install"), ("copy-command", "start"), ("check-again", None)]
+    assert all(attrs["type"] == "button" for attrs in buttons)
+    copy_install, copy_start, check = buttons
+    assert check["class"] == "nm-btn solid" and "aria-disabled" not in check
+    assert (copy_install["aria-label"], copy_start["aria-label"]) == (COPY_TITLES["install"], COPY_TITLES["start"])
+    assert (copy_install["data-fid"], copy_start["data-fid"]) == ("signin-copy-install", "signin-copy-start")    # each keeps its own focus
+    assert page.text.count("Copy") == 2
     assert "Check again" in page.text and not [t for t in page.text if "Still no" in t or "Checking" in t]      # nothing found yet
     (link,) = page.find("a")
     assert link["href"] == README_WEB_AND_APP and link["data-external"] == "1" and "More in the README" in page.text
@@ -1829,12 +1857,14 @@ def test_with_no_sign_in_the_help_says_what_to_do_in_the_words_it_was_given(chec
 def test_an_expired_sign_in_keeps_the_monitors_reason_and_adds_the_one_thing_to_do(checks: dict[str, Any]) -> None:
     html = checks["signIn"]["expired"]
     assert html.startswith('<div class="nm-msg nm-help" role="region" aria-label="Claude sign-in"><b>AUTH LOST</b>')       # the banner's own heading
-    assert paragraphs(html) == ["The Claude sign-in has expired; open Claude Code to renew it", SIGNIN_EXPIRED]
+    assert paragraphs(html) == ["The Claude sign-in has expired; open Claude Code to renew it", SIGNIN_EXPIRED, SIGNIN_NOT_FOUND]
     page = Markup(html)
     assert page.find("ol") == [] and page.find("a") == []                              # no steps to start from nothing, no manual to read
-    assert [attrs["data-action"] for attrs in page.find("button")] == ["check-again"]  # and no install command to copy
-    assert commands(html) == ["claude"]
-    assert paragraphs(checks["signIn"]["noDetail"]) == [SIGNIN_EXPIRED]                # no reason sent: the heading and the one thing to do
+    # no install command to copy; the command that starts Claude Code where claude is not found (#42)
+    assert [(attrs["data-action"], attrs.get("data-command")) for attrs in page.find("button")] == [("copy-command", "start"), ("check-again", None)]
+    assert commands(html) == ["claude", "claude", START_COMMAND]
+    assert html.index("opens instead, run this:</p>") < html.index('<div class="nm-cmd" data-command="start">') < html.index('class="nm-actions"')
+    assert paragraphs(checks["signIn"]["noDetail"]) == [SIGNIN_EXPIRED, SIGNIN_NOT_FOUND]   # no reason sent: the heading and what to do
 
 
 @ui_only
@@ -1893,17 +1923,49 @@ def test_a_check_the_monitor_refuses_or_cannot_hear_says_so(checks: dict[str, An
 def test_copy_puts_the_command_on_the_clipboard_or_selects_it_and_says_which(checks: dict[str, Any]) -> None:
     copy = checks["signInActions"]["copy"]
 
-    def label(html: str) -> str:
-        return re.search(r'data-action="copy-command"[^>]*>([^<]*)</button>', html).group(1)
+    def label(html: str, which: str = "install") -> str:
+        return re.search(rf'<button[^>]*data-command="{which}"[^>]*>([^<]*)</button>', html).group(1)
+
+    def spoken(html: str, which: str) -> str:
+        """What a screen reader says for the button."""
+        return re.search(rf'<button[^>]*data-command="{which}"[^>]*aria-label="([^"]*)"', html).group(1)
 
     written = copy["written"]
-    assert written["writes"] == [INSTALL_COMMAND] and written["copy"] == "copied" and label(written["html"]) == "Copied"
-    assert written["timers"] == [3000] and written["after"]["copy"] == "" and label(written["after"]["html"]) == "Copy"      # for a moment
+    assert written["writes"] == [INSTALL_COMMAND] and (written["copy"], written["copyOf"]) == ("copied", "install")
+    assert label(written["html"]) == "Copied" and label(written["html"], "start") == "Copy"      # only the button that was pressed answers
+    assert (spoken(written["html"], "install"), spoken(written["html"], "start")) == ("Copied to the clipboard", COPY_TITLES["start"])
+    assert written["timers"] == [3000] and (written["after"]["copy"], written["after"]["copyOf"]) == ("", "")      # for a moment
+    assert label(written["after"]["html"]) == "Copy"
+    assert written["after"]["painted"] == [["copied", "install"], ["", ""]]            # the page is drawn with the answer, then without it
     for name in ("refused", "throws", "missing", "noClipboard"):                       # nothing to write to, or it says no: select it instead
         shown = copy[name]
-        assert shown["copy"] == "select" and label(shown["html"]) == "Press Ctrl+C", name
+        assert (shown["copy"], shown["copyOf"]) == ("select", "install") and label(shown["html"]) == "Press Ctrl+C", name
+        assert label(shown["html"], "start") == "Copy", name
+        assert spoken(shown["html"], "install") == "Press Ctrl+C to copy the selected command", name
+        assert spoken(shown["html"], "start") == COPY_TITLES["start"], name
         assert shown["timers"] == [8000] and label(shown["after"]["html"]) == "Copy", name       # long enough to read it and act
+        assert shown["after"]["painted"] == [["select", "install"], ["", ""]], name
     assert copy["refused"]["writes"] == [INSTALL_COMMAND] and copy["throws"]["writes"] == copy["missing"]["writes"] == []
+    # "Press Ctrl+C" must leave the command of the button pressed selected, or Ctrl+C takes the wrong one; a copy that worked selects nothing
+    target = '.nm-help .nm-cmd[data-command="{}"] code'
+    picked = checks["signInActions"]["selected"]
+    assert picked["install"] == [target.format("install")]
+    assert picked["start"] == picked["expiredStart"] == [target.format("start")]
+    assert picked["copied"] == []
+    # the second button pressed within the moment: the answer moves to it, and the first press's timer cannot end it early
+    moved = checks["signInActions"]["handOver"]
+    assert moved["writes"] == [INSTALL_COMMAND, START_COMMAND] and moved["copyOf"] == "start"
+    assert label(moved["html"]) == "Copy" and label(moved["html"], "start") == "Copied"
+    assert moved["cleared"][-1] == 1 and moved["timers"] == 2
+    for name in ("start", "expiredStart"):                                             # the second command, with no sign-in or an expired one
+        shown = copy[name]
+        assert shown["writes"] == [START_COMMAND] and (shown["copy"], shown["copyOf"]) == ("copied", "start"), name
+        assert label(shown["html"], "start") == "Copied" and label(shown["after"]["html"], "start") == "Copy", name
+    assert label(copy["start"]["html"]) == "Copy"                                      # the install command's button says nothing
+    assert "data-command=\"install\"" not in copy["expiredStart"]["html"]
+    for name in ("unknownCommand", "noCommand"):                                       # a command the panel does not have copies nothing
+        shown = copy[name]
+        assert shown["writes"] == [] and (shown["copy"], shown["copyOf"]) == ("", "") and shown["timers"] == [], name
     unknown = checks["signInActions"]["unknownAction"]                                 # an action the panel does not have does nothing
     assert unknown["calls"] == [] and unknown["copy"] == "" and unknown["check"]["busy"] is False
 

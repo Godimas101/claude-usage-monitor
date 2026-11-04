@@ -35,9 +35,9 @@
  *             /api/state reports a release that was not skipped.
  * Help        .nm-msg.nm-help[role=region] is the status banner grown into a help panel, for the two statuses only the user can fix
  *             (no_credentials: the steps to sign in; stale: what to do about an expired sign-in). b (the heading) + p + ol (the steps;
- *             a li may end in .nm-cmd > code.nm-path + button.nm-btn[data-action=copy-command]) + .nm-actions (button.nm-btn.solid
- *             [data-action=check-again], .nm-links > a[data-external]) + p.nm-status[role=status] (what a check found). A code is a
- *             command the user types; it keeps its case.
+ *             a li may hold a .nm-cmd[data-command] > code.nm-path + button.nm-btn[data-action=copy-command][data-command]; the stale
+ *             panel has one after its p) + .nm-actions (button.nm-btn.solid [data-action=check-again], .nm-links > a[data-external])
+ *             + p.nm-status[role=status] (what a check found). A code is a command the user types; it keeps its case.
  * Card        section.nm-card[.wide|.span-N][.is-warn|.is-crit|.is-real] > .nm-card-in > .nm-card-t
  *             (.nm-tag | h2.nm-ttl, and .nm-meta-t) + the body. .is-real marks the one card of real money.
  * Values      .nm-big (sizes .h .m .s), .nm-big-row, .nm-row2 (.is-base), .nm-facts, .nm-chip (.solid
@@ -194,10 +194,15 @@
   };
   var HOOK_WORDS = { installed: "INSTALLED", partial: "PARTLY INSTALLED", missing: "NOT INSTALLED", unknown: "UNKNOWN" };
   var MCP_WORDS = { registered: "REGISTERED", missing: "NOT REGISTERED", other: "A DIFFERENT PROGRAM", unknown: "UNKNOWN" };
-  // The sign-in help (#28): what the status banner says when there is no sign-in or it has expired, and the one command it shows.
-  // The command is text for the user to run in PowerShell; the page never fetches or links it. The heading is in capitals like the
-  // other banners' (the Gates theme sets it in sentence case).
+  // The sign-in help (#28): what the status banner says when there is no sign-in or it has expired, and the commands it shows.
+  // The commands are text for the user to run in PowerShell; the page never fetches or links them. Anthropic's installer leaves
+  // the PATH alone, so "claude" on its own is not found after it: START_COMMAND runs Claude Code from the folder the installer
+  // puts it in, whatever the PATH holds (#42). The heading is in capitals like the other banners' (the Gates theme sets it in
+  // sentence case).
   var INSTALL_COMMAND = "irm https://claude.ai/install.ps1 | iex";
+  var START_COMMAND = '& "$env:USERPROFILE\\.local\\bin\\claude.exe"';
+  var COMMANDS = { install: INSTALL_COMMAND, start: START_COMMAND };
+  var COPY_TITLES = { install: "Copy the install command", start: "Copy the command that starts Claude Code" };
   var SIGNIN_HEAD = "NO CLAUDE SIGN-IN YET";
   var SIGNIN_WHY = "The monitor reads your plan's limits through the sign-in that Claude Code saves on this PC. Signing in to Claude Code once is enough, even if you use Claude on the web or in the Claude app. Claude Code needs a paid plan such as Pro or Max.";
   var SIGNIN_RENEWS = "Claude Code renews the sign-in each time it runs. If the monitor later says the sign-in has expired, open Claude Code again.";
@@ -339,6 +344,7 @@
     setup: { busy: "", result: null },   // "install" or "remove" while a click runs; the result of the last click
     check: { busy: false, sent: false, from: "", at: 0, still: false, failed: false },   // "Check again" on the sign-in help (see checkAgain)
     copy: "",                // the copy button's answer for a moment: "copied" or "select"
+    copyOf: "",              // and which button gives it: "install" or "start"
     copyTimer: 0,
     noActivity: false,       // the monitor has finished reading and found no Claude Code activity on this PC (see limitsOnly)
     odoShown: null,
@@ -3698,16 +3704,25 @@
     return '<code class="nm-path">' + esc(text) + "</code>";
   }
 
-  function copyButton() {
-    var label = S.copy === "copied" ? "Copied" : S.copy === "select" ? "Press Ctrl+C" : "Copy";
-    var title = S.copy === "copied" ? "Copied to the clipboard" : S.copy === "select" ? "Press Ctrl+C to copy the selected command" : "Copy the install command";
-    return '<button class="nm-btn" type="button" data-action="copy-command" data-fid="signin-copy" aria-label="' + esc(title) + '">' + esc(label) + "</button>";
+  /* The copy button of one command (a key of COMMANDS). Only the button that was pressed gives the answer. */
+  function copyButton(which) {
+    var answer = S.copyOf === which ? S.copy : "";
+    var label = answer === "copied" ? "Copied" : answer === "select" ? "Press Ctrl+C" : "Copy";
+    var title = answer === "copied" ? "Copied to the clipboard" : answer === "select" ? "Press Ctrl+C to copy the selected command" : COPY_TITLES[which];
+    return '<button class="nm-btn" type="button" data-action="copy-command" data-command="' + which + '" data-fid="signin-copy-' + which + '" aria-label="' +
+      esc(title) + '">' + esc(label) + "</button>";
+  }
+
+  /* A command to run, with its copy button. */
+  function commandRow(which) {
+    return '<div class="nm-cmd" data-command="' + which + '">' + codeText(COMMANDS[which]) + copyButton(which) + "</div>";
   }
 
   /* The status banner for a missing or expired sign-in: what happened, what to do about it, and a button that looks again. With no
    * sign-in the steps start from nothing (installing Claude Code, which also gives the plan's limits to someone who uses Claude on
-   * the web or in the app); with an expired one the monitor's own reason stays and the one thing to do is added. info is the
-   * status's entry in STATUS (its heading). */
+   * the web or in the app) and start Claude Code by its folder, since the installer leaves the PATH alone (#42); with an expired
+   * one the monitor's own reason stays and the one thing to do is added, with the same command for a PC where claude is not
+   * found, or opens an older Claude app that took the name. info is the status's entry in STATUS (its heading). */
   function signInHelp(s, info) {
     var missing = s.status === "no_credentials";
     var busy = S.check.busy;
@@ -3716,14 +3731,15 @@
     if (missing) {
       var steps = [
         esc("Open PowerShell: press Start and type PowerShell."),
-        esc("Install Claude Code:") + '<div class="nm-cmd">' + codeText(INSTALL_COMMAND) + copyButton() + "</div>",
-        esc("Open a new PowerShell window, run ") + codeText("claude") + esc(", and sign in with your Claude account in the browser that opens."),
+        esc("Install Claude Code:") + commandRow("install") + esc("If it warns that a folder is not in your PATH, carry on. The next step does not need it."),
+        esc("Start Claude Code:") + commandRow("start") + esc("Then sign in with your Claude account in the browser that opens."),
         esc("Come back here and press Check again.")
       ];
       body = "<p>" + esc(SIGNIN_WHY) + "</p><ol>" + steps.map(function (step) { return "<li>" + step + "</li>"; }).join("") + "</ol><p>" + esc(SIGNIN_RENEWS) + "</p>";
     } else {
       body = (s.status_detail ? "<p>" + esc(s.status_detail) + "</p>" : "") + "<p>" + esc("Claude Code renews the sign-in each time it runs. Open Claude Code, or run ") +
-        codeText("claude") + esc(" in PowerShell, then press Check again.") + "</p>";
+        codeText("claude") + esc(" in PowerShell, then press Check again.") + "</p><p>" + esc("If PowerShell says ") + codeText("claude") +
+        esc(" is not recognized, or the Claude app opens instead, run this:") + "</p>" + commandRow("start");
     }
     return '<div class="nm-msg nm-help" role="region" aria-label="Claude sign-in"><b>' + esc(missing ? SIGNIN_HEAD : info.text) + "</b>" + body +
       '<div class="nm-actions"><button class="nm-btn solid" type="button" data-action="check-again" data-fid="check-again"' + (busy ? ' aria-disabled="true"' : "") + ">" +
@@ -3775,9 +3791,9 @@
     return true;
   }
 
-  /* The command, selected, so Ctrl+C takes it where the clipboard could not be written. */
-  function selectCommand() {
-    var code = $(".nm-help .nm-cmd code");
+  /* The command, selected, so Ctrl+C takes it where the clipboard could not be written. which is a key of COMMANDS. */
+  function selectCommand(which) {
+    var code = $('.nm-help .nm-cmd[data-command="' + which + '"] code');
     var picked = window.getSelection ? window.getSelection() : null;
     if (code && picked && document.createRange) {
       var range = document.createRange();
@@ -3787,25 +3803,30 @@
     }
   }
 
-  /* Copy: the install command to the clipboard. Where the page may not write it (no clipboard, or it refuses) the command is
-   * selected instead. The answer shows on the button for COPY_MS. */
-  function copyCommand() {
+  /* Copy: one command (a key of COMMANDS; any other does nothing) to the clipboard. Where the page may not write it (no clipboard,
+   * or it refuses) the command is selected instead. The answer shows on that command's button for COPY_MS. */
+  function copyCommand(which) {
+    if (!Object.prototype.hasOwnProperty.call(COMMANDS, which)) {
+      return;
+    }
     var clip = window.navigator && window.navigator.clipboard;
     var answer = function (ok) {
       S.copy = ok ? "copied" : "select";
+      S.copyOf = which;
       renderPage();
       if (!ok) {
-        selectCommand();
+        selectCommand(which);
       }
       window.clearTimeout(S.copyTimer);
       S.copyTimer = window.setTimeout(function () {
         S.copy = "";
+        S.copyOf = "";
         renderPage();
       }, ok ? COPY_MS : COPY_SELECT_MS);
     };
     if (clip && typeof clip.writeText === "function") {
       try {
-        clip.writeText(INSTALL_COMMAND).then(function () { answer(true); }, function () { answer(false); });
+        clip.writeText(COMMANDS[which]).then(function () { answer(true); }, function () { answer(false); });
         return;
       } catch (e) {
         /* a clipboard that throws: the command is selected instead */
@@ -3814,12 +3835,12 @@
     answer(false);
   }
 
-  /* The help panel's buttons. */
-  function helpAction(action) {
+  /* The help panel's buttons. which is the copy button's data-command. */
+  function helpAction(action, which) {
     if (action === "check-again") {
       checkAgain();
     } else if (action === "copy-command") {
-      copyCommand();
+      copyCommand(which);
     }
   }
 
@@ -4907,7 +4928,7 @@
         }
         var help = closest(".nm-help button[data-action]");
         if (help) {
-          helpAction(help.getAttribute("data-action"));
+          helpAction(help.getAttribute("data-action"), help.getAttribute("data-command"));
           return;
         }
         if (S.formKey === "settings") {

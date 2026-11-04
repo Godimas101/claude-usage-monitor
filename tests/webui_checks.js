@@ -506,6 +506,7 @@ function forget() {
   reset();
   S.noActivity = false;
   S.copy = "";
+  S.copyOf = "";
   S.check = { busy: false, sent: false, from: "", at: 0, still: false, failed: false };
   S.themesRequested = true;                                       // no /api/themes ask in the recorded calls
 }
@@ -943,30 +944,78 @@ async function signInActions() {
   S.check = { busy: false, sent: true, from: SIGN_UPDATED, at: 0, still: true, failed: false };
   out2.outlived = { ended: api.syncCheck(), check: where() };
 
-  // Copy: the command goes to the clipboard once, the button says so for a moment; where the clipboard refuses or is not there the
-  // command is selected instead (no selection API in this page, which must not matter)
+  // Copy: the command of the button pressed goes to the clipboard once, and that button says so for a moment; where the clipboard
+  // refuses or is not there the command is selected instead (no selection API in this page, which must not matter). A command the
+  // panel does not have copies nothing.
   const writes = [];
-  const copyWith = async (clipboard) => {
-    monitorState("no_credentials");
+  const writer = { writeText: (text) => { writes.push(text); return Promise.resolve(); } };
+  // renderPage asks for #main first, so each ask is a paint: what the copy state was when the page was drawn
+  const painted = [];
+  const byId = box.document.getElementById;
+  box.document.getElementById = (id) => { if (id === "main") { painted.push([S.copy, S.copyOf]); } return byId(id); };
+  const copyWith = async (clipboard, which = "install", status = "no_credentials") => {
+    monitorState(status);
     writes.length = 0;
     timers.length = 0;
+    painted.length = 0;
     box.navigator = clipboard === undefined ? undefined : { clipboard };
-    api.helpAction("copy-command");
+    api.helpAction("copy-command", which);
     await settle();
-    const shown = { copy: S.copy, html: api.statusBanner(), timers: timers.map((t) => t.ms), writes: writes.slice() };
+    const shown = { copy: S.copy, copyOf: S.copyOf, html: api.statusBanner(), timers: timers.map((t) => t.ms), writes: writes.slice() };
     if (timers.length) { timers[timers.length - 1].fn(); }
-    shown.after = { copy: S.copy, html: api.statusBanner() };
+    shown.after = { copy: S.copy, copyOf: S.copyOf, html: api.statusBanner(), painted: painted.slice() };
     return shown;
   };
   out2.copy = {
-    written: await copyWith({ writeText: (text) => { writes.push(text); return Promise.resolve(); } }),
+    written: await copyWith(writer),
     refused: await copyWith({ writeText: (text) => { writes.push(text); return Promise.reject(new Error("denied")); } }),
     throws: await copyWith({ writeText: () => { throw new Error("no permission"); } }),
     missing: await copyWith({}),
     noClipboard: await copyWith(undefined),
+    start: await copyWith(writer, "start"),
+    expiredStart: await copyWith(writer, "start", "stale"),
+    unknownCommand: await copyWith(writer, "toString"),
+    noCommand: await copyWith(writer, null),
   };
+
+  // What "Press Ctrl+C" selects. This page has no selection of its own, so these stand in for one: a found code element is its selector.
+  const chosen = [];
+  const query = box.document.querySelector;
+  box.document.querySelector = (selector) => (selector.startsWith(".nm-help") ? { selector } : null);
+  box.document.createRange = () => ({ selectNodeContents(node) { this.node = node; } });
+  box.getSelection = () => ({ removeAllRanges() {}, addRange(range) { chosen.push(range.node.selector); } });
+  const selectedBy = async (clipboard, which, status) => {
+    chosen.length = 0;
+    await copyWith(clipboard, which, status);
+    return chosen.slice();
+  };
+  out2.selected = {
+    install: await selectedBy({}, "install"),
+    start: await selectedBy({}, "start"),
+    expiredStart: await selectedBy({}, "start", "stale"),
+    copied: await selectedBy(writer, "start"),
+  };
+  box.document.querySelector = query;
+  delete box.document.createRange;
+  delete box.getSelection;
+
+  // Both buttons within the moment: the answer moves to the second, and the first press's timer is called off
+  const cleared = [];
   monitorState("no_credentials");
-  out2.unknownAction = { calls: await run({}, () => api.helpAction("nothing-here")), copy: S.copy, check: where() };      // an unknown action does nothing
+  writes.length = 0;
+  timers.length = 0;
+  box.clearTimeout = (id) => { cleared.push(id); };
+  box.navigator = { clipboard: writer };
+  api.helpAction("copy-command", "install");
+  await settle();
+  api.helpAction("copy-command", "start");
+  await settle();
+  out2.handOver = { copyOf: S.copyOf, html: api.statusBanner(), writes: writes.slice(), cleared, timers: timers.length };
+  box.clearTimeout = () => {};
+  box.document.getElementById = byId;
+
+  monitorState("no_credentials");
+  out2.unknownAction ={ calls: await run({}, () => api.helpAction("nothing-here")), copy: S.copy, check: where() };      // an unknown action does nothing
 
   box.fetch = saved.fetch; box.setTimeout = saved.set; box.clearTimeout = saved.clear; box.navigator = saved.navigator;
   forget();
