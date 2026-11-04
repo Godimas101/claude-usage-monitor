@@ -4,6 +4,7 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
+- Epic: v2 overhaul — accurate numbers, Fable-aware limits, three themes, real dashboard ([#2](https://github.com/Godimas101/claude-usage-monitor/issues/2)) — closed 2026-11-04 by @Godimas101
 - Ship: docs, style guide and screenshots for v2 ([#22](https://github.com/Godimas101/claude-usage-monitor/issues/22)) — closed 2026-11-04 by @Godimas101
 - Usage guard: a second hold in the same window tells nobody who heard the first one ([#40](https://github.com/Godimas101/claude-usage-monitor/issues/40)) — closed 2026-11-04 by @Godimas101
 - Usage guard card: the VS Code warning shows even when the extension is new enough ([#38](https://github.com/Godimas101/claude-usage-monitor/issues/38)) — closed 2026-11-04 by @Godimas101
