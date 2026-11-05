@@ -3058,8 +3058,8 @@
 
   // ── Settings ────────────────────────────────────────────────────────────────────
 
-  function toggleRow(key, title, desc, attrs) {
-    return '<label class="nm-row-set"><span><span class="t">' + esc(title) + '</span><span class="d">' + esc(desc) +
+  function toggleRow(key, title, desc, attrs, descId) {
+    return '<label class="nm-row-set"><span><span class="t">' + esc(title) + '</span><span class="d"' + (descId ? ' id="' + descId + '"' : "") + ">" + esc(desc) +
       '</span></span><span class="nm-toggle"><input type="checkbox" data-key="' + esc(key) + '" data-kind="bool"' + (attrs || "") + '><span class="box" aria-hidden="true"></span><span class="lbl" data-lbl-for="' +
       esc(key) + '">OFF</span></span></label>';
   }
@@ -3127,7 +3127,7 @@
         alertsCard() +
         guardCard() +
         '<section class="nm-card wide" aria-label="System"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">System</h2><span class="nm-meta-t">start-up and updates</span></div><div class="nm-set">' +
-        toggleRow("launch_on_startup", "Start with Windows", S.data && S.data.dev ? "Dev instance: this is not saved to Windows." : "Run the monitor when you sign in.") +
+        toggleRow("launch_on_startup", "Start with Windows", startupHintText(), "", "startup-hint") +
         toggleRow("check_updates", "Check for updates", "Look for a newer release once in a while.") +
         '</div><div class="nm-actions" id="set-update-actions"><button class="nm-btn" type="button" data-action="check-update">Check for updates now</button>' +
         '<button class="nm-btn" type="button" data-action="install-update" hidden>Install update</button><button class="nm-btn" type="button" data-action="skip-update" hidden>Skip this version</button></div>' +
@@ -3182,7 +3182,7 @@
         el.value = value === null || value === undefined ? "" : String(value);
       }
     });
-    syncPlanHint(main);
+    syncHints(main);
     syncThemePicker(main);
     syncAlerts(main);
     syncGuard(main);
@@ -3196,13 +3196,19 @@
     return "USD a month. Blank uses the detected price (" + detected + ").";
   }
 
-  /* The page can be drawn before the first state, and a first sign-in or a new plan changes the plan under a page that is open. */
-  function syncPlanHint(main) {
-    var hint = $("#plan-hint", main);
-    var text = planHintText();
-    if (hint && hint.textContent !== text) {
-      hint.textContent = text;
-    }
+  function startupHintText() {
+    return S.data && S.data.dev ? "Dev instance: this is not saved to Windows." : "Run the monitor when you sign in.";
+  }
+
+  /* Words that follow the state. The page can be drawn before the first state, and a first sign-in or a new plan changes the plan
+   * under a page that is open. Each is written only when it changes. */
+  function syncHints(main) {
+    [["#plan-hint", planHintText()], ["#startup-hint", startupHintText()]].forEach(function (pair) {
+      var hint = $(pair[0], main);
+      if (hint && hint.textContent !== pair[1]) {
+        hint.textContent = pair[1];
+      }
+    });
   }
 
   function alertLevels() {
@@ -3651,8 +3657,26 @@
     }
     var status = $("#set-update-status", main);
     if (status) {
-      status.textContent = S.update.text || (u && u.available && u.info && u.info.version ? "Version " + u.info.version + " is available." : "");
+      status.textContent = updateLine();
     }
+  }
+
+  /* The release the state offers, "" for none. */
+  function offeredVersion() {
+    var u = S.data && S.data.update ? S.data.update : null;
+    return u && u.available && u.info && u.info.version ? String(u.info.version) : "";
+  }
+
+  /* The line under the update buttons. What a click said stays while nothing is on offer, or while it is about the release that is:
+   * "YOU ARE UP TO DATE." beside an Install button says nothing true. A check keeps `offered`, not `version`, which would also put
+   * its words in the banner. */
+  function updateLine() {
+    var offered = offeredVersion();
+    var about = S.update.version !== undefined ? S.update.version : S.update.offered;
+    if (S.update.text && (!offered || about === offered)) {
+      return S.update.text;
+    }
+    return offered ? "Version " + offered + " is available." : "";
   }
 
   // ── The update banner ───────────────────────────────────────────────────────────
@@ -3896,6 +3920,10 @@
     if (S.formKey !== "about") {
       S.formKey = "about";
       S.sig = "";
+      if (S.supporters && S.supporters.error) {
+        S.supporters = null;                              // a list that failed is asked for again at this visit, not on every state
+        S.supportersRequested = false;
+      }
       main.innerHTML = pageHead("about") +
         '<div id="about-update" style="display:contents"></div>' +
         '<div class="nm-pgrid">' +
@@ -4213,12 +4241,12 @@
         setStatus("REFRESH FAILED: THE DASHBOARD LOST ITS LINK", true);
       });
     } else if (action === "check-update") {
-      S.update = { text: "CHECKING\u2026" };
+      S.update = { text: "CHECKING\u2026", offered: offeredVersion() };
       api("POST", "/api/update/check").then(function (res) {
-        S.update = { text: checkUpdateText(res) };
+        S.update = { text: checkUpdateText(res), offered: offeredVersion() };
         api("GET", "/api/state").then(function (r) { if (r.ok) { S.data = r.data; S.etag = r.etag; } syncSettings($("#main")); });
       }, function () {
-        S.update = { text: "CHECK FAILED: THE DASHBOARD LOST ITS LINK" };
+        S.update = { text: "CHECK FAILED: THE DASHBOARD LOST ITS LINK", offered: offeredVersion() };
         syncSettings($("#main"));
       });
     } else if (action === "install-update") {

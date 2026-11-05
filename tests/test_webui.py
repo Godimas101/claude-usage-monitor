@@ -844,6 +844,53 @@ def test_the_plan_price_hint_says_what_the_latest_state_says(checks: dict[str, A
 
 
 @ui_only
+def test_the_settings_update_line_is_about_the_release_on_offer(checks: dict[str, Any]) -> None:
+    """Nothing cleared what the last click said, so a release found later stood beside "YOU ARE UP TO DATE." or the skip of an
+    older one until the window closed (#47). The banner already kept its text to one release."""
+    line = checks["updateLine"]
+
+    def offered(version: str) -> dict[str, Any]:
+        return {"line": f"Version {version} is available.", "install": True}
+
+    assert line["upToDate"] == {"line": "YOU ARE UP TO DATE.", "install": False}
+    assert line["foundLater"] == offered("2.3.0")
+    assert line["checking"] == {"line": "CHECKING\u2026", "install": True}            # a state on the way changes nothing
+    assert line["checked"] == {"line": "AN UPDATE IS AVAILABLE.", "install": True}
+    assert 'role="status"></p>' in line["banner"]                                      # a check's words stay out of the banner
+    assert line["linkLost"] == {"line": "CHECK FAILED: THE DASHBOARD LOST ITS LINK", "install": True}
+    assert line["noGithub"] == {"line": "COULD NOT REACH GITHUB; TRY AGAIN LATER.", "install": True}
+    assert line["newerAfterThat"] == offered("2.4.0")
+    assert line["skipped"] == {"line": "THIS VERSION WILL BE SKIPPED.", "install": False}
+    assert line["newerAfterSkip"] == offered("2.5.0")
+    assert line["installing"] == {"line": "OPENED THE RELEASE PAGE IN YOUR BROWSER.", "install": True}
+    assert line["newerAfterInstall"] == offered("2.6.0")
+
+
+@ui_only
+def test_the_start_with_windows_note_follows_the_state(checks: dict[str, Any]) -> None:
+    """A dev instance loaded on #settings is drawn before the state says it is one, so the note said what a real install does (#47)."""
+    hint = checks["startupHint"]
+    normal, dev = "Run the monitor when you sign in.", "Dev instance: this is not saved to Windows."
+    assert hint["before"] == {"text": normal, "writes": 0}
+    assert hint["dev"] == {"text": dev, "writes": 1}
+    assert hint["sameState"] == {"text": dev, "writes": 1}
+    assert hint["notDev"] == {"text": normal, "writes": 2}
+    assert hint["drawnAgain"] == {"text": dev, "writes": 3}                              # the page draws the same words itself
+
+
+@ui_only
+def test_a_supporters_list_that_failed_is_asked_for_at_the_next_visit(checks: dict[str, Any]) -> None:
+    """One failed ask stayed "unavailable" until the window closed, though the monitor only holds a failure for five minutes (#47)."""
+    list_ = checks["supporters"]
+    assert list_["failed"] == {"asks": 1, "unavailable": True, "named": False}
+    assert list_["sameVisit"] == {"asks": 1, "unavailable": True, "named": False}        # a new state asks nothing
+    assert list_["nextVisit"] == {"asks": 2, "unavailable": False, "named": True}
+    assert list_["visitAfterThat"] == {"asks": 2, "unavailable": False, "named": True}   # one that worked is not asked for again
+    assert list_["linkLost"] == {"asks": 3, "unavailable": True, "named": False}
+    assert list_["afterLinkLost"] == {"asks": 4, "unavailable": False, "named": True}
+
+
+@ui_only
 def test_the_time_left_in_a_window_is_a_bar_the_themes_may_draw(checks: dict[str, Any]) -> None:
     """Edgerun's approved limit card has a TIME REMAINING bar where the other themes have the RESETS and IN facts."""
     def bar(html: str) -> tuple[dict[str, str | None], list[str]]:

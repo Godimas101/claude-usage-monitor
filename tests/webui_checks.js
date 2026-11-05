@@ -1115,4 +1115,139 @@ async function planHint() {
   reset();
 }
 
-failures().then(guardPolling).then(guardActions).then(signInActions).then(colourSaves).then(planHint).then(() => console.log(JSON.stringify(out)), (error) => { console.error(error && error.stack ? error.stack : String(error)); process.exit(1); });
+// three texts that outlived what they described (#47), each through the page's real paths: the first paint, a poll, a click
+async function staleTexts() {
+  const saved = { hash: box.location.hash, main: elements.main, fetch: box.fetch, clear: box.clearTimeout, query: box.document.querySelector };
+  const main = element("main");
+  const statusLine = element("set-update-status");
+  const installButton = element("install");
+  const startupHint = element("startup-hint");
+  const supportersBox = element("about-supporters");
+  const parts = {
+    "#set-update-status": statusLine, '[data-action="install-update"]': installButton, '[data-action="skip-update"]': element("skip"),
+    "#startup-hint": startupHint, "#about-supporters": supportersBox,
+  };
+  let drawn = "";
+  let startup = null;
+  let startupWrites = 0;
+  Object.defineProperty(main, "innerHTML", {
+    get: () => drawn,
+    set: (html) => { drawn = html; const found = /id="startup-hint">([^<]*)</.exec(html); startup = found ? found[1] : null; },
+  });
+  Object.defineProperty(startupHint, "textContent", { get: () => startup, set: (value) => { startupWrites += 1; startup = value; } });
+  main.querySelector = (selector) => parts[selector] || null;
+  elements.main = main;
+  box.document.querySelector = (selector) => (selector === "#main" ? main : null);
+  box.clearTimeout = () => {};
+  let stateNow = null;
+  let checkResult = null;
+  let heldCheck = null;
+  let supportersReply = null;
+  let asks = 0;
+  box.fetch = (url) => {
+    const path = String(url);
+    if (path.indexOf("/api/supporters") >= 0) { asks += 1; return supportersReply(); }
+    if (path.indexOf("/api/update/check") >= 0) { return heldCheck || answer(200, { ok: true, result: checkResult })(); }
+    if (path.indexOf("/api/update/apply") >= 0) { return answer(200, { result: { mode: "browser" } })(); }
+    if (path.indexOf("/api/update/skip") >= 0) { return answer(200, { ok: true })(); }
+    if (path.indexOf("/api/state") >= 0) { return answer(200, stateNow)(); }
+    return answer(404, { error: "not in this test" })();
+  };
+  const offering = (version) => ({
+    state: { status: "live" }, settings: {}, model_names: {},
+    update: version ? { available: true, version, info: { version } } : { available: false },
+  });
+  const line = () => ({ line: statusLine.textContent, install: !installButton.hidden });
+  const lands = async (state) => { stateNow = state; api.poll(true); await settle(); return line(); };
+  const clicked = async (action, state, result) => { stateNow = state; checkResult = result; api.settingsClick(click(action)); await settle(); return line(); };
+  const opens = async (hash) => { box.location.hash = hash; S.page = null; api.renderPage(); await settle(); };
+
+  // 1. The line under the update buttons: what a click said lasts only while it is about the release on offer.
+  reset();
+  S.update = { text: "" };
+  S.skipped = "";
+  stateNow = offering(null);
+  await opens("#settings");
+  await lands(offering(null));
+  out.updateLine = {};
+  out.updateLine.upToDate = await clicked("check-update", offering(null), { available: false, version: null, checked: true });
+  out.updateLine.foundLater = await lands(offering("2.3.0"));
+  let finishCheck = null;
+  heldCheck = new Promise((resolve) => { finishCheck = resolve; }).then(() => answer(200, { ok: true, result: { available: true, version: "2.3.0", checked: true } })());
+  api.settingsClick(click("check-update"));
+  out.updateLine.checking = await lands(offering("2.3.0"));
+  finishCheck();
+  heldCheck = null;
+  await settle();
+  out.updateLine.checked = line();
+  out.updateLine.banner = api.updateBanner();
+  heldCheck = Promise.reject(new Error("link lost"));
+  out.updateLine.linkLost = await clicked("check-update", offering("2.3.0"));
+  heldCheck = null;
+  out.updateLine.noGithub = await clicked("check-update", offering("2.3.0"), { available: false, version: null, checked: false });
+  out.updateLine.newerAfterThat = await lands(offering("2.4.0"));
+  out.updateLine.skipped = await clicked("skip-update", offering(null));
+  out.updateLine.newerAfterSkip = await lands(offering("2.5.0"));
+  api.installUpdate();
+  await settle();
+  out.updateLine.installing = line();
+  out.updateLine.newerAfterInstall = await lands(offering("2.6.0"));
+
+  // 2. The note under Start with Windows: a page loaded on #settings is drawn before the state says it is a dev instance.
+  reset();
+  S.update = { text: "" };
+  S.skipped = "";
+  const hinted = () => ({ text: startup, writes: startupWrites });
+  const devState = Object.assign(offering(null), { dev: true });
+  await opens("#settings");
+  out.startupHint = { before: hinted() };
+  await lands(devState);
+  out.startupHint.dev = hinted();
+  await lands(devState);
+  out.startupHint.sameState = hinted();
+  await lands(offering(null));
+  out.startupHint.notDev = hinted();
+  await lands(devState);
+  await opens("#settings");
+  out.startupHint.drawnAgain = hinted();
+
+  // 3. The supporters: a list that failed is asked for at the next visit, not on every state, and one that worked is not asked for again.
+  reset();
+  S.supporters = null;
+  S.supportersRequested = false;
+  const listed = () => ({ asks, unavailable: /unavailable/.test(supportersBox.innerHTML), named: /Ada/.test(supportersBox.innerHTML) });
+  const works = answer(200, { supporters: ["Ada"] });
+  stateNow = offering(null);
+  supportersReply = answer(200, { supporters: [], error: "the list could not be fetched" });
+  await opens("#about");
+  out.supporters = { failed: listed() };
+  await lands(offering(null));
+  out.supporters.sameVisit = listed();
+  supportersReply = works;
+  await opens("#about");
+  out.supporters.nextVisit = listed();
+  await opens("#about");
+  out.supporters.visitAfterThat = listed();
+  S.supporters = null;
+  S.supportersRequested = false;
+  supportersReply = () => Promise.reject(new Error("link lost"));
+  await opens("#about");
+  out.supporters.linkLost = listed();
+  supportersReply = works;
+  await opens("#about");
+  out.supporters.afterLinkLost = listed();
+
+  box.location.hash = saved.hash;
+  elements.main = saved.main;
+  box.fetch = saved.fetch;
+  box.clearTimeout = saved.clear;
+  box.document.querySelector = saved.query;
+  S.page = null;
+  S.formKey = null;
+  S.update = { text: "" };
+  S.skipped = "";
+  S.supporters = null;
+  reset();
+}
+
+failures().then(guardPolling).then(guardActions).then(signInActions).then(colourSaves).then(planHint).then(staleTexts).then(() => console.log(JSON.stringify(out)), (error) => { console.error(error && error.stack ? error.stack : String(error)); process.exit(1); });

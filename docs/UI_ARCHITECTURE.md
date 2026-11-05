@@ -404,7 +404,7 @@ Settings: `theme_id`, `theme_variant`, `theme_mode` (Gates: light / dark / syste
 | GET | `/api/themes` | themes with variants and tokens; the Gates `system-*` variants show the live Windows accent, as applied |
 | GET | `/api/analytics/<name>` | statistics report: `cost`, `efficiency`, `pacing`, `history`, `sessions` (below) |
 | GET | `/api/export?format=csv\|json` | daily rollups download (below) |
-| GET | `/api/supporters` | supporters list (cached for an hour; failures come back as an empty list plus the reason) |
+| GET | `/api/supporters` | supporters list (cached for an hour; failures come back as an empty list plus the reason, and the About page asks again at its next visit) |
 | POST | `/api/settings` | validated partial settings update (below) |
 | POST | `/api/refresh` | `DataService.refresh_now()` |
 | POST | `/api/dashboard/closed` | `{"pid": n}`: the dashboard process says its window is gone (`dashboard_closed_cb`, wired to `DashboardLauncher.window_closed`); `400` without a pid, `501` where nothing manages the dashboard |
@@ -672,7 +672,8 @@ default browser instead, and the exit code says so (below).
   *Update now* posts `/api/update/apply` and the status line says the mode (`installer` or `browser`) or the error; *Release
   notes* opens the github.com page through `open_external` (shown only when there is one); *Skip this version* posts
   `/api/update/skip` and hides the banner at once, rolling back on failure. The status text is tied to the release it was
-  about, so it never shows against a newer one. The dev server fakes no update (its `info` callback returns nothing): to see
+  about, so it never shows against a newer one. The line under the Settings buttons follows the same rule (`updateLine`), and a
+  check's words are tied there through `S.update.offered`, which keeps them out of the banner. The dev server fakes no update (its `info` callback returns nothing): to see
   the banner, answer `/api/state` with an `update` block (a Playwright route does it).
 - **Usage guard card (#27).** The Settings card's two blocks, the live status (`#guard-live`) and the one-click setup
   (`#guard-setup`), are filled by `syncGuard` from `/api/guard`, asked once at a time every `GUARD_POLL_MS` while Settings is
@@ -722,7 +723,7 @@ default browser instead, and the exit code says so (below).
   `Intl.NumberFormat` with the ISO code the usage API reports; USD where it reports none). API-equivalent cost
   stays dollars. `/api/state.plan` carries the detected plan and price only: `plan_price_override` is a setting,
   applied where a price is used (the reports, and `effectivePlanPrice()` in the page), so setting or clearing it
-  never rewrites state. The hint beside the override names the detected plan and price, and `syncPlanHint` keeps it
+  never rewrites state. The hint beside the override names the detected plan and price, and `syncHints` keeps it
   to the latest state: loaded on `#settings` the page is drawn before the first state, and a first sign-in or a new
   plan changes the plan under a page that is open. It writes only when the words change.
 - **The plan multiple** is a row of cells of one plan-month each. Past 24 months a cell stands for N months
