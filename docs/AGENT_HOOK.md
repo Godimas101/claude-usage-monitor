@@ -246,7 +246,8 @@ PowerShell does not wait for a windowed program unless its output goes through a
   PATH, then on the PATH as Windows holds it now, so a folder added to the PATH while the monitor
   runs is found. Last it looks in `%USERPROFILE%\.local\bin`, where Anthropic's Windows installer
   puts it without adding that folder to the PATH: see
-  [Verify your PATH](https://code.claude.com/docs/en/troubleshoot-install#verify-your-path). With
+  [Verify your PATH](https://code.claude.com/docs/en/troubleshoot-install#verify-your-path). Any
+  command the card shows you then starts that copy by its full path. With
   an older one it changes nothing, names the `claude` it found, and tells you to run
   `claude update`.
 - It backs up your Claude Code user settings (`%USERPROFILE%\.claude\settings.json`, or the folder in

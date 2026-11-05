@@ -1605,6 +1605,8 @@ def test_install_and_remove_are_there_when_setup_can_run_and_the_cost_is_always_
     for name in ("installing", "removing"):                                                   # one click on its way
         assert buttons(setup[name]) == {"install": "busy", "remove": "busy"}, name
     assert '(<span class="nm-path">C:\\Users\\t\\AppData\\Roaming\\npm\\claude.CMD</span>) is older than 2.1.139' in setup["tooOldAt"]
+    assert 'Update it with <span class="nm-path">claude update</span>' in setup["tooOld"]
+    assert 'Update it with <span class="nm-path">&amp; &#39;C:\\Users\\t\\.local\\bin\\claude.exe&#39; update</span>' in setup["tooOldOnNoPath"]   # #43
     for name, html in setup.items():
         assert f'<p class="nm-lede">{GUARD_COST}</p>' in html, name                              # what it costs is said whatever the state
         install = "Installing…" if name == "installing" else "Install"                          # the label of a click on its way says so

@@ -95,24 +95,31 @@ class Context:
     which: Callable[[str], str | None]    # shutil.which
     run: Callable[[Sequence[str]], Ran]   # runs an argument list; run_claude
     now: Callable[[], datetime]           # names the backup
+    on_path: Callable[[str], str | None] = lambda name: name   # on_a_path: None when no PATH has the command
 
 
 def default_context() -> Context:
     return Context(frozen=bool(getattr(sys, "frozen", False)), executable=sys.executable, env=os.environ,
-                   home=Path.home(), which=find_command, run=run_claude, now=datetime.now)
+                   home=Path.home(), which=find_command, run=run_claude, now=datetime.now, on_path=on_a_path)
 
 
 def find_command(name: str) -> str | None:
-    """shutil.which, and when that finds nothing, again on the PATH that Windows holds now, and last in the folder of
-    Anthropic's Windows installer. A process keeps the PATH it started with, so a folder added to the PATH while the
-    monitor runs is not on the monitor's own. That installer does not add its folder at all, so the sign-in help starts
-    Claude Code by its full path (#42), and a claude installed that way is on no PATH (#43)."""
+    """on_a_path, and last the folder of Anthropic's Windows installer. That installer does not add its folder to the PATH,
+    so the sign-in help starts Claude Code by its full path (#42), and a claude installed that way is on no PATH (#43)."""
+    found = on_a_path(name)
+    if found or sys.platform != "win32":
+        return found
+    return shutil.which(name, path=str(_installer_folder()))
+
+
+def on_a_path(name: str) -> str | None:
+    """shutil.which, and when that finds nothing, again on the PATH that Windows holds now. A process keeps the PATH it
+    started with, so a folder added to the PATH while the monitor runs is not on the monitor's own."""
     found = shutil.which(name)
     if found or sys.platform != "win32":
         return found
     fresh = _registry_path()
-    found = shutil.which(name, path=fresh) if fresh else None
-    return found or shutil.which(name, path=str(_installer_folder()))
+    return shutil.which(name, path=fresh) if fresh else None
 
 
 def _installer_folder() -> Path:
@@ -227,11 +234,18 @@ def risky_for_cmd(path: str) -> bool:
     return any(char in _CMD_UNSAFE for char in path)
 
 
-def manual_mcp_command(exe: str) -> str:
-    """The PowerShell line of docs/AGENT_HOOK.md for this exe. The bare -- stays quoted: PowerShell swallows it when
-    claude is an npm script."""
+def manual_mcp_command(exe: str, claude: str = CLAUDE_COMMAND) -> str:
+    """The PowerShell line of docs/AGENT_HOOK.md for this exe, with ``claude`` as typed_claude gives it. The bare -- stays
+    quoted: PowerShell swallows it when claude is an npm script."""
     quoted = "'" + exe.replace("'", "''") + "'"
-    return f"claude mcp add --transport stdio --scope user {MCP_NAME} '--' {quoted} --mcp"
+    return f"{claude} mcp add --transport stdio --scope user {MCP_NAME} '--' {quoted} --mcp"
+
+
+def typed_claude(ctx: Context, claude: str | None) -> str:
+    """What a person types in PowerShell to start ``claude``: the name, or its full path when no PATH has it (#43)."""
+    if claude is None or ctx.on_path(CLAUDE_COMMAND):
+        return CLAUDE_COMMAND
+    return "& '" + claude.replace("'", "''") + "'"
 
 
 def _clean(text: str, limit: int = 160) -> str:
@@ -573,7 +587,8 @@ def status(ctx: Context | None = None) -> dict:
         hooks         ``state`` installed | partial | missing | unknown, ``installed`` of ``total``, and ``events``:
                       the state of each of the three, installed | different | missing
         mcp           ``state`` registered | missing | other | unknown
-        claude        found, path, version ("2.1.160" or None), min_version and ``supported`` (None when unknown)
+        claude        found, path, version ("2.1.160" or None), min_version, ``supported`` (None when unknown) and
+                      ``command``, what a person types to start it
         errors        why the settings file cannot be edited, when it cannot
     """
     ctx = ctx or default_context()
@@ -595,7 +610,8 @@ def status(ctx: Context | None = None) -> dict:
     if claude is not None:
         version = claude_version(ctx, claude)
         out["claude"] = {"found": True, "path": claude, "version": _version_text(version) if version else None,
-                         "min_version": MIN_CLAUDE_TEXT, "supported": None if version is None else version >= MIN_CLAUDE}
+                         "min_version": MIN_CLAUDE_TEXT, "supported": None if version is None else version >= MIN_CLAUDE,
+                         "command": typed_claude(ctx, claude)}
         out["mcp"] = {"state": _mcp_state(ctx, claude, exe)}
     return out
 
@@ -635,10 +651,10 @@ def _install(ctx: Context) -> dict:
     version = claude_version(ctx, claude)
     if version is None:
         result["errors"].append("Could not tell which version of Claude Code is installed, so setup changed nothing. "
-                                f"Hooks need {MIN_CLAUDE_TEXT} or newer; check with: claude --version")
+                                f"Hooks need {MIN_CLAUDE_TEXT} or newer; check with: {typed_claude(ctx, claude)} --version")
     elif version < MIN_CLAUDE:
         result["errors"].append(f"Claude Code {_version_text(version)} (the claude at {claude}) is older than "
-                                f"{MIN_CLAUDE_TEXT}, which hooks need, so setup changed nothing. Update it with: claude update")
+                                f"{MIN_CLAUDE_TEXT}, which hooks need, so setup changed nothing. Update it with: {typed_claude(ctx, claude)} update")
     stamp = _stamp(path)
     doc, problem = read_settings(path)
     problem = problem or (hooks_problem(doc) if doc is not None else None)
@@ -694,14 +710,14 @@ def _install_mcp(ctx: Context, claude: str, exe: str, result: dict) -> None:
         result["warnings"].append("The MCP tool was not registered: claude here is an npm script that Windows runs "
                                   "through cmd.exe, and this app's path has characters cmd.exe would misread. "
                                   "Register it by hand with the command below.")
-        result["manual"] = manual_mcp_command(exe)
+        result["manual"] = manual_mcp_command(exe, typed_claude(ctx, claude))
         return
     if state == "other":
         ran = ctx.run([claude, "mcp", "remove", MCP_NAME, "-s", "user"])
         if ran.returncode != 0:
             result["errors"].append(f"A {MCP_NAME} MCP tool that starts another program is registered and could not be "
-                                    f"removed ({_ran_reason(ran)}). Remove it with: claude mcp remove {MCP_NAME} -s user")
-            result["manual"] = manual_mcp_command(exe)
+                                    f"removed ({_ran_reason(ran)}). Remove it with: {typed_claude(ctx, claude)} mcp remove {MCP_NAME} -s user")
+            result["manual"] = manual_mcp_command(exe, typed_claude(ctx, claude))
             return
         result["changed"].append(f"Removed a {MCP_NAME} MCP tool that started another program"
                                  + (f" ({starts})." if starts else "."))
@@ -709,13 +725,13 @@ def _install_mcp(ctx: Context, claude: str, exe: str, result: dict) -> None:
     if ran.returncode != 0 and state == "unknown" and re.search(r"already exists", f"{ran.stdout}\n{ran.stderr}",
                                                                  re.IGNORECASE):
         result["warnings"].append(f"A {MCP_NAME} MCP tool is already registered, but Claude Code did not say what it "
-                                  f"starts, so it was left as it is. If it is not this app, remove it with: claude mcp "
-                                  f"remove {MCP_NAME} -s user, then press Install again.")
+                                  f"starts, so it was left as it is. If it is not this app, remove it with: {typed_claude(ctx, claude)} "
+                                  f"mcp remove {MCP_NAME} -s user, then press Install again.")
         return
     if ran.returncode != 0:
         result["errors"].append(f"Claude Code did not register the {MCP_NAME} MCP tool ({_ran_reason(ran)}). "
                                 "The hooks are in place; register the tool by hand with the command below.")
-        result["manual"] = manual_mcp_command(exe)
+        result["manual"] = manual_mcp_command(exe, typed_claude(ctx, claude))
         return
     result["changed"].append(f"Registered the {MCP_NAME} MCP tool.")
     log.info("setup: MCP tool registered")
@@ -770,7 +786,7 @@ def _remove(ctx: Context) -> dict:
 
 
 def _remove_mcp(ctx: Context, claude: str | None, exe: str, result: dict) -> None:
-    by_hand = f"Remove it by hand with: claude mcp remove {MCP_NAME} -s user"
+    by_hand = f"Remove it by hand with: {typed_claude(ctx, claude)} mcp remove {MCP_NAME} -s user"
     if claude is None:
         result["warnings"].append(f"Claude Code was not found, so the {MCP_NAME} MCP tool was left alone. {by_hand}")
         return

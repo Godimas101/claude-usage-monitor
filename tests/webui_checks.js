@@ -714,6 +714,7 @@ out.guard = {
     installed: setupFor(setupWith({ hooks: { state: "installed", installed: 3, total: 3, events: {} }, mcp: { state: "registered" } })),
     partial: setupFor(setupWith({ hooks: { state: "partial", installed: 2, total: 3, events: {} }, mcp: { state: "other" } })),
     tooOld: setupFor(setupWith({ claude: { found: true, version: "2.1.94", min_version: "2.1.139", supported: false } })),
+    tooOldOnNoPath: setupFor(setupWith({ claude: { found: true, path: "C:\\Users\\t\\.local\\bin\\claude.exe", command: "& 'C:\\Users\\t\\.local\\bin\\claude.exe'", version: "2.1.94", min_version: "2.1.139", supported: false } })),
     tooOldAt: setupFor(setupWith({ claude: { found: true, path: "C:\\Users\\t\\AppData\\Roaming\\npm\\claude.CMD", version: "2.1.94", min_version: "2.1.139", supported: false } })),
     versionUnknown: setupFor(setupWith({ claude: { found: true, version: null, min_version: "2.1.139", supported: null } })),
     noClaude: setupFor(setupWith({ available: false, reason: "Claude Code was not found on this PC: there is no claude command on the PATH.", claude: { found: false, version: null, min_version: "2.1.139", supported: null } })),

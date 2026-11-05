@@ -739,6 +739,42 @@ def test_the_card_finds_the_installers_copy_and_install_works_through_it(tmp_pat
     assert rig.claude.tool == (EXE, ["--mcp"]) and {Path(call[0]) for call in rig.claude.calls} == {copy}
 
 
+def test_a_claude_on_no_path_is_named_by_its_path_in_every_command_shown(tmp_path: Path) -> None:
+    """Typed as claude, these fail with "not recognized" on the very PC #43 is for, so they name the copy that was found."""
+    typed = "& '" + CLAUDE_EXE + "'"
+
+    def on_no_path(rig: Rig) -> setup.Context:
+        return dataclasses.replace(rig.ctx, on_path=lambda name: None)
+
+    rig = make_rig(tmp_path / "add")
+    assert setup.status(on_no_path(rig))["claude"]["command"] == typed
+    rig.claude.forced["add"] = Ran(1, "", "something went wrong\n")
+    assert setup.install(on_no_path(rig))["manual"].startswith(typed + " mcp add ")
+    too_old = setup.install(on_no_path(make_rig(tmp_path / "old", version="2.1.94 (Claude Code)")))
+    assert f"Update it with: {typed} update" in too_old["errors"][0]
+    no_version = setup.install(on_no_path(make_rig(tmp_path / "unknown", version="no version here")))
+    assert f"check with: {typed} --version" in no_version["errors"][0]
+    stuck = make_rig(tmp_path / "stuck", tool=(EXE, ["--mcp"]))
+    stuck.claude.forced["remove"] = Ran(1, "", "no\n")
+    assert f"by hand with: {typed} mcp remove claude-usage -s user" in setup.remove(on_no_path(stuck))["errors"][0]
+    other = make_rig(tmp_path / "other", tool=(r"C:\other.exe", ["--mcp"]))
+    other.claude.forced["remove"] = Ran(1, "", "no\n")
+    assert f"Remove it with: {typed} mcp remove claude-usage -s user" in setup.install(on_no_path(other))["errors"][0]
+
+
+def test_a_claude_a_path_has_is_named_as_claude_and_a_quote_in_a_path_is_doubled(tmp_path: Path) -> None:
+    assert setup.status(make_rig(tmp_path / "plain").ctx)["claude"]["command"] == "claude"
+    rig = make_rig(tmp_path / "quote", claude_path=r"C:\Users\O'Neil\.local\bin\claude.exe")
+    ctx = dataclasses.replace(rig.ctx, on_path=lambda name: None)
+    assert setup.status(ctx)["claude"]["command"] == r"& 'C:\Users\O''Neil\.local\bin\claude.exe'"
+
+
+@windows_only
+def test_the_installers_folder_is_found_but_is_no_path(installer_folder: Path) -> None:
+    claude_in(installer_folder)
+    assert setup.find_command("claude") is not None and setup.on_a_path("claude") is None
+
+
 def test_a_tool_without_the_mcp_argument_is_not_ours(tmp_path: Path) -> None:
     rig = make_rig(tmp_path, tool=(EXE, []))                                 # "added wrongly": empty Args
     setup.install(rig.ctx)
@@ -822,7 +858,8 @@ def test_the_status_before_and_after_a_click(tmp_path: Path) -> None:
         "hooks": {"state": "missing", "installed": 0, "total": 3,
                   "events": {"SessionStart": "missing", "UserPromptSubmit": "missing", "PostToolUse": "missing"}},
         "mcp": {"state": "missing"},
-        "claude": {"found": True, "path": CLAUDE_EXE, "version": "2.1.160", "min_version": "2.1.139", "supported": True},
+        "claude": {"found": True, "path": CLAUDE_EXE, "version": "2.1.160", "min_version": "2.1.139", "supported": True,
+                   "command": "claude"},
     }
     assert rig.files() == [] and rig.claude.kinds() == ["version", "get"]       # looking changes nothing and runs nothing else
     setup.install(rig.ctx)

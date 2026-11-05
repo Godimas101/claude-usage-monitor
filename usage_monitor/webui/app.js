@@ -3452,7 +3452,7 @@
         // Which claude: an old npm copy can come first on the PATH while another one is up to date.
         notes += '<div class="nm-callout is-warn" role="note">Claude Code ' + esc(s.claude.version) +
           (where ? ' (<span class="nm-path">' + esc(where) + "</span>)" : "") + " is older than " + esc(s.claude.min_version) +
-          ", which the hooks need. Update it with <span class=\"nm-path\">claude update</span> first.</div>";
+          ", which the hooks need. Update it with <span class=\"nm-path\">" + esc((s.claude.command || "claude") + " update") + "</span> first.</div>";
       }
       (Array.isArray(s.errors) ? s.errors : []).forEach(function (error) {
         notes += '<p class="nm-error" role="alert">' + esc(error) + "</p>";
