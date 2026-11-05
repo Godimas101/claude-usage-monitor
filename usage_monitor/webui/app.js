@@ -4265,7 +4265,7 @@
    * One sentence per text: the Gates theme writes sentence case and capitalises only the first letter of a string. */
   function installUpdate() {
     var found = pendingUpdate();
-    var forVersion = found ? found.version : "";                // the banner shows this status only while it is about that release
+    var forVersion = found ? found.version : offeredVersion();  // a skipped release is still on offer here, and the click gets its answer
     S.update = { text: "INSTALLING\u2026", version: forVersion };
     refreshUpdateViews();
     api("POST", "/api/update/apply").then(function (res) {
@@ -4291,7 +4291,7 @@
   /* Skip this version: the banner goes at once, and comes back only for a newer one. */
   function skipUpdate() {
     var found = pendingUpdate();
-    var forVersion = found ? found.version : "";
+    var forVersion = found ? found.version : offeredVersion();
     if (found) {
       S.skipped = found.version;
     }

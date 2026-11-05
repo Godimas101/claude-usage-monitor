@@ -1153,9 +1153,9 @@ async function staleTexts() {
     if (path.indexOf("/api/state") >= 0) { return answer(200, stateNow)(); }
     return answer(404, { error: "not in this test" })();
   };
-  const offering = (version) => ({
+  const offering = (version, skipped) => ({
     state: { status: "live" }, settings: {}, model_names: {},
-    update: version ? { available: true, version, info: { version } } : { available: false },
+    update: version ? { available: true, version, skipped: !!skipped, skip_version: skipped ? version : null, info: { version } } : { available: false },
   });
   const line = () => ({ line: statusLine.textContent, install: !installButton.hidden });
   const lands = async (state) => { stateNow = state; api.poll(true); await settle(); return line(); };
@@ -1186,12 +1186,21 @@ async function staleTexts() {
   heldCheck = null;
   out.updateLine.noGithub = await clicked("check-update", offering("2.3.0"), { available: false, version: null, checked: false });
   out.updateLine.newerAfterThat = await lands(offering("2.4.0"));
-  out.updateLine.skipped = await clicked("skip-update", offering(null));
+  out.updateLine.skipped = await clicked("skip-update", offering("2.4.0", true));
   out.updateLine.newerAfterSkip = await lands(offering("2.5.0"));
   api.installUpdate();
   await settle();
   out.updateLine.installing = line();
   out.updateLine.newerAfterInstall = await lands(offering("2.6.0"));
+  // the monitor goes on offering a release that was skipped, and Settings is the one place left to install it from
+  await lands(offering("2.6.0", true));
+  S.update = { text: "" };
+  out.updateLine.skippedOnOffer = line();
+  api.installUpdate();
+  await settle();
+  out.updateLine.installSkipped = line();
+  await clicked("skip-update", offering("2.6.0", true));
+  out.updateLine.skipSkipped = line();
 
   // 2. The note under Start with Windows: a page loaded on #settings is drawn before the state says it is a dev instance.
   reset();

@@ -860,10 +860,12 @@ def test_the_settings_update_line_is_about_the_release_on_offer(checks: dict[str
     assert line["linkLost"] == {"line": "CHECK FAILED: THE DASHBOARD LOST ITS LINK", "install": True}
     assert line["noGithub"] == {"line": "COULD NOT REACH GITHUB; TRY AGAIN LATER.", "install": True}
     assert line["newerAfterThat"] == offered("2.4.0")
-    assert line["skipped"] == {"line": "THIS VERSION WILL BE SKIPPED.", "install": False}
+    assert line["skipped"] == {"line": "THIS VERSION WILL BE SKIPPED.", "install": True}
     assert line["newerAfterSkip"] == offered("2.5.0")
     assert line["installing"] == {"line": "OPENED THE RELEASE PAGE IN YOUR BROWSER.", "install": True}
     assert line["newerAfterInstall"] == offered("2.6.0")
+    assert line["installSkipped"] == {"line": "OPENED THE RELEASE PAGE IN YOUR BROWSER.", "install": True}   # a click on a skipped
+    assert line["skipSkipped"] == {"line": "THIS VERSION WILL BE SKIPPED.", "install": True}                 # release gets its answer
 
 
 @ui_only
