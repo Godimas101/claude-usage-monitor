@@ -4653,7 +4653,7 @@ def test_overview_cards_never_clip_their_content_in_the_real_web_view(tmp_path: 
     size leaves a 1184 x 741 page): the plan block had a line more than the approved design, and the cost
     row had a fixed floor below its content. Measured in WebView2, the engine the dashboard really uses,
     for each theme (the page opens in the theme's own look, see _themed_shell)."""
-    server, settings = devserver.make_server("normal", 0, settings_dir=tmp_path / "dev", theme=theme)
+    server, settings = devserver.make_server("normal", 0, settings_dir=tmp_path / "dev", theme=theme, clock=lambda: NOW)
     server.start()
     try:
         env = dict(os.environ, **REAL_PROFILE_ENV, CUM_APPDATA_DIR=str(tmp_path / "app"))
@@ -4769,8 +4769,10 @@ def test_no_cost_card_changes_height_when_its_report_lands_in_the_real_web_view(
     hides it: the row is held open by taller cards beside it, which is why a check at 1280 x 800 never saw it). The Main and
     subagents card grew a line in a narrow window the same way, because the placeholder "0% · 0 requests" is shorter than a
     real "97% · 2,670 requests". Measured in WebView2, the engine the dashboard really uses, in the default window and a
-    narrower one, with the reports held back for 5 s so the placeholders are what is measured first."""
-    server, settings = devserver.make_server("normal", 0, settings_dir=tmp_path / "dev", theme=theme, warm=True)
+    narrower one, with the reports held back for 5 s so the placeholders are what is measured first. The clock is pinned to the
+    middle of a month: the invented history and "this month" move with the date, and early in a month By model and By folder are
+    shorter than their placeholders and Month by month has a row more, which says nothing about the page (#44)."""
+    server, settings = devserver.make_server("normal", 0, settings_dir=tmp_path / "dev", theme=theme, warm=True, clock=lambda: NOW)
     _hold_reports(server, 5.0)
     server.start()
     try:
