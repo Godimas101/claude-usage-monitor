@@ -242,9 +242,10 @@ PowerShell does not wait for a windowed program unless its output goes through a
   usage, and run `--wait` again if the guard still holds.
 
 **What Install does:**
-- It checks Claude Code first: the `claude` command must be on the PATH, at 2.1.139 or newer. It
-  looks on the PATH as Windows holds it now, so a folder added to the PATH while the monitor runs
-  is found. Anthropic's Windows installer doesn't add its folder itself: see
+- It checks Claude Code first: it needs a `claude` command at 2.1.139 or newer. It looks on the
+  PATH, then on the PATH as Windows holds it now, so a folder added to the PATH while the monitor
+  runs is found. Last it looks in `%USERPROFILE%\.local\bin`, where Anthropic's Windows installer
+  puts it without adding that folder to the PATH: see
   [Verify your PATH](https://code.claude.com/docs/en/troubleshoot-install#verify-your-path). With
   an older one it changes nothing, names the `claude` it found, and tells you to run
   `claude update`.
@@ -269,7 +270,7 @@ PowerShell does not wait for a windowed program unless its output goes through a
 **Remove** takes out this app's entries in those three events, including ones you added by hand or
 that point at an older install folder (a `--gate` stays), and the MCP tool when it starts this app.
 When it removes a hook, it backs up the file first too. It needs no
-Claude Code; with no `claude` on the PATH, the card gives the command that removes the tool.
+Claude Code; with no `claude` found, the card gives the command that removes the tool.
 
 **Before you uninstall the app, press Remove.** The uninstaller does not edit Claude Code's settings,
 so the hooks and the MCP tool would stay behind, starting a program that is no longer there.

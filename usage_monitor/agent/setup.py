@@ -103,14 +103,21 @@ def default_context() -> Context:
 
 
 def find_command(name: str) -> str | None:
-    """shutil.which, and when that finds nothing, again on the PATH that Windows holds now. A process keeps the PATH
-    it started with, so a folder added to the PATH while the monitor runs is not on the monitor's own. Anthropic's
-    Windows installer does not add its folder, so the sign-in help starts Claude Code by its full path (#42)."""
+    """shutil.which, and when that finds nothing, again on the PATH that Windows holds now, and last in the folder of
+    Anthropic's Windows installer. A process keeps the PATH it started with, so a folder added to the PATH while the
+    monitor runs is not on the monitor's own. That installer does not add its folder at all, so the sign-in help starts
+    Claude Code by its full path (#42), and a claude installed that way is on no PATH (#43)."""
     found = shutil.which(name)
     if found or sys.platform != "win32":
         return found
     fresh = _registry_path()
-    return shutil.which(name, path=fresh) if fresh else None
+    found = shutil.which(name, path=fresh) if fresh else None
+    return found or shutil.which(name, path=str(_installer_folder()))
+
+
+def _installer_folder() -> Path:
+    """%USERPROFILE%/.local/bin, where Anthropic's Windows installer puts claude.exe."""
+    return Path(os.environ.get("USERPROFILE") or Path.home()) / ".local" / "bin"
 
 
 def _registry_path() -> str | None:

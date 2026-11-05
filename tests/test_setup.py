@@ -682,6 +682,63 @@ def test_claude_installed_after_the_monitor_started_is_found_on_the_path_windows
     assert setup.find_command("claude") == (r"C:\fresh\claude.exe" if sys.platform == "win32" else None)
 
 
+windows_only = pytest.mark.skipif(sys.platform != "win32", reason="the folder of Anthropic's Windows installer")
+
+
+@pytest.fixture
+def installer_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Where Anthropic's Windows installer puts claude.exe, inside tmp_path. Both PATHs hold an empty folder, so a real
+    claude on this machine stays out of the test."""
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "user"))
+    monkeypatch.setattr(setup, "_registry_path", lambda: str(empty))
+    return tmp_path / "user" / ".local" / "bin"
+
+
+def claude_in(folder: Path) -> Path:
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "claude.exe").write_bytes(b"")
+    return folder / "claude.exe"
+
+
+@windows_only
+def test_claude_from_anthropics_installer_is_found_though_its_folder_is_on_no_path(installer_folder: Path) -> None:
+    """That installer leaves the PATH alone, so someone who had just followed the sign-in help read NOT FOUND, and was told
+    to install what they had just installed (#43)."""
+    copy = claude_in(installer_folder)
+    assert Path(setup.find_command("claude")) == copy
+
+
+@windows_only
+def test_a_claude_on_the_path_wins_over_the_one_in_the_installers_folder(tmp_path: Path, installer_folder: Path,
+                                                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    claude_in(installer_folder)
+    chosen = claude_in(tmp_path / "chosen")
+    monkeypatch.setattr(setup, "_registry_path", lambda: str(chosen.parent))
+    assert Path(setup.find_command("claude")) == chosen
+
+
+@windows_only
+def test_a_pc_with_no_claude_code_at_all_still_says_so(tmp_path: Path, installer_folder: Path) -> None:
+    ctx = dataclasses.replace(make_rig(tmp_path / "rig").ctx, which=setup.find_command)
+    assert setup.find_command("claude") is None
+    snapshot = setup.status(ctx)
+    assert snapshot["available"] is False and snapshot["reason"] == setup.NO_CLAUDE_REASON
+
+
+@windows_only
+def test_the_card_finds_the_installers_copy_and_install_works_through_it(tmp_path: Path, installer_folder: Path) -> None:
+    copy = claude_in(installer_folder)
+    rig = make_rig(tmp_path / "rig")
+    ctx = dataclasses.replace(rig.ctx, which=setup.find_command)
+    snapshot = setup.status(ctx)
+    assert snapshot["available"] is True and Path(snapshot["claude"]["path"]) == copy
+    assert setup.install(ctx)["ok"] is True
+    assert rig.claude.tool == (EXE, ["--mcp"]) and {Path(call[0]) for call in rig.claude.calls} == {copy}
+
+
 def test_a_tool_without_the_mcp_argument_is_not_ours(tmp_path: Path) -> None:
     rig = make_rig(tmp_path, tool=(EXE, []))                                 # "added wrongly": empty Args
     setup.install(rig.ctx)
