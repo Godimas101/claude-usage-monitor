@@ -44,7 +44,7 @@ strip, tooltip, tray icon) plus a **pywebview dashboard** (WebView2) served by a
 - Log with `usage_monitor.log.get_logger(__name__)`. No hidden globals: paths, clock and HTTP are
   injectable. The monitor never sends a model request and never runs `claude -p`. The only `claude` it runs is in
   `agent/setup.py`, the usage guard's one-click setup: `--version` and `mcp get` for the Settings card, and
-  `mcp add` / `mcp remove` when the user clicks Install or Remove.
+  `mcp add` / `mcp remove` when the user clicks Install or Remove. The uninstaller runs that Remove too.
 
 ## Themes
 

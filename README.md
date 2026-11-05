@@ -169,7 +169,7 @@ its own (a hook line adds about 100 tokens to the conversation, a tool call a fe
 - **`--status --json`** prints the same reading for your own scripts.
 
 The setup, the settings snippet and the fields are in [docs/AGENT_HOOK.md](docs/AGENT_HOOK.md). The
-hooks need Claude Code 2.1.139 or newer. Only the usage guard's **Install** and **Remove** change
+hooks need Claude Code 2.1.139 or newer. Only the usage guard's **Install** and **Remove**, and the uninstaller, change
 anything of Claude Code's: its settings file (after a backup beside it) and its MCP tool list.
 
 ## 📡 Data Sources
@@ -182,8 +182,8 @@ anything of Claude Code's: its settings file (after a backup beside it) and its 
 | **History** | A local SQLite database, `usage.db`, that remembers every request the transcripts showed, so it survives Claude Code cleaning up old transcripts. |
 | **Prices** | A price table bundled with the app (`pricing.json`, list prices in US dollars per million tokens). |
 
-The monitor never signs in for you and never sends a model request. The only time it runs `claude` is the usage
-guard's one-click setup in Settings: while the card is open it checks Claude Code's version and MCP entry
+The monitor never signs in for you and never sends a model request. The only times it runs `claude` are the usage
+guard's one-click setup in Settings and the uninstaller, which does what **Remove** does: while the card is open it checks Claude Code's version and MCP entry
 (`claude --version`, `claude mcp get`) at most every 10 minutes, and it adds or removes the entry when you click
 **Install** or **Remove**. Those two buttons also edit Claude Code's settings file (`%USERPROFILE%\.claude\settings.json`,
 or the one in `CLAUDE_CONFIG_DIR`): Install adds the monitor's three hooks and Remove takes them out, after a backup
@@ -201,7 +201,7 @@ Real money is only two things: your plan's monthly price, and **usage credits** 
 
 Everything stays on your PC. There is no account, no telemetry and no server of ours.
 
-- **What it reads:** your Claude Code transcripts and sign-in file, and Claude Code's settings file while the usage guard's card is open (only its **Install** and **Remove** buttons change it). To group the Cost page by repository, it also looks for a `.git` entry in each session's working folder and the folders above it (when that entry is a file, as in a linked worktree or a submodule, it reads only its first line, the `gitdir:` pointer). It never prints, logs or stores message text, prompts, tool inputs or outputs, or file contents, and never stores your token.
+- **What it reads:** your Claude Code transcripts and sign-in file, and Claude Code's settings file while the usage guard's card is open (only its **Install** and **Remove** buttons and the uninstaller change it). To group the Cost page by repository, it also looks for a `.git` entry in each session's working folder and the folders above it (when that entry is a file, as in a linked worktree or a submodule, it reads only its first line, the `gitdir:` pointer). It never prints, logs or stores message text, prompts, tool inputs or outputs, or file contents, and never stores your token.
 - **What it keeps** in `usage.db`, on your PC only: IDs, model names, token counts, timestamps, each session's folder and git branch, the session titles Claude Code gives them, tool names, lines added and removed, pull-request links, and whether a shell command ran `git commit`, `git push` or `gh pr create` (never the command itself). It also keeps the full path of each transcript file it has read (your Windows user name is in those paths), 180 days of your limit readings, and the newest usage-API response, including your credit balance when usage credits are on. **Do not attach `usage.db` to a bug report:** it holds your folder names, session titles and those paths. If you need to share numbers, use **Export** on the History page (CSV or JSON, daily totals only). Beside it, `state.json` holds the latest limits, pace and burn rate for Claude sessions (never the token), and `agent-demand`, `hook-seen.json`, `waiting\` (a session ID and folder for each running wait), `resume-now`, `wait-released` and `agent.log` support the [Claude session tools](docs/AGENT_HOOK.md#privacy).
 - **What leaves your PC:** only these requests, and they carry no prompts, no code and no usage numbers.
 
@@ -221,7 +221,7 @@ The **installer** (not the app) has one more optional download: Microsoft's smal
 
 **Update:** the monitor looks for a newer release when it starts and again every six hours while it runs (switch that off in Settings → System). A release it finds is announced once with a Windows notification (click it to open the dashboard) and then stays on offer in three places: **Update to vX** in the tray menu, a banner at the top of every dashboard page but Settings with **Update now**, **Release notes** and **Skip this version**, and **Install update** in Settings → System. A version you skip is never announced, nothing is announced while the check is off, and the notification waits for a moment you can see it: not while the PC is locked, a fullscreen app is in front or your quiet hours are on. Installing downloads the installer from this project's GitHub release, checks it against the SHA-256 checksum GitHub lists for that file, runs it silently and relaunches the app. If the link or the checksum is not right, or the release has none, nothing is run and the release page opens in your browser instead. The check shows that the file is the one GitHub lists for the release; it does not prove who published it, and the installer is not code-signed. You can also just run the newer installer over the old one. Your settings, history and Start with Windows choice are kept, and v1 users keep their settings too (the colour you picked in v1 becomes the matching Nostromo phosphor; Cyan becomes Cryo and Orange becomes Ray Tube).
 
-**Uninstall:** Settings → Apps → Installed apps → Claude Usage Monitor → Uninstall. It takes the usage guard's hooks and the MCP tool out of Claude Code, and says if it could not. It asks whether to delete your settings, usage history and logs in `%APPDATA%\ClaudeUsageMonitor`. They stay unless you say yes (a silent uninstall never deletes them). If you added the monitor's hooks or its MCP tool, with the usage guard's **Install** or by hand, press **Remove** on the Usage guard card first: the uninstaller does not edit Claude Code's settings, so they would stay behind, pointing at a program that is gone. Remove leaves a `--gate` hook alone, so delete that one by hand.
+**Uninstall:** Settings → Apps → Installed apps → Claude Usage Monitor → Uninstall. It takes the usage guard's hooks and the MCP tool out of Claude Code, and says if it could not. It asks whether to delete your settings, usage history and logs in `%APPDATA%\ClaudeUsageMonitor`. They stay unless you say yes (a silent uninstall never deletes them). It leaves a `--gate` hook alone, and tells you, so delete that one by hand. Hooks that start another copy of the monitor on this PC stay.
 
 **From source:**
 
@@ -286,7 +286,7 @@ Logs are in `%APPDATA%\ClaudeUsageMonitor` (`monitor.log`, plus `dashboard.log`,
 | `%APPDATA%\ClaudeUsageMonitor\usage.db` | Your history (SQLite). Close the app and delete it to rebuild it from the transcripts Claude Code still has. It holds folder names, session titles and file paths, so keep it out of bug reports (see [Privacy](#-privacy)). |
 | `%APPDATA%\ClaudeUsageMonitor\monitor.log` | The log (it rotates), plus `dashboard.log` and `faults.log` |
 | `~\.claude\projects` and `~\.claude\.credentials.json` | Claude Code's transcripts and sign-in. Read only. |
-| `~\.claude\settings.json` | Claude Code's settings. Read while the usage guard's card is open, and changed only by its **Install** and **Remove** buttons, after a backup beside it. |
+| `~\.claude\settings.json` | Claude Code's settings. Read while the usage guard's card is open, and changed only by its **Install** and **Remove** buttons and the uninstaller, after a backup beside it. |
 
 </details>
 

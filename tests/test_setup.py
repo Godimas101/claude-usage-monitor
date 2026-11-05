@@ -775,6 +775,51 @@ def test_the_installers_folder_is_found_but_is_no_path(installer_folder: Path) -
     assert setup.find_command("claude") is not None and setup.on_a_path("claude") is None
 
 
+def test_an_uninstall_leaves_the_hooks_of_a_copy_that_stays_and_takes_out_stale_ones(tmp_path: Path) -> None:
+    """Hooks are told by the exe's file name, so the card's Remove takes any copy's. An uninstall removes one copy from the PC,
+    so hooks that start another copy still on it must go on working, and only a path with nothing there is stale."""
+    rig = make_rig(tmp_path)
+    other = tmp_path / "Other Place" / "ClaudeUsageMonitor.exe"
+    other.parent.mkdir()
+    other.write_bytes(b"")
+    rig.write({"hooks": ours(other.as_posix())})
+    assert setup.remove(rig.ctx, only_here=True)["ok"] is True and rig.load() == {"hooks": ours(other.as_posix())}
+    setup.remove(rig.ctx)                               # the card's Remove takes them: the app stays, so it can set them up again
+    assert "hooks" not in rig.load()
+    rig.write({"hooks": ours("C:/Program Files/Nothing Here/ClaudeUsageMonitor.exe")})
+    setup.remove(rig.ctx, only_here=True)
+    assert "hooks" not in rig.load()
+    rig.write({"hooks": ours()})
+    setup.remove(rig.ctx, only_here=True)
+    assert "hooks" not in rig.load()
+
+
+def test_an_uninstall_does_not_take_a_hook_with_no_path_for_a_copy_that_stays(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The uninstaller starts the exe in the install folder, so a bare name is found right there: this copy, which is leaving."""
+    rig = make_rig(tmp_path)
+    folder = tmp_path / "Install"
+    folder.mkdir()
+    (folder / "ClaudeUsageMonitor.exe").write_bytes(b"")
+    monkeypatch.chdir(folder)
+    rig.write({"hooks": ours("ClaudeUsageMonitor.exe")})
+    setup.remove(rig.ctx, only_here=True)
+    assert "hooks" not in rig.load()
+
+
+def test_an_uninstall_says_when_a_gate_hook_stays(tmp_path: Path) -> None:
+    """It is the user's own, so it stays, and after an uninstall it starts a program that is gone. The card's Remove leaves the
+    app installed, so the hook still works and there is nothing to say."""
+    rig = make_rig(tmp_path)
+    gate = {"PreToolUse": [{"matcher": "Agent|Workflow", "hooks": [{"type": "command", "command": CMD, "args": ["--gate"]}]}]}
+    rig.write({"hooks": {**ours(), **gate}})
+    result = setup.remove(rig.ctx, only_here=True)
+    assert setup.GATE_LEFT in result["warnings"] and rig.load() == {"hooks": gate}
+    rig.write({"hooks": {**ours(), **gate}})
+    assert setup.GATE_LEFT not in setup.remove(rig.ctx)["warnings"]
+    rig.write({"hooks": ours()})
+    assert setup.GATE_LEFT not in setup.remove(rig.ctx, only_here=True)["warnings"]
+
+
 def test_a_tool_without_the_mcp_argument_is_not_ours(tmp_path: Path) -> None:
     rig = make_rig(tmp_path, tool=(EXE, []))                                 # "added wrongly": empty Args
     setup.install(rig.ctx)

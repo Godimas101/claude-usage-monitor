@@ -82,7 +82,8 @@ Name: "startup"; Description: "&Start with Windows (start the monitor when I sig
 ; would otherwise stay behind for good. By now CurStepChanged has moved the old exe and bundle aside, or stopped with
 ; them untouched (MoveOldInstallAside). This removes them, and whatever an earlier update could not remove.
 Type: files; Name: "{app}\{#ExeName}.old*"
-Type: filesandordirs; Name: "{app}\_internal*"
+Type: filesandordirs; Name: "{app}\_internal"
+Type: filesandordirs; Name: "{app}\_internal.old*"
 
 [Files]
 ; Onedir build: package the whole PyInstaller output folder (exe + _internal). The exe goes last: until it is there a start
@@ -119,6 +120,8 @@ const
   // The exe's modes other than the monitor's (main.py parse_args), one space apart. The monitor is started with none.
   OtherModes = '--dashboard --mcp --hook --gate --wait --status --print-version --remove-setup --dump-frames --smoke-test';
   WmClose = $0010;
+  // Tenths of a second. Above the most the exe's two claude calls can take (about 70 s, see run_claude).
+  RemoveSetupWaitTries = 900;
   // The Microsoft Edge WebView2 Runtime (Evergreen) registers its version, "pv", under this client id.
   WebView2Client = 'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
   // Microsoft's small Evergreen bootstrapper; it fetches the runtime itself.
@@ -577,24 +580,34 @@ end;
 
 // Takes this app's hooks and MCP tool out of Claude Code while the exe is still here: left in, Claude Code would go on
 // starting a program that is gone. What could not be done is said, and only logged in a silent uninstall. Nothing here
-// stops the uninstall. Without a report (the exe would not start, or could not write it) all that is known is that it may
-// still be there.
+// stops the uninstall, and nothing here waits for ever: with its bundle broken the exe sits behind the bootloader's error
+// dialog, which no switch answers, and an uninstall is how people get out of that. EndOtherProcesses ends what is left.
+// The exe writes its report last, empty when all of it went. No report means all that is known is that it may be there.
 procedure RemoveFromClaudeCode;
 var
   Report, Left: String;
   Lines: TArrayOfString;
-  I, Code: Integer;
+  I, Tries, Code: Integer;
 begin
   Report := ExpandConstant('{tmp}\claude-code-left.txt');
-  if Exec(ExpandConstant('{app}\{#ExeName}'), '--remove-setup "' + Report + '"', '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0) then begin
+  Left := 'If you set up the usage guard, its hooks and MCP tool may still be there. ' +
+          'https://github.com/Godimas101/claude-usage-monitor/blob/main/docs/AGENT_HOOK.md says how to remove them.';
+  if DirExists(ExpandConstant('{app}\_internal')) and
+     Exec(ExpandConstant('{app}\{#ExeName}'), '--remove-setup "' + Report + '"', '', SW_HIDE, ewNoWait, Code) then begin
+    for Tries := 1 to RemoveSetupWaitTries do begin
+      if FileExists(Report) then
+        Break;
+      Sleep(100);
+    end;
+    if LoadStringsFromFile(Report, Lines) then begin
+      Left := '';
+      for I := 0 to GetArrayLength(Lines) - 1 do
+        Left := Left + Lines[I] + #13#10;
+    end;
+  end;
+  if Trim(Left) = '' then begin
     Log('Nothing of this app is left in Claude Code.');
     Exit;
-  end;
-  Left := 'If you set up the usage guard, its hooks and MCP tool may still be there. docs/AGENT_HOOK.md says how to remove them.';
-  if LoadStringsFromFile(Report, Lines) then begin
-    Left := '';
-    for I := 0 to GetArrayLength(Lines) - 1 do
-      Left := Left + Lines[I] + #13#10;
   end;
   Log('Left in Claude Code: ' + Left);
   if not UninstallSilent then

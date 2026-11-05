@@ -167,20 +167,23 @@ def _print_version(path: str | None) -> int:
 def _remove_setup(path: str | None) -> int:
     """For the uninstaller: take this app's hooks and MCP tool out of Claude Code while the exe is still there, or Claude
     Code goes on starting a program that is gone. What could not be done goes to ``path`` for the uninstaller to show, and
-    the exit code is then 1. A warning counts only if there were hooks: without them, "Claude Code was not found" is about
-    something this person never set up."""
+    the exit code is then 1. The file is written either way: the uninstaller waits for it, and takes no file to mean this
+    never finished. "Claude Code was not found" counts only if there were hooks: without them it is about something this
+    person never set up."""
     from usage_monitor.agent import setup
 
-    result = setup.remove()
-    left = [*result["errors"], *(result["warnings"] if result["changed"] else [])]
-    if not left:
-        return 0
+    result = setup.remove(only_here=True)
+    warnings = [line for line in result["warnings"] if result["changed"] or not line.startswith(setup.NO_CLAUDE_LEFT)]
+    left = [*result["errors"], *warnings]
     if path:
+        target = Path(path)
+        temporary = target.with_name(target.name + ".tmp")
         try:
-            Path(path).write_text("\n".join(left), encoding="utf-8-sig")   # the mark: Inno Setup reads it as UTF-8
+            temporary.write_text("\n".join(left), encoding="utf-8-sig")    # the mark: Inno Setup reads it as UTF-8
+            temporary.replace(target)                                      # all of it or none: it is waited for
         except OSError:
             pass                                                           # the exit code still says so
-    return 1
+    return 1 if left else 0
 
 
 def _fail(message: str) -> int:

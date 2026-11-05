@@ -43,7 +43,8 @@ v1.2 (Phase 1 exit) keeps the v1 Tk UI (`widget.py`, `options.py`, `tray.py`, `t
 3. **No model calls.** The monitor never sends a model request and never runs `claude -p`. The
    only `claude` commands it runs are in `agent/setup.py`, the usage guard's one-click setup:
    `claude --version` and `claude mcp get` (read-only) for the Settings card, and `claude mcp add`
-   / `claude mcp remove` when the user clicks Install or Remove.
+   / `claude mcp remove` when the user clicks Install or Remove. The uninstaller runs that Remove
+   too.
 4. **No silent swallowing.** Catch broadly at thread boundaries only, and log what was caught
    via `usage_monitor.log.get_logger(__name__)`.
 5. **Time.** Store UTC epoch seconds (`REAL`). Convert to local time only for window

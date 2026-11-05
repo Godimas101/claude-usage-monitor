@@ -1477,7 +1477,8 @@ def test_the_old_install_is_moved_aside_before_anything_is_deleted_or_written() 
     """A delete stopped half way by a file held open would leave v1.1.5's updater (which cannot be changed) with no program at
     all, so Setup renames instead, and stops with the old install whole when it cannot. The exe goes first and comes back
     if the folder won't go, because from then on a start of it fails at once (#37). The sandbox runs below do all this for real."""
-    assert iss_section("InstallDelete") == ['Type: files; Name: "{app}\\{#ExeName}.old*"', 'Type: filesandordirs; Name: "{app}\\_internal*"']
+    assert iss_section("InstallDelete") == ['Type: files; Name: "{app}\\{#ExeName}.old*"', 'Type: filesandordirs; Name: "{app}\\_internal"',
+                                            'Type: filesandordirs; Name: "{app}\\_internal.old*"']
     assert re.search(r"if CurStep = ssInstall then\s+MoveOldInstallAside;", iss_routine("CurStepChanged"))
     body = iss_routine("MoveOldInstallAside")
     assert body.index("MovedTo(Exe, OldExe)") < body.index("MovedTo(Folder, OldFolder)") < body.index("MovedTo(OldExe, Exe)")
@@ -1667,6 +1668,7 @@ def sandbox_script(real: str, app: Path) -> str:
         ("DefaultGroupName=Claude Usage Monitor", f"DefaultGroupName={SANDBOX}"),
         ("AppMutex=Global\\ClaudeUsageMonitor", f"AppMutex={SANDBOX_MUTEX}"),
         ("SetupIconFile=usage_monitor.ico", f"SetupIconFile={ROOT / 'usage_monitor.ico'}"),
+        ("RemoveSetupWaitTries = 900;", "RemoveSetupWaitTries = 100;"),                 # a test need not wait 90 s to see the limit
         ('Name: "{group}\\Claude Usage Monitor"', f'Name: "{{group}}\\{SANDBOX}"'),
         ('Name: "{group}\\Uninstall Claude Usage Monitor"', f'Name: "{{group}}\\Uninstall {SANDBOX}"'),
         ('ValueName: "ClaudeUsageMonitor"', f'ValueName: "{SANDBOX_RUN_VALUE}"'),
@@ -1938,7 +1940,10 @@ using System.Threading;
 
 static class StandIn {
     static void Main(string[] args) {
-        if (args[0] == "--remove-setup") { return; }      // the uninstaller's call: it holds nothing
+        if (args[0] == "--remove-setup") {                // the uninstaller's call: it holds nothing, and nothing is left
+            File.WriteAllBytes(args[1], new byte[] { 0xEF, 0xBB, 0xBF });
+            return;
+        }
         using (File.Open(args[args.Length - 2], FileMode.Open, FileAccess.Read, FileShare.Read)) {
             File.WriteAllText(args[args.Length - 1], "holding");
             Thread.Sleep(180000);
@@ -2216,7 +2221,11 @@ static class Recorder {
         string above = Path.GetDirectoryName(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location));
         File.AppendAllText(Path.Combine(above, "modes.txt"), string.Join(" ", args) + "\\n");
         string report = Path.Combine(above, "left-behind.txt");
-        if (args.Length < 2 || !File.Exists(report)) { return 0; }
+        if (args.Length < 2) { return 0; }
+        if (!File.Exists(report)) {                       // all of it went: the mark alone, as the real exe writes it
+            File.WriteAllBytes(args[1], new byte[] { 0xEF, 0xBB, 0xBF });
+            return 0;
+        }
         File.Copy(report, args[1]);
         return 1;
     }
@@ -2224,11 +2233,21 @@ static class Recorder {
 """
 
 
-def build_recorder(folder: Path) -> Path:
-    """Compile the recorder, under the exe's real name, into ``folder``. Returns the exe."""
+# The exe with its bundle broken: the PyInstaller bootloader sits behind its error dialog, which no switch answers.
+HUNG_SOURCE = """\
+using System.Threading;
+
+static class Hung {
+    static void Main() { Thread.Sleep(120000); }
+}
+"""
+
+
+def build_recorder(folder: Path, code: str = RECORDER_SOURCE) -> Path:
+    """Compile ``code``, under the exe's real name, into ``folder``. Returns the exe."""
     folder.mkdir(parents=True)
     source = folder / "recorder.cs"
-    source.write_text(RECORDER_SOURCE, encoding="ascii")
+    source.write_text(code, encoding="ascii")
     exe = folder / "ClaudeUsageMonitor.exe"
     done = subprocess.run([str(CSC), "/nologo", "/target:winexe", f"/out:{exe}", str(source)], capture_output=True,
                           text=True, timeout=120, creationflags=NO_WINDOW)
@@ -2250,6 +2269,9 @@ def test_a_sandboxed_uninstall_takes_the_app_out_of_claude_code_first(tmp_path: 
         calls = (box.root / "modes.txt").read_text(encoding="ascii").splitlines()
         assert len(calls) == 1 and calls[0].startswith("--remove-setup ") and calls[0].endswith("claude-code-left.txt")
         assert not box.app.exists(), "the uninstall did not finish"
+        log = max(box.logs.glob("uninstall-*.log"), key=lambda path: path.stat().st_mtime).read_text(encoding="utf-8-sig", errors="replace")
+        assert "Nothing of this app is left in Claude Code." in log      # or everyone gets a box saying some of it stayed
+        assert "Left in Claude Code" not in log
     finally:
         box.cleanup()
     assert real_install_state() == before
@@ -2270,6 +2292,42 @@ def test_a_sandboxed_uninstall_says_what_it_could_not_take_out_and_carries_on(tm
         log = max(box.logs.glob("uninstall-*.log"), key=lambda path: path.stat().st_mtime).read_text(encoding="utf-8-sig", errors="replace")
         assert "The MCP tool was left alone." in log and "Çağla" in log
         assert not box.app.exists(), "what was left stopped the uninstall"
+    finally:
+        box.cleanup()
+    assert real_install_state() == before
+
+
+@SANDBOX_RUNS
+@needs_csc
+@pytest.mark.usefixtures("keeps_real_readers")
+def test_a_sandboxed_uninstall_gives_up_on_an_exe_that_never_answers(tmp_path: Path) -> None:
+    """An uninstall is how people get out of a broken install, so a stuck exe must not hold it. It stops waiting, says what it
+    can't know, and the step after it ends the exe."""
+    box = Sandbox(tmp_path, exe=build_recorder(tmp_path / "hung", HUNG_SOURCE))
+    before = real_install_state()
+    try:
+        box.reset("v2", None)
+        box.uninstall()
+        log = max(box.logs.glob("uninstall-*.log"), key=lambda path: path.stat().st_mtime).read_text(encoding="utf-8-sig", errors="replace")
+        assert "may still be there" in log and "started with --remove-setup" in log
+        assert not box.app.exists(), "the uninstall did not finish"
+    finally:
+        box.cleanup()
+    assert real_install_state() == before
+
+
+@SANDBOX_RUNS
+@needs_csc
+@pytest.mark.usefixtures("keeps_real_readers")
+def test_a_sandboxed_uninstall_with_the_bundle_gone_does_not_start_the_exe(tmp_path: Path) -> None:
+    box = Sandbox(tmp_path, exe=build_recorder(tmp_path / "recorder"))
+    before = real_install_state()
+    try:
+        box.reset("v2", None)
+        shutil.rmtree(box.app / "_internal")
+        box.uninstall()
+        assert not (box.root / "modes.txt").exists(), "it started an exe with no bundle"
+        assert not box.app.exists(), "the uninstall did not finish"
     finally:
         box.cleanup()
     assert real_install_state() == before

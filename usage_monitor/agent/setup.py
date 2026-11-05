@@ -16,10 +16,10 @@ Pure functions (``hook_states``, ``merge_install``, ``merge_remove``, ``parse_mc
 ``Context`` holds everything that touches the machine (the exe, the environment, the home folder, ``which``, the runner
 of ``claude`` and the clock), so a test hands in fakes and never reads a real ``~/.claude`` or runs a real ``claude``.
 
-The monitor otherwise never runs ``claude``. This module does it only for the Settings page: ``claude --version`` and
-``claude mcp get`` (both read-only) to show the status, and ``claude mcp add`` / ``remove`` when the user clicks Install
-or Remove. Neither the credentials file nor any token is read, printed or logged, and output of ``claude`` reaches a
-result only as a short, cleaned phrase.
+The monitor otherwise never runs ``claude``. This module does it only for the Settings page and the uninstaller:
+``claude --version`` and ``claude mcp get`` (both read-only) to show the status, and ``claude mcp add`` / ``remove`` when
+the user clicks Install or Remove, or uninstalls. Neither the credentials file nor any token is read, printed or logged,
+and output of ``claude`` reaches a result only as a short, cleaned phrase.
 """
 from __future__ import annotations
 
@@ -58,6 +58,8 @@ VSCODE_WARNING = ("This card checks only the claude command. Claude Code in VS C
 NOT_INSTALLED_REASON = "One-click setup works in the installed app. This copy runs from source."
 NO_CLAUDE_REASON = ("Claude Code was not found on this PC: there is no claude command on the PATH. The copy inside "
                     "the VS Code extension is not on it; install Claude Code itself (see the README).")
+NO_CLAUDE_LEFT = f"Claude Code was not found, so the {MCP_NAME} MCP tool was left alone."
+GATE_LEFT = "A --gate hook of this app stays in Claude Code's settings. It was added by hand, so delete it by hand."
 KEEP_BACKUPS = 5                   # the newest backups of the settings file kept beside it; older ones go
 _STAMP_UNKNOWN = ("unknown",)      # a settings file whose size and time cannot be read
 
@@ -394,10 +396,34 @@ def merge_install(doc: Mapping[str, Any], exe: str) -> tuple[dict, list[str]]:
     return new, changed
 
 
-def merge_remove(doc: Mapping[str, Any], exe: str) -> tuple[dict, list[str]]:
-    """``doc`` without the hooks of this exe in the three events of setup, and the events that lost one. An event
-    list, or the ``hooks`` object, that this leaves empty goes too. A ``--gate`` entry and everything else stays."""
+def _another_copy(handler: Any, exe_key: str) -> bool:
+    """Whether a hook starts a copy of this app that is not this one and is still on this PC. A bare name says nothing
+    about where, and would be looked up in the current folder: the uninstaller's is this copy's."""
+    program = _program_and_args(handler)[0]
+    return program != exe_key and Path(program).is_absolute() and Path(program).is_file()
+
+
+def _gate_left(doc: Mapping[str, Any], exe: str) -> bool:
+    """Whether a --gate hook of this exe stays in ``doc``."""
     key = _key(exe)
+    hooks = doc.get("hooks")
+    for event in hooks if isinstance(hooks, dict) else ():
+        for handler in _handlers(doc, event):
+            program, args = _program_and_args(handler) if isinstance(handler, dict) else ("", [])
+            if program == key and GATE_FLAG in args:
+                return True
+    return False
+
+
+def merge_remove(doc: Mapping[str, Any], exe: str, *, only_here: bool = False) -> tuple[dict, list[str]]:
+    """``doc`` without the hooks of this exe in the three events of setup, and the events that lost one. An event
+    list, or the ``hooks`` object, that this leaves empty goes too. A ``--gate`` entry and everything else stays.
+    ``only_here``: the hooks of another copy that is still on this PC stay too."""
+    key = _key(exe)
+
+    def goes(handler: Any) -> bool:
+        return _is_ours(handler, key) and not (only_here and _another_copy(handler, key))
+
     new = copy.deepcopy(dict(doc))
     hooks = new.get("hooks")
     if not isinstance(hooks, dict):
@@ -411,11 +437,11 @@ def merge_remove(doc: Mapping[str, Any], exe: str) -> tuple[dict, list[str]]:
         touched = False
         for group in groups:
             inner = group.get("hooks") if isinstance(group, dict) else None
-            if not isinstance(inner, list) or not any(_is_ours(handler, key) for handler in inner):
+            if not isinstance(inner, list) or not any(goes(handler) for handler in inner):
                 kept.append(group)
                 continue
             touched = True
-            rest = [handler for handler in inner if not _is_ours(handler, key)]
+            rest = [handler for handler in inner if not goes(handler)]
             if rest:
                 kept.append({**group, "hooks": rest})
         if touched:
@@ -737,19 +763,22 @@ def _install_mcp(ctx: Context, claude: str, exe: str, result: dict) -> None:
     log.info("setup: MCP tool registered")
 
 
-def remove(ctx: Context | None = None) -> dict:
+def remove(ctx: Context | None = None, *, only_here: bool = False) -> dict:
     """Take this app's hooks out of Claude Code's settings and unregister the MCP tool when it starts this exe.
 
     Same result shape as install(). Only the handlers whose command is this exe in the three events of setup go (a
     ``--gate`` entry stays), with the event lists or the ``hooks`` object that this leaves empty; the file is backed up
     first and written atomically. A tool registered for another program is left alone.
+
+    ``only_here`` is the uninstaller's: this copy leaves the PC, so another copy's hooks stay, and a ``--gate`` hook that
+    would start a program that is gone is mentioned.
     """
     ctx = ctx or default_context()
     with _LOCK:
-        return _remove(ctx)
+        return _remove(ctx, only_here)
 
 
-def _remove(ctx: Context) -> dict:
+def _remove(ctx: Context, only_here: bool = False) -> dict:
     result = _new_result("remove")
     exe, claude, _reason = _availability(ctx)
     if exe is None:
@@ -764,7 +793,7 @@ def _remove(ctx: Context) -> dict:
         result["errors"].append(problem or NOT_INSTALLED_REASON)
         return _finish(result)
 
-    merged, removed = merge_remove(doc, exe)
+    merged, removed = merge_remove(doc, exe, only_here=only_here)
     if removed:
         problem = _write_problem(path, stamp, merged)
         if problem:
@@ -781,6 +810,8 @@ def _remove(ctx: Context) -> dict:
         log.info("setup: hooks removed (%s)", ", ".join(removed))
     else:
         result["unchanged"].append("The settings file held no hooks of this app.")
+    if only_here and _gate_left(merged, exe):
+        result["warnings"].append(GATE_LEFT)
     _remove_mcp(ctx, claude, exe, result)
     return _finish(result)
 
@@ -788,7 +819,7 @@ def _remove(ctx: Context) -> dict:
 def _remove_mcp(ctx: Context, claude: str | None, exe: str, result: dict) -> None:
     by_hand = f"Remove it by hand with: {typed_claude(ctx, claude)} mcp remove {MCP_NAME} -s user"
     if claude is None:
-        result["warnings"].append(f"Claude Code was not found, so the {MCP_NAME} MCP tool was left alone. {by_hand}")
+        result["warnings"].append(f"{NO_CLAUDE_LEFT} {by_hand}")
         return
     state = _mcp_state(ctx, claude, exe)
     if state == "registered":
