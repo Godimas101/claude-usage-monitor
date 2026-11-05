@@ -1344,7 +1344,7 @@ def test_setup_ends_the_exes_other_processes_before_the_folder_check() -> None:
     close, and Uninstall does the same at usUninstall, before it deletes."""
     prepare = iss_routine("PrepareToInstall")
     assert prepare.index("CloseDashboardWindow;") < prepare.index("EndOtherProcesses;")
-    assert re.search(r"if CurUninstallStep = usUninstall then begin\s+CloseDashboardWindow;\s+EndOtherProcesses;\s+end;",
+    assert re.search(r"if CurUninstallStep = usUninstall then begin\s+CloseDashboardWindow;[^\n]*\s+RemoveFromClaudeCode;[^\n]*\s+EndOtherProcesses;",
                      iss_routine("CurUninstallStepChanged"))
     assert re.search(r"if CurStep = ssInstall then\s+MoveOldInstallAside;", iss_routine("CurStepChanged"))
     ending = iss_routine("EndOtherProcesses")
@@ -1938,6 +1938,7 @@ using System.Threading;
 
 static class StandIn {
     static void Main(string[] args) {
+        if (args[0] == "--remove-setup") { return; }      // the uninstaller's call: it holds nothing
         using (File.Open(args[args.Length - 2], FileMode.Open, FileAccess.Read, FileShare.Read)) {
             File.WriteAllText(args[args.Length - 1], "holding");
             Thread.Sleep(180000);
@@ -2201,6 +2202,76 @@ def test_a_sandboxed_update_leaves_a_running_monitor_alone_and_stops(tmp_path: P
             end_stand_ins(monitor)
         finally:
             box.cleanup()
+    assert real_install_state() == before
+
+
+# The exe as the uninstaller calls it. It notes the words it was given in a file beside the install folder, and when a report
+# waits there it hands that over as what could not be taken out of Claude Code.
+RECORDER_SOURCE = """\
+using System.IO;
+using System.Reflection;
+
+static class Recorder {
+    static int Main(string[] args) {
+        string above = Path.GetDirectoryName(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location));
+        File.AppendAllText(Path.Combine(above, "modes.txt"), string.Join(" ", args) + "\\n");
+        string report = Path.Combine(above, "left-behind.txt");
+        if (args.Length < 2 || !File.Exists(report)) { return 0; }
+        File.Copy(report, args[1]);
+        return 1;
+    }
+}
+"""
+
+
+def build_recorder(folder: Path) -> Path:
+    """Compile the recorder, under the exe's real name, into ``folder``. Returns the exe."""
+    folder.mkdir(parents=True)
+    source = folder / "recorder.cs"
+    source.write_text(RECORDER_SOURCE, encoding="ascii")
+    exe = folder / "ClaudeUsageMonitor.exe"
+    done = subprocess.run([str(CSC), "/nologo", "/target:winexe", f"/out:{exe}", str(source)], capture_output=True,
+                          text=True, timeout=120, creationflags=NO_WINDOW)
+    assert done.returncode == 0, done.stdout + done.stderr
+    return exe
+
+
+@SANDBOX_RUNS
+@needs_csc
+@pytest.mark.usefixtures("keeps_real_readers")
+def test_a_sandboxed_uninstall_takes_the_app_out_of_claude_code_first(tmp_path: Path) -> None:
+    """Only the exe can do it, so it runs before the files go. Left in, the hooks and the MCP tool go on starting a program
+    that is gone (#32)."""
+    box = Sandbox(tmp_path, exe=build_recorder(tmp_path / "recorder"))
+    before = real_install_state()
+    try:
+        box.reset("v2", None)
+        box.uninstall()
+        calls = (box.root / "modes.txt").read_text(encoding="ascii").splitlines()
+        assert len(calls) == 1 and calls[0].startswith("--remove-setup ") and calls[0].endswith("claude-code-left.txt")
+        assert not box.app.exists(), "the uninstall did not finish"
+    finally:
+        box.cleanup()
+    assert real_install_state() == before
+
+
+@SANDBOX_RUNS
+@needs_csc
+@pytest.mark.usefixtures("keeps_real_readers")
+def test_a_sandboxed_uninstall_says_what_it_could_not_take_out_and_carries_on(tmp_path: Path) -> None:
+    """A silent uninstall only logs it. The name is there for the encoding: a path can hold any user's name."""
+    box = Sandbox(tmp_path, exe=build_recorder(tmp_path / "recorder"))
+    before = real_install_state()
+    try:
+        box.reset("v2", None)
+        (box.root / "left-behind.txt").write_text("The MCP tool was left alone.\nC:\\Users\\Çağla\\settings.json could not be written.",
+                                                  encoding="utf-8-sig")
+        box.uninstall()
+        log = max(box.logs.glob("uninstall-*.log"), key=lambda path: path.stat().st_mtime).read_text(encoding="utf-8-sig", errors="replace")
+        assert "The MCP tool was left alone." in log and "Çağla" in log
+        assert not box.app.exists(), "what was left stopped the uninstall"
+    finally:
+        box.cleanup()
     assert real_install_state() == before
 
 

@@ -4,6 +4,8 @@
     main.py --dashboard --port N         the dashboard window (a child process of the monitor)
     main.py --print-version FILE         write the version to FILE and exit (frozen-build check;
                                          exit code 1 when it cannot be written or the build has no VERSION)
+    main.py --remove-setup [FILE]        take this app's hooks and MCP tool out of Claude Code (the uninstaller runs this;
+                                         what could not be done goes to FILE, and the exit code is 1)
     main.py --dump-frames DIR            render every theme, variant, state and scale to PNGs
     main.py --smoke-test SECONDS FILE    run the real app for SECONDS, exercise it, write a report
     main.py --status [--json]            print the plan usage for a Claude session (see docs/AGENT_HOOK.md)
@@ -43,7 +45,7 @@ _fault_file: IO[str] | None = None  # faulthandler needs its file open for the l
 
 @dataclass(frozen=True)
 class Command:
-    """What the command line asks for. ``kind`` is "app", "dashboard", "print_version",
+    """What the command line asks for. ``kind`` is "app", "dashboard", "print_version", "remove_setup",
     "dump_frames", "smoke_test", "status", "hook", "gate", "mcp", "wait" or "error" (then ``error`` says why)."""
 
     kind: str = "app"
@@ -100,12 +102,15 @@ def _session_id(args: list[str]) -> str | None:
 
 def parse_args(argv: Sequence[str]) -> Command:
     """Read the command line. Unknown words are ignored (a windowed app must not die on them), and
-    when several modes are given the first of print-version, dashboard, dump-frames, smoke-test,
-    status, hook, gate, wait, mcp wins."""
+    when several modes are given the first of print-version, remove-setup, dashboard, dump-frames,
+    smoke-test, status, hook, gate, wait, mcp wins."""
     args = list(argv)
     if "--print-version" in args:
         words = _values(args, "--print-version", 1)
         return Command("print_version", path=words[0] if words else None)  # v1: no file, nothing to do
+    if "--remove-setup" in args:
+        words = _values(args, "--remove-setup", 1)
+        return Command("remove_setup", path=words[0] if words else None)
     if "--dashboard" in args:
         port, error = _port(args)
         return Command("error", error=error) if error else Command("dashboard", port=port)
@@ -157,6 +162,25 @@ def _print_version(path: str | None) -> int:
     except OSError as exc:
         return _fail(f"could not write the version to {path}: {exc.strerror or type(exc).__name__}")
     return 0
+
+
+def _remove_setup(path: str | None) -> int:
+    """For the uninstaller: take this app's hooks and MCP tool out of Claude Code while the exe is still there, or Claude
+    Code goes on starting a program that is gone. What could not be done goes to ``path`` for the uninstaller to show, and
+    the exit code is then 1. A warning counts only if there were hooks: without them, "Claude Code was not found" is about
+    something this person never set up."""
+    from usage_monitor.agent import setup
+
+    result = setup.remove()
+    left = [*result["errors"], *(result["warnings"] if result["changed"] else [])]
+    if not left:
+        return 0
+    if path:
+        try:
+            Path(path).write_text("\n".join(left), encoding="utf-8-sig")   # the mark: Inno Setup reads it as UTF-8
+        except OSError:
+            pass                                                           # the exit code still says so
+    return 1
 
 
 def _fail(message: str) -> int:
@@ -248,6 +272,8 @@ def _agent(command: Command) -> int:
 def run_command(command: Command, argv: Sequence[str]) -> int:
     if command.kind == "print_version":
         return _print_version(command.path)
+    if command.kind == "remove_setup":
+        return _remove_setup(command.path)
     if command.kind == "dashboard":
         return _dashboard(argv)
     if command.kind == "dump_frames":

@@ -114,7 +114,8 @@ signature as well as the digest.
     of the exe and nothing else, and the monitor starts at the next sign-in;
   - running the installer again while the monitor runs makes Setup ask you to close it, and the dashboard
     window closes with it;
-  - uninstalling removes that Run value and asks before deleting `%APPDATA%\ClaudeUsageMonitor` (No keeps it).
+  - uninstalling removes that Run value, takes the hooks and the MCP tool out of Claude Code, and asks before deleting
+    `%APPDATA%\ClaudeUsageMonitor` (No keeps it).
 - [ ] **With Claude Code open.** In a Claude Code session that started after the monitor's MCP tool was registered,
       `/mcp` shows `claude-usage` as connected. Close the monitor, and run the new installer by hand over that install
       (your own install is fine for this one). It goes through without an "in use" stop. In that session the tool

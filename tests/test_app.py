@@ -400,6 +400,8 @@ class Rig:
     (["--dashboard", "--port", "5000"], "dashboard"),
     (["--dashboard"], "dashboard"),
     (["--print-version", "v.txt"], "print_version"),
+    (["--remove-setup", "left.txt"], "remove_setup"),
+    (["--remove-setup"], "remove_setup"),
     (["--print-version"], "print_version"),
     (["--dump-frames", "out"], "dump_frames"),
     (["--smoke-test", "45", "report.json"], "smoke_test"),
@@ -444,6 +446,43 @@ def test_parse_args_mode_precedence():
     assert entry.parse_args(["--dump-frames", "d", "--print-version", "v"]).kind == "print_version"
     assert entry.parse_args(["--smoke-test", "5", "r", "--dashboard", "--port", "9"]).kind == "dashboard"
     assert entry.parse_args(["--smoke-test", "5", "r", "--dump-frames", "d"]).kind == "dump_frames"
+
+
+def run_remove_setup(monkeypatch, tmp_path, result):
+    """--remove-setup with setup.remove() answering ``result``. Returns (exit code, the report file)."""
+    from usage_monitor.agent import setup
+
+    report = tmp_path / "left.txt"
+    monkeypatch.setattr(setup, "remove", lambda: result)
+    return entry.main(["--remove-setup", str(report)]), report
+
+
+def test_remove_setup_writes_nothing_when_all_of_it_went(monkeypatch, tmp_path):
+    code, report = run_remove_setup(monkeypatch, tmp_path, {"changed": ["Removed the SessionStart hook."], "warnings": [], "errors": []})
+    assert code == 0 and not report.exists()
+
+
+def test_remove_setup_tells_the_uninstaller_what_is_left(monkeypatch, tmp_path):
+    """Non-ASCII in the file: a user name in a path. The byte order mark makes Inno Setup read it as UTF-8."""
+    code, report = run_remove_setup(monkeypatch, tmp_path, {"changed": ["Removed the SessionStart hook."],
+                                                            "warnings": ["The MCP tool was left alone."], "errors": [r"C:\Users\Çağla could not be written."]})
+    assert code == 1
+    assert report.read_bytes().startswith(b"\xef\xbb\xbf")
+    assert report.read_text(encoding="utf-8-sig").splitlines() == [r"C:\Users\Çağla could not be written.", "The MCP tool was left alone."]
+
+
+def test_remove_setup_says_nothing_to_someone_who_never_set_it_up(monkeypatch, tmp_path):
+    """No hooks, and no Claude Code to ask about the tool: there is nothing to tell them about something they never had."""
+    code, report = run_remove_setup(monkeypatch, tmp_path, {"changed": [], "warnings": ["Claude Code was not found."], "errors": []})
+    assert code == 0 and not report.exists()
+
+
+def test_remove_setup_with_nowhere_to_write_still_says_something_is_left(monkeypatch, tmp_path):
+    from usage_monitor.agent import setup
+
+    monkeypatch.setattr(setup, "remove", lambda: {"changed": [], "warnings": [], "errors": ["It could not be read."]})
+    assert entry.main(["--remove-setup"]) == 1
+    assert entry.main(["--remove-setup", str(tmp_path / "no" / "such" / "folder" / "left.txt")]) == 1
 
 
 def test_main_print_version_writes_the_bundled_version(tmp_path):

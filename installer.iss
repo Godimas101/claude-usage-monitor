@@ -117,7 +117,7 @@ const
   UninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#AppIdValue}_is1';
   DashboardTitle = 'Claude Usage Monitor';     // title of the dashboard window; the controller window's differs
   // The exe's modes other than the monitor's (main.py parse_args), one space apart. The monitor is started with none.
-  OtherModes = '--dashboard --mcp --hook --gate --wait --status --print-version --dump-frames --smoke-test';
+  OtherModes = '--dashboard --mcp --hook --gate --wait --status --print-version --remove-setup --dump-frames --smoke-test';
   WmClose = $0010;
   // The Microsoft Edge WebView2 Runtime (Evergreen) registers its version, "pv", under this client id.
   WebView2Client = 'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
@@ -575,10 +575,37 @@ begin
     Log('Kept ' + Folder);
 end;
 
+// Takes this app's hooks and MCP tool out of Claude Code while the exe is still here: left in, Claude Code would go on
+// starting a program that is gone. What could not be done is said, and only logged in a silent uninstall. Nothing here
+// stops the uninstall. Without a report (the exe would not start, or could not write it) all that is known is that it may
+// still be there.
+procedure RemoveFromClaudeCode;
+var
+  Report, Left: String;
+  Lines: TArrayOfString;
+  I, Code: Integer;
+begin
+  Report := ExpandConstant('{tmp}\claude-code-left.txt');
+  if Exec(ExpandConstant('{app}\{#ExeName}'), '--remove-setup "' + Report + '"', '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0) then begin
+    Log('Nothing of this app is left in Claude Code.');
+    Exit;
+  end;
+  Left := 'If you set up the usage guard, its hooks and MCP tool may still be there. docs/AGENT_HOOK.md says how to remove them.';
+  if LoadStringsFromFile(Report, Lines) then begin
+    Left := '';
+    for I := 0 to GetArrayLength(Lines) - 1 do
+      Left := Left + Lines[I] + #13#10;
+  end;
+  Log('Left in Claude Code: ' + Left);
+  if not UninstallSilent then
+    MsgBox('Some of this app is still in Claude Code:' + #13#10 + #13#10 + Left + #13#10 + 'The uninstall carries on.', mbInformation, MB_OK);
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usUninstall then begin
     CloseDashboardWindow;      // the monitor itself is already gone: AppMutex made Uninstall wait for it
+    RemoveFromClaudeCode;      // the exe is still here, and from now on no new hook starts it
     EndOtherProcesses;         // a running reader would keep the exe and bundle files from being deleted
   end;
   if CurUninstallStep = usPostUninstall then begin

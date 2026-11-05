@@ -16,7 +16,7 @@ Privacy, everywhere: never print, store or log message text, prompts, file conte
 
 | Path | What |
 |---|---|
-| `main.py` | Entry point: the monitor, `--dashboard`, `--print-version`, `--dump-frames`, `--smoke-test`, and the agent modes `--status`, `--hook`, `--gate`, `--mcp`, `--wait` |
+| `main.py` | Entry point: the monitor, `--dashboard`, `--print-version`, `--remove-setup`, `--dump-frames`, `--smoke-test`, and the agent modes `--status`, `--hook`, `--gate`, `--mcp`, `--wait` |
 | `usage_monitor/app.py` | `MonitorApp`: wires settings, data service, UI host, widgets, tray, local API |
 | `usage_monitor/data/` | Data layer, no UI imports: transcripts, SQLite store, usage API, windows, `DataService` |
 | `usage_monitor/ui/` | Win32 layer (ctypes, no Tk): host, layered windows, widgets, tray, menu, server, dashboard |

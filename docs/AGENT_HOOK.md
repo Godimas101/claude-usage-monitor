@@ -274,8 +274,9 @@ that point at an older install folder (a `--gate` stays), and the MCP tool when 
 When it removes a hook, it backs up the file first too. It needs no
 Claude Code; with no `claude` found, the card gives the command that removes the tool.
 
-**Before you uninstall the app, press Remove.** The uninstaller does not edit Claude Code's settings,
-so the hooks and the MCP tool would stay behind, starting a program that is no longer there.
+**Uninstalling takes them out too.** The uninstaller does what Remove does, before the files go, and says
+what it could not take out. That is the uninstaller of 2.3 or newer: left in, the hooks and the MCP tool
+would go on starting a program that is no longer there.
 
 The VS Code extension has its own Claude Code version, and needs 2.1.139 or newer too. The card checks
 only the `claude` command, so check the extension yourself: in VS Code, under Extensions. Setup works only
