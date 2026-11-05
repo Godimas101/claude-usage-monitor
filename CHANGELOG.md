@@ -10,6 +10,7 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 - The hint beside **Plan price override** follows your plan. It kept its old text if you signed in or changed plan while Settings was open, and read "no price known" if you reloaded Settings in a browser ([#46](https://github.com/Godimas101/claude-usage-monitor/issues/46)).
 - The Usage guard card finds Claude Code from Anthropic's Windows installer, whose folder isn't on the PATH. It read NOT FOUND, and told you to install what you had just installed ([#43](https://github.com/Godimas101/claude-usage-monitor/issues/43)).
 - The line under the update buttons in Settings no longer contradicts them. It kept the last click's answer, such as "YOU ARE UP TO DATE.", after a newer release was found ([#47](https://github.com/Godimas101/claude-usage-monitor/issues/47)).
+- An update can no longer leave an install that won't start. Claude Code starts the monitor for each hook and MCP call, and a start at the wrong moment during an update could stop it with the program half gone ([#37](https://github.com/Godimas101/claude-usage-monitor/issues/37)).
 - About asks for the supporters list again at your next visit if it failed to load. It stayed "unavailable" until the window was closed ([#47](https://github.com/Godimas101/claude-usage-monitor/issues/47)).
 
 ## [2.2.0] — 2026-11-03

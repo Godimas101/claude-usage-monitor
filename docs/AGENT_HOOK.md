@@ -59,7 +59,8 @@ the week has gone is 39 points ahead of it.
 For unattended runs, allow the tool so that it never stops at a permission prompt: add
 `"mcp__claude-usage__get_plan_usage"` to `permissions.allow` in your settings. Installing a monitor
 update ends the server. A session starts it again the next time it uses the tool; if one does not,
-reconnect it with `/mcp`, or start a new session.
+reconnect it with `/mcp`, or start a new session. For the moments Setup is swapping the files there is
+no exe to start, so a hook or a tool call fails at once. Claude Code carries on, and the next one works.
 
 ## Hooks
 

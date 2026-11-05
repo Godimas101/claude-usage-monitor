@@ -119,8 +119,8 @@ signature as well as the digest.
       `/mcp` shows `claude-usage` as connected. Close the monitor, and run the new installer by hand over that install
       (your own install is fine for this one). It goes through without an "in use" stop. In that session the tool
       answers again on its next use, or after `/mcp`. The sandboxed runs (`CUM_UI_TESTS=1` and `CUM_INSTALLER_E2E=1`;
-      the stand-in tests also need the .NET Framework's `csc.exe`) cover the same with stand-in readers, and the
-      uninstall.
+      the stand-in tests also need the .NET Framework's `csc.exe`) cover the same with stand-in readers, hooks that
+      keep starting the exe all through an update, and the uninstall.
 - [ ] **Upgrade from v1, the way v1.1.5's updater does it.** That updater cannot be changed and is the one every v1
       user will run, so this is the check that matters most. On the same spare user or VM, install v1.1.5 and make the
       state you want to test: **on** is what v1 wrote (the exe followed by the path of a script, see

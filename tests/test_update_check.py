@@ -1339,14 +1339,14 @@ def test_restart_manager_closes_what_is_using_the_files_and_restarts_nothing() -
 
 def test_setup_ends_the_exes_other_processes_before_the_folder_check() -> None:
     """Restart Manager closes applications only once the installation has started, after CurStepChanged(ssInstall),
-    where RequireBundleFolderFree must already find the folder free. Left to it, one --mcp reader of an open Claude
+    where MoveOldInstallAside must already find the folder free. Left to it, one --mcp reader of an open Claude
     Code session stopped every update with "in use". So PrepareToInstall ends them, after asking the dashboard to
     close, and Uninstall does the same at usUninstall, before it deletes."""
     prepare = iss_routine("PrepareToInstall")
     assert prepare.index("CloseDashboardWindow;") < prepare.index("EndOtherProcesses;")
     assert re.search(r"if CurUninstallStep = usUninstall then begin\s+CloseDashboardWindow;\s+EndOtherProcesses;\s+end;",
                      iss_routine("CurUninstallStepChanged"))
-    assert re.search(r"if CurStep = ssInstall then\s+RequireBundleFolderFree;", iss_routine("CurStepChanged"))
+    assert re.search(r"if CurStep = ssInstall then\s+MoveOldInstallAside;", iss_routine("CurStepChanged"))
     ending = iss_routine("EndOtherProcesses")
     assert ending.index("OtherProcesses(True)") < ending.index("OtherProcesses(False)")    # end them, then wait
 
@@ -1372,7 +1372,7 @@ def assert_terminate_is_guarded(text: str) -> None:
 def test_only_the_install_folders_own_exe_is_ended_and_never_the_monitor() -> None:
     """A copy of the exe elsewhere (a second install, a dev build, the owner's install during a sandbox run) is not
     touched: the full path must match. The monitor, started with no mode, is left to AppMutex and
-    RequireBundleFolderFree."""
+    MoveOldInstallAside."""
     assert_terminate_is_guarded(ISS)
 
 
@@ -1473,17 +1473,16 @@ def test_the_start_with_windows_box_is_set_once_as_the_page_appears_and_is_only_
 
 # --- F2: the folder is proven replaceable before it is wiped ------------------------------------------------
 
-def test_the_bundle_folder_is_proven_replaceable_before_install_delete_wipes_it() -> None:
-    """[InstallDelete] empties {app}\\_internal before one new file is copied. With a file held open, v1.1.5's updater (which
-    cannot be changed) would be left with no program at all, so Setup renames the folder away and back first, and stops
-    with the old install untouched when it cannot."""
-    assert iss_section("InstallDelete") == ['Type: filesandordirs; Name: "{app}\\_internal"']
-    assert re.search(r"if CurStep = ssInstall then\s+RequireBundleFolderFree;", iss_routine("CurStepChanged"))
-    body = iss_routine("RequireBundleFolderFree")
-    assert "ExpandConstant('{app}\\_internal')" in body
-    assert body.index("RenameFile(Folder, Probe)") < body.index("RenameFile(Probe, Folder)")   # away, then straight back
-    assert body.count("Abort;") == 2 and "Sleep(200)" in body                                    # it retries, then stops
-    assert "DeleteFile" not in body and "DelTree" not in body                                    # the probe changes nothing
+def test_the_old_install_is_moved_aside_before_anything_is_deleted_or_written() -> None:
+    """A delete stopped half way by a file held open would leave v1.1.5's updater (which cannot be changed) with no program at
+    all, so Setup renames instead, and stops with the old install whole when it cannot. The exe goes first and comes back
+    if the folder won't go, because from then on a start of it fails at once (#37). The sandbox runs below do all this for real."""
+    assert iss_section("InstallDelete") == ['Type: files; Name: "{app}\\{#ExeName}.old*"', 'Type: filesandordirs; Name: "{app}\\_internal*"']
+    assert re.search(r"if CurStep = ssInstall then\s+MoveOldInstallAside;", iss_routine("CurStepChanged"))
+    body = iss_routine("MoveOldInstallAside")
+    assert body.index("MovedTo(Exe, OldExe)") < body.index("MovedTo(Folder, OldFolder)") < body.index("MovedTo(OldExe, Exe)")
+    assert "DeleteFile" not in body and "DelTree" not in body                                    # moving changes nothing yet
+    assert "Sleep(200)" in iss_routine("MovedTo") and "Abort;" in iss_routine("StopInUse")       # it retries, then stops
 
 
 # --- F7: the WebView2 bootstrapper is verified before it is run --------------------------------------------
@@ -1521,13 +1520,14 @@ def test_the_installer_packages_the_folder_and_exe_the_spec_builds(spec: types.S
     assert iss_defines()["ExeName"] == spec.exe.kw["name"] + ".exe" == spec.coll.kw["name"] + ".exe"
     assert iss_defines()["DistDir"].endswith("\\" + spec.coll.kw["name"])
     assert any(line.startswith('Source: "{#DistDir}\\*"') for line in iss_section("Files"))
+    assert iss_section("Files")[-1].startswith('Source: "{#DistDir}\\{#ExeName}"')              # the exe last (#37)
     assert all("ClaudeUsageMonitor.exe" in iss_expand(line) for line in iss_section("Run"))
 
 
 def test_the_uninstaller_keeps_the_settings_unless_the_user_says_otherwise() -> None:
     from usage_monitor import paths
 
-    assert iss_section("UninstallDelete") == []            # nothing is deleted unasked
+    assert all('Name: "{app}\\' in line for line in iss_section("UninstallDelete"))   # outside the install folder nothing goes unasked
     assert "{userappdata}\\" + paths.APP_FOLDER in ISS      # %APPDATA%\ClaudeUsageMonitor, where paths.app_data_dir() is
     prompt = ISS.index("MsgBox('Do you also want to delete")
     assert "MB_YESNO or MB_DEFBUTTON2" in ISS[prompt:prompt + 700]   # defaults to No
@@ -1700,12 +1700,17 @@ def v1_stand_in_script(app: Path) -> str:
 class Sandbox:
     """A renamed copy of the installer, a stand-in v1 installer with the same AppId, and what a run leaves behind."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, exe: Path | None = None, bundle_files: int = 0) -> None:
+        """``exe`` replaces the bundle's unrunnable exe, and ``bundle_files`` makes the bundle slower to delete and copy."""
         self.root = root
         self.app = root / "app"
         self.logs = root / "logs"
         self.logs.mkdir()
         dist = make_dummy_dist(root)
+        if exe is not None:
+            shutil.copy(exe, dist / "ClaudeUsageMonitor.exe")
+        for number in range(bundle_files):
+            (dist / "_internal" / f"part-{number}.pyd").write_bytes(b"stand-in")
         scripts = root / "scripts"
         scripts.mkdir()
         (scripts / "v2.iss").write_text(sandbox_script((ROOT / "installer.iss").read_text(encoding="ascii"), self.app), encoding="ascii")
@@ -1761,6 +1766,10 @@ class Sandbox:
         return sorted((p.relative_to(self.app).as_posix(), p.stat().st_size)
                       for p in self.app.rglob("*") if p.is_file() and not p.name.startswith("unins"))
 
+    def moved_aside(self) -> list[str]:
+        """What an update left beside the install: nothing, once it has gone through or stopped."""
+        return sorted(p.name for p in self.app.iterdir() if ".old" in p.name or ".probe" in p.name)
+
     def reset(self, previous: str | None, entry: str | None) -> None:
         """Start from: nothing installed, a v1-style install or a v2 install, with the Run value as given."""
         self.cleanup()
@@ -1770,6 +1779,11 @@ class Sandbox:
         self.set_run_value(entry)
 
     def cleanup(self) -> None:
+        self.uninstall()
+        self.set_run_value(None)
+        shutil.rmtree(self.app, ignore_errors=True)
+
+    def uninstall(self) -> None:
         uninstaller = self.app / "unins000.exe"
         if uninstaller.is_file():
             # The uninstaller hands over to a copy of itself in %TEMP% and returns at once. That copy deletes the
@@ -1784,8 +1798,6 @@ class Sandbox:
                 time.sleep(0.3)
             while self.display_version() is not None and time.monotonic() < deadline:
                 time.sleep(0.3)
-        self.set_run_value(None)
-        shutil.rmtree(self.app, ignore_errors=True)
 
 
 def log_closed(log: Path) -> bool:
@@ -1883,7 +1895,7 @@ def test_sandboxed_silent_upgrades_keep_each_users_start_with_windows_choice(tmp
             assert box.run(box.v2, switches, label) == 0, label
             assert (box.run_value() or "").lower() == (expected or "").lower(), f"{label}: the Run value is {box.run_value()!r}"
             assert box.display_version() == "2.0.0", label
-            assert not (box.app / "_internal.probe").exists(), label
+            assert box.moved_aside() == [], label
     finally:
         box.cleanup()
     assert real_install_state() == before
@@ -1906,7 +1918,7 @@ def test_a_sandboxed_update_with_a_file_held_open_stops_and_changes_nothing(tmp_
         assert "stopping before anything is changed" in log, "Setup stopped for another reason"
         assert box.files() == listing, "the update changed the install although it stopped"
         assert box.display_version() == "1.1.5"
-        assert not (box.app / "_internal.probe").exists()
+        assert box.moved_aside() == []
         assert box.run(box.v2, V1_SWITCHES, "after the file was released") == 0
         assert box.display_version() == "2.0.0"
     finally:
@@ -2008,12 +2020,158 @@ def test_a_sandboxed_update_ends_the_readers_of_claude_code_and_goes_through(tmp
         assert f"Left alone: process {neighbour.pid}, started from another folder." in log
         assert exe.read_bytes().startswith(b"MZ a stand-in")                  # the new files are in place
         assert box.display_version() == "2.0.0"
-        assert not (box.app / "_internal.probe").exists()
+        assert box.moved_aside() == []
     finally:
         try:
             end_stand_ins(readers)
         finally:
             box.cleanup()
+    assert real_install_state() == before
+
+
+# The exe as a hook starts it. With the bundle it holds the bundle's DLL for a moment, as a running hook does. Without the
+# bundle it stays, as the PyInstaller bootloader does behind its "Failed to load Python DLL" dialog until the hook's
+# timeout ends it, holding the exe open all the while.
+HOOK_SOURCE = """\
+using System.IO;
+using System.Reflection;
+using System.Threading;
+
+static class Hook {
+    static int Main(string[] args) {
+        string folder = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+        try {
+            using (File.Open(Path.Combine(folder, "_internal", "python.dll"), FileMode.Open, FileAccess.Read, FileShare.Read)) {
+                Thread.Sleep(50);
+            }
+            return 0;
+        } catch (IOException) {
+            Thread.Sleep(4000);
+            return 1;
+        }
+    }
+}
+"""
+
+
+def build_hook(folder: Path) -> Path:
+    """Compile the hook stand-in, under the exe's real name, into ``folder``. Returns the exe."""
+    folder.mkdir(parents=True)
+    source = folder / "hook.cs"
+    source.write_text(HOOK_SOURCE, encoding="ascii")
+    exe = folder / "ClaudeUsageMonitor.exe"
+    done = subprocess.run([str(CSC), "/nologo", "/target:winexe", f"/out:{exe}", str(source)], capture_output=True,
+                          text=True, timeout=120, creationflags=NO_WINDOW)
+    assert done.returncode == 0, done.stdout + done.stderr
+    return exe
+
+
+def keep_starting_hooks(exe: Path, stop: threading.Event, started: list[subprocess.Popen[bytes]]) -> None:
+    """What Claude Code does while it works: start the exe as a hook, again and again, whatever Setup is doing. A start
+    that finds no exe, or half of one, fails at once, and Claude Code carries on."""
+    while not stop.is_set():
+        try:
+            started.append(subprocess.Popen([str(exe), "--hook"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                            stderr=subprocess.DEVNULL, creationflags=NO_WINDOW))
+        except OSError:
+            pass
+        time.sleep(0.1)
+
+
+@SANDBOX_RUNS
+@needs_csc
+@pytest.mark.usefixtures("keeps_real_readers")
+def test_a_sandboxed_update_goes_through_while_hooks_keep_starting_the_exe(tmp_path: Path) -> None:
+    """Claude Code starts the exe for every hook and every MCP call, whatever Setup is doing. A start after the old bundle
+    was deleted and before the new exe was written kept the old exe open, so Setup could not replace it, and a silent
+    update stopped with the bundle gone: an install that does not start (#37)."""
+    box = Sandbox(tmp_path, exe=build_hook(tmp_path / "hook"), bundle_files=3000)
+    exe = box.app / "ClaudeUsageMonitor.exe"
+    before = real_install_state()
+    stop = threading.Event()
+    started: list[subprocess.Popen[bytes]] = []
+    starters = [threading.Thread(target=keep_starting_hooks, args=(exe, stop, started), daemon=True) for _ in range(1)]
+    try:
+        box.reset("v2", None)
+        wanted = box.files()
+        for starter in starters:
+            starter.start()
+        code = box.run(box.v2, V2_SWITCHES, "hooks starting")
+        stop.set()
+        for starter in starters:
+            starter.join(timeout=10)
+        end_stand_ins(started)
+        log = (box.logs / "hooks_starting.log").read_text(encoding="utf-8", errors="replace")
+        assert code == 0, f"the update stopped (exit code {code}), {len(box.files())} of {len(wanted)} files in place: {log[-700:]}"
+        # A hook caught at the very moment of the move can keep the old exe held, so it stays as a .old file. That is harmless:
+        # the next update or the uninstaller removes it (test_a_sandboxed_update_steps_round_what_an_earlier_update_left_behind).
+        assert [file for file in box.files() if ".old" not in file[0]] == wanted, "the install is not whole"
+        assert box.display_version() == "2.0.0"
+        started_after = subprocess.run([str(exe), "--hook"], stdin=subprocess.DEVNULL, capture_output=True, timeout=30,
+                                       creationflags=NO_WINDOW)
+        assert started_after.returncode == 0, "the install does not start"
+        assert len(started) > 20, "the hooks did not really run through the update"
+        written = [line.rsplit("\\", 1)[-1] for line in log.splitlines() if "Dest filename:" in line and str(box.app) in line and "unins" not in line]
+        assert written[-1] == "ClaudeUsageMonitor.exe", "the exe must be the last file written: a start before that fails at once"
+    finally:
+        stop.set()
+        try:
+            end_stand_ins(started)
+        finally:
+            box.cleanup()
+    assert real_install_state() == before
+
+
+@SANDBOX_RUNS
+@pytest.mark.usefixtures("keeps_real_readers")
+def test_a_sandboxed_update_waits_for_a_file_held_only_for_a_moment(tmp_path: Path) -> None:
+    """A virus scanner lets go of a file after a moment, and so does a hook that started just before the exe moved. Setup
+    tries the folder for about 5 seconds before it stops, so a file held for 3, past the moment Setup gets there, is waited for."""
+    box = Sandbox(tmp_path)
+    before = real_install_state()
+    held = box.app / "_internal" / "base_library.zip"
+    try:
+        box.reset("v2", None)
+        with open(held, "rb") as handle:
+            timer = threading.Timer(3.0, handle.close)
+            timer.start()
+            code = box.run(box.v2, V2_SWITCHES, "file held a moment")
+            timer.join()
+        assert code == 0, (box.logs / "file_held_a_moment.log").read_text(encoding="utf-8", errors="replace")[-600:]
+        assert box.moved_aside() == [] and box.display_version() == "2.0.0"
+    finally:
+        box.cleanup()
+    assert real_install_state() == before
+
+
+@SANDBOX_RUNS
+@pytest.mark.usefixtures("keeps_real_readers")
+def test_a_sandboxed_update_steps_round_what_an_earlier_update_left_behind(tmp_path: Path) -> None:
+    """Something can still hold the old copies when [InstallDelete] runs. They stay, the next update needs names that are
+    free, and it removes them once they are not held. What is left at the end must not keep the install folder from going.
+    The held file is a .zip as in the test above: Restart Manager force-closes whatever holds a .dll Setup will delete, and
+    here that would be this test."""
+    box = Sandbox(tmp_path)
+    old_exe, old_dll = box.app / "ClaudeUsageMonitor.exe.old0", box.app / "_internal.old0" / "held.zip"
+    before = real_install_state()
+    try:
+        box.reset("v2", None)
+        old_dll.parent.mkdir()
+        old_exe.write_bytes(b"left behind")
+        old_dll.write_bytes(b"left behind")
+        with open(old_exe, "rb"), open(old_dll, "rb"):
+            assert box.run(box.v2, V2_SWITCHES, "copies held") == 0
+            assert box.moved_aside() == ["ClaudeUsageMonitor.exe.old0", "_internal.old0"]
+        assert (box.app / "ClaudeUsageMonitor.exe").is_file() and (box.app / "_internal" / "python.dll").is_file()
+        assert box.run(box.v2, V2_SWITCHES, "copies free") == 0
+        assert box.moved_aside() == []
+        old_dll.parent.mkdir()
+        old_exe.write_bytes(b"left behind")
+        old_dll.write_bytes(b"left behind")
+        box.uninstall()
+        assert not box.app.exists(), "the uninstaller left the install folder behind"
+    finally:
+        box.cleanup()
     assert real_install_state() == before
 
 
@@ -2037,7 +2195,7 @@ def test_a_sandboxed_update_leaves_a_running_monitor_alone_and_stops(tmp_path: P
         assert f"Left alone: process {monitor[0].pid}, the monitor (no mode on its command line)." in log
         assert monitor[0].poll() is None, "Setup ended the monitor"
         assert box.files() == listing
-        assert not (box.app / "_internal.probe").exists()
+        assert box.moved_aside() == []
     finally:
         try:
             end_stand_ins(monitor)

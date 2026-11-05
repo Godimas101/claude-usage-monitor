@@ -57,7 +57,7 @@ ArchitecturesAllowed=x64compatible
 ; can be days). They hold no state. PrepareToInstall asks the dashboard to close and then ends what is left of
 ; them (EndOtherProcesses); Uninstall does the same before it deletes. Restart Manager (CloseApplications) cannot
 ; be left to do that: it closes applications only once the installation has started, after
-; CurStepChanged(ssInstall), and RequireBundleFolderFree must find the folder free before then. Left to it, one
+; CurStepChanged(ssInstall), and MoveOldInstallAside must find the folder free before then. Left to it, one
 ; --mcp reader stopped every update with "in use" while Claude Code was open (2.1.0). "force" stays for anything
 ; else Restart Manager finds. A --wait that is ended wakes its session without the "wait is over" line, and an
 ; ended --mcp is started again when its session next uses the tool, or with /mcp (docs/AGENT_HOOK.md says both).
@@ -79,13 +79,16 @@ Name: "startup"; Description: "&Start with Windows (start the monitor when I sig
 [InstallDelete]
 ; A PyInstaller onedir bundle: the files under _internal change with every Python, Pillow or pywebview
 ; version, so an update starts from an empty folder. Stale DLLs of the previous build (v1 shipped Tcl/Tk)
-; would otherwise stay behind for good. This wipe runs before any new file is copied, so CurStepChanged
-; first proves that the folder can be replaced (RequireBundleFolderFree) and stops, untouched, when it cannot.
-Type: filesandordirs; Name: "{app}\_internal"
+; would otherwise stay behind for good. By now CurStepChanged has moved the old exe and bundle aside, or stopped with
+; them untouched (MoveOldInstallAside). This removes them, and whatever an earlier update could not remove.
+Type: files; Name: "{app}\{#ExeName}.old*"
+Type: filesandordirs; Name: "{app}\_internal*"
 
 [Files]
-; Onedir build: package the whole PyInstaller output folder (exe + _internal).
-Source: "{#DistDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Onedir build: package the whole PyInstaller output folder (exe + _internal). The exe goes last: until it is there a start
+; of the exe fails at once, and once it is there the bundle is whole.
+Source: "{#DistDir}\*"; Excludes: "\{#ExeName}"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#DistDir}\{#ExeName}"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\Claude Usage Monitor"; Filename: "{app}\{#ExeName}"
@@ -99,7 +102,10 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 [UninstallDelete]
 ; Settings, the usage database and the logs live in %APPDATA%\ClaudeUsageMonitor, outside the install
-; folder, and stay by default. CurUninstallStepChanged asks whether to delete them.
+; folder, and stay by default. CurUninstallStepChanged asks whether to delete them. What goes here is only what an
+; update could not remove from the install folder, which would otherwise keep the folder from going.
+Type: files; Name: "{app}\{#ExeName}.old*"
+Type: filesandordirs; Name: "{app}\_internal.old*"
 
 [Run]
 Filename: "{app}\{#ExeName}"; Description: "Launch Claude Usage Monitor now"; Flags: nowait postinstall skipifsilent
@@ -331,7 +337,7 @@ end;
 // list them. With EndThem True it also ends each one it counts, and logs why any other process of that name is left
 // alone (by its number; command lines are never logged). Windows reports the path a process was started by; the
 // dashboard and the readers are started by this full path. A copy of the exe in another folder is left alone, and so
-// is the monitor: AppMutex made Setup wait for it, and one started since then makes RequireBundleFolderFree stop.
+// is the monitor: AppMutex made Setup wait for it, and one started since then makes MoveOldInstallAside stop.
 function OtherProcesses(const EndThem: Boolean): Integer;
 var
   Wmi, Found, Item: Variant;
@@ -386,8 +392,8 @@ begin
 end;
 
 // Ends the exe's other processes, then checks up to 30 times, 100 ms apart, that they are gone, so that Restart
-// Manager does not list them and RequireBundleFolderFree finds their files closed. Ended processes are usually gone
-// by the first check. What cannot be ended makes RequireBundleFolderFree stop.
+// Manager does not list them and MoveOldInstallAside finds their files closed. Ended processes are usually gone
+// by the first check. What cannot be ended makes MoveOldInstallAside stop.
 procedure EndOtherProcesses;
 var
   Tries: Integer;
@@ -444,63 +450,84 @@ begin
   Result := '';
 end;
 
-// [InstallDelete] empties {app}\_internal before one new file is copied. If a file in it is still held open by a
-// program Setup did not close (a virus scanner, a backup agent, an indexer, a monitor started after Setup began), the
-// delete stops half way and the copy never happens: no program is left, and v1.1.5's updater, which cannot be
-// changed, then starts an exe that is gone. A folder with nothing open below it can be renamed, so prove that first
-// (the rename changes nothing: it is undone at once) and stop with the old install untouched when it cannot be done.
-// This is stricter than the delete itself, which can step round a file opened with delete sharing; the price is a
-// clean, retryable stop. It has to run here: an Abort from anything later (an [InstallDelete] Check or BeforeInstall)
-// is only logged, and the installation goes on.
-procedure RequireBundleFolderFree;
+// The first name free for Path's old copy. An earlier update leaves one behind when something still held it.
+function OldName(const Path: String): String;
 var
-  Folder, Probe: String;
-  Tries: Integer;
-  Moved, Back: Boolean;
+  Number: Integer;
 begin
-  Folder := ExpandConstant('{app}\_internal');
-  Probe := Folder + '.probe';
-  if not DirExists(Folder) then
-    Exit;                                   // a first install: nothing to replace
-  Moved := False;
-  for Tries := 1 to 25 do begin             // about 5 seconds: a scanner lets go of a file after a moment
-    if RenameFile(Folder, Probe) then begin
-      Moved := True;
-      Break;
-    end;
-    Sleep(200);
-  end;
-  if not Moved then begin
-    Log('The bundle folder is in use; stopping before anything is changed.');
-    SuppressibleMsgBox(
-      'Claude Usage Monitor cannot be updated because a file in ' + Folder + ' is in use. Nothing was changed.' + #13#10 + #13#10 +
-      'Close the program and run Setup again.',
-      mbError, MB_OK, IDOK);
-    Abort;
-  end;
-  Back := False;
+  Number := 0;
+  repeat
+    Result := Path + '.old' + IntToStr(Number);
+    Number := Number + 1;
+  until not (FileExists(Result) or DirExists(Result));
+end;
+
+// About 5 seconds of tries: a scanner lets go of a file after a moment, and a hook that started just before ends.
+function MovedTo(const Source, Target: String): Boolean;
+var
+  Tries: Integer;
+begin
+  Result := False;
   for Tries := 1 to 25 do begin
-    if RenameFile(Probe, Folder) then begin
-      Back := True;
-      Break;
+    if RenameFile(Source, Target) then begin
+      Result := True;
+      Exit;
     end;
     Sleep(200);
   end;
-  if not Back then begin
-    Log('The bundle folder could not be renamed back from ' + Probe + '.');
-    SuppressibleMsgBox(
-      'Setup tested whether ' + Folder + ' can be replaced by renaming it to ' + Probe + ', and could not rename it back.' + #13#10 + #13#10 +
-      'Please rename it back by hand and run Setup again.',
-      mbError, MB_OK, IDOK);
-    Abort;
+end;
+
+procedure StopInUse(const Path: String);
+begin
+  Log('The bundle folder is in use; stopping before anything is changed.');
+  SuppressibleMsgBox(
+    'Claude Usage Monitor cannot be updated because ' + Path + ' is in use. Nothing was changed.' + #13#10 + #13#10 +
+    'Close the program and run Setup again.',
+    mbError, MB_OK, IDOK);
+  Abort;
+end;
+
+// Moves the old exe and bundle out of the way before anything is deleted or written, and stops with them whole when it
+// cannot. Two things can go wrong otherwise.
+// A file held open by a program Setup did not close (a virus scanner, a backup agent, a monitor started after Setup
+// began) stops a delete half way, and the copy never happens: no program is left, and v1.1.5's updater, which cannot be
+// changed, then starts an exe that is gone. A folder with nothing open below it can be renamed, so renaming proves it.
+// Claude Code starts the exe at any moment, for each hook and for an MCP call (#37). An old exe started after its bundle
+// went shows "Failed to load Python DLL" and stays open, so it cannot be replaced, and a silent update then stops with
+// the bundle gone. So the exe moves first: from then on a start fails at once, which Claude Code carries on from, and
+// the bundle's last users end while the folder is tried. [Files] writes the exe last, so it is never there without its
+// bundle. It has to run here: an Abort from anything later (an [InstallDelete] Check or BeforeInstall) is only logged,
+// and the installation goes on.
+procedure MoveOldInstallAside;
+var
+  Exe, Folder, OldExe, OldFolder: String;
+  HadExe: Boolean;
+begin
+  Exe := ExpandConstant('{app}\{#ExeName}');
+  Folder := ExpandConstant('{app}\_internal');
+  OldExe := OldName(Exe);
+  OldFolder := OldName(Folder);
+  HadExe := FileExists(Exe);
+  if HadExe and not MovedTo(Exe, OldExe) then
+    StopInUse(Exe);
+  if DirExists(Folder) and not MovedTo(Folder, OldFolder) then begin
+    if HadExe and not MovedTo(OldExe, Exe) then begin
+      Log('The exe could not be moved back from ' + OldExe + '.');
+      SuppressibleMsgBox(
+        'Setup moved ' + Exe + ' to ' + OldExe + ', and could not move it back.' + #13#10 + #13#10 +
+        'Please rename it back by hand and run Setup again.',
+        mbError, MB_OK, IDOK);
+      Abort;
+    end;
+    StopInUse(Folder);
   end;
-  Log('The bundle folder is free to be replaced.');
+  Log('The old exe and bundle are moved aside.');
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssInstall then
-    RequireBundleFolderFree;                // after EndOtherProcesses, before [InstallDelete]
+    MoveOldInstallAside;                    // after EndOtherProcesses, before [InstallDelete]
   if (CurStep = ssPostInstall) and WebView2Downloaded then
     InstallWebView2;
 end;
