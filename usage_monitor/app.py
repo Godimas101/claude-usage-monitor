@@ -91,6 +91,11 @@ UI_CALL_TIMEOUT_S = 5.0
 GITHUB_PREFIX = "https://github.com/"
 UPDATE_RECHECK_S = 6 * 60 * 60      # the monitor looks for a newer release again this often while it runs
 NOTIFIED_KEY = "notified_version"   # setting: the newest release the monitor has already put a toast up for
+# What the last update ended of Claude Code's calls to the monitor, written by Setup after a silent update (installer.iss,
+# WriteUpdateNote) and said once as a toast when the monitor is back (MonitorApp._announce_update_note).
+UPDATE_NOTE_FILE = "update-note.txt"
+UPDATE_NOTE_TITLE = "Claude Usage Monitor updated"
+UPDATE_NOTE_MAX = 250                   # a balloon's text holds 255 characters
 UPDATE_TOAST_BODY = "Open the tray menu or the dashboard to update"
 
 # Settings that change what the UI shows. Anything else (poll interval, dashboard bounds) is ignored here.
@@ -586,6 +591,7 @@ class MonitorApp:
         self._alerts: AlertEngine | None = None     # built with the settings, in _build
         self._failures: dict[str, int] = {}
         self._torn_down = False
+        self._update_note_done = False             # the note of a silent update was said, or there was none
         self._unsubscribers: list[Callable[[], None]] = []
 
     # ── Lifecycle ──
@@ -897,6 +903,37 @@ class MonitorApp:
         if shown is not False:      # False: the shell had no icon to attach it to (Explorer restarting); try again later
             tracker.mark_announced(info)
 
+    def _announce_update_note(self) -> None:
+        """Say once what the last update ended, then delete Setup's note. UI thread.
+
+        To replace the files, Setup ends the monitor's MCP tool in open Claude Code sessions and their waits on the usage
+        guard. Run by hand, it says so on its last page. Run by the app's update, nobody sees Setup, so it leaves the
+        text in UPDATE_NOTE_FILE for this. Held back like the update toast while nobody would see it, and kept when the
+        shell has no icon to attach it to; only an update writes one, and an update starts the monitor again."""
+        if self._update_note_done or self.tray is None or self._torn_down:
+            return
+        note = paths.app_data_dir() / UPDATE_NOTE_FILE
+        try:
+            text = " ".join(note.read_text(encoding="utf-8-sig", errors="replace").split())   # one line, as a balloon shows it
+        except OSError:                 # none, which is the usual case, or one that cannot be read
+            self._update_note_done = True
+            return
+        if text:
+            if self._toast_held_back():
+                return
+            try:
+                shown = self.tray.notify(UPDATE_NOTE_TITLE, text[:UPDATE_NOTE_MAX])
+            except Exception:  # a bug, not the shell's refusal: do not hit it again at every state
+                log.exception("could not show the update note")
+                shown = True
+            if shown is False:
+                return
+        self._update_note_done = True
+        try:
+            note.unlink()
+        except OSError:
+            log.debug("could not delete the update note", exc_info=True)
+
     def _toast_held_back(self) -> bool:
         """Whether a toast would go unseen right now. UI thread."""
         if self.host is not None and self.host.locked:
@@ -962,6 +999,7 @@ class MonitorApp:
         self._refresh()
         self._raise_alerts(state)
         self._announce_update()
+        self._announce_update_note()
 
     def _on_setting(self, key: str, _value: Any) -> None:
         """Settings listener, on whichever thread changed the setting."""
@@ -1000,6 +1038,7 @@ class MonitorApp:
         self.refresh_now()
         self._refresh()
         self._announce_update()     # a release found while the session was locked is announced to whoever is back
+        self._announce_update_note()
 
     def _on_display(self) -> None:
         """The display layout or the taskbar changed: place the widgets again."""

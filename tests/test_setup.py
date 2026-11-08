@@ -820,6 +820,55 @@ def test_an_uninstall_says_when_a_gate_hook_stays(tmp_path: Path) -> None:
     assert setup.GATE_LEFT not in setup.remove(rig.ctx, only_here=True)["warnings"]
 
 
+def test_an_uninstall_takes_the_tool_out_even_when_the_settings_file_cannot_be_read(tmp_path: Path) -> None:
+    """The card stops at a settings file it cannot read, to be put right and Remove pressed again. After an uninstall there
+    is nothing to press: the MCP tool lives in another file and goes anyway, and the advice is to finish by hand."""
+    rig = make_rig(tmp_path, tool=(EXE, ["--mcp"]))
+    rig.write("{ not json")
+    result = setup.remove(rig.ctx, only_here=True)
+    assert rig.claude.tool is None and "Removed the claude-usage MCP tool." in result["changed"]
+    assert result["errors"] == ["The Claude Code settings file is not valid JSON, so setup left it alone. " + setup.BY_HAND_IF_THERE]
+    (tmp_path / "card").mkdir()
+    card = make_rig(tmp_path / "card", tool=(EXE, ["--mcp"]))
+    card.write("{ not json")
+    result = setup.remove(card.ctx)
+    assert card.claude.tool is not None and result["errors"] == [
+        "The Claude Code settings file is not valid JSON, so setup left it alone. Fix it or move it aside, then try again."]
+
+
+def test_an_uninstall_that_cannot_write_the_settings_says_to_delete_the_hooks_by_hand(tmp_path: Path,
+                                                                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    rig = make_rig(tmp_path, tool=(EXE, ["--mcp"]))
+    rig.write({"hooks": ours()})
+
+    def refuse(src: Any, dst: Any) -> None:
+        raise PermissionError(13, "Access is denied")
+
+    monkeypatch.setattr(setup.os, "replace", refuse)
+    result = setup.remove(rig.ctx, only_here=True)
+    assert result["errors"] == ["Could not write the Claude Code settings file (Access is denied), so the hooks were not removed. "
+                                + setup.BY_HAND]
+    assert rig.claude.tool is None
+
+
+def test_an_uninstall_that_finds_the_settings_changed_does_not_say_try_again(tmp_path: Path,
+                                                                            monkeypatch: pytest.MonkeyPatch) -> None:
+    rig = make_rig(tmp_path, tool=(EXE, ["--mcp"]))
+    rig.write({"hooks": ours()})
+    real_read = setup.read_settings
+
+    def read_then_claude_code_saves(path: Path) -> Any:
+        answer = real_read(path)
+        path.write_text(json.dumps({"hooks": ours(), "model": "opus"}), encoding="utf-8")    # Claude Code saves its settings
+        return answer
+
+    monkeypatch.setattr(setup, "read_settings", read_then_claude_code_saves)
+    result = setup.remove(rig.ctx, only_here=True)
+    assert result["errors"] == ["The Claude Code settings file changed while setup was working, so setup left it alone. "
+                                "The hooks were not removed. " + setup.BY_HAND]
+    assert rig.claude.tool is None
+
+
 def test_a_tool_without_the_mcp_argument_is_not_ours(tmp_path: Path) -> None:
     rig = make_rig(tmp_path, tool=(EXE, []))                                 # "added wrongly": empty Args
     setup.install(rig.ctx)

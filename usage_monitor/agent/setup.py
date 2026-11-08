@@ -59,6 +59,11 @@ NOT_INSTALLED_REASON = "One-click setup works in the installed app. This copy ru
 NO_CLAUDE_REASON = ("Claude Code was not found on this PC: there is no claude command on the PATH. The copy inside "
                     "the VS Code extension is not on it; install Claude Code itself (see the README).")
 NO_CLAUDE_LEFT = f"Claude Code was not found, so the {MCP_NAME} MCP tool was left alone."
+HOOK_DOCS_URL = "https://github.com/Godimas101/claude-usage-monitor/blob/main/docs/AGENT_HOOK.md"
+# After an uninstall there is no Remove to press again, so what could not be done is done by hand.
+BY_HAND_IF_THERE = f"If this app's hooks are in it, delete them by hand: {HOOK_DOCS_URL} says how."
+BY_HAND = f"Delete them by hand: {HOOK_DOCS_URL} says how."
+_TRY_AGAIN = ("Fix it or move it aside, then try again.", "Try again.")
 GATE_LEFT = "A --gate hook of this app stays in Claude Code's settings. It was added by hand, so delete it by hand."
 KEEP_BACKUPS = 5                   # the newest backups of the settings file kept beside it; older ones go
 _STAMP_UNKNOWN = ("unknown",)      # a settings file whose size and time cannot be read
@@ -786,34 +791,52 @@ def _remove(ctx: Context, only_here: bool = False) -> dict:
         return _finish(result)
     path = settings_path(ctx.env, ctx.home)
     result["settings_path"] = str(path)
+    problem = _remove_hooks(ctx, path, exe, result, only_here)
+    if problem is not None:
+        result["errors"].append(problem)
+        if not only_here:       # the card: nothing more until the file is put right and Remove is pressed again
+            return _finish(result)
+    _remove_mcp(ctx, claude, exe, result)     # the tool lives in another file: the uninstaller takes it out regardless
+    return _finish(result)
+
+
+def _remove_hooks(ctx: Context, path: Path, exe: str, result: dict, only_here: bool) -> str | None:
+    """Takes this app's hooks out of the settings file at ``path``. Returns why it could not, in the words for who asked:
+    the card says to try again, and the uninstaller (``only_here``) to finish by hand, as nothing is left to press."""
     stamp = _stamp(path)
     doc, problem = read_settings(path)
     problem = problem or (hooks_problem(doc) if doc is not None else None)
     if problem or doc is None:
-        result["errors"].append(problem or NOT_INSTALLED_REASON)
-        return _finish(result)
+        problem = problem or NOT_INSTALLED_REASON
+        return f"{_without_try_again(problem)} {BY_HAND_IF_THERE}" if only_here else problem
 
     merged, removed = merge_remove(doc, exe, only_here=only_here)
     if removed:
         problem = _write_problem(path, stamp, merged)
         if problem:
-            result["errors"].append(problem + " The hooks were not removed.")
-            return _finish(result)
+            return (f"{_without_try_again(problem)} The hooks were not removed. {BY_HAND}" if only_here
+                    else problem + " The hooks were not removed.")
         try:
             result["backup"] = str(backup_settings(path, ctx.now()))
             write_settings(path, merged)
         except OSError as exc:
-            result["errors"].append(f"Could not write the Claude Code settings file ({_os_reason(exc)}), "
-                                    "so the hooks were not removed.")
-            return _finish(result)
+            problem = f"Could not write the Claude Code settings file ({_os_reason(exc)}), so the hooks were not removed."
+            return f"{problem} {BY_HAND}" if only_here else problem
         result["changed"] += [f"Removed the {event} hook." for event in removed]
         log.info("setup: hooks removed (%s)", ", ".join(removed))
     else:
         result["unchanged"].append("The settings file held no hooks of this app.")
     if only_here and _gate_left(merged, exe):
         result["warnings"].append(GATE_LEFT)
-    _remove_mcp(ctx, claude, exe, result)
-    return _finish(result)
+    return None
+
+
+def _without_try_again(problem: str) -> str:
+    """``problem`` without the card's advice to try again."""
+    for ending in _TRY_AGAIN:
+        if problem.endswith(ending):
+            return problem[: -len(ending)].rstrip()
+    return problem
 
 
 def _remove_mcp(ctx: Context, claude: str | None, exe: str, result: dict) -> None:

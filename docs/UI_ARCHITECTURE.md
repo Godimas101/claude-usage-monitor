@@ -551,6 +551,12 @@ as told. The usage-alert switches (`alerts_enabled`, `alert_on_*`) do not apply 
 do. `notified_version` is only ever raised (under a lock) and is an unknown key to the settings API, so the page can neither read
 nor write it. The same release is offered in the tray menu (*Update to vX*, unless skipped) for as long as it is on offer.
 
+To replace the files, Setup ends the monitor's MCP tool in open Claude Code sessions and their waits on the usage guard
+(installer.iss, `EndedNote`). Run by hand, it says so on its last page. After a silent update, which is how the app updates
+itself, nobody saw Setup, so it leaves the same text in `update-note.txt` in the app data folder (`app.UPDATE_NOTE_FILE`).
+`MonitorApp._announce_update_note` shows it once as a toast, "Claude Usage Monitor updated", at the first state or unlock,
+held back like the update toast and kept when the shell refuses it, and then deletes the file.
+
 ## Dashboard process
 
 `ClaudeUsageMonitor.exe --dashboard --port <n>` (source: `pythonw main.py --dashboard …`).

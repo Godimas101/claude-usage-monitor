@@ -80,10 +80,9 @@ Name: "startup"; Description: "&Start with Windows (start the monitor when I sig
 ; A PyInstaller onedir bundle: the files under _internal change with every Python, Pillow or pywebview
 ; version, so an update starts from an empty folder. Stale DLLs of the previous build (v1 shipped Tcl/Tk)
 ; would otherwise stay behind for good. By now CurStepChanged has moved the old exe and bundle aside, or stopped with
-; them untouched (MoveOldInstallAside). This removes them, and whatever an earlier update could not remove.
-Type: files; Name: "{app}\{#ExeName}.old*"
+; them untouched (MoveOldInstallAside), so this finds nothing. The old copies are not deleted here: they wait until the
+; new copy is whole (RemoveOldCopies, at ssPostInstall), so that a Setup that stops half way can put them back (#37).
 Type: filesandordirs; Name: "{app}\_internal"
-Type: filesandordirs; Name: "{app}\_internal.old*"
 
 [Files]
 ; Onedir build: package the whole PyInstaller output folder (exe + _internal). The exe goes last: until it is there a start
@@ -115,13 +114,19 @@ Filename: "{app}\{#ExeName}"; Description: "Launch Claude Usage Monitor now"; Fl
 const
   RunKey = 'Software\Microsoft\Windows\CurrentVersion\Run';
   RunValue = 'ClaudeUsageMonitor';
+  // Windows' own record of the entry, by its name: Task Manager and the Settings app turn it off here (startup.py).
+  ApprovedKey = 'Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run';
   UninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#AppIdValue}_is1';
   DashboardTitle = 'Claude Usage Monitor';     // title of the dashboard window; the controller window's differs
   // The exe's modes other than the monitor's (main.py parse_args), one space apart. The monitor is started with none.
   OtherModes = '--dashboard --mcp --hook --gate --wait --status --print-version --remove-setup --dump-frames --smoke-test';
   WmClose = $0010;
+  WmQuit = $0012;
+  PmRemove = $0001;
   // Tenths of a second. Above the most the exe's two claude calls can take (about 70 s, see run_claude).
   RemoveSetupWaitTries = 900;
+  // After a silent update, what Setup ended of Claude Code's calls, for the monitor to say once (app.py UPDATE_NOTE_FILE).
+  UpdateNote = '{userappdata}\ClaudeUsageMonitor\update-note.txt';
   // The Microsoft Edge WebView2 Runtime (Evergreen) registers its version, "pv", under this client id.
   WebView2Client = 'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
   // Microsoft's small Evergreen bootstrapper; it fetches the runtime itself.
@@ -132,12 +137,65 @@ const
   // path is doubled by the caller). Nothing here goes through ExpandConstant, so the braces stay as they are.
   WebView2SignatureCheck = '$s = Get-AuthenticodeSignature -LiteralPath ''%s''; if ($s.Status -eq ''Valid'' -and $s.SignerCertificate.Subject -like ''CN=Microsoft Corporation,*'') { exit 0 } else { exit 1 }';
 
+type
+  // MSG as Setup and Uninstall see it: both are 32-bit programs (Inno Setup ships Setup.e32 only).
+  TMsg = record
+    MsgWnd: HWND;
+    MsgId: Cardinal;
+    MsgWParam: Longint;
+    MsgLParam: Longint;
+    MsgTime: Cardinal;
+    MsgX: Longint;
+    MsgY: Longint;
+  end;
+
 var
   DownloadPage: TDownloadWizardPage;
   WebView2Asked: Boolean;
   WebView2Downloaded: Boolean;
   WebView2Cancelled: Boolean;
   StartupBoxSet: Boolean;
+  MovedExe: String;            // where MoveOldInstallAside put the old exe and bundle, until they go or come back
+  MovedFolder: String;
+  InstallDone: Boolean;        // ssPostInstall was reached: the new exe and bundle are whole
+  EndedTools: Integer;         // Claude Code's calls that Setup ended, for the note: a session's MCP tool (--mcp) ...
+  EndedWaits: Integer;         // ... and a session held by the usage guard (--wait)
+
+// ---- Waiting with the window answering ---------------------------------------------------------
+
+function PeekMessage(var Msg: TMsg; Wnd: HWND; First, Last, Remove: Cardinal): Integer;
+  external 'PeekMessageW@user32.dll stdcall';
+function TranslateMessage(var Msg: TMsg): Integer;
+  external 'TranslateMessage@user32.dll stdcall';
+function DispatchMessage(var Msg: TMsg): Integer;
+  external 'DispatchMessageW@user32.dll stdcall';
+procedure PostQuitMessage(ExitCode: Integer);
+  external 'PostQuitMessage@user32.dll stdcall';
+
+// Lets the window handle what waits for it: a click, a repaint, Windows asking whether it still answers. A quit message
+// goes back for Setup's own loop.
+procedure HandleMessages;
+var
+  Msg: TMsg;
+begin
+  while PeekMessage(Msg, 0, 0, 0, PmRemove) <> 0 do begin
+    if Msg.MsgId = WmQuit then begin
+      PostQuitMessage(Msg.MsgWParam);
+      Exit;
+    end;
+    TranslateMessage(Msg);
+    DispatchMessage(Msg);
+  end;
+end;
+
+// Waits Ms milliseconds, and lets the window answer before and after. A plain Sleep in a loop leaves Setup's or the
+// uninstaller's window "Not Responding" after five seconds, which reads as a hang (#32).
+procedure Pause(const Ms: Integer);
+begin
+  HandleMessages;
+  Sleep(Ms);
+  HandleMessages;
+end;
 
 // ---- Start with Windows -------------------------------------------------------------------------
 
@@ -303,7 +361,7 @@ begin
   Log('Asking the dashboard window to close.');
   PostMessage(Wnd, WmClose, 0, 0);
   for Tries := 1 to 40 do begin
-    Sleep(100);
+    Pause(100);
     if FindWindowByWindowName(DashboardTitle) = 0 then begin
       Log('The dashboard window closed.');
       Exit;
@@ -340,16 +398,20 @@ end;
 // list them. With EndThem True it also ends each one it counts, and logs why any other process of that name is left
 // alone (by its number; command lines are never logged). Windows reports the path a process was started by; the
 // dashboard and the readers are started by this full path. A copy of the exe in another folder is left alone, and so
-// is the monitor: AppMutex made Setup wait for it, and one started since then makes MoveOldInstallAside stop.
+// is the monitor: AppMutex made Setup wait for it, and one started since then makes MoveOldInstallAside stop. Once
+// MoveOldInstallAside has moved the exe, Windows 11 still reports its processes by the path they were started by (measured
+// in the sandbox), and the moved name counts too in case a Windows does not. Ended MCP tools and usage guard waits are
+// counted for the note that says so (EndedNote).
 function OtherProcesses(const EndThem: Boolean): Integer;
 var
   Wmi, Found, Item: Variant;
   Exe, Mode: String;
   I, Count, Pid, Code: Integer;
+  Ours: Boolean;
 begin
   Result := 0;
   Exe := ExpandConstant('{app}\{#ExeName}');
-  if not FileExists(Exe) then
+  if not FileExists(Exe) and ((MovedExe = '') or not FileExists(MovedExe)) then
     Exit;                                   // a first install: nothing runs from here
   try
     Wmi := CreateOleObject('WbemScripting.SWbemLocator');
@@ -365,7 +427,8 @@ begin
           Log(Format('Left alone: process %d, whose path Windows hides (another user''s or elevated).', [Pid]));
         Continue;
       end;
-      if not SameText(Item.ExecutablePath, Exe) then begin
+      Ours := SameText(Item.ExecutablePath, Exe) or ((MovedExe <> '') and SameText(Item.ExecutablePath, MovedExe));
+      if not Ours then begin
         if EndThem then
           Log(Format('Left alone: process %d, started from another folder.', [Pid]));
         Continue;
@@ -382,7 +445,11 @@ begin
         try
           Code := Item.Terminate();
           if Code <> 0 then
-            Log(Format('Windows did not end it (Win32_Process.Terminate returned %d).', [Code]));
+            Log(Format('Windows did not end it (Win32_Process.Terminate returned %d).', [Code]))
+          else if Mode = '--mcp' then
+            EndedTools := EndedTools + 1
+          else if Mode = '--wait' then
+            EndedWaits := EndedWaits + 1;
         except
           Log('It could not be ended: ' + GetExceptionMessage);
         end;
@@ -404,13 +471,33 @@ begin
   if OtherProcesses(True) <= 0 then
     Exit;
   for Tries := 1 to 30 do begin
-    Sleep(100);
+    Pause(100);
     if OtherProcesses(False) = 0 then begin
       Log('The other processes of the install folder have ended.');
       Exit;
     end;
   end;
   Log('Processes of the install folder are still running.');
+end;
+
+// What Setup ended of Claude Code's calls, for the person: on the last page of a run by hand, or as a note the monitor
+// shows once after a silent update (WriteUpdateNote). Empty when it ended neither kind: a hook cut short fails once,
+// and Claude Code's next one works.
+function EndedNote: String;
+begin
+  Result := '';
+  if EndedTools = 1 then
+    Result := 'Setup closed the monitor''s tool in a Claude Code session. If that session shows an error, type /mcp there or restart it.'
+  else if EndedTools > 1 then
+    Result := Format('Setup closed the monitor''s tool in %d Claude Code sessions. If one shows an error, type /mcp there or restart it.', [EndedTools]);
+  if EndedWaits > 0 then begin
+    if Result <> '' then
+      Result := Result + ' ';
+    if EndedWaits = 1 then
+      Result := Result + 'A session waiting on the usage guard was let go early.'
+    else
+      Result := Result + Format('%d sessions waiting on the usage guard were let go early.', [EndedWaits]);
+  end;
 end;
 
 // ---- Setup events -------------------------------------------------------------------------------
@@ -436,6 +523,12 @@ begin
       Log('Updating: "Start with Windows" is off, so its box is unchecked.');
       WizardSelectTasks('!startup');
     end;
+  end;
+  if (CurPageID = wpFinished) and (EndedNote <> '') then begin
+    // Run by hand, so someone is here to read it. A silent run leaves the monitor a note instead (WriteUpdateNote).
+    WizardForm.FinishedLabel.Caption := WizardForm.FinishedLabel.Caption + #13#10#13#10 + EndedNote;
+    WizardForm.FinishedLabel.AdjustHeight;
+    WizardForm.RunList.Top := WizardForm.FinishedLabel.Top + WizardForm.FinishedLabel.Height + ScaleY(12);
   end;
 end;
 
@@ -476,7 +569,7 @@ begin
       Result := True;
       Exit;
     end;
-    Sleep(200);
+    Pause(200);
   end;
 end;
 
@@ -501,6 +594,9 @@ end;
 // the bundle's last users end while the folder is tried. [Files] writes the exe last, so it is never there without its
 // bundle. It has to run here: an Abort from anything later (an [InstallDelete] Check or BeforeInstall) is only logged,
 // and the installation goes on.
+// Once the exe has moved, nothing new can start it, so what still holds the bundle started in the moment after
+// PrepareToInstall ended the readers (a new session's MCP tool can live for hours): it is ended the same way (#37). The
+// moved copies stay until the new copy is whole (RemoveOldCopies), and go back if Setup stops before (PutOldInstallBack).
 procedure MoveOldInstallAside;
 var
   Exe, Folder, OldExe, OldFolder: String;
@@ -511,31 +607,163 @@ begin
   OldExe := OldName(Exe);
   OldFolder := OldName(Folder);
   HadExe := FileExists(Exe);
-  if HadExe and not MovedTo(Exe, OldExe) then
-    StopInUse(Exe);
-  if DirExists(Folder) and not MovedTo(Folder, OldFolder) then begin
-    if HadExe and not MovedTo(OldExe, Exe) then begin
-      Log('The exe could not be moved back from ' + OldExe + '.');
-      SuppressibleMsgBox(
-        'Setup moved ' + Exe + ' to ' + OldExe + ', and could not move it back.' + #13#10 + #13#10 +
-        'Please rename it back by hand and run Setup again.',
-        mbError, MB_OK, IDOK);
-      Abort;
+  if HadExe then begin
+    if not MovedTo(Exe, OldExe) then
+      StopInUse(Exe);
+    MovedExe := OldExe;
+  end;
+  if DirExists(Folder) then begin
+    if not RenameFile(Folder, OldFolder) then begin
+      EndOtherProcesses;                    // nothing new can start the exe now: end what started just before it moved
+      if not MovedTo(Folder, OldFolder) then begin
+        if HadExe then begin
+          if not MovedTo(OldExe, Exe) then begin
+            Log('The exe could not be moved back from ' + OldExe + '.');
+            SuppressibleMsgBox(
+              'Setup moved ' + Exe + ' to ' + OldExe + ', and could not move it back.' + #13#10 + #13#10 +
+              'Please rename it back by hand and run Setup again.',
+              mbError, MB_OK, IDOK);
+            Abort;
+          end;
+          MovedExe := '';
+        end;
+        StopInUse(Folder);
+      end;
     end;
-    StopInUse(Folder);
+    MovedFolder := OldFolder;
   end;
   Log('The old exe and bundle are moved aside.');
+end;
+
+// Deletes the old copies: this run's, now that the new copy is whole, and any an earlier update could not delete because
+// something still held them. What is still held stays, for the next update or the uninstall ([UninstallDelete]); OldName
+// steps round it.
+procedure RemoveOldCopies;
+var
+  Found: TFindRec;
+  Names: TStringList;
+  App, Path: String;
+  I: Integer;
+begin
+  App := ExpandConstant('{app}\');
+  Names := TStringList.Create;
+  try
+    if FindFirst(App + '{#ExeName}.old*', Found) then
+      try
+        repeat
+          Names.Add(Found.Name);
+        until not FindNext(Found);
+      finally
+        FindClose(Found);
+      end;
+    if FindFirst(App + '_internal.old*', Found) then
+      try
+        repeat
+          Names.Add(Found.Name);
+        until not FindNext(Found);
+      finally
+        FindClose(Found);
+      end;
+    for I := 0 to Names.Count - 1 do begin
+      Path := App + Names[I];
+      if DirExists(Path) then
+        DelTree(Path, True, True, True)
+      else
+        DeleteFile(Path);
+      if FileExists(Path) or DirExists(Path) then
+        Log('Still held, so left for later: ' + Path)
+      else
+        Log('Deleted ' + Path);
+    end;
+  finally
+    Names.Free;
+  end;
+end;
+
+// Setup ended before the new copy was whole (Cancel, an error, an Abort after the old copy moved): put the old exe and
+// bundle back, so the version that was there still starts (#37). Whatever the failed copy left goes first; Setup's own
+// rollback has usually removed it already. The bundle goes back before the exe, so the exe is never there without it. A
+// new exe means the copy did finish (the exe is written last), so the new version stays.
+procedure PutOldInstallBack;
+var
+  Exe, Bundle: String;
+  Back: Boolean;
+begin
+  Exe := ExpandConstant('{app}\{#ExeName}');
+  Bundle := ExpandConstant('{app}\_internal');
+  if FileExists(Exe) then begin
+    Log('Setup did not finish, but the new exe and bundle are whole, so they stay.');
+    RemoveOldCopies;
+    Exit;
+  end;
+  Log('Setup did not finish: putting the old exe and bundle back.');
+  Back := True;
+  if MovedFolder <> '' then begin
+    if DirExists(Bundle) then
+      DelTree(Bundle, True, True, True);
+    Back := RenameFile(MovedFolder, Bundle);
+  end;
+  if Back and (MovedExe <> '') then
+    Back := RenameFile(MovedExe, Exe);
+  if Back then
+    Log('The old version is back.')
+  else begin
+    Log('The old version could not be put back.');
+    SuppressibleMsgBox('Setup did not finish, and could not put the old version back.' + #13#10 + #13#10 +
+                       'Run Setup again to install Claude Usage Monitor.', mbError, MB_OK, IDOK);
+  end;
+end;
+
+// After a silent update (the app's own, which nobody watches), what Setup ended, for the monitor to say once when it
+// starts again (app.py, _announce_update_note). A run by hand says it on its last page instead.
+procedure WriteUpdateNote;
+var
+  Note, Text: String;
+begin
+  Text := EndedNote;
+  if Text = '' then
+    Exit;
+  Note := ExpandConstant(UpdateNote);
+  if ForceDirectories(ExtractFileDir(Note)) and SaveStringToFile(Note, Text, False) then
+    Log('Left the monitor a note: ' + Text)
+  else
+    Log('Could not leave the monitor a note: ' + Text);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssInstall then
     MoveOldInstallAside;                    // after EndOtherProcesses, before [InstallDelete]
-  if (CurStep = ssPostInstall) and WebView2Downloaded then
-    InstallWebView2;
+  if CurStep = ssPostInstall then begin
+    InstallDone := True;                    // the new exe and bundle are whole: the old copies can go
+    RemoveOldCopies;
+    if WebView2Downloaded then
+      InstallWebView2;
+  end;
+end;
+
+// The last thing Setup does, however it ends.
+procedure DeinitializeSetup;
+begin
+  if (not InstallDone) and ((MovedExe <> '') or (MovedFolder <> '')) then
+    PutOldInstallBack;
+  if InstallDone and WizardSilent then
+    WriteUpdateNote;
 end;
 
 // ---- Uninstall events ---------------------------------------------------------------------------
+
+// Windows keeps its own record of a startup entry, by the entry's name, after the entry goes. One that says off (Task
+// Manager, the Settings app) would turn off the entry of the next install, with its box checked (#32).
+procedure RemoveStartupRecord;
+begin
+  if RegValueExists(HKCU, ApprovedKey, RunValue) then begin
+    if RegDeleteValue(HKCU, ApprovedKey, RunValue) then
+      Log('Removed Windows'' startup record of the entry.')
+    else
+      Log('Windows'' startup record of the entry could not be removed.');
+  end;
+end;
 
 // The entry may have been written by the app's own switch rather than by Setup, so Setup's uninsdeletevalue
 // would miss it. It is removed when it starts with the quoted path of this install's exe: that is the entry
@@ -550,9 +778,11 @@ begin
     if Pos(Lowercase(Ours), Lowercase(Current)) = 1 then begin
       RegDeleteValue(HKCU, RunKey, RunValue);
       Log('Removed the "Start with Windows" entry.');
+      RemoveStartupRecord;
     end else
-      Log('The "Start with Windows" entry points somewhere else; left alone.');
-  end;
+      Log('The "Start with Windows" entry points somewhere else; left alone, with its record.');
+  end else
+    RemoveStartupRecord;                    // no entry, but a record from an older one would still turn the next off
 end;
 
 // Settings, the usage database and the logs are kept unless the user says otherwise. A silent
@@ -585,7 +815,7 @@ end;
 // The exe writes its report last, empty when all of it went. No report means all that is known is that it may be there.
 procedure RemoveFromClaudeCode;
 var
-  Report, Left: String;
+  Report, Left, Status: String;
   Lines: TArrayOfString;
   I, Tries, Code: Integer;
 begin
@@ -594,11 +824,16 @@ begin
           'https://github.com/Godimas101/claude-usage-monitor/blob/main/docs/AGENT_HOOK.md says how to remove them.';
   if DirExists(ExpandConstant('{app}\_internal')) and
      Exec(ExpandConstant('{app}\{#ExeName}'), '--remove-setup "' + Report + '"', '', SW_HIDE, ewNoWait, Code) then begin
+    // The exe can take a while (claude is slow to start the first time): the window says what it waits for.
+    Status := UninstallProgressForm.StatusLabel.Caption;
+    UninstallProgressForm.StatusLabel.Caption := 'Taking Claude Usage Monitor out of Claude Code...';
     for Tries := 1 to RemoveSetupWaitTries do begin
       if FileExists(Report) then
         Break;
-      Sleep(100);
+      Pause(100);
     end;
+    if Status <> '' then
+      UninstallProgressForm.StatusLabel.Caption := Status;
     if LoadStringsFromFile(Report, Lines) then begin
       Left := '';
       for I := 0 to GetArrayLength(Lines) - 1 do

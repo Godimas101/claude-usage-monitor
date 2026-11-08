@@ -2667,6 +2667,50 @@ def publish(wired, state) -> list[tuple[str, str]]:
     return wired.tray.notices[before:]
 
 
+# ── What a silent update ended (installer.iss writes the note) ──
+
+def update_note() -> Path:
+    return app_mod.paths.app_data_dir() / app_mod.UPDATE_NOTE_FILE
+
+
+NOTE = ("Setup closed the monitor's tool in a Claude Code session.\r\nIf that session shows an error, type /mcp there or "
+        "restart it.")
+SAID = "Setup closed the monitor's tool in a Claude Code session. If that session shows an error, type /mcp there or restart it."
+
+
+def test_the_note_of_a_silent_update_is_said_once_and_then_deleted(wired):
+    """To replace the files, Setup ends the monitor's MCP tool in open Claude Code sessions and their waits on the usage
+    guard. After an update from the app nobody saw Setup, so the monitor says it once when it is back."""
+    note = update_note()
+    note.write_text(NOTE, encoding="ascii")
+    assert (app_mod.UPDATE_NOTE_TITLE, SAID) in publish(wired, usage_state(10))
+    assert not note.exists()
+    note.write_text("Not looked for again: only an update writes one, and it starts the monitor again.", encoding="ascii")
+    assert app_mod.UPDATE_NOTE_TITLE not in [title for title, _ in publish(wired, usage_state(11))]
+
+
+def test_an_empty_update_note_says_nothing_and_goes(wired):
+    note = update_note()
+    note.write_text("  \r\n", encoding="ascii")
+    assert app_mod.UPDATE_NOTE_TITLE not in [title for title, _ in publish(wired, usage_state(10))]
+    assert not note.exists()
+
+
+def test_an_update_note_waits_for_someone_to_see_it(wired, monkeypatch):
+    """Held back like the update toast (a locked session, a fullscreen app, quiet hours), and kept when the shell has no
+    icon to attach it to."""
+    note = update_note()
+    note.write_text(NOTE, encoding="ascii")
+    notify = wired.tray.notify
+    monkeypatch.setattr(wired.app, "_toast_held_back", lambda: True)
+    assert publish(wired, usage_state(10)) == [] and note.exists()
+    monkeypatch.setattr(wired.app, "_toast_held_back", lambda: False)
+    monkeypatch.setattr(wired.tray, "notify", lambda title, body: False)
+    assert publish(wired, usage_state(11)) == [] and note.exists()
+    monkeypatch.setattr(wired.tray, "notify", notify)        # not undo(): that would also drop the isolated app data folder
+    assert (app_mod.UPDATE_NOTE_TITLE, SAID) in publish(wired, usage_state(12)) and not note.exists()
+
+
 def test_the_app_checks_alerts_with_the_alert_engine_built_on_its_settings(wired):
     assert isinstance(wired.app._alerts, AlertEngine)
     wired.settings.set("alert_thresholds", [40])
@@ -3074,6 +3118,18 @@ def test_a_release_found_while_the_session_was_locked_is_announced_at_unlock(mon
     built.host.locked = False
     built.host.emit("session", False)                                          # no state needed: the unlock itself is the cue
     assert built.tray.notices == [TOAST]
+
+
+def test_an_update_note_held_back_while_locked_is_said_at_unlock(wired):
+    """An update from the app often finishes with nobody at the PC: the note waits, and the unlock itself is the cue."""
+    note = update_note()
+    note.write_text(NOTE, encoding="ascii")
+    wired.host.locked = True
+    wired.host.emit("session", True)
+    assert publish(wired, usage_state(10)) == [] and note.exists()
+    wired.host.locked = False
+    wired.host.emit("session", False)
+    assert wired.tray.notices[-1:] == [(app_mod.UPDATE_NOTE_TITLE, SAID)] and not note.exists()
 
 
 def test_a_failure_to_tell_whether_a_toast_would_be_seen_does_not_cost_it(monkeypatch, settings):

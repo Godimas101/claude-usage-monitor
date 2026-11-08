@@ -1358,7 +1358,11 @@ def assert_terminate_is_guarded(text: str) -> None:
     body = iss_routine("OtherProcesses", text)
     assert "Exe := ExpandConstant('{app}\\{#ExeName}');" in body
     assert body.count("Item.Terminate()") == 1
-    path_check = body.index("if not SameText(Item.ExecutablePath, Exe) then begin")
+    # The exe's moved-aside name is the only other path that counts, and it is only ever set to that name or cleared.
+    assert "Ours := SameText(Item.ExecutablePath, Exe) or ((MovedExe <> '') and SameText(Item.ExecutablePath, MovedExe));" in body
+    assert sorted(set(re.findall(r"MovedExe := ([^;]+);", pascal_code(text)))) == ["''", "OldExe"]
+    assert "OldExe := OldName(Exe);" in iss_routine("MoveOldInstallAside", text)
+    path_check = body.index("if not Ours then begin")
     mode_check = body.index("if Mode = '' then begin")
     ending = body.index("Item.Terminate()")
     assert path_check < body.index("Mode := OtherMode(Item.CommandLine);") < mode_check
@@ -1477,13 +1481,24 @@ def test_the_old_install_is_moved_aside_before_anything_is_deleted_or_written() 
     """A delete stopped half way by a file held open would leave v1.1.5's updater (which cannot be changed) with no program at
     all, so Setup renames instead, and stops with the old install whole when it cannot. The exe goes first and comes back
     if the folder won't go, because from then on a start of it fails at once (#37). The sandbox runs below do all this for real."""
-    assert iss_section("InstallDelete") == ['Type: files; Name: "{app}\\{#ExeName}.old*"', 'Type: filesandordirs; Name: "{app}\\_internal"',
-                                            'Type: filesandordirs; Name: "{app}\\_internal.old*"']
+    assert iss_section("InstallDelete") == ['Type: filesandordirs; Name: "{app}\\_internal"']          # never the old copies: see below
     assert re.search(r"if CurStep = ssInstall then\s+MoveOldInstallAside;", iss_routine("CurStepChanged"))
     body = iss_routine("MoveOldInstallAside")
     assert body.index("MovedTo(Exe, OldExe)") < body.index("MovedTo(Folder, OldFolder)") < body.index("MovedTo(OldExe, Exe)")
+    assert body.index("MovedExe := OldExe;") < body.index("EndOtherProcesses;") < body.index("MovedTo(Folder, OldFolder)")
     assert "DeleteFile" not in body and "DelTree" not in body                                    # moving changes nothing yet
-    assert "Sleep(200)" in iss_routine("MovedTo") and "Abort;" in iss_routine("StopInUse")       # it retries, then stops
+    assert "Pause(200)" in iss_routine("MovedTo") and "Abort;" in iss_routine("StopInUse")       # it retries, then stops
+    # The old copies go once the new copy is whole, and back when Setup stops before that.
+    assert re.search(r"if CurStep = ssPostInstall then begin\s+InstallDone := True;\s+RemoveOldCopies;", iss_routine("CurStepChanged"))
+    assert re.search(r"if \(not InstallDone\) and \(\(MovedExe <> ''\) or \(MovedFolder <> ''\)\) then\s+PutOldInstallBack;",
+                     iss_routine("DeinitializeSetup"))
+
+
+def test_every_wait_lets_the_window_answer() -> None:
+    """A plain Sleep in a loop leaves Setup's or the uninstaller's window "Not Responding" after five seconds (#32)."""
+    names = re.findall(r"^(?:procedure|function) (\w+)", ISS, re.M)
+    assert [name for name in names if "Sleep(" in iss_routine(name)] == ["Pause"]
+    assert "HandleMessages;" in iss_routine("Pause") and "DispatchMessage(Msg);" in iss_routine("HandleMessages")
 
 
 # --- F7: the WebView2 bootstrapper is verified before it is run --------------------------------------------
@@ -1568,12 +1583,13 @@ SANDBOX = "CUM Test Sandbox"                         # AppId and AppName: the un
 SANDBOX_RUN_VALUE = "CUMTestSandbox"
 SANDBOX_MUTEX = "Global\\CUMTestSandboxMutex"
 SANDBOX_DATA = "CUMTestSandboxData"
+APPROVED_TEST_KEY = r"Software\UsageMonitorTestSandboxApproved"            # the sandbox's stand-in for Explorer\StartupApproved\Run
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 UNINSTALL_ROOT = r"Software\Microsoft\Windows\CurrentVersion\Uninstall"
 V1_SWITCHES = ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"]               # what v1.1.5's updater passes (it cannot change)
 V2_SWITCHES = [*V1_SWITCHES, '/MERGETASKS="!startup"']                          # what update_check.py passes
 REAL_IDENTITY = (                                                                # none of these may survive in a sandbox script
-    "{localappdata}", "{userappdata}\\ClaudeUsageMonitor", "Global\\ClaudeUsageMonitor", "'ClaudeUsageMonitor'",
+    "{localappdata}", "{userappdata}\\ClaudeUsageMonitor", "Global\\ClaudeUsageMonitor", "'ClaudeUsageMonitor'", "Explorer\\StartupApproved",
     '"ClaudeUsageMonitor"', "AppName=Claude Usage Monitor", '#define AppIdValue "Claude Usage Monitor"',
     "DefaultGroupName=Claude Usage Monitor", "DashboardTitle = 'Claude Usage Monitor'",
 )
@@ -1669,6 +1685,10 @@ def sandbox_script(real: str, app: Path) -> str:
         ("AppMutex=Global\\ClaudeUsageMonitor", f"AppMutex={SANDBOX_MUTEX}"),
         ("SetupIconFile=usage_monitor.ico", f"SetupIconFile={ROOT / 'usage_monitor.ico'}"),
         ("RemoveSetupWaitTries = 900;", "RemoveSetupWaitTries = 100;"),                 # a test need not wait 90 s to see the limit
+        ("ApprovedKey = 'Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run';",
+         f"ApprovedKey = '{APPROVED_TEST_KEY}';"),                                       # never the real StartupApproved key
+        ("UpdateNote = '{userappdata}\\ClaudeUsageMonitor\\update-note.txt';",
+         f"UpdateNote = '{{userappdata}}\\{SANDBOX_DATA}\\update-note.txt';"),
         ('Name: "{group}\\Claude Usage Monitor"', f'Name: "{{group}}\\{SANDBOX}"'),
         ('Name: "{group}\\Uninstall Claude Usage Monitor"', f'Name: "{{group}}\\Uninstall {SANDBOX}"'),
         ('ValueName: "ClaudeUsageMonitor"', f'ValueName: "{SANDBOX_RUN_VALUE}"'),
@@ -1702,8 +1722,10 @@ def v1_stand_in_script(app: Path) -> str:
 class Sandbox:
     """A renamed copy of the installer, a stand-in v1 installer with the same AppId, and what a run leaves behind."""
 
-    def __init__(self, root: Path, *, exe: Path | None = None, bundle_files: int = 0) -> None:
-        """``exe`` replaces the bundle's unrunnable exe, and ``bundle_files`` makes the bundle slower to delete and copy."""
+    def __init__(self, root: Path, *, exe: Path | None = None, bundle_files: int = 0,
+                 extra: list[tuple[str, str]] | None = None) -> None:
+        """``exe`` replaces the bundle's unrunnable exe, ``bundle_files`` makes the bundle slower to delete and copy, and
+        ``extra`` changes the v2 script further for one test (each swap must match exactly once)."""
         self.root = root
         self.app = root / "app"
         self.logs = root / "logs"
@@ -1715,7 +1737,11 @@ class Sandbox:
             (dist / "_internal" / f"part-{number}.pyd").write_bytes(b"stand-in")
         scripts = root / "scripts"
         scripts.mkdir()
-        (scripts / "v2.iss").write_text(sandbox_script((ROOT / "installer.iss").read_text(encoding="ascii"), self.app), encoding="ascii")
+        script = sandbox_script((ROOT / "installer.iss").read_text(encoding="ascii"), self.app)
+        for old, new in extra or []:
+            assert script.count(old) == 1, f"a test's swap no longer matches the script exactly once: {old!r}"
+            script = script.replace(old, new)
+        (scripts / "v2.iss").write_text(script, encoding="ascii")
         (scripts / "v1.iss").write_text(v1_stand_in_script(self.app), encoding="ascii")
         self.v2 = self._build(scripts / "v2.iss", "v2", dist, "2.0.0", "ClaudeUsageMonitorSetup-v2.0.0.exe")
         self.v1 = self._build(scripts / "v1.iss", "v1", dist, "1.1.5", "v1like.exe")
@@ -1784,8 +1810,15 @@ class Sandbox:
         self.uninstall()
         self.set_run_value(None)
         shutil.rmtree(self.app, ignore_errors=True)
+        sandbox_note().unlink(missing_ok=True)          # a silent update that ended a stand-in reader leaves one
+        try:
+            sandbox_note().parent.rmdir()
+        except OSError:
+            pass
 
-    def uninstall(self) -> None:
+    def uninstall(self, switches: str = "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART", during: Callable[[], Any] | None = None) -> Any:
+        """Uninstall with ``switches``, and return what ``during`` returns: it runs while the uninstall does."""
+        seen = None
         uninstaller = self.app / "unins000.exe"
         if uninstaller.is_file():
             # The uninstaller hands over to a copy of itself in %TEMP% and returns at once. That copy deletes the
@@ -1793,13 +1826,24 @@ class Sandbox:
             # key alone let a late RemoveStartupEntry delete the Run value the next case had just set (seen with Inno
             # Setup 6.7.1). Its log closes only once it is done.
             log = self.logs / f"uninstall-{len(list(self.logs.glob('uninstall-*.log')))}.log"
-            subprocess.run(f'"{uninstaller}" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG="{log}"', stdin=subprocess.DEVNULL,
-                           capture_output=True, timeout=240, creationflags=NO_WINDOW)
+            # It does not return at once with ``during``'s window to watch: the first process waits for the copy until that
+            # starts to delete, so ``during`` runs beside it.
+            process = subprocess.Popen(f'"{uninstaller}" {switches} /LOG="{log}"', stdin=subprocess.DEVNULL,
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=NO_WINDOW)
+            if during is not None:
+                seen = during()
+            process.wait(timeout=240)
             deadline = time.monotonic() + 90
             while not log_closed(log) and time.monotonic() < deadline:
                 time.sleep(0.3)
             while self.display_version() is not None and time.monotonic() < deadline:
                 time.sleep(0.3)
+        return seen
+
+
+def sandbox_note() -> Path:
+    """Where the sandbox's Setup leaves its note for the monitor (UpdateNote, under the sandbox's data folder)."""
+    return Path(os.environ["APPDATA"]) / SANDBOX_DATA / "update-note.txt"
 
 
 def log_closed(log: Path) -> bool:
@@ -2327,6 +2371,248 @@ def test_a_sandboxed_uninstall_with_the_bundle_gone_does_not_start_the_exe(tmp_p
         shutil.rmtree(box.app / "_internal")
         box.uninstall()
         assert not (box.root / "modes.txt").exists(), "it started an exe with no bundle"
+        assert not box.app.exists(), "the uninstall did not finish"
+    finally:
+        box.cleanup()
+    assert real_install_state() == before
+
+
+def sandbox_windows() -> list[int]:
+    """The visible top-level windows with the sandbox's name in their title: its Setup or uninstall window."""
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    found: list[int] = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def each(hwnd: int, _param: int) -> bool:
+        if user32.IsWindowVisible(hwnd):
+            title = ctypes.create_unicode_buffer(256)
+            user32.GetWindowTextW(hwnd, title, 256)
+            if SANDBOX in title.value:
+                found.append(hwnd)
+        return True
+
+    user32.EnumWindows(each, 0)
+    return found
+
+
+def child_texts(hwnd: int) -> set[str]:
+    """The texts of a window's controls. For another program's window Windows answers from what it keeps itself, without
+    asking the program, so a window that has stopped answering cannot hold this up."""
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    texts: set[str] = set()
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def each(child: int, _param: int) -> bool:
+        text = ctypes.create_unicode_buffer(512)
+        user32.GetWindowTextW(child, text, 512)
+        if text.value:
+            texts.add(text.value)
+        return True
+
+    user32.EnumChildWindows(hwnd, each, 0)
+    return texts
+
+
+def watch_uninstall_window() -> tuple[bool, float, set[str]]:
+    """Watch the sandbox's uninstall window until it goes: whether Windows ever found it not responding (IsHungAppWindow,
+    the test behind the "Not Responding" title), for how many seconds it was up, and what its controls said."""
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    user32.IsHungAppWindow.argtypes = [wintypes.HWND]
+    user32.IsWindow.argtypes = [wintypes.HWND]
+    # Looked for again at every poll: the uninstaller hands over to a copy of itself in %TEMP%, which has its own window.
+    started = time.monotonic()
+    first = last = None
+    hung = False
+    said: set[str] = set()
+    while time.monotonic() < started + 90:
+        windows = sandbox_windows()
+        now = time.monotonic()
+        if windows:
+            first = now if first is None else first
+            last = now
+            hung = hung or any(user32.IsHungAppWindow(hwnd) for hwnd in windows)
+            for hwnd in windows:
+                said |= child_texts(hwnd)
+        elif (last is not None and now - last > 3) or (first is None and now - started > 20):
+            break
+        time.sleep(0.2)
+    return hung, ((last - first) if first is not None and last is not None else 0.0), said
+
+
+def failing_copy(root: Path) -> list[tuple[str, str]]:
+    """Swaps that make the v2 Setup's copy fail half way when ``root``/fail-the-copy is there: just before Setup writes
+    part-5.pyd, a folder takes its place, and /SUPPRESSMSGBOXES answers Abort to the error, as a full disk would end it.
+    (It cannot be set up any earlier: [InstallDelete] empties _internal first.)"""
+    mark = root / "fail-the-copy"
+    block = ("procedure BlockOneFile;\n"
+             "begin\n"
+             f"  if FileExists('{mark}') and (ExtractFileName(CurrentFileName) = 'part-5.pyd') then\n"
+             "    ForceDirectories(ExpandConstant(CurrentFileName));\n"
+             "end;\n\n")
+    files = 'Source: "{#DistDir}\\*"; Excludes: "\\{#ExeName}"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs\n'
+    return [(files, files[:-1] + "; BeforeInstall: BlockOneFile\n"),
+            ("procedure MoveOldInstallAside;\n", block + "procedure MoveOldInstallAside;\n")]
+
+
+def straggler(root: Path) -> list[tuple[str, str]]:
+    """Swaps that make the v2 Setup start a reader of the old exe just before it moves the exe, when ``root``/start-a-
+    straggler is there: the moment after PrepareToInstall ended the readers, when Claude Code can start one again."""
+    mark, ready = root / "start-a-straggler", root / "straggler-holding"
+    start = ("procedure StartStraggler;\n"
+             "var\n"
+             "  Code, Tries: Integer;\n"
+             "begin\n"
+             f"  if not FileExists('{mark}') then\n"
+             "    Exit;\n"
+             "  Exec(ExpandConstant('{app}\\{#ExeName}'), '--mcp \"' + ExpandConstant('{app}\\_internal\\python.dll') + "
+             f"'\" \"{ready}\"', '', SW_HIDE, ewNoWait, Code);\n"
+             "  for Tries := 1 to 100 do begin\n"
+             f"    if FileExists('{ready}') then\n"
+             "      Exit;\n"
+             "    Sleep(100);\n"
+             "  end;\n"
+             "end;\n\n")
+    return [("procedure MoveOldInstallAside;\n", start + "procedure MoveOldInstallAside;\n"),
+            ("  HadExe := FileExists(Exe);\n", "  StartStraggler;\n  HadExe := FileExists(Exe);\n")]
+
+
+@SANDBOX_RUNS
+@pytest.mark.usefixtures("keeps_real_readers")
+def test_a_sandboxed_update_that_stops_half_way_puts_the_old_version_back(tmp_path: Path) -> None:
+    """Setup moves the old exe and bundle aside before it writes anything. If it then stops half way (Cancel, a full disk,
+    a file it cannot write), they go back, so the version that was there still starts. Before, the old copies were
+    deleted before the copy began, and a stop left no program at all (#37)."""
+    box = Sandbox(tmp_path, bundle_files=10, extra=failing_copy(tmp_path))
+    exe, kept = box.app / "ClaudeUsageMonitor.exe", box.app / "_internal" / "from-the-old-install.txt"
+    before = real_install_state()
+    try:
+        box.reset("v2", None)
+        kept.write_text("old", encoding="ascii")
+        identity = os.stat(exe).st_ino
+        (tmp_path / "fail-the-copy").write_text("", encoding="ascii")
+        code = box.run(box.v2, V2_SWITCHES, "stops half way")
+        log = (box.logs / "stops_half_way.log").read_text(encoding="utf-8", errors="replace")
+        assert code != 0, "the copy was meant to fail"
+        assert "The old version is back." in log, log[-1200:]
+        assert exe.is_file() and os.stat(exe).st_ino == identity, "not the old exe"        # the same file, moved back
+        assert kept.is_file() and box.moved_aside() == []
+    finally:
+        box.cleanup()
+    assert real_install_state() == before
+
+
+@SANDBOX_RUNS
+@pytest.mark.usefixtures("keeps_real_readers")
+def test_a_sandboxed_update_after_one_that_was_killed_half_way_installs_and_tidies_up(tmp_path: Path) -> None:
+    """A Setup that is killed, or loses power, never puts the old copies back: they stay beside a half-written bundle and
+    no exe. The next Setup installs as usual, and deletes them once the new copy is whole."""
+    box = Sandbox(tmp_path)
+    before = real_install_state()
+    try:
+        box.reset("v2", None)
+        (box.app / "ClaudeUsageMonitor.exe").rename(box.app / "ClaudeUsageMonitor.exe.old0")
+        (box.app / "_internal").rename(box.app / "_internal.old0")
+        (box.app / "_internal").mkdir()
+        (box.app / "_internal" / "half-written.pyd").write_bytes(b"part of the new copy")
+        assert box.run(box.v2, V2_SWITCHES, "after a killed one") == 0
+        assert (box.app / "ClaudeUsageMonitor.exe").is_file() and (box.app / "_internal" / "python.dll").is_file()
+        assert not (box.app / "_internal" / "half-written.pyd").exists() and box.moved_aside() == []
+    finally:
+        box.cleanup()
+    assert real_install_state() == before
+
+
+@SANDBOX_RUNS
+@needs_csc
+@pytest.mark.usefixtures("keeps_real_readers")
+def test_a_sandboxed_update_ends_a_reader_that_starts_as_the_exe_moves_and_says_so(tmp_path: Path) -> None:
+    """PrepareToInstall ends the readers, but Claude Code can start one in the moment before the exe moves, and a new
+    session's MCP tool lives for hours. Once the exe has moved nothing new can start, so Setup ends that one too instead
+    of stopping with "in use". After a silent update it leaves the monitor a note to say so (#37)."""
+    box = Sandbox(tmp_path, extra=straggler(tmp_path))
+    before = real_install_state()
+    try:
+        box.reset("v2", None)
+        build_stand_in(box)
+        (tmp_path / "start-a-straggler").write_text("", encoding="ascii")
+        code = box.run(box.v2, V2_SWITCHES, "straggler")
+        log = (box.logs / "straggler.log").read_text(encoding="utf-8", errors="replace")
+        assert code == 0, log[-1200:]
+        assert (tmp_path / "straggler-holding").exists(), "the straggler never held the bundle"
+        assert re.search(r"Ending process \d+ of the install folder, started with --mcp\.", log)
+        assert box.moved_aside() == [] and box.display_version() == "2.0.0"
+        assert sandbox_note().read_text(encoding="ascii") == (
+            "Setup closed the monitor's tool in a Claude Code session. If that session shows an error, type /mcp there or "
+            "restart it.")
+    finally:
+        box.cleanup()
+    assert real_install_state() == before
+
+
+@SANDBOX_RUNS
+@pytest.mark.usefixtures("keeps_real_readers")
+def test_a_sandboxed_uninstall_takes_windows_startup_record_with_the_entry(tmp_path: Path) -> None:
+    """Windows keeps its own record of a startup entry, by its name, after the entry goes, and one that says off (Task
+    Manager, the Settings app) would turn off the next install's entry. It goes with this install's entry, and when there
+    is no entry; an entry that points somewhere else keeps its record (#32)."""
+    import winreg
+
+    off = b"\x03" + bytes(11)
+
+    def record() -> Any:
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, APPROVED_TEST_KEY) as key:
+                return winreg.QueryValueEx(key, SANDBOX_RUN_VALUE)[0]
+        except FileNotFoundError:
+            return None
+
+    box = Sandbox(tmp_path)
+    before = real_install_state()
+    try:
+        ours = f'"{box.app / "ClaudeUsageMonitor.exe"}"'
+        for entry, kept in ((ours, False), (None, False), ('"C:\\Elsewhere\\ClaudeUsageMonitor.exe"', True)):
+            box.reset("v2", entry)
+            if kept:            # Setup's uninsdeletevalue takes the value whatever it holds: install without the startup task
+                box.cleanup()
+                assert box.run(box.v2, V2_SWITCHES, "no startup task") == 0
+                box.set_run_value(entry)
+            with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, APPROVED_TEST_KEY, 0, winreg.KEY_SET_VALUE) as key:
+                winreg.SetValueEx(key, SANDBOX_RUN_VALUE, 0, winreg.REG_BINARY, off)
+            box.uninstall()
+            assert record() == (off if kept else None), f"with the entry {entry!r}"
+    finally:
+        box.cleanup()
+        try:
+            winreg.DeleteKey(winreg.HKEY_CURRENT_USER, APPROVED_TEST_KEY)
+        except FileNotFoundError:
+            pass
+    assert real_install_state() == before
+
+
+@SANDBOX_RUNS
+@needs_csc
+@pytest.mark.usefixtures("keeps_real_readers")
+def test_a_sandboxed_uninstall_window_keeps_answering_while_it_waits_for_the_exe(tmp_path: Path) -> None:
+    """The uninstaller waits up to 90 seconds for the exe to take the app out of Claude Code (10 here, for an exe that
+    never answers), with its window on screen. The window says what it waits for, and Windows' own test for "Not
+    Responding" must stay false all that time (#32). This one puts the window on screen for a few seconds."""
+    box = Sandbox(tmp_path, exe=build_recorder(tmp_path / "hung", HUNG_SOURCE))
+    before = real_install_state()
+    try:
+        box.reset("v2", None)
+        hung, seen, said = box.uninstall("/SILENT /SUPPRESSMSGBOXES /NORESTART", during=watch_uninstall_window)
+        assert seen >= 6.0, f"the window was up {seen:.1f} s: too short to tell"
+        assert not hung, "the uninstall window stopped answering"
+        assert "Taking Claude Usage Monitor out of Claude Code..." in said, said
         assert not box.app.exists(), "the uninstall did not finish"
     finally:
         box.cleanup()
