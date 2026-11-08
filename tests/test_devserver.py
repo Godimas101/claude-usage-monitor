@@ -301,7 +301,8 @@ def test_the_guard_scenario_is_a_holding_guard_with_two_sessions_told_and_one_wa
     assert guard["state"] == "holding" and guard["resume_at"] == SESSION_RESET
     assert guard["over"] == [{"name": "session", "label": "session", "percent": 96.0, "cap": 95,
                               "resets_at": SESSION_RESET}]
-    assert guard["policy"] == {"enabled": True, "session_cap": 95, "weekly_cap": 90, "scoped_cap": None, "stagger_s": 120}
+    assert guard["policy"] == {"enabled": True, "session_cap": 95, "weekly_cap": 90, "scoped_cap": None, "stagger_s": 120,
+                               "enabled_at": None}
     assert state["settings"]["guard_enabled"] is True
     answer = get_json(server, "/api/guard")
     assert answer["guard"] == guard

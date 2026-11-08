@@ -31,6 +31,7 @@ SETTING_KEYS = {  # setting -> policy field
 }
 DEFAULTS = {key: _SETTINGS[key] for key in SETTING_KEYS}
 SETTINGS_NAME = "settings.json"  # paths.settings_path() is app_data_dir() / this
+ON_KEY = "guard_enabled_at"       # setting: when the guard was last switched on, written by the app; not the page's (#41)
 
 
 def policy_from(get: Callable[[str], Any]) -> dict:
@@ -40,6 +41,8 @@ def policy_from(get: Callable[[str], Any]) -> dict:
         value = get(key)
         policy[field] = DEFAULTS[key] if value is None and key in ("guard_enabled", "guard_resume_stagger_s") else value
     policy["enabled"] = bool(policy["enabled"])
+    on = get(ON_KEY)
+    policy["enabled_at"] = on if isinstance(on, str) and 0 < len(on) <= 40 else None
     return policy
 
 
@@ -53,7 +56,7 @@ def policy_from_file(path: Path) -> dict:
         stored = {}
     if not isinstance(stored, dict):
         stored = {}
-    return policy_from(lambda key: stored[key] if key in stored and _valid(key, stored[key]) else DEFAULTS[key])
+    return policy_from(lambda key: stored[key] if key in stored and _valid(key, stored[key]) else DEFAULTS.get(key))
 
 
 def for_reader(doc: Mapping[str, Any] | None, now: datetime, folder: Path) -> dict:
@@ -110,9 +113,13 @@ def episode(evaluation: Mapping[str, Any]) -> str:
     """A key for one holding episode: the limits over their caps, their windows and the caps. A session
     is told once per episode. A new window over a cap is a new episode, and so is a changed cap: a hold
     that ended because a cap was raised, and that starts again at the new cap in the same window, is told
-    again (#40). Switching the guard off and on again with the same caps is not a new episode."""
-    return "|".join(sorted(f"{item['name']}@{item['resets_at']} cap {item['cap']:g}"
-                           for item in evaluation.get("over") or []))
+    again (#40). Switching the guard off and on again is one too (#41): the key then holds when it was switched on,
+    and a key from before that time has no such part, so the sessions told under it are told again."""
+    parts = sorted(f"{item['name']}@{item['resets_at']} cap {item['cap']:g}" for item in evaluation.get("over") or [])
+    on = (evaluation.get("policy") or {}).get("enabled_at")
+    if parts and on:
+        parts.append(f"on@{on}")
+    return "|".join(parts)
 
 
 def _watched(doc: Mapping[str, Any], policy: Mapping[str, Any]) -> Iterator[tuple[str, str, Any, Any]]:

@@ -2711,6 +2711,17 @@ def test_an_update_note_waits_for_someone_to_see_it(wired, monkeypatch):
     assert (app_mod.UPDATE_NOTE_TITLE, SAID) in publish(wired, usage_state(12)) and not note.exists()
 
 
+def test_switching_the_guard_on_records_when(wired):
+    """The readers start a new holding episode from it (#41). Switching the guard off leaves it as it was."""
+    from usage_monitor.agent import guard
+
+    wired.settings.set("guard_enabled", True)
+    assert wired.settings.get(guard.ON_KEY) == NOW.astimezone(timezone.utc).isoformat(timespec="seconds")
+    wired.settings.set(guard.ON_KEY, "before")
+    wired.settings.set("guard_enabled", False)
+    assert wired.settings.get(guard.ON_KEY) == "before"
+
+
 def test_the_app_checks_alerts_with_the_alert_engine_built_on_its_settings(wired):
     assert isinstance(wired.app._alerts, AlertEngine)
     wired.settings.set("alert_thresholds", [40])

@@ -91,6 +91,7 @@ UI_CALL_TIMEOUT_S = 5.0
 GITHUB_PREFIX = "https://github.com/"
 UPDATE_RECHECK_S = 6 * 60 * 60      # the monitor looks for a newer release again this often while it runs
 NOTIFIED_KEY = "notified_version"   # setting: the newest release the monitor has already put a toast up for
+GUARD_ON_KEY = "guard_enabled_at"   # setting: when the usage guard was last switched on (agent/guard.ON_KEY)
 # What the last update ended of Claude Code's calls to the monitor, written by Setup after a silent update (installer.iss,
 # WriteUpdateNote) and said once as a toast when the monitor is back (MonitorApp._announce_update_note).
 UPDATE_NOTE_FILE = "update-note.txt"
@@ -1003,6 +1004,8 @@ class MonitorApp:
 
     def _on_setting(self, key: str, _value: Any) -> None:
         """Settings listener, on whichever thread changed the setting."""
+        if key == "guard_enabled" and _value is True:     # a new holding episode starts from it (agent/guard.episode)
+            self.settings.set(GUARD_ON_KEY, self._clock().astimezone(timezone.utc).isoformat(timespec="seconds"))
         if key.startswith("_") or key not in (THEME_KEYS | WIDGET_KEYS | LOOK_KEYS | {"check_updates"}):
             return
         with self._lock:

@@ -477,6 +477,29 @@ def test_get_plan_usage_says_when_the_guard_holds(folder, fetches):
     assert "usage guard" not in called["result"]["content"][0]["text"].split("\n")[0]
 
 
+def test_switching_the_guard_off_and_on_starts_a_new_episode(folder):
+    """#41, left over from #40: a hold that ended because the guard was switched off, and that starts again when it is
+    switched back on in the same window, is told again. The app records when the guard was switched on."""
+    save(folder, guarded(document(weekly=78.0)))
+    assert hook(folder, TOOL) is not None and hook(folder, TOOL) is None
+    save(folder, guarded(document(weekly=78.0), enabled_at="2026-10-21T12:30:00+00:00"))
+    assert "wind-down point" in context(hook(folder, TOOL))
+    assert hook(folder, TOOL) is None and told(folder) == ["s1"]
+    save(folder, guarded(document(weekly=78.0), enabled_at="2026-10-21T12:45:00+00:00"))
+    assert hook(folder, TOOL) is not None
+
+
+def test_the_policy_carries_when_the_guard_was_switched_on(tmp_path):
+    on = "2026-10-21T12:30:00+00:00"
+    assert guard.policy_from({"guard_enabled": True, guard.ON_KEY: on}.get)["enabled_at"] == on
+    assert guard.policy_from({"guard_enabled": True, guard.ON_KEY: 5}.get)["enabled_at"] is None
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"guard_enabled": True, guard.ON_KEY: on}), encoding="utf-8")
+    assert guard.policy_from_file(path)["enabled_at"] == on
+    path.write_text(json.dumps({"guard_enabled": True}), encoding="utf-8")        # a file from before: no time yet
+    assert guard.policy_from_file(path)["enabled_at"] is None
+
+
 def test_a_new_holding_episode_is_told_again(folder):
     save(folder, guarded(document(weekly=78.0)))
     assert hook(folder, TOOL) is not None

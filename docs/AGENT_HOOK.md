@@ -202,8 +202,8 @@ model-limited week such as Fable (off by default). Then press **Install** on the
 - The guard pauses nothing. A workflow or a background agent carries on until it wraps up, or until
   you stop it.
 - Each session hears it once per holding episode. A new window over a cap is a new episode, and so
-  is a changed cap. Switching the guard off and on again in the same window, with the same caps, is
-  not. A session that starts, resumes or is compacted while the guard holds hears it again.
+  is a changed cap, and so is switching the guard off and on again: every session hears it again. A
+  session that starts, resumes or is compacted while the guard holds hears it again too.
 - The floating widget shows the guard holding, with the time left until work can resume (in Gates,
   while the numbers are live). The taskbar strip shows only a hold mark; the hover card and the tray
   icon's tooltip give the time.
