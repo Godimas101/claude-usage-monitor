@@ -1,7 +1,7 @@
 """Tests for the Night City skin (usage_monitor/render/skins/night_city.py).
 
 Everything renders to memory or to pytest's tmp_path, so nearly all of it needs no desktop and runs in CI. The
-two tests that hand frames to real (off-screen) windows and icons at the end are skipped unless CUM_UI_TESTS=1.
+two tests that hand frames to real (off-screen) windows and icons at the end are skipped unless USAGE_MONITOR_UI_TESTS=1.
 
 Pixel checks sample flat shapes (cells, plates, rings, the frame) and compare them with the variant's tokens, so
 they hold whatever the text looks like. Where a test needs text it compares two renders instead.
@@ -31,7 +31,7 @@ from usage_monitor.render.skins import night_city as nc
 from usage_monitor.render.skins.night_city import NightCitySkin, Palette
 
 UI = pytest.mark.skipif(
-    os.environ.get("CUM_UI_TESTS") != "1", reason="needs an interactive desktop: set CUM_UI_TESTS=1"
+    os.environ.get("USAGE_MONITOR_UI_TESTS") != "1", reason="needs an interactive desktop: set USAGE_MONITOR_UI_TESTS=1"
 )
 VARIANTS = ("blackwall", "relic", "edgerun", "mox")
 SCALES = (1.0, 1.25, 1.5, 2.0)
@@ -1173,7 +1173,7 @@ def test_dump_frames_writes_night_city_files(tmp_path: Path):
         assert opened.size == (264, 126)
 
 
-# ── Real windows and icons (CUM_UI_TESTS=1) ───────────────────────────────────
+# ── Real windows and icons (USAGE_MONITOR_UI_TESTS=1) ───────────────────────────────────
 
 @UI
 @pytest.mark.skipif(sys.platform != "win32", reason="the Win32 UI layer is Windows only")
@@ -1181,7 +1181,7 @@ def test_night_city_frames_show_in_layered_windows():
     from usage_monitor.ui.host import UIHost
     from usage_monitor.ui.layered import LayeredWindow
 
-    host = UIHost(controller_class=f"CUM.Test.NightCity.{uuid.uuid4().hex[:8]}")
+    host = UIHost(controller_class=f"UsageMonitor.Test.NightCity.{uuid.uuid4().hex[:8]}")
     try:
         offscreen = (-30000, -30000)
         sample = dump.sample_model("critical")

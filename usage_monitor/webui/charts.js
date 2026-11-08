@@ -21,12 +21,12 @@
  *   --chart-limit   the 100 % line                               (fallback --alert)
  *   --chart-pips    "1" draws bars as separate pips (segments); anything else draws solid bars
  *
- * SVG classes (a theme may restyle any of them): cum-chart (root) cum-t (text; is-end, is-mid, is-strong)
- * cum-track cum-mark cum-mark-2 cum-hot cum-line cum-ideal cum-fore cum-dot cum-grid (is-limit) cum-now
- * cum-cell (cum-l0 .. cum-l4 heat levels, is-today) cum-pip cum-col cum-row cum-seg (cum-s-main, cum-s-alt,
- * cum-s-dim) cum-item (anything that takes a tooltip and keyboard focus) cum-hit (invisible hit area).
+ * SVG classes (a theme may restyle any of them): mon-chart (root) mon-t (text; is-end, is-mid, is-strong)
+ * mon-track mon-mark mon-mark-2 mon-hot mon-line mon-ideal mon-fore mon-dot mon-grid (is-limit) mon-now
+ * mon-cell (mon-l0 .. mon-l4 heat levels, is-today) mon-pip mon-col mon-row mon-seg (mon-s-main, mon-s-alt,
+ * mon-s-dim) mon-item (anything that takes a tooltip and keyboard focus) mon-hit (invisible hit area).
  *
- * Accessibility: an item is `.cum-item` with an aria-label (the tooltip text) and a roving tabindex, so
+ * Accessibility: an item is `.mon-item` with an aria-label (the tooltip text) and a roving tabindex, so
  * one Tab stop enters a chart and the arrow keys move between its items; the tooltip shows on hover and
  * on focus. bind() wires the tooltip and the arrow keys once for a whole container.
  */
@@ -43,44 +43,44 @@
   var STYLE = [
     "[hidden]{display:none!important}",
     ".nm-tip{position:fixed;left:0;top:0;z-index:60;max-width:340px}",
-    ".cum-chart{display:block;width:100%;height:auto;overflow:visible}",
-    ".cum-t{font:500 11px/1 var(--font-body,system-ui,sans-serif);fill:var(--chart-text,var(--text-dim,currentColor));letter-spacing:.04em}",
-    ".cum-t.is-strong{fill:var(--chart-text-strong,var(--text,currentColor))}",
-    ".cum-t.is-mid{text-anchor:middle}.cum-t.is-end{text-anchor:end}",
-    ".cum-track{fill:var(--chart-track,var(--track,currentColor))}",
-    ".cum-mark{fill:var(--chart-mark,var(--accent,currentColor))}",
-    ".cum-mark-2{fill:var(--chart-mark-2,var(--accent-alt,currentColor))}",
-    ".cum-hot{fill:var(--chart-hot,var(--text-bright,currentColor))}",
-    ".cum-s-main{fill:var(--chart-mark,var(--accent,currentColor))}",
-    ".cum-s-alt{fill:var(--chart-mark-2,var(--accent-alt,currentColor))}",
-    ".cum-s-dim{fill:var(--chart-track,var(--track,currentColor))}",
-    ".cum-line{fill:none;stroke:var(--chart-line,var(--accent,currentColor));stroke-width:1.6;stroke-linejoin:round}",
-    ".cum-ideal{fill:none;stroke:var(--chart-text,var(--text-dim,currentColor));stroke-width:1;stroke-dasharray:4 4;opacity:.8}",
-    ".cum-fore{fill:none;stroke:var(--chart-line,var(--accent,currentColor));stroke-width:1.4;stroke-dasharray:2 4;opacity:.9}",
-    ".cum-dot{fill:var(--chart-hot,var(--text-bright,currentColor));stroke:none}",
-    ".cum-dot.is-hollow{fill:none;stroke:var(--chart-hot,var(--text-bright,currentColor));stroke-width:1.4}",
-    ".cum-grid{fill:none;stroke:var(--chart-grid,var(--border-dim,currentColor));stroke-width:1;stroke-dasharray:1 3}",
-    ".cum-grid.is-limit{stroke:var(--chart-limit,var(--alert,currentColor));stroke-dasharray:6 3;opacity:.7}",
-    ".cum-now{stroke:var(--chart-hot,var(--text-bright,currentColor));stroke-width:1;stroke-dasharray:2 2}",
-    ".cum-cell.cum-l0{fill:var(--chart-track,var(--track,currentColor))}",
-    ".cum-cell.cum-l1,.cum-cell.cum-l2,.cum-cell.cum-l3,.cum-cell.cum-l4{fill:var(--chart-mark,var(--accent,currentColor))}",
-    ".cum-cell.cum-l1{fill-opacity:.3}.cum-cell.cum-l2{fill-opacity:.52}.cum-cell.cum-l3{fill-opacity:.76}.cum-cell.cum-l4{fill-opacity:1}",
-    ".cum-cell.is-today{stroke:var(--chart-hot,var(--text-bright,currentColor));stroke-width:1.5}",
-    ".cum-hit{fill:transparent;stroke:none}",
-    ".cum-ring-focus{display:none;fill:none;stroke:var(--chart-hot,var(--text-bright,currentColor));stroke-width:1.5}",
-    ".cum-item{outline:none}",
-    ".cum-cell.cum-item:hover,.cum-cell.cum-item:focus,.cum-dot.cum-item:focus,.cum-dot.cum-item:hover{stroke:var(--chart-hot,var(--text-bright,currentColor));stroke-width:1.8}",
-    ".cum-seg.cum-item:hover,.cum-seg.cum-item:focus{stroke:var(--chart-hot,var(--text-bright,currentColor));stroke-width:2}",
-    ".cum-col:hover .cum-pip,.cum-col:focus .cum-pip,.cum-col:hover .cum-mark,.cum-col:focus .cum-mark,.cum-row:hover .cum-mark,.cum-row:focus .cum-mark{fill:var(--chart-hot,var(--text-bright,currentColor))}",
-    ".cum-col:focus .cum-ring-focus,.cum-row:focus .cum-ring-focus{display:inline}"
+    ".mon-chart{display:block;width:100%;height:auto;overflow:visible}",
+    ".mon-t{font:500 11px/1 var(--font-body,system-ui,sans-serif);fill:var(--chart-text,var(--text-dim,currentColor));letter-spacing:.04em}",
+    ".mon-t.is-strong{fill:var(--chart-text-strong,var(--text,currentColor))}",
+    ".mon-t.is-mid{text-anchor:middle}.mon-t.is-end{text-anchor:end}",
+    ".mon-track{fill:var(--chart-track,var(--track,currentColor))}",
+    ".mon-mark{fill:var(--chart-mark,var(--accent,currentColor))}",
+    ".mon-mark-2{fill:var(--chart-mark-2,var(--accent-alt,currentColor))}",
+    ".mon-hot{fill:var(--chart-hot,var(--text-bright,currentColor))}",
+    ".mon-s-main{fill:var(--chart-mark,var(--accent,currentColor))}",
+    ".mon-s-alt{fill:var(--chart-mark-2,var(--accent-alt,currentColor))}",
+    ".mon-s-dim{fill:var(--chart-track,var(--track,currentColor))}",
+    ".mon-line{fill:none;stroke:var(--chart-line,var(--accent,currentColor));stroke-width:1.6;stroke-linejoin:round}",
+    ".mon-ideal{fill:none;stroke:var(--chart-text,var(--text-dim,currentColor));stroke-width:1;stroke-dasharray:4 4;opacity:.8}",
+    ".mon-fore{fill:none;stroke:var(--chart-line,var(--accent,currentColor));stroke-width:1.4;stroke-dasharray:2 4;opacity:.9}",
+    ".mon-dot{fill:var(--chart-hot,var(--text-bright,currentColor));stroke:none}",
+    ".mon-dot.is-hollow{fill:none;stroke:var(--chart-hot,var(--text-bright,currentColor));stroke-width:1.4}",
+    ".mon-grid{fill:none;stroke:var(--chart-grid,var(--border-dim,currentColor));stroke-width:1;stroke-dasharray:1 3}",
+    ".mon-grid.is-limit{stroke:var(--chart-limit,var(--alert,currentColor));stroke-dasharray:6 3;opacity:.7}",
+    ".mon-now{stroke:var(--chart-hot,var(--text-bright,currentColor));stroke-width:1;stroke-dasharray:2 2}",
+    ".mon-cell.mon-l0{fill:var(--chart-track,var(--track,currentColor))}",
+    ".mon-cell.mon-l1,.mon-cell.mon-l2,.mon-cell.mon-l3,.mon-cell.mon-l4{fill:var(--chart-mark,var(--accent,currentColor))}",
+    ".mon-cell.mon-l1{fill-opacity:.3}.mon-cell.mon-l2{fill-opacity:.52}.mon-cell.mon-l3{fill-opacity:.76}.mon-cell.mon-l4{fill-opacity:1}",
+    ".mon-cell.is-today{stroke:var(--chart-hot,var(--text-bright,currentColor));stroke-width:1.5}",
+    ".mon-hit{fill:transparent;stroke:none}",
+    ".mon-ring-focus{display:none;fill:none;stroke:var(--chart-hot,var(--text-bright,currentColor));stroke-width:1.5}",
+    ".mon-item{outline:none}",
+    ".mon-cell.mon-item:hover,.mon-cell.mon-item:focus,.mon-dot.mon-item:focus,.mon-dot.mon-item:hover{stroke:var(--chart-hot,var(--text-bright,currentColor));stroke-width:1.8}",
+    ".mon-seg.mon-item:hover,.mon-seg.mon-item:focus{stroke:var(--chart-hot,var(--text-bright,currentColor));stroke-width:2}",
+    ".mon-col:hover .mon-pip,.mon-col:focus .mon-pip,.mon-col:hover .mon-mark,.mon-col:focus .mon-mark,.mon-row:hover .mon-mark,.mon-row:focus .mon-mark{fill:var(--chart-hot,var(--text-bright,currentColor))}",
+    ".mon-col:focus .mon-ring-focus,.mon-row:focus .mon-ring-focus{display:inline}"
   ].join("\n");
 
   function installStyle() {
-    if (!doc || doc.getElementById("cum-charts-style")) {
+    if (!doc || doc.getElementById("mon-charts-style")) {
       return;
     }
     var el = doc.createElement("style");
-    el.id = "cum-charts-style";
+    el.id = "mon-charts-style";
     el.textContent = STYLE;
     var head = doc.head || doc.documentElement;
     head.insertBefore(el, head.firstChild);
@@ -119,8 +119,8 @@
 
   /* The px width of one chart text as the page draws it (this theme's font, size, spacing and case). It asks an
    * invisible <text> inside an <svg> of the chart's own class, so the theme's rules for that chart apply to it.
-   * `chart` is the SVG's chart class ("cum-hbars", "cum-columns", "cum-calendar") and `strong` says the text is a
-   * value (cum-t is-strong). Without a page to ask (the script tests, no <body> yet) the answer is the estimate,
+   * `chart` is the SVG's chart class ("mon-hbars", "mon-columns", "mon-calendar") and `strong` says the text is a
+   * value (mon-t is-strong). Without a page to ask (the script tests, no <body> yet) the answer is the estimate,
    * CHAR_W a character. Answers are kept until refresh(), which the page calls before every render pass. */
   function textWidth(text, chart, strong) {
     var s = String(text === null || text === undefined ? "" : text);
@@ -145,8 +145,8 @@
         svg.appendChild(probe);
         doc.body.appendChild(svg);
       }
-      probe.parentNode.setAttribute("class", "cum-chart " + chart);
-      probe.setAttribute("class", strong ? "cum-t is-strong" : "cum-t");
+      probe.parentNode.setAttribute("class", "mon-chart " + chart);
+      probe.setAttribute("class", strong ? "mon-t is-strong" : "mon-t");
       probe.textContent = text;
       var w = probe.getComputedTextLength();
       return w > 0 ? w : -1;
@@ -211,14 +211,14 @@
 
   function open(cls, w, h, label, o) {
     o = o || {};
-    return '<svg class="cum-chart ' + cls + '" viewBox="0 0 ' + f1(w) + " " + f1(h) + '" preserveAspectRatio="' + (o.par || "xMinYMin meet") +
+    return '<svg class="mon-chart ' + cls + '" viewBox="0 0 ' + f1(w) + " " + f1(h) + '" preserveAspectRatio="' + (o.par || "xMinYMin meet") +
       '" role="' + (o.role || "img") + '" aria-label="' + esc(label || "chart") + '"' + (o.nav ? ' data-nav="' + o.nav + '"' : "") +
       (o.cols ? ' data-cols="' + o.cols + '"' : "") + ">";
   }
 
   /* Attributes that make a drawn element a tooltip and keyboard stop (a roving tabindex: one Tab stop per chart). */
   function item(cls, tip, index, tabbable, r, c) {
-    return ' class="' + cls + ' cum-item" tabindex="' + (tabbable ? 0 : -1) + '" role="img" aria-label="' + esc(tip || "") + '" data-i="' + index + '"' +
+    return ' class="' + cls + ' mon-item" tabindex="' + (tabbable ? 0 : -1) + '" role="img" aria-label="' + esc(tip || "") + '" data-i="' + index + '"' +
       (r !== undefined ? ' data-r="' + r + '" data-c="' + c + '"' : "");
   }
 
@@ -262,19 +262,19 @@
       return [x, y];
     });
     var tips = opts.tips || null;
-    var out = open("cum-spark", w, h, opts.label || "trend", { par: "none", role: tips ? "group" : "img", nav: tips ? "list" : "" });
+    var out = open("mon-spark", w, h, opts.label || "trend", { par: "none", role: tips ? "group" : "img", nav: tips ? "list" : "" });
     [top, (top + base) / 2, base].forEach(function (y) {
-      out += '<line class="cum-grid" x1="0" x2="' + f1(w) + '" y1="' + f1(y) + '" y2="' + f1(y) + '" vector-effect="non-scaling-stroke"/>';
+      out += '<line class="mon-grid" x1="0" x2="' + f1(w) + '" y1="' + f1(y) + '" y2="' + f1(y) + '" vector-effect="non-scaling-stroke"/>';
     });
     if (pts.length > 1) {
-      out += '<polyline class="cum-line" vector-effect="non-scaling-stroke" points="' +
+      out += '<polyline class="mon-line" vector-effect="non-scaling-stroke" points="' +
         pts.map(function (p) { return f1(p[0]) + "," + f1(p[1]); }).join(" ") + '"/>';
     }
     if (opts.dots !== false) {
       out += pts.map(function (p, i) {
         var tip = tips && tips[i] !== undefined ? tips[i] : null;
         return '<circle cx="' + f1(p[0]) + '" cy="' + f1(p[1]) + '" r="1.8"' +
-          (tip !== null ? item("cum-dot", tip, i, i === pts.length - 1) : ' class="cum-dot"') + "/>";
+          (tip !== null ? item("mon-dot", tip, i, i === pts.length - 1) : ' class="mon-dot"') + "/>";
       }).join("");
     }
     return out + "</svg>";
@@ -305,18 +305,18 @@
     function Y(v) { return top + ph - clamp((num(v) - y0) / (y1 - y0), 0, 1) * ph; }
     var series = opts.series || [];
     var hasItems = series.some(function (s) { return (s.tips && s.tips.length) || (s.marks && s.marks.length) || s.endTip; });
-    var out = open("cum-linechart", w, h, opts.label || "line chart", { role: hasItems ? "group" : "img", nav: hasItems ? "list" : "" });
+    var out = open("mon-linechart", w, h, opts.label || "line chart", { role: hasItems ? "group" : "img", nav: hasItems ? "list" : "" });
     (opts.yTicks || []).forEach(function (t) {
       var y = Y(t.v);
-      out += '<line class="cum-grid' + (t.limit ? " is-limit" : "") + '" x1="' + f1(left) + '" x2="' + f1(w - right) + '" y1="' + f1(y) + '" y2="' + f1(y) + '"/>' +
-        '<text class="cum-t is-end" x="' + f1(left - 8) + '" y="' + f1(y + 4) + '">' + esc(t.label) + "</text>";
+      out += '<line class="mon-grid' + (t.limit ? " is-limit" : "") + '" x1="' + f1(left) + '" x2="' + f1(w - right) + '" y1="' + f1(y) + '" y2="' + f1(y) + '"/>' +
+        '<text class="mon-t is-end" x="' + f1(left - 8) + '" y="' + f1(y + 4) + '">' + esc(t.label) + "</text>";
     });
     var ticks = opts.xTicks || [];
     ticks.forEach(function (t, i) {
       var x = X(t.t);
       var anchor = i === 0 ? "" : i === ticks.length - 1 ? " is-end" : " is-mid";
-      out += '<line class="cum-grid" x1="' + f1(x) + '" x2="' + f1(x) + '" y1="' + f1(top) + '" y2="' + f1(top + ph) + '"/>' +
-        '<text class="cum-t' + anchor + '" x="' + f1(x) + '" y="' + f1(h - 8) + '">' + esc(t.label) + "</text>";
+      out += '<line class="mon-grid" x1="' + f1(x) + '" x2="' + f1(x) + '" y1="' + f1(top) + '" y2="' + f1(top + ph) + '"/>' +
+        '<text class="mon-t' + anchor + '" x="' + f1(x) + '" y="' + f1(h - 8) + '">' + esc(t.label) + "</text>";
     });
     function pathOf(points) {
       return points.map(function (p) { return f1(X(p[0])) + "," + f1(Y(p[1])); }).join(" ");
@@ -324,13 +324,13 @@
     series.forEach(function (s) {
       var pts = s.points || [];
       if (pts.length > 1 && s.kind === "ideal") {
-        out += '<polyline class="cum-ideal" points="' + pathOf(pts) + '"/>';
+        out += '<polyline class="mon-ideal" points="' + pathOf(pts) + '"/>';
       }
     });
     series.forEach(function (s) {
       var pts = s.points || [];
       if (pts.length > 1 && s.kind === "forecast") {
-        out += '<polyline class="cum-fore" points="' + pathOf(pts) + '"/>';
+        out += '<polyline class="mon-fore" points="' + pathOf(pts) + '"/>';
       }
     });
     series.forEach(function (s) {
@@ -339,15 +339,15 @@
         return;
       }
       if (pts.length > 1) {
-        out += '<polyline class="cum-line" points="' + pathOf(pts) + '"/>';
+        out += '<polyline class="mon-line" points="' + pathOf(pts) + '"/>';
       }
     });
     (opts.marks || []).forEach(function (m) {
       var x = X(m.t);
-      out += '<line class="cum-now" x1="' + f1(x) + '" x2="' + f1(x) + '" y1="' + f1(top - 4) + '" y2="' + f1(top + ph) + '"/>';
+      out += '<line class="mon-now" x1="' + f1(x) + '" x2="' + f1(x) + '" y1="' + f1(top - 4) + '" y2="' + f1(top + ph) + '"/>';
       if (m.label) {
         var edge = x > w - right - 40;
-        out += '<text class="cum-t is-strong' + (edge ? " is-end" : "") + '" x="' + f1(edge ? x - 4 : x + 4) + '" y="' + f1(top + 18) + '">' + esc(m.label) + "</text>";
+        out += '<text class="mon-t is-strong' + (edge ? " is-end" : "") + '" x="' + f1(edge ? x - 4 : x + 4) + '" y="' + f1(top + 18) + '">' + esc(m.label) + "</text>";
       }
     });
     var counter = 0;
@@ -361,15 +361,15 @@
         if (last) {
           var ex = X(last[0]), ey = Y(last[1]);
           out += '<circle cx="' + f1(ex) + '" cy="' + f1(ey) + '" r="3.4"' +
-            (s.endTip ? item("cum-dot is-hollow", s.endTip, counter, false) : ' class="cum-dot is-hollow"') + "/>";
+            (s.endTip ? item("mon-dot is-hollow", s.endTip, counter, false) : ' class="mon-dot is-hollow"') + "/>";
           if (s.endTip) {
             counter++;
           }
           if (s.endLabel) {
             /* above the plot, centred on the point and kept inside the chart, so it never lies on the line it names */
-            var tw = textWidth(s.endLabel, "cum-linechart", true);
+            var tw = textWidth(s.endLabel, "mon-linechart", true);
             var tx = clamp(ex, tw / 2, w - tw / 2);
-            out += '<text class="cum-t is-strong is-mid" x="' + f1(tx) + '" y="' + f1(Math.max(10, ey - 6)) + '">' + esc(s.endLabel) + "</text>";
+            out += '<text class="mon-t is-strong is-mid" x="' + f1(tx) + '" y="' + f1(Math.max(10, ey - 6)) + '">' + esc(s.endLabel) + "</text>";
           }
         }
         return;
@@ -383,7 +383,7 @@
         }
         var tip = m.tip === undefined ? null : m.tip;
         out += '<circle cx="' + f1(X(p[0])) + '" cy="' + f1(Y(p[1])) + '" r="' + (tip !== null ? "2.8" : "2.2") + '"' +
-          (tip !== null ? item("cum-dot", tip, counter, k === list.length - 1) : ' class="cum-dot"') + "/>";
+          (tip !== null ? item("mon-dot", tip, counter, k === list.length - 1) : ' class="mon-dot"') + "/>";
         if (tip !== null) {
           counter++;
         }
@@ -404,7 +404,7 @@
     var n = Math.max(list.length, 1);
     var max = opts.max !== undefined ? num(opts.max) : Math.max.apply(null, list.concat([1e-9]));
     var avgLabel = opts.avg && opts.avg.value > 0 && opts.avg.label ? String(opts.avg.label) : "";
-    var gutter = Math.max(num(opts.gutterRight, 0), avgLabel ? Math.ceil(textWidth(avgLabel, "cum-columns", true)) + 8 : 0);
+    var gutter = Math.max(num(opts.gutterRight, 0), avgLabel ? Math.ceil(textWidth(avgLabel, "mon-columns", true)) + 8 : 0);
     var topPad = 4, axis = opts.labels && opts.labels.length ? 18 : 2;
     var ph = h - topPad - axis;
     var pitch = (w - gutter) / n;
@@ -416,44 +416,44 @@
     var vpitch = ph / rows;
     var tips = opts.tips || [];
     var current = opts.current === undefined ? n - 1 : opts.current;
-    var out = open("cum-columns", w, h, opts.label || "columns", { role: tips.length ? "group" : "img", nav: tips.length ? "list" : "" });
+    var out = open("mon-columns", w, h, opts.label || "columns", { role: tips.length ? "group" : "img", nav: tips.length ? "list" : "" });
     list.forEach(function (v, i) {
       var x = i * pitch + gap / 2;
       var tip = tips[i];
-      out += "<g" + (tip !== undefined ? item("cum-col", tip, i, i === current) : ' class="cum-col"') + ">";
-      out += '<rect class="cum-hit" x="' + f1(i * pitch) + '" y="0" width="' + f1(pitch) + '" height="' + f1(topPad + ph) + '"/>';
-      var cls = i === current ? "cum-hot" : "cum-mark";
+      out += "<g" + (tip !== undefined ? item("mon-col", tip, i, i === current) : ' class="mon-col"') + ">";
+      out += '<rect class="mon-hit" x="' + f1(i * pitch) + '" y="0" width="' + f1(pitch) + '" height="' + f1(topPad + ph) + '"/>';
+      var cls = i === current ? "mon-hot" : "mon-mark";
       if (pips) {
         var lit = v > 0 ? clamp(Math.round(v / step), 1, rows) : 0;
         for (var p = 0; p < rows; p++) {
           var y = topPad + ph - (p + 1) * vpitch + 1;
-          out += '<rect class="' + (p < lit ? cls + " cum-pip" : "cum-track cum-pip") + '" x="' + f1(x) + '" y="' + f1(y) + '" width="' + f1(cw) + '" height="' + f1(Math.max(1, vpitch - 2)) + '"/>';
+          out += '<rect class="' + (p < lit ? cls + " mon-pip" : "mon-track mon-pip") + '" x="' + f1(x) + '" y="' + f1(y) + '" width="' + f1(cw) + '" height="' + f1(Math.max(1, vpitch - 2)) + '"/>';
         }
       } else {
-        out += '<rect class="cum-track" x="' + f1(x) + '" y="' + f1(topPad) + '" width="' + f1(cw) + '" height="' + f1(ph) + '" opacity=".35"/>';
+        out += '<rect class="mon-track" x="' + f1(x) + '" y="' + f1(topPad) + '" width="' + f1(cw) + '" height="' + f1(ph) + '" opacity=".35"/>';
         var bh = max > 0 ? Math.min(1, v / max) * ph : 0;
         if (v > 0) {
           out += '<rect class="' + cls + '" x="' + f1(x) + '" y="' + f1(topPad + ph - Math.max(1, bh)) + '" width="' + f1(cw) + '" height="' + f1(Math.max(1, bh)) + '"/>';
         }
       }
       if (tip !== undefined) {
-        out += '<rect class="cum-ring-focus" x="' + f1(i * pitch) + '" y="0" width="' + f1(pitch) + '" height="' + f1(topPad + ph) + '"/>';
+        out += '<rect class="mon-ring-focus" x="' + f1(i * pitch) + '" y="0" width="' + f1(pitch) + '" height="' + f1(topPad + ph) + '"/>';
       }
       out += "</g>";
     });
     if (opts.avg && opts.avg.value > 0) {
       var ay = pips ? topPad + ph - opts.avg.value / step * vpitch : topPad + ph - Math.min(1, opts.avg.value / max) * ph;
       ay = clamp(ay, topPad, topPad + ph);
-      out += '<line class="cum-now" x1="0" x2="' + f1(w - gutter) + '" y1="' + f1(ay) + '" y2="' + f1(ay) + '"/>';
+      out += '<line class="mon-now" x1="0" x2="' + f1(w - gutter) + '" y1="' + f1(ay) + '" y2="' + f1(ay) + '"/>';
       if (opts.avg.label) {
-        out += '<text class="cum-t is-strong" x="' + f1(w - gutter + 6) + '" y="' + f1(ay + 4) + '">' + esc(opts.avg.label) + "</text>";
+        out += '<text class="mon-t is-strong" x="' + f1(w - gutter + 6) + '" y="' + f1(ay + 4) + '">' + esc(opts.avg.label) + "</text>";
       }
     }
     /* Axis labels, most important first: each sits under its column, is pushed back inside the chart at either
      * edge, and is dropped when it would touch a label already placed. */
     var placed = [];
     (opts.labels || []).forEach(function (l) {
-      var tw = textWidth(l.text, "cum-columns", false);
+      var tw = textWidth(l.text, "mon-columns", false);
       var cx = l.i * pitch + pitch / 2;
       var left = cx - tw / 2, anchor = " is-mid", x = cx;
       if (left < 0) {
@@ -471,7 +471,7 @@
       }
     });
     placed.forEach(function (b) {
-      out += '<text class="cum-t' + b.anchor + '" x="' + f1(b.x) + '" y="' + f1(h - 4) + '">' + esc(b.text) + "</text>";
+      out += '<text class="mon-t' + b.anchor + '" x="' + f1(b.x) + '" y="' + f1(h - 4) + '">' + esc(b.text) + "</text>";
     });
     return out + "</svg>";
   }
@@ -489,7 +489,7 @@
     opts = opts || {};
     rows = rows || [];
     var w = Math.max(220, num(opts.width, 560)), rowH = num(opts.rowHeight, 24), barH = num(opts.barHeight, 10);
-    var longest = rows.reduce(function (a, r) { return Math.max(a, textWidth(r.text || "", "cum-hbars", true)); }, 0);
+    var longest = rows.reduce(function (a, r) { return Math.max(a, textWidth(r.text || "", "mon-hbars", true)); }, 0);
     var labelW = num(opts.labelWidth, clamp(Math.round(w * 0.34), 96, 230)), gap = 10;
     var valueW = Math.max(num(opts.valueWidth, 84), Math.ceil(longest) + 2);             // the value text never runs into the bar
     var barW = Math.max(24, w - labelW - valueW - gap * 2);
@@ -498,16 +498,16 @@
     var pips = opts.pips === undefined ? pipsOn : !!opts.pips;
     var pipW = 6, pipGap = 2;
     var cells = Math.max(4, Math.floor((barW + pipGap) / (pipW + pipGap)));
-    var out = open("cum-hbars", w, h, opts.label || "bars", { role: rows.length ? "group" : "img", nav: rows.length ? "list" : "" });
+    var out = open("mon-hbars", w, h, opts.label || "bars", { role: rows.length ? "group" : "img", nav: rows.length ? "list" : "" });
     rows.forEach(function (r, i) {
       var y = i * rowH + 1, cy = y + rowH / 2;
       var v = Math.max(0, num(r.value, 0));
       var frac = max > 0 ? Math.min(1, v / max) : 0;
       var tip = r.tip || (r.label + (r.text ? ": " + r.text : ""));
-      var fill = r.alt ? "cum-mark-2" : "cum-mark";
-      out += "<g" + item("cum-row", tip, i, i === 0) + ">";
-      out += '<rect class="cum-hit" x="0" y="' + f1(y) + '" width="' + f1(w) + '" height="' + f1(rowH) + '"/>';
-      out += '<text class="cum-t" x="0" y="' + f1(cy + 4) + '">' + esc(fitLabel(r.label, labelW - 2, "cum-hbars")) + "</text>";
+      var fill = r.alt ? "mon-mark-2" : "mon-mark";
+      out += "<g" + item("mon-row", tip, i, i === 0) + ">";
+      out += '<rect class="mon-hit" x="0" y="' + f1(y) + '" width="' + f1(w) + '" height="' + f1(rowH) + '"/>';
+      out += '<text class="mon-t" x="0" y="' + f1(cy + 4) + '">' + esc(fitLabel(r.label, labelW - 2, "mon-hbars")) + "</text>";
       var bx = labelW + gap, by = cy - barH / 2;
       if (pips) {
         var exact = frac * cells, full = Math.floor(exact), part = exact - full;
@@ -516,20 +516,20 @@
           if (k < full) {
             out += '<rect class="' + fill + '" x="' + f1(px) + '" y="' + f1(by) + '" width="' + pipW + '" height="' + barH + '"/>';
           } else if (k === full && part > 0.04) {
-            out += '<rect class="cum-track" x="' + f1(px) + '" y="' + f1(by) + '" width="' + pipW + '" height="' + barH + '"/>' +
+            out += '<rect class="mon-track" x="' + f1(px) + '" y="' + f1(by) + '" width="' + pipW + '" height="' + barH + '"/>' +
               '<rect class="' + fill + '" x="' + f1(px) + '" y="' + f1(by) + '" width="' + f1(pipW * part) + '" height="' + barH + '"/>';
           } else {
-            out += '<rect class="cum-track" x="' + f1(px) + '" y="' + f1(by) + '" width="' + pipW + '" height="' + barH + '"/>';
+            out += '<rect class="mon-track" x="' + f1(px) + '" y="' + f1(by) + '" width="' + pipW + '" height="' + barH + '"/>';
           }
         }
       } else {
-        out += '<rect class="cum-track" x="' + f1(bx) + '" y="' + f1(by) + '" width="' + f1(barW) + '" height="' + barH + '"/>';
+        out += '<rect class="mon-track" x="' + f1(bx) + '" y="' + f1(by) + '" width="' + f1(barW) + '" height="' + barH + '"/>';
         if (frac > 0) {
           out += '<rect class="' + fill + '" x="' + f1(bx) + '" y="' + f1(by) + '" width="' + f1(Math.max(1.5, barW * frac)) + '" height="' + barH + '"/>';
         }
       }
-      out += '<text class="cum-t is-end is-strong" x="' + f1(w) + '" y="' + f1(cy + 4) + '">' + esc(r.text || "") + "</text>";
-      out += '<rect class="cum-ring-focus" x="0" y="' + f1(y) + '" width="' + f1(w) + '" height="' + f1(rowH) + '"/></g>';
+      out += '<text class="mon-t is-end is-strong" x="' + f1(w) + '" y="' + f1(cy + 4) + '">' + esc(r.text || "") + "</text>";
+      out += '<rect class="mon-ring-focus" x="0" y="' + f1(y) + '" width="' + f1(w) + '" height="' + f1(rowH) + '"/></g>';
     });
     return out + "</svg>";
   }
@@ -545,12 +545,12 @@
     var scale = total > 0 ? total : 1;
     var usable = w - gap * Math.max(0, list.length - 1);
     var tipped = list.some(function (p) { return p.tip; });
-    var out = open("cum-stack", w, h, opts.label || "share", { par: "none", role: tipped ? "group" : "img", nav: tipped ? "list" : "" });
-    out += '<rect class="cum-track" x="0" y="0" width="' + f1(w) + '" height="' + f1(h) + '" opacity=".4"/>';
+    var out = open("mon-stack", w, h, opts.label || "share", { par: "none", role: tipped ? "group" : "img", nav: tipped ? "list" : "" });
+    out += '<rect class="mon-track" x="0" y="0" width="' + f1(w) + '" height="' + f1(h) + '" opacity=".4"/>';
     var x = 0;
     list.forEach(function (p, i) {
       var pw = p.value / scale * usable;
-      out += '<rect' + (p.tip ? item("cum-seg cum-s-" + p.cls, p.tip, i, i === 0) : ' class="cum-seg cum-s-' + p.cls + '"') +
+      out += '<rect' + (p.tip ? item("mon-seg mon-s-" + p.cls, p.tip, i, i === 0) : ' class="mon-seg mon-s-' + p.cls + '"') +
         ' x="' + f1(x) + '" y="0" width="' + f1(Math.max(0, pw)) + '" height="' + f1(h) + '"/>';
       x += pw + gap;
     });
@@ -567,13 +567,13 @@
     var angle = p / 100 * Math.PI * 2;
     var x = c + r * Math.sin(angle), y = c - r * Math.cos(angle);
     var large = p > 50 ? 1 : 0;
-    var out = '<svg class="cum-chart cum-ring" viewBox="0 0 ' + size + " " + size + '" role="img" aria-label="' + f1(p) + ' percent">';
-    out += '<circle cx="' + c + '" cy="' + c + '" r="' + f1(r) + '" fill="none" stroke-width="' + stroke + '" class="cum-grid" style="stroke-dasharray:none"/>';
+    var out = '<svg class="mon-chart mon-ring" viewBox="0 0 ' + size + " " + size + '" role="img" aria-label="' + f1(p) + ' percent">';
+    out += '<circle cx="' + c + '" cy="' + c + '" r="' + f1(r) + '" fill="none" stroke-width="' + stroke + '" class="mon-grid" style="stroke-dasharray:none"/>';
     if (p > 0) {
       var d = p >= 100
         ? "M " + c + " " + (c - r) + " A " + r + " " + r + " 0 1 1 " + c + " " + (c + r) + " A " + r + " " + r + " 0 1 1 " + c + " " + (c - r)
         : "M " + c + " " + (c - r) + " A " + f1(r) + " " + f1(r) + " 0 " + large + " 1 " + f1(x) + " " + f1(y);
-      out += '<path d="' + d + '" fill="none" stroke-width="' + stroke + '" class="cum-line" style="stroke-width:' + stroke + 'px"/>';
+      out += '<path d="' + d + '" fill="none" stroke-width="' + stroke + '" class="mon-line" style="stroke-width:' + stroke + 'px"/>';
     }
     return out + "</svg>";
   }
@@ -587,11 +587,11 @@
     var rows = grid || [];
     var cols = rows.reduce(function (a, r) { return Math.max(a, r.length); }, 0);
     var w = cols * (cell + gap) - gap, h = rows.length * (cell + gap) - gap;
-    var out = '<svg class="cum-chart cum-heat" viewBox="0 0 ' + Math.max(w, 1) + " " + Math.max(h, 1) + '" role="img" aria-label="' + esc(opts.label || "heatmap") + '">';
+    var out = '<svg class="mon-chart mon-heat" viewBox="0 0 ' + Math.max(w, 1) + " " + Math.max(h, 1) + '" role="img" aria-label="' + esc(opts.label || "heatmap") + '">';
     rows.forEach(function (row, y) {
       row.forEach(function (v, x) {
         var a = clamp(num(v, 0), 0, 1);
-        out += '<rect class="cum-cell cum-l' + (a <= 0 ? 0 : a < 0.25 ? 1 : a < 0.5 ? 2 : a < 0.75 ? 3 : 4) + '" x="' + (x * (cell + gap)) + '" y="' + (y * (cell + gap)) +
+        out += '<rect class="mon-cell mon-l' + (a <= 0 ? 0 : a < 0.25 ? 1 : a < 0.5 ? 2 : a < 0.75 ? 3 : 4) + '" x="' + (x * (cell + gap)) + '" y="' + (y * (cell + gap)) +
           '" width="' + cell + '" height="' + cell + '"/>';
       });
     });
@@ -605,7 +605,7 @@
     days = days || [];
     var first = days.length ? parseYmd(days[0].date) : null;
     if (!first) {
-      return open("cum-calendar", 200, 40, opts.label || "calendar") + "</svg>";
+      return open("mon-calendar", 200, 40, opts.label || "calendar") + "</svg>";
     }
     var gap = num(opts.gap, 3), gutter = 34, top = 20;
     var dow0 = (first.getDay() + 6) % 7;
@@ -617,7 +617,7 @@
     var legendH = 26;
     var height = top + 7 * pitch - gap + legendH;
     var lv = levels(days.map(function (d) { return num(d.value, 0); }));
-    var out = open("cum-calendar", width, height, opts.label || "calendar heatmap", { role: "group", nav: "grid", cols: cols });
+    var out = open("mon-calendar", width, height, opts.label || "calendar heatmap", { role: "group", nav: "grid", cols: cols });
     var marks = [];
     days.forEach(function (d, i) {
       var dt = parseYmd(d.date);
@@ -631,32 +631,32 @@
     var labelEnd = -1e9;        // a month name is dropped when the one before it (a year is added in January) still reaches there
     marks.forEach(function (m) {
       var name = MONTHS[m.dt.getMonth()] + (m.dt.getMonth() === 0 ? " " + String(m.dt.getFullYear()).slice(2) : "");
-      var tw = textWidth(name, "cum-calendar", false);
+      var tw = textWidth(name, "mon-calendar", false);
       var x = Math.min(gutter + m.col * pitch, width - tw);          // a month that starts in the last column is pulled back inside
       if (x >= labelEnd + 6) {
         labelEnd = x + tw;
-        out += '<text class="cum-t" x="' + f1(x) + '" y="12">' + name + "</text>";
+        out += '<text class="mon-t" x="' + f1(x) + '" y="12">' + name + "</text>";
       }
     });
     ["MON", "WED", "FRI"].forEach(function (name, k) {
       var row = k * 2;
-      out += '<text class="cum-t is-end" x="' + (gutter - 8) + '" y="' + f1(top + row * pitch + cell / 2 + 4) + '">' + name + "</text>";
+      out += '<text class="mon-t is-end" x="' + (gutter - 8) + '" y="' + f1(top + row * pitch + cell / 2 + 4) + '">' + name + "</text>";
     });
     var startAt = days.length - 1;
     days.forEach(function (d, i) {
       var col = Math.floor((dow0 + i) / 7), row = (dow0 + i) % 7;
       var today = i === days.length - 1;
-      out += "<rect" + item("cum-cell cum-l" + lv[i] + (today ? " is-today" : ""), d.tip || d.date, i, i === startAt, row, col) +
+      out += "<rect" + item("mon-cell mon-l" + lv[i] + (today ? " is-today" : ""), d.tip || d.date, i, i === startAt, row, col) +
         ' x="' + (gutter + col * pitch) + '" y="' + (top + row * pitch) + '" width="' + cell + '" height="' + cell + '"/>';
     });
     var ly = top + 7 * pitch - gap + 8;
     var lx = width - (5 * pitch + 78);
     var lessText = (opts.legend && opts.legend[0]) || "LESS", moreText = (opts.legend && opts.legend[1]) || "MORE";
-    out += '<text class="cum-t is-end" x="' + f1(lx - 6) + '" y="' + f1(ly + cell - 1) + '">' + esc(lessText) + "</text>";
+    out += '<text class="mon-t is-end" x="' + f1(lx - 6) + '" y="' + f1(ly + cell - 1) + '">' + esc(lessText) + "</text>";
     for (var k = 0; k < 5; k++) {
-      out += '<rect class="cum-cell cum-l' + k + '" x="' + f1(lx + k * pitch) + '" y="' + f1(ly) + '" width="' + cell + '" height="' + cell + '"/>';
+      out += '<rect class="mon-cell mon-l' + k + '" x="' + f1(lx + k * pitch) + '" y="' + f1(ly) + '" width="' + cell + '" height="' + cell + '"/>';
     }
-    out += '<text class="cum-t" x="' + f1(lx + 5 * pitch + 4) + '" y="' + f1(ly + cell - 1) + '">' + esc(moreText) + "</text>";
+    out += '<text class="mon-t" x="' + f1(lx + 5 * pitch + 4) + '" y="' + f1(ly + cell - 1) + '">' + esc(moreText) + "</text>";
     return out + "</svg>";
   }
 
@@ -674,19 +674,19 @@
     var flat = [];
     grid.forEach(function (row) { row.forEach(function (v) { flat.push(num(v, 0)); }); });
     var lv = levels(flat);
-    var out = open("cum-matrix", width, height, opts.label || "matrix heatmap", { role: "group", nav: "grid", cols: cols });
+    var out = open("mon-matrix", width, height, opts.label || "matrix heatmap", { role: "group", nav: "grid", cols: cols });
     (opts.colLabels || []).forEach(function (l) {
-      out += '<text class="cum-t is-mid" x="' + f1(gutter + l.c * (cw + gap) + cw / 2) + '" y="12">' + esc(l.text) + "</text>";
+      out += '<text class="mon-t is-mid" x="' + f1(gutter + l.c * (cw + gap) + cw / 2) + '" y="12">' + esc(l.text) + "</text>";
     });
     (opts.rowLabels || []).forEach(function (name, r) {
-      out += '<text class="cum-t is-end" x="' + (gutter - 8) + '" y="' + f1(top + r * (ch + gap) + ch / 2 + 4) + '">' + esc(name) + "</text>";
+      out += '<text class="mon-t is-end" x="' + (gutter - 8) + '" y="' + f1(top + r * (ch + gap) + ch / 2 + 4) + '">' + esc(name) + "</text>";
     });
     var k = 0, start = 0, best = -1;
     flat.forEach(function (v, i) { if (v > best) { best = v; start = i; } });
     grid.forEach(function (row, r) {
       row.forEach(function (v, c) {
         var tip = opts.tip ? opts.tip(r, c, v) : String(v);
-        out += "<rect" + item("cum-cell cum-l" + lv[k], tip, k, k === start, r, c) +
+        out += "<rect" + item("mon-cell mon-l" + lv[k], tip, k, k === start, r, c) +
           ' x="' + (gutter + c * (cw + gap)) + '" y="' + (top + r * (ch + gap)) + '" width="' + cw + '" height="' + ch + '"/>';
         k++;
       });
@@ -696,7 +696,7 @@
 
   // ── tooltip and keyboard binding ─────────────────────────────────────────────
 
-  /* Wires one container once: a tooltip on hover and focus for anything with data-tip (or a .cum-item
+  /* Wires one container once: a tooltip on hover and focus for anything with data-tip (or a .mon-item
    * with an aria-label), Escape to dismiss, and arrow-key movement between the items of a [data-nav] chart.
    * `tipEl` is the tooltip element (role="tooltip"). Returns {hide}: call it when the container's content is
    * replaced, so a tooltip never points at a node that is gone. Safe to call again for another container. */
@@ -712,7 +712,7 @@
     }
 
     function targetOf(node) {
-      return node && node.closest ? node.closest("[data-tip], .cum-item") : null;
+      return node && node.closest ? node.closest("[data-tip], .mon-item") : null;
     }
 
     function place(el) {
@@ -801,7 +801,7 @@
     });
 
     container.addEventListener("keydown", function (e) {
-      var cur = e.target && e.target.closest ? e.target.closest(".cum-item") : null;
+      var cur = e.target && e.target.closest ? e.target.closest(".mon-item") : null;
       if (!cur) {
         return;
       }
@@ -821,10 +821,10 @@
   }
 
   function navigate(group, cur, key) {
-    var items = group.querySelectorAll(".cum-item");
+    var items = group.querySelectorAll(".mon-item");
     var i = +cur.getAttribute("data-i");
     function byIndex(k) {
-      return group.querySelector('.cum-item[data-i="' + k + '"]');
+      return group.querySelector('.mon-item[data-i="' + k + '"]');
     }
     if (key === "Home") {
       return items[0] || null;
@@ -840,7 +840,7 @@
         return null;
       }
       for (var s = 1; s < 60; s++) {
-        var cand = group.querySelector('.cum-item[data-r="' + (r + dr * s) + '"][data-c="' + (c + dc * s) + '"]');
+        var cand = group.querySelector('.mon-item[data-r="' + (r + dr * s) + '"][data-c="' + (c + dc * s) + '"]');
         if (cand) {
           return cand;
         }
@@ -861,7 +861,7 @@
 
   installStyle();
 
-  root.CUMCharts = {
+  root.MonitorCharts = {
     sparkline: sparkline, line: line, columns: columns, bars: bars, hbars: hbars, stackedBar: stackedBar,
     ring: ring, heatmap: heatmap, calendar: calendar, matrix: matrix,
     niceStep: niceStep, levels: levels, refresh: refresh, bind: bind, pips: function () { return pipsOn; }

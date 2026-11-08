@@ -2,7 +2,7 @@
 
 The pure helpers (callback arity, premultiplied pixels, clipping, icon choice, menu planning,
 lparam arithmetic) run anywhere on Windows. Everything that creates a real window, menu, icon or
-tray icon is skipped unless CUM_UI_TESTS=1, because CI has no interactive desktop. Those tests
+tray icon is skipped unless USAGE_MONITOR_UI_TESTS=1, because CI has no interactive desktop. Those tests
 use off-screen windows and a tray tooltip ending in "(dev)"; none opens a dashboard or touches
 real settings.
 """
@@ -41,7 +41,7 @@ from usage_monitor.ui.platform import Rect
 from usage_monitor.ui.tray import TrayIcon, clip, create_hicon, pick_image
 
 UI = pytest.mark.skipif(
-    os.environ.get("CUM_UI_TESTS") != "1", reason="needs an interactive desktop: set CUM_UI_TESTS=1"
+    os.environ.get("USAGE_MONITOR_UI_TESTS") != "1", reason="needs an interactive desktop: set USAGE_MONITOR_UI_TESTS=1"
 )
 
 OFFSCREEN = (-30000, -30000)
@@ -50,7 +50,7 @@ OFFSCREEN = (-30000, -30000)
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def new_host() -> UIHost:
-    return UIHost(controller_class=f"CUM.Test.Controller.{uuid.uuid4().hex[:8]}")
+    return UIHost(controller_class=f"UsageMonitor.Test.Controller.{uuid.uuid4().hex[:8]}")
 
 
 @pytest.fixture
@@ -301,12 +301,12 @@ def test_popup_flags_open_away_from_the_screen_edge():
 # ── controller window naming ─────────────────────────────────────────────────
 
 def test_a_dev_instance_gets_its_own_controller_class(monkeypatch):
-    monkeypatch.delenv("CUM_DEV_INSTANCE", raising=False)
+    monkeypatch.delenv("USAGE_MONITOR_DEV_INSTANCE", raising=False)
     normal = controller_class_name()
-    monkeypatch.setenv("CUM_DEV_INSTANCE", "1")
+    monkeypatch.setenv("USAGE_MONITOR_DEV_INSTANCE", "1")
     dev = controller_class_name()
     assert dev != normal and dev.startswith(normal)
-    monkeypatch.setenv("CUM_DEV_INSTANCE", "0")
+    monkeypatch.setenv("USAGE_MONITOR_DEV_INSTANCE", "0")
     assert controller_class_name() == normal
 
 
@@ -626,8 +626,8 @@ def test_a_second_launch_can_signal_the_running_instance(host):
     assert signal_running_instance(class_name=cls) is True
     assert pump(until=lambda: seen)
     assert seen == ["open"]
-    assert find_controller("CUM.NoSuchController") == 0
-    assert signal_running_instance(class_name="CUM.NoSuchController") is False
+    assert find_controller("UsageMonitor.NoSuchController") == 0
+    assert signal_running_instance(class_name="UsageMonitor.NoSuchController") is False
 
 
 @UI
@@ -1180,7 +1180,7 @@ def icon_set(color):
 
 @pytest.fixture
 def tray(host):
-    icon = TrayIcon(host, "CUM test (dev)", None, None)
+    icon = TrayIcon(host, "Usage Monitor test (dev)", None, None)
     try:
         yield icon
     finally:
@@ -1248,7 +1248,7 @@ def test_tray_icon_is_added_updated_and_removed(host, tray):
     user = user_objects()
     for i in range(30):
         tray.set_images(icon_set((i * 8, 160, 0, 255)))
-        tray.set_tooltip(f"CUM test (dev) {i}")
+        tray.set_tooltip(f"Usage Monitor test (dev) {i}")
     assert user_objects() == user  # every replaced HICON was destroyed
     tray.remove()
     assert not tray.added and tray._hicon is None
@@ -1431,7 +1431,7 @@ class _NotificationArea:
 
 def _toast_tray(monkeypatch, area):
     monkeypatch.setattr(win32, "Shell_NotifyIconW", area)
-    icon = TrayIcon(_ToastHost(), "CUM test (dev)", None, None)
+    icon = TrayIcon(_ToastHost(), "Usage Monitor test (dev)", None, None)
     assert icon.added and area.has_icon
     return icon
 
@@ -1474,7 +1474,7 @@ def shell_message(host, event, x=0, y=0, icon_id=1):
 @UI
 def test_a_left_click_calls_back_once_even_when_the_shell_sends_two_messages(host, monkeypatch):
     clicks = []
-    icon = TrayIcon(host, "CUM test (dev)", lambda x, y: clicks.append((x, y)), None)
+    icon = TrayIcon(host, "Usage Monitor test (dev)", lambda x, y: clicks.append((x, y)), None)
     try:
         assert icon.ensure_added() and icon._version4
         shell_message(host, win32.WM_LBUTTONUP, 640, 1410)
@@ -1490,7 +1490,7 @@ def test_a_left_click_calls_back_once_even_when_the_shell_sends_two_messages(hos
 @UI
 def test_the_menu_callback_gets_the_click_position_with_signs(host):
     seen = []
-    icon = TrayIcon(host, "CUM test (dev)", None, lambda x, y: seen.append((x, y)))
+    icon = TrayIcon(host, "Usage Monitor test (dev)", None, lambda x, y: seen.append((x, y)))
     try:
         assert icon.ensure_added() and icon._version4
         shell_message(host, win32.WM_CONTEXTMENU, -50, 1200)
@@ -1503,7 +1503,7 @@ def test_the_menu_callback_gets_the_click_position_with_signs(host):
 @UI
 def test_messages_for_another_icon_or_other_events_are_ignored(host):
     seen = []
-    icon = TrayIcon(host, "CUM test (dev)", lambda: seen.append("click"), lambda: seen.append("menu"))
+    icon = TrayIcon(host, "Usage Monitor test (dev)", lambda: seen.append("click"), lambda: seen.append("menu"))
     icon.on_notify_click = lambda: seen.append("toast")
     try:
         assert icon.ensure_added() and icon._version4
@@ -1521,7 +1521,7 @@ def test_messages_for_another_icon_or_other_events_are_ignored(host):
 @UI
 def test_a_shell_without_version_4_uses_the_legacy_messages(host):
     seen = []
-    icon = TrayIcon(host, "CUM test (dev)", lambda: seen.append("click"), lambda x, y: seen.append("menu"))
+    icon = TrayIcon(host, "Usage Monitor test (dev)", lambda: seen.append("click"), lambda x, y: seen.append("menu"))
     try:
         assert icon.ensure_added()
         icon._version4 = False  # as if NIM_SETVERSION had been refused
@@ -1536,7 +1536,7 @@ def test_a_shell_without_version_4_uses_the_legacy_messages(host):
 @UI
 def test_the_host_removes_the_tray_icon_when_it_shuts_down():
     host = new_host()
-    icon = TrayIcon(host, "CUM test (dev)", None, None)
+    icon = TrayIcon(host, "Usage Monitor test (dev)", None, None)
     assert icon.ensure_added()
     host.close()
     assert not icon.added and icon._removed

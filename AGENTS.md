@@ -82,16 +82,16 @@ Windows' own animation switch. A new effect that does not is a bug.
 A test build must run beside the installed copy without touching it:
 
 ```
-set CUM_DEV_INSTANCE=1
-set CUM_APPDATA_DIR=C:\some\scratch\folder
+set USAGE_MONITOR_DEV_INSTANCE=1
+set USAGE_MONITOR_APPDATA_DIR=C:\some\scratch\folder
 python main.py            (console: Ctrl+C quits, errors print)     or    launch.bat   (pythonw)
 ```
 
-- `CUM_DEV_INSTANCE=1`: mutex `Global\ClaudeUsageMonitor-dev`, its own controller window class, tray
+- `USAGE_MONITOR_DEV_INSTANCE=1`: mutex `Global\ClaudeUsageMonitor-dev`, its own controller window class, tray
   tooltip ends "(dev)". A dev instance never reads, writes or repairs the HKCU Run entry; its *Start
   with Windows* switch lives in memory. Only the frozen installed build repairs the entry at launch.
   `--smoke-test` always runs as a dev instance.
-- `CUM_APPDATA_DIR`: settings, `usage.db` and logs go there instead of `%APPDATA%\ClaudeUsageMonitor`.
+- `USAGE_MONITOR_APPDATA_DIR`: settings, `usage.db` and logs go there instead of `%APPDATA%\ClaudeUsageMonitor`.
 - Logs: `monitor.log` (dashboard child: `dashboard.log`, hard crashes: `faults.log`).
 - `python main.py --smoke-test 45 report.json` runs the real app for 45 s (real server, dashboard,
   widgets; the data service never pauses) and exits 0 when clean. The first run backfills your
@@ -102,14 +102,14 @@ python main.py            (console: Ctrl+C quits, errors print)     or    launch
 ## Tests
 
 - `python -m pytest` — offline and fast; what CI (`tests.yml`, Windows, Python 3.12) runs.
-- `CUM_UI_TESTS=1 python -m pytest` — adds the tests that create real windows, tray icons or
+- `USAGE_MONITOR_UI_TESTS=1 python -m pytest` — adds the tests that create real windows, tray icons or
   processes. They need an interactive desktop, park widgets off-screen and use a fake data service.
   A new test that opens a window, a tray icon or a process must be gated the same way.
 - The dashboard scripts (`app.js`, `charts.js`, `motion.js`) are tested by running them under node:
   `tests/webui_checks.js` loads `charts.js` and `app.js` with a fake DOM and the test hook at the end of `app.js`, and
   `tests/test_webui.py` asserts on what they return; `tests/test_motion.py` runs `motion.js` on its own fake DOM and
   checks the motion stylesheets, and runs each theme script with no `motion.js` (`tests/theme_scripts_checks.js`). They
-  start node, so they are gated with `CUM_UI_TESTS=1`; `tests.yml` runs both files once more with it set, so CI covers them.
+  start node, so they are gated with `USAGE_MONITOR_UI_TESTS=1`; `tests.yml` runs both files once more with it set, so CI covers them.
   A check that reads a script's source for a phrase proves the phrase is there, not that the script works: where the claim
   is behaviour, run the script.
 - **Hover effects play once per entry of the pointer.** A hover rule that animates, moves or clips its own target must not

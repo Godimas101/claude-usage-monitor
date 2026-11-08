@@ -26,7 +26,7 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("APPDATA", str(tmp_path / "roaming"))
-    monkeypatch.delenv("CUM_APPDATA_DIR", raising=False)
+    monkeypatch.delenv("USAGE_MONITOR_APPDATA_DIR", raising=False)
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     return home
 
@@ -58,9 +58,9 @@ def test_app_data_dir_uses_appdata_and_creates_it(tmp_path: Path) -> None:
     assert folder.is_dir()
 
 
-def test_cum_appdata_dir_replaces_the_app_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_usage_monitor_appdata_dir_replaces_the_app_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     target = tmp_path / "override"
-    monkeypatch.setenv("CUM_APPDATA_DIR", str(target))
+    monkeypatch.setenv("USAGE_MONITOR_APPDATA_DIR", str(target))
     assert paths.app_data_dir() == target
     assert target.is_dir()
 
@@ -70,7 +70,7 @@ def test_app_data_dir_returns_its_path_when_it_cannot_be_created(
 ) -> None:
     blocker = tmp_path / "blocker.txt"
     blocker.write_text("a file, not a folder", encoding="utf-8")
-    monkeypatch.setenv("CUM_APPDATA_DIR", str(blocker / "sub"))
+    monkeypatch.setenv("USAGE_MONITOR_APPDATA_DIR", str(blocker / "sub"))
     with caplog.at_level(logging.WARNING, logger="usage_monitor"):
         assert paths.app_data_dir() == blocker / "sub"
     assert any("cannot create app data folder" in r.getMessage() for r in caplog.records)
@@ -78,7 +78,7 @@ def test_app_data_dir_returns_its_path_when_it_cannot_be_created(
 
 def test_file_locations_sit_in_the_documented_folders(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-cfg"))
-    monkeypatch.setenv("CUM_APPDATA_DIR", str(tmp_path / "app"))
+    monkeypatch.setenv("USAGE_MONITOR_APPDATA_DIR", str(tmp_path / "app"))
     assert paths.credentials_path() == tmp_path / "claude-cfg" / ".credentials.json"
     assert paths.settings_path() == tmp_path / "app" / "settings.json"
     assert paths.db_path() == tmp_path / "app" / "usage.db"
@@ -96,7 +96,7 @@ def test_claude_config_dir_overrides_claude_dir(tmp_path: Path, monkeypatch: pyt
 
 def test_only_app_data_dir_creates_folders(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
-    monkeypatch.setenv("CUM_APPDATA_DIR", str(tmp_path / "app"))
+    monkeypatch.setenv("USAGE_MONITOR_APPDATA_DIR", str(tmp_path / "app"))
     paths.claude_dir()
     paths.credentials_path()
     paths.projects_dirs()
@@ -235,7 +235,7 @@ def test_setup_logging_is_idempotent_and_can_switch_files(
 def test_setup_logging_defaults_to_the_log_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, logging_sandbox: logging.Logger
 ) -> None:
-    monkeypatch.setenv("CUM_APPDATA_DIR", str(tmp_path / "app"))
+    monkeypatch.setenv("USAGE_MONITOR_APPDATA_DIR", str(tmp_path / "app"))
     log.setup_logging()
     (handler,) = _managed(logging_sandbox)
     assert _same_path(handler.baseFilename, paths.log_path())

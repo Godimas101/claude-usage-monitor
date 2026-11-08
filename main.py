@@ -17,8 +17,8 @@
 
 The build is windowed, so there is no console: results go to files, and an unhandled exception is
 written to the log. --status, --hook, --gate, --mcp and --wait answer on stdout, which exists when the caller
-gives the process a pipe, as Claude Code does. Dev isolation: CUM_APPDATA_DIR puts settings, database and log in another
-folder, and CUM_DEV_INSTANCE=1 uses its own single-instance mutex and tags the tray tooltip.
+gives the process a pipe, as Claude Code does. Dev isolation: USAGE_MONITOR_APPDATA_DIR puts settings, database and log in another
+folder, and USAGE_MONITOR_DEV_INSTANCE=1 uses its own single-instance mutex and tags the tray tooltip.
 """
 from __future__ import annotations
 

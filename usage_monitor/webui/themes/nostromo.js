@@ -1,7 +1,7 @@
 /* nostromo.js: the Nostromo flavour.
  *
  * 1. The boot. A typed boot log plays once per browser session (sessionStorage), a click or Esc skips it, and reduce_motion
- *    (or prefers-reduced-motion) shows the finished text at once. app.js calls window.CUM_THEME_FX.nostromo.start() after
+ *    (or prefers-reduced-motion) shows the finished text at once. app.js calls window.USAGE_MONITOR_THEME_FX.nostromo.start() after
  *    this file loads, once per page load. Every storage call is wrapped: a private window or blocked storage just means
  *    the boot plays again.
  * 2. The motion layer (motion.js, nostromo.motion.css): a CRT terminal that prints the page. enter(main, page) plays the
@@ -27,7 +27,7 @@
     "> ALL SYSTEMS NOMINAL. HAVE A PRODUCTIVE SHIFT."
   ].join("\n");
 
-  var FX = window.CUM_FX || null;
+  var FX = window.USAGE_MONITOR_FX || null;
   var started = false;
   var timers = [];
 
@@ -165,11 +165,11 @@
     }
   }) : null;
 
-  window.CUM_THEME_FX = window.CUM_THEME_FX || {};
-  window.CUM_THEME_FX.nostromo = { start: start };
+  window.USAGE_MONITOR_THEME_FX = window.USAGE_MONITOR_THEME_FX || {};
+  window.USAGE_MONITOR_THEME_FX.nostromo = { start: start };
   if (dir) {
-    window.CUM_THEME_FX.nostromo.enter = dir.enter;
-    window.CUM_THEME_FX.nostromo.cancel = dir.cancel;
-    window.CUM_THEME_FX.nostromo.arrive = FX.noticeCard;
+    window.USAGE_MONITOR_THEME_FX.nostromo.enter = dir.enter;
+    window.USAGE_MONITOR_THEME_FX.nostromo.cancel = dir.cancel;
+    window.USAGE_MONITOR_THEME_FX.nostromo.arrive = FX.noticeCard;
   }
 })();

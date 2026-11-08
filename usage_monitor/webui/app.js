@@ -2,8 +2,8 @@
  * unchanged state costs a 304), routes on the hash (#overview #limits #cost #efficiency #history #settings
  * #about; #nerds, the old name of Efficiency, still opens it), and renders from the live MonitorState plus the
  * statistics reports (/api/analytics/<name>, /api/export). Settings apply at once through POST /api/settings.
- * Dependencies: charts.js (window.CUMCharts). The theme's own script (themes/<id>.js, which registers
- * window.CUM_THEME_FX[id]) and the motion layer (motion.js) are optional: without them the page is complete and still.
+ * Dependencies: charts.js (window.MonitorCharts). The theme's own script (themes/<id>.js, which registers
+ * window.USAGE_MONITOR_THEME_FX[id]) and the motion layer (motion.js) are optional: without them the page is complete and still.
  * Nothing here stores a token, a message or a file body. The token comes from the page's meta tag.
  *
  * ── Markup contract for theme authors ─────────────────────────────────────────────────────────────
@@ -75,7 +75,7 @@
  * History     .nm-odo-row > .nm-odo-main (.nm-odo > .nm-od-d > .strip > i, the digit shown set by --d;
  *             .nm-od-sep; .nm-odo-facts) + .nm-compare (.nm-cmp-body > .nm-cmp-n .nm-cmp-u .nm-cmp-t; .nm-dots
  *             > button, the comparison picker).
- * Charts      .nm-chart-host[data-chart] holds one SVG from charts.js (cum-* classes, see that file); the
+ * Charts      .nm-chart-host[data-chart] holds one SVG from charts.js (mon-* classes, see that file); the
  *             hosts carry .nm-line .nm-hbars .nm-calendar .nm-matrix .nm-daily so a theme can size them.
  * Data hooks  data-seg / data-value (a segmented button), data-action (a button), data-key (a setting),
  *             data-quiet and data-needs-alerts (the alert form), data-fid (focus returns to this id after a
@@ -91,8 +91,8 @@
  *             in place of its contents, and the other cards are not affected. data-updating is on a card whose numbers are
  *             on screen and are being fetched again, only once that has taken over 600 ms (a quiet cue, never a blank).
  *   Marks     A figure (.nm-big .nm-stat-v .nm-stat-s .nm-mrow .v .nm-kv b .nm-facts spans .nm-pace spans .nm-story table
- *             cells .nm-odo-facts b .nm-cmp-n .nm-toolbar-n), a bar (.nm-cells .nm-ratio) or a chart (.nm-chart-host .cum-spark
- *             .cum-stack .nm-odo) whose value is not in carries data-pending (and aria-hidden). Its text is placeholder text
+ *             cells .nm-odo-facts b .nm-cmp-n .nm-toolbar-n), a bar (.nm-cells .nm-ratio) or a chart (.nm-chart-host .mon-spark
+ *             .mon-stack .nm-odo) whose value is not in carries data-pending (and aria-hidden). Its text is placeholder text
  *             that only sizes the slot; the structural stylesheet makes it transparent and the theme draws what stands in its
  *             place (a block, a cursor, noise). When the value is in: data-final=<its final text> on a figure and data-fill=<0
  *             to 100> on a bar; and data-fresh on the ones that are new or changed in the last paint (a figure showing what
@@ -107,7 +107,7 @@
  * Motion      Everything that moves checks data-reduce-motion="1" on <html> (the reduce_motion setting) and
  *             prefers-reduced-motion. With either, nothing animates, enter and arrive are never called (cancel still is:
  *             it only finishes what was playing) and the comparison does not rotate. The hooks a theme script
- *             (window.CUM_THEME_FX[id]) or the motion layer may implement:
+ *             (window.USAGE_MONITOR_THEME_FX[id]) or the motion layer may implement:
  *               enter(main, page)   the page just drawn into #main is due its entrance: a page was opened (a tab, a link,
  *                                   back or forward), the dashboard started, or the theme changed. Not for a refresh of the
  *                                   same page, a variant or colour change, or a card filled in place. It is called once the
@@ -120,8 +120,8 @@
  *             Classes on #main: fx-run (the theme's entrance is playing; the theme sets and clears it), fx-quiet (the page just
  *             changed under the pointer: hover effects wait until the pointer moves or the wheel turns; the page sets it and
  *             clears it itself). fx-hold, which kept the page hidden until its reports arrived, is retired.
- *             Events, for code that is not a theme script: cum:card-data on the card (bubbles; detail is the info above) and
- *             cum:page-rendered on #main (detail { page, opened, reduced, updated: [card keys], added: [card keys] }).
+ *             Events, for code that is not a theme script: mon:card-data on the card (bubbles; detail is the info above) and
+ *             mon:page-rendered on #main (detail { page, opened, reduced, updated: [card keys], added: [card keys] }).
  */
 (function () {
   "use strict";
@@ -132,7 +132,7 @@
     var meta = document.querySelector('meta[name="monitor-token"]');
     return meta ? meta.getAttribute("content") || "" : "";
   })();
-  var CHARTS = window.CUMCharts;
+  var CHARTS = window.MonitorCharts;
   var PAGES = [
     { key: "overview", label: "OVERVIEW", title: "OVERVIEW", sub: "Session telemetry for the current window. Pace is usage against elapsed time." },
     { key: "limits", label: "LIMITS", title: "LIMITS", sub: "Every limit window, its reset and where it is heading." },
@@ -224,7 +224,7 @@
   // Points of the clock within which a limit counts as on pace. The same number as windows.PACE_BAND_POINTS on the
   // Python side (the widgets and the pacing report use it), which tests/test_webui.py checks.
   var PACE_BAND = 10;
-  var PREFS_KEY = "cum-dashboard-prefs";
+  var PREFS_KEY = "usage-monitor-dashboard-prefs";
   // What the page needs to work whatever the theme: the odometer's strips, segmented bars, chart hosts.
   var BASE_CSS = [
     ".nm-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}",
@@ -241,7 +241,7 @@
     // A value that is not known yet keeps its room and shows nothing: the placeholder text under it is only there to size it.
     // A theme draws what stands in its place (a block, a cursor, noise) with a more specific !important rule of its own.
     "[data-pending],[data-pending] *{color:transparent!important;text-shadow:none!important}",
-    "[data-pending] .cum-t{fill:transparent!important}",
+    "[data-pending] .mon-t{fill:transparent!important}",
     "[data-pending] .on,[data-pending] .part{box-shadow:none!important}",
     // A boxed note (the Fast mode card's) that is there before its report and after it: before, it keeps its room and its text
     // is transparent like any placeholder's, and its box is not drawn either.
@@ -660,9 +660,29 @@
 
   // ── Per-viewer preferences (the last window and toggles chosen) ─────────────────
 
+  // Before v2.3 the choices were kept under a key with a shorter, three-letter prefix. Read it once and move it here, so
+  // an update keeps them.
+  function movedPrefs() {
+    var store = window.localStorage;
+    for (var i = 0; i < (store.length || 0); i++) {
+      var key = String(store.key(i));
+      if (key !== PREFS_KEY && /^[a-z]{3}-dashboard-prefs$/.test(key)) {
+        var text = store.getItem(key);
+        store.setItem(PREFS_KEY, text);
+        store.removeItem(key);
+        return text;
+      }
+    }
+    return null;
+  }
+
   function loadPrefs() {
     try {
-      var saved = JSON.parse(window.localStorage.getItem(PREFS_KEY) || "null");
+      var text = window.localStorage.getItem(PREFS_KEY);
+      if (text === null) {
+        text = movedPrefs();
+      }
+      var saved = JSON.parse(text || "null");
       if (!saved || typeof saved !== "object") {
         return;
       }
@@ -1506,7 +1526,7 @@
   var FIGURES = ".nm-big, .nm-stat-v, .nm-stat-s, .nm-mrow .v, .nm-kv b, .nm-facts > span, .nm-pace > span, .nm-pace > b, .nm-pace > .fc, " +
     ".nm-story, .nm-table td.r, .nm-table td.nm-trunc, .nm-odo-facts b, .nm-cmp-n, .nm-toolbar-n";
   var BARS = ".nm-cells, .nm-ratio";
-  var CHARTS_SEL = ".nm-chart-host, .cum-spark, .cum-stack, .nm-odo";
+  var CHARTS_SEL = ".nm-chart-host, .mon-spark, .mon-stack, .nm-odo";
 
   function textOf(el) {
     return String(el.textContent || "").replace(/\s+/g, " ").trim();
@@ -1734,7 +1754,7 @@
   }
 
   /* Tells the theme and the motion layer what a paint did: for every card whose numbers arrived (or changed), the theme's
-   * arrive(card, info) and a cum:card-data event on the card; for the page, a cum:page-rendered event on #main. */
+   * arrive(card, info) and a mon:card-data event on the card; for the page, a mon:page-rendered event on #main. */
   function announce(main, key, opened, ctx) {
     var fx = themeFx();
     var reduced = reduceMotion();
@@ -1744,9 +1764,9 @@
       if (fx && typeof fx.arrive === "function" && !reduced) {
         guarded("arrive", function () { fx.arrive(u.el, info); });
       }
-      dispatch(u.el, "cum:card-data", info);
+      dispatch(u.el, "mon:card-data", info);
     });
-    dispatch(main, "cum:page-rendered", {
+    dispatch(main, "mon:page-rendered", {
       page: key, opened: opened, reduced: reduced,
       updated: ctx.updated.map(function (u) { return u.key; }), added: ctx.added.map(function (a) { return a.key; })
     });
@@ -1756,7 +1776,7 @@
 
   function themeFx() {
     var t = S.lastTheme;
-    return t && window.CUM_THEME_FX ? window.CUM_THEME_FX[t.id] : null;
+    return t && window.USAGE_MONITOR_THEME_FX ? window.USAGE_MONITOR_THEME_FX[t.id] : null;
   }
 
   /* The theme's own stylesheet AND script are in. Changing the link's href does not clear link.sheet (Chromium keeps the old
@@ -4444,7 +4464,7 @@
   }
 
   function startThemeFx(id) {
-    var fx = window.CUM_THEME_FX && window.CUM_THEME_FX[id];
+    var fx = window.USAGE_MONITOR_THEME_FX && window.USAGE_MONITOR_THEME_FX[id];
     if (fx && typeof fx.start === "function" && document.documentElement.getAttribute("data-theme") === id) {
       fx.start();
     }
@@ -4869,11 +4889,11 @@
   }
 
   function installBaseStyle() {
-    if (document.getElementById("cum-app-style")) {
+    if (document.getElementById("mon-app-style")) {
       return;
     }
     var style = document.createElement("style");
-    style.id = "cum-app-style";
+    style.id = "mon-app-style";
     style.textContent = BASE_CSS;
     document.head.insertBefore(style, document.head.firstChild);
   }
@@ -4996,11 +5016,11 @@
     poll();
   }
 
-  /* Test hook. tests/test_webui.py loads this file in node with window.__CUM_TEST__ set and reads the helpers it
+  /* Test hook. tests/test_webui.py loads this file in node with window.__USAGE_MONITOR_TEST__ set and reads the helpers it
    * needs from there; the page is then not started. Nothing in the app sets it (the page allows no inline script),
    * so in the dashboard this is a no-op. */
-  if (window.__CUM_TEST__) {
-    window.__CUM_TEST__.api = {
+  if (window.__USAGE_MONITOR_TEST__) {
+    window.__USAGE_MONITOR_TEST__.api = {
       S: S, PACE_BAND: PACE_BAND, esc: esc, num: num, fmtPct: fmtPct, fmtRate: fmtRate, fmtUsd: fmtUsd, fmtMoney: fmtMoney,
       fmtMult: fmtMult, paceOf: paceOf, ratioCells: ratioCells, ratioNote: ratioNote, ratioScale: ratioScale,
       costNumbers: costNumbers, modelMixCard: modelMixCard, spendCardBody: spendCardBody, sessionsTable: sessionsTable,

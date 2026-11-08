@@ -42,12 +42,12 @@ log = get_logger(__name__)
 CONTROLLER_CLASS = "ClaudeUsageMonitor.Controller"
 CONTROLLER_TITLE = "Claude Usage Monitor Controller"
 
-_DEV_ENV = "CUM_DEV_INSTANCE"
+_DEV_ENV = "USAGE_MONITOR_DEV_INSTANCE"
 _SIGINT_POLL_MS = 250
 
 
 def controller_class_name() -> str:
-    """Window class of the controller. A dev instance (CUM_DEV_INSTANCE=1) gets its own, so a
+    """Window class of the controller. A dev instance (USAGE_MONITOR_DEV_INSTANCE=1) gets its own, so a
     test build never answers the installed copy's "open the dashboard" signal."""
     return CONTROLLER_CLASS + (".dev" if os.environ.get(_DEV_ENV) == "1" else "")
 

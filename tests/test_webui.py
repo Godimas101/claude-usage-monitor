@@ -5,14 +5,14 @@ No browser, no window, no server and no network: the files are read as text and 
 Python side they depend on (the statistics routes, the settings whitelist, the window names) and
 against the rules the page has to keep (no inline handlers, no literal colours, no external addresses,
 every figure explained, motion honoured). The one test that starts a process (node --check) is skipped
-unless CUM_UI_TESTS=1, like every test that starts a process.
+unless USAGE_MONITOR_UI_TESTS=1, like every test that starts a process.
 
 The scripts themselves run under node, in tests/webui_checks.js: charts.js and app.js are loaded into a vm
-context with a small fake DOM and window.__CUM_TEST__ set, so app.js hands back its helpers (the test hook at its
+context with a small fake DOM and window.__USAGE_MONITOR_TEST__ set, so app.js hands back its helpers (the test hook at its
 end) and the tests below assert on what they return: escaping, the percent formats, the pace band, the model mix,
 the currency of real money, the plan multiple, the health rows, the plan price, the card layout of every page before
 any number has arrived, the update banner, the forecast line, the sign-in help and the pages of a PC with no Claude Code.
-A syntax error, a lost x100 or an unescaped title fails there. Those tests start node, so they need CUM_UI_TESTS=1 like every test that starts a
+A syntax error, a lost x100 or an unescaped title fails there. Those tests start node, so they need USAGE_MONITOR_UI_TESTS=1 like every test that starts a
 process; .github/workflows/tests.yml sets it for this file (and a test below checks that it does).
 
 What these cannot show is how the page looks and behaves; that is checked by loading it in a browser
@@ -41,8 +41,8 @@ from usage_monitor.ui import dashboard, server
 WEBUI = paths.resource_dir() / "usage_monitor" / "webui"
 CHECKS_JS = Path(__file__).resolve().parent / "webui_checks.js"
 WORKFLOW = paths.resource_dir() / ".github" / "workflows" / "tests.yml"
-UI_TESTS = os.environ.get("CUM_UI_TESTS") == "1"
-ui_only = pytest.mark.skipif(not UI_TESTS, reason="needs CUM_UI_TESTS=1 (starts a child process)")
+UI_TESTS = os.environ.get("USAGE_MONITOR_UI_TESTS") == "1"
+ui_only = pytest.mark.skipif(not UI_TESTS, reason="needs USAGE_MONITOR_UI_TESTS=1 (starts a child process)")
 # A child process of a test must not open a console window on the desktop of whoever runs the tests.
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -321,7 +321,7 @@ def test_storage_is_only_for_preferences_and_always_guarded() -> None:
 # ── Charts ────────────────────────────────────────────────────────────────────────
 
 def test_charts_js_offers_every_chart_the_pages_need() -> None:
-    exported = re.search(r"root\.CUMCharts = \{(.*?)\};", CHARTS, re.S).group(1)
+    exported = re.search(r"root\.MonitorCharts = \{(.*?)\};", CHARTS, re.S).group(1)
     for name in ("sparkline", "line", "columns", "hbars", "stackedBar", "calendar", "matrix", "bind",
                  "niceStep", "levels", "refresh", "pips"):
         assert re.search(rf"\b{name}\b", exported), name
@@ -332,7 +332,7 @@ def test_charts_js_offers_every_chart_the_pages_need() -> None:
 
 def test_chart_items_are_keyboard_and_screen_reader_stops() -> None:
     item = function_body(CHARTS, "item")
-    for needle in ("cum-item", "tabindex", 'role="img"', "aria-label", "data-i"):
+    for needle in ("mon-item", "tabindex", 'role="img"', "aria-label", "data-i"):
         assert needle in item, needle
     navigate = function_body(CHARTS, "navigate")
     for key in ("ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"):
@@ -380,7 +380,7 @@ def test_every_theme_stops_its_motion_for_reduced_motion(theme_id: str) -> None:
 def test_every_theme_ships_the_files_the_server_offers_for_it(theme_id: str) -> None:
     """/api/state lists a theme's css and js only when the file exists; the script registers its start hook."""
     assert (WEBUI / "themes" / f"{theme_id}.css").is_file() and (WEBUI / "themes" / f"{theme_id}.js").is_file()
-    assert f"CUM_THEME_FX.{theme_id} = {{ start: start }}" in THEME_JS[theme_id]
+    assert f"USAGE_MONITOR_THEME_FX.{theme_id} = {{ start: start }}" in THEME_JS[theme_id]
 
 
 # ── Nostromo ──────────────────────────────────────────────────────────────────────
@@ -529,7 +529,7 @@ def test_the_time_left_bar_keeps_both_texts_readable_over_the_fill_and_the_track
     assert colour.contrast_ratio(signal, track) >= 4.5, "the label and the time over the track"
 
 
-# ── JavaScript (child processes: only with CUM_UI_TESTS=1) ────────────────────────
+# ── JavaScript (child processes: only with USAGE_MONITOR_UI_TESTS=1) ────────────────────────
 
 # Loads charts.js in node (no DOM needed to build a string) and looks for text or marks drawn outside the
 # chart's own width, and for text drawn over text. Text is taken as 7.9 px a character, as charts.js itself does.
@@ -537,7 +537,7 @@ CHART_BOUNDS_JS = r"""
 const fs = require('fs'), vm = require('vm');
 const box = {}; box.window = box; vm.createContext(box);
 vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), box);
-const C = box.CUMCharts, CHAR = 7.9, problems = [];
+const C = box.MonitorCharts, CHAR = 7.9, problems = [];
 function check(name, svg) {
   const W = +svg.match(/viewBox="0 0 ([\d.]+) /)[1], texts = [];
   for (const m of svg.matchAll(/<text class="([^"]*)" x="([-\d.]+)" y="([-\d.]+)">([^<]*)<\/text>/g)) {
@@ -932,6 +932,7 @@ def test_an_old_nerds_link_and_a_choice_saved_under_the_old_name_still_work(chec
     assert checks["alias"] == "efficiency" and checks["aliasNew"] == "efficiency"
     assert checks["aliasUnknown"] == "overview"
     assert checks["legacyPrefs"] == ["week", "month"]               # the window saved as nerdsWindow, and the cost window
+    assert checks["movedPrefs"] == ["week", ["something-else", "usage-monitor-dashboard-prefs"]]   # kept before v2.3
     assert checks["newPrefsWin"] == "today"                         # the new name wins when both are saved
 
 
@@ -1064,9 +1065,9 @@ def test_every_theme_draws_its_placeholders_and_the_updating_cue(theme_id: str) 
 # ── The hook contract for the motion layer ────────────────────────────────────────
 
 def test_the_header_documents_the_hooks_the_motion_layer_may_implement() -> None:
-    for needle in ("enter(main, page)", "cancel(main)", "arrive(card, info)", "cum:card-data", "cum:page-rendered",
+    for needle in ("enter(main, page)", "cancel(main)", "arrive(card, info)", "mon:card-data", "mon:page-rendered",
                    "fx-run", "fx-quiet", "data-pending", "data-final", "data-fill", "data-fresh", "data-state=pending | ready | error",
-                   "data-updating", "window.CUM_THEME_FX[id]", "fx-hold, which kept the page hidden"):
+                   "data-updating", "window.USAGE_MONITOR_THEME_FX[id]", "fx-hold, which kept the page hidden"):
         assert needle in APP_DOC, needle
     assert "Pending: a page is never empty" in APP_DOC
 
@@ -1076,7 +1077,7 @@ def test_the_page_calls_the_hooks_and_does_not_wait_for_the_reports() -> None:
     for name in ("themeFx", "themeReady", "wantEnter", "playEnterIfDue", "cancelFx", "announce"):
         assert f"function {name}(" in code, name
     assert 'fx.enter(main, key)' in code and 'fx.arrive(u.el, info)' in code and 'fx.cancel(main)' in code
-    assert '"cum:card-data"' in code and '"cum:page-rendered"' in code
+    assert '"mon:card-data"' in code and '"mon:page-rendered"' in code
     assert 'classList.add("fx-hold")' not in code and "pageReady" not in code          # the entrance is not held back by the reports
     assert 'classList.add("fx-quiet")' in code and 'classList.remove("fx-quiet")' in code
     body = function_body(APP_CODE, "playEnterIfDue")
@@ -1633,7 +1634,7 @@ def test_a_click_shows_what_changed_the_backup_the_warnings_and_the_errors_each_
     setup = checks["guard"]["setup"]
     done = setup["installed_ok"]
     assert '<div class="nm-callout" role="status"><b>Installed.</b> Added the SessionStart hook. Registered the claude-usage MCP tool.<br>' in done
-    assert 'Backup: <span class="nm-path">C:\\Users\\t\\.claude\\settings.json.cum-backup-20261028-180509</span>' in done
+    assert 'Backup: <span class="nm-path">C:\\Users\\t\\.claude\\settings.json.usage-monitor-backup-20261028-180509</span>' in done
     assert '<div class="nm-callout is-warn" role="note">This card checks only the claude command. Claude Code in VS Code has its own version: in VS Code, check under Extensions that it is 2.1.139 or newer.</div>' in done
     assert "<b>Removed.</b> Removed the PostToolUse hook." in setup["removed_ok"]
     assert "<b>Nothing to change.</b> The three hooks were already in place." in setup["nothing"]
@@ -2145,14 +2146,14 @@ def test_the_forecast_line_marks_when_it_crosses_100_percent_and_agrees_with_the
 
 def test_ci_runs_the_script_tests_with_node() -> None:
     """Plain `python -m pytest` skips every test that starts a process, node included, so a syntax error in
-    app.js passed CI. The workflow runs this file once more with CUM_UI_TESTS=1."""
+    app.js passed CI. The workflow runs this file once more with USAGE_MONITOR_UI_TESTS=1."""
     text = WORKFLOW.read_text(encoding="utf-8")
-    assert "CUM_UI_TESTS" in text and "tests/test_webui.py" in text and "setup-node" in text
+    assert "USAGE_MONITOR_UI_TESTS" in text and "tests/test_webui.py" in text and "setup-node" in text
     assert "tests/test_motion.py" in text                                          # motion.js is run under node there too
 
 
 def test_the_test_hook_is_inert_unless_a_test_sets_it() -> None:
     code = strip_comments(APP_CODE)
-    assert code.count("__CUM_TEST__") == 2                                         # the guard and the hand-over
-    hook = code[code.index("if (window.__CUM_TEST__)"):]
+    assert code.count("__USAGE_MONITOR_TEST__") == 2                                         # the guard and the hand-over
+    hook = code[code.index("if (window.__USAGE_MONITOR_TEST__)"):]
     assert hook.index("return;") < hook.index("init();")                           # the page is not started under test

@@ -2,7 +2,7 @@
 /* Runs the dashboard's real scripts (charts.js, app.js) under node and prints what they do as one JSON object.
  *
  * tests/test_webui.py starts this with `node tests/webui_checks.js <webui folder>` and asserts on the result.
- * app.js is loaded in a vm context with a small fake DOM and window.__CUM_TEST__ set, so it hands back its
+ * app.js is loaded in a vm context with a small fake DOM and window.__USAGE_MONITOR_TEST__ set, so it hands back its
  * helpers (see the test hook at the end of app.js) instead of starting the page. Nothing here needs a browser,
  * a window, the network or a timer, and nothing in it reads or prints a user's data: every input is made up.
  */
@@ -45,7 +45,7 @@ function load() {
     getElementById: (id) => elements[id] || null, createElement: (tag) => element(tag),
     createElementNS: (_ns, tag) => svgElement(tag), addEventListener() {},
   };
-  const box = { console, document: doc, __CUM_TEST__: {} };
+  const box = { console, document: doc, __USAGE_MONITOR_TEST__: {} };
   box.window = box;
   box.location = { hash: "" };
   box.localStorage = { getItem: () => null, setItem() {} };
@@ -60,7 +60,7 @@ function load() {
   for (const name of ["charts.js", "app.js"]) {
     vm.runInContext(fs.readFileSync(path.join(webui, name), "utf8"), box, { filename: name });
   }
-  return { api: box.__CUM_TEST__.api, charts: box.CUMCharts, elements, box };
+  return { api: box.__USAGE_MONITOR_TEST__.api, charts: box.MonitorCharts, elements, box };
 }
 
 const out = {};
@@ -103,7 +103,7 @@ out.sessionsTableUntitled = api.sessionsTable([{ title: null, project: "p", proj
 // ── chart labels: cut to the measured width, in the middle, so the end that tells names apart stays ──────────
 function labelsOf(rows, width, opts) {
   const svg = charts.hbars(rows.map((l, i) => ({ label: l, value: 10 - i, text: "$20.31 · 52%" })), Object.assign({ width }, opts || {}));
-  return [...svg.matchAll(/<text class="cum-t" x="0" y="[\d.]+">([^<]*)<\/text>/g)].map((m) => m[1]);
+  return [...svg.matchAll(/<text class="mon-t" x="0" y="[\d.]+">([^<]*)<\/text>/g)].map((m) => m[1]);
 }
 const folders = ["se-infolcd-apex-advanced", "se-infolcd-apex-update", "se-infolcd-apex-server", "SpaceEngineersModSDK", "claude-usage-monitor", "x"];
 out.labels = {};
@@ -117,7 +117,7 @@ charts.refresh();
 out.labelsNarrow = labelsOf(folders, 300);
 // the bar takes what the label column and the value text leave; the value text is measured, not assumed
 const barWidth = () => +charts.hbars([{ label: "a", value: 1, text: "$20.31 · 52%" }], { width: 406, valueWidth: 0 })
-  .match(/<rect class="cum-track" x="[\d.]+" y="[\d.]+" width="([\d.]+)"/)[1];
+  .match(/<rect class="mon-track" x="[\d.]+" y="[\d.]+" width="([\d.]+)"/)[1];
 out.barWidth = { six: barWidth() };           // 12 characters of 6 px: the 84 px default is wider than the text
 pxPerChar = 10;
 out.barWidthStale = barWidth();               // answers are kept until refresh() ...
@@ -296,6 +296,17 @@ out.legacyPrefs = [S.ui.efficiencyWindow, S.ui.costWindow];
 box.localStorage = { getItem: () => JSON.stringify({ efficiencyWindow: "today", nerdsWindow: "week" }), setItem() {} };
 api.loadPrefs();
 out.newPrefsWin = S.ui.efficiencyWindow;
+// choices kept under the key with the shorter prefix (before v2.3) are read once and moved to the new key
+const oldPrefsStore = { "abc-dashboard-prefs": JSON.stringify({ costWindow: "week" }), "something-else": "x" };
+box.localStorage = {
+  get length() { return Object.keys(oldPrefsStore).length; },
+  key(i) { return Object.keys(oldPrefsStore)[i]; },
+  getItem(k) { return Object.prototype.hasOwnProperty.call(oldPrefsStore, k) ? oldPrefsStore[k] : null; },
+  setItem(k, v) { oldPrefsStore[k] = String(v); },
+  removeItem(k) { delete oldPrefsStore[k]; },
+};
+api.loadPrefs();
+out.movedPrefs = [S.ui.costWindow, Object.keys(oldPrefsStore).sort()];
 S.ui.efficiencyWindow = "cycle"; S.ui.costWindow = "cycle";
 box.localStorage = { getItem: () => null, setItem() {} };
 
@@ -420,7 +431,7 @@ out.forecastCard = {
   crossingTip: (/aria-label="(Reaches 100% about [^"]+)"/.exec(crossing.svg) || [])[1] || null,
   crossingFacts: [/Projected end<\/span><b>([^<]+)</.exec(crossing.facts)[1], (/Limit reached<\/span><b>([^<]+)</.exec(crossing.facts) || [])[1] || null],
   stayingLabel: /100% ~/.test(staying.svg), stayingFacts: [/Projected end<\/span><b>([^<]+)</.exec(staying.facts)[1], /Limit reached/.test(staying.facts)],
-  stayingForecastDrawn: /class="cum-fore"/.test(staying.svg), crossingForecastDrawn: /class="cum-fore"/.test(crossing.svg),
+  stayingForecastDrawn: /class="mon-fore"/.test(staying.svg), crossingForecastDrawn: /class="mon-fore"/.test(crossing.svg),
 };
 
 // ── Top sessions: the folder column is as wide as the longest folder name needs ─────────────────────────────
@@ -722,7 +733,7 @@ out.guard = {
     unreadable: setupFor(setupWith({ errors: ["The Claude Code settings file is not valid JSON, so setup left it alone."], hooks: { state: "unknown", installed: 0, total: 3, events: {} } })),
     installing: setupFor(SETUP_OK, null, "install"),
     removing: setupFor(SETUP_OK, null, "remove"),
-    installed_ok: setupFor(SETUP_OK, done({ changed: ["Added the SessionStart hook.", "Registered the claude-usage MCP tool."], backup: "C:\\Users\\t\\.claude\\settings.json.cum-backup-20261028-180509", warnings: ["This card checks only the claude command. Claude Code in VS Code has its own version: in VS Code, check under Extensions that it is 2.1.139 or newer."] })),
+    installed_ok: setupFor(SETUP_OK, done({ changed: ["Added the SessionStart hook.", "Registered the claude-usage MCP tool."], backup: "C:\\Users\\t\\.claude\\settings.json.usage-monitor-backup-20261028-180509", warnings: ["This card checks only the claude command. Claude Code in VS Code has its own version: in VS Code, check under Extensions that it is 2.1.139 or newer."] })),
     nothing: setupFor(SETUP_OK, done({ unchanged: ["The three hooks were already in place."] })),
     removed_ok: setupFor(SETUP_OK, done({ action: "remove", changed: ["Removed the PostToolUse hook."], backup: "C:\\b" })),
     refused: setupFor(SETUP_OK, done({ ok: false, errors: ["Claude Code 2.1.94 is older than 2.1.139, which hooks need, so setup changed nothing. Update it with: claude update"] })),

@@ -1,7 +1,7 @@
 """Every filesystem location the monitor touches, computed in one place.
 
 Only app_data_dir() creates a folder, and only when it is called. Two environment variables
-redirect locations: CUM_APPDATA_DIR replaces the app data folder (tests and validation runs),
+redirect locations: USAGE_MONITOR_APPDATA_DIR replaces the app data folder (tests and validation runs),
 and CLAUDE_CONFIG_DIR is Claude Code's own config-folder override, honoured the same way.
 """
 from __future__ import annotations
@@ -15,12 +15,12 @@ from usage_monitor.log import get_logger
 log = get_logger(__name__)
 
 APP_FOLDER = "ClaudeUsageMonitor"
-APP_DATA_OVERRIDE_ENV = "CUM_APPDATA_DIR"
+APP_DATA_OVERRIDE_ENV = "USAGE_MONITOR_APPDATA_DIR"
 CLAUDE_CONFIG_ENV = "CLAUDE_CONFIG_DIR"
 
 
 def app_data_dir() -> Path:
-    """The app data folder: $CUM_APPDATA_DIR when set, else %APPDATA%\\ClaudeUsageMonitor.
+    """The app data folder: $USAGE_MONITOR_APPDATA_DIR when set, else %APPDATA%\\ClaudeUsageMonitor.
 
     Created on demand. A folder that cannot be created is logged and its path is still
     returned, so the failure surfaces at the caller's own file I/O.

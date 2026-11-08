@@ -2,7 +2,7 @@
 
 Offline: the dev server listens on loopback only, settings go to a temporary folder (a dev server never
 touches the sign-in entry), and the synthetic year is built small (HISTORY_SCALE) so each test stays fast.
-Starting the server as a child process is skipped unless CUM_UI_TESTS=1.
+Starting the server as a child process is skipped unless USAGE_MONITOR_UI_TESTS=1.
 """
 from __future__ import annotations
 
@@ -34,8 +34,8 @@ from usage_monitor.settings import Settings
 from usage_monitor.ui import devserver
 from usage_monitor.ui.server import ApiServer
 
-UI_TESTS = os.environ.get("CUM_UI_TESTS") == "1"
-ui_only = pytest.mark.skipif(not UI_TESTS, reason="needs CUM_UI_TESTS=1 (starts a child process)")
+UI_TESTS = os.environ.get("USAGE_MONITOR_UI_TESTS") == "1"
+ui_only = pytest.mark.skipif(not UI_TESTS, reason="needs USAGE_MONITOR_UI_TESTS=1 (starts a child process)")
 # The child process needs the real profile (pywebview and Pillow live in the user site-packages).
 REAL_PROFILE_ENV = {k: os.environ[k] for k in ("APPDATA", "LOCALAPPDATA", "USERPROFILE", "HOME", "PYTHONUSERBASE")
                     if k in os.environ}
@@ -48,11 +48,11 @@ REPORTS = ("cost", "efficiency", "pacing", "history", "sessions")
 
 @pytest.fixture(autouse=True)
 def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CUM_APPDATA_DIR", str(tmp_path / "app"))
+    monkeypatch.setenv("USAGE_MONITOR_APPDATA_DIR", str(tmp_path / "app"))
     monkeypatch.setenv("APPDATA", str(tmp_path / "roaming"))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
-    monkeypatch.delenv("CUM_DEV_INSTANCE", raising=False)
+    monkeypatch.delenv("USAGE_MONITOR_DEV_INSTANCE", raising=False)
     monkeypatch.setattr(devserver, "HISTORY_SCALE", SMALL_YEAR)
 
 
@@ -759,7 +759,7 @@ def test_main_still_refuses_an_unknown_scenario(capsys: pytest.CaptureFixture[st
     assert caught.value.code == 2
 
 
-# ── The real thing, as a child process (CUM_UI_TESTS=1) ───────────────────────────
+# ── The real thing, as a child process (USAGE_MONITOR_UI_TESTS=1) ───────────────────────────
 
 def read_devserver_page(child: subprocess.Popen, port: int, timeout: float = 30.0) -> bytes:
     """The page a dev server child serves at the address it prints (``devserver ... url=http://127.0.0.1:PORT/?k=KEY``).
@@ -793,8 +793,8 @@ def test_the_devserver_process_serves_a_database_copy_with_a_theme(tmp_path: Pat
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
-    env = dict(os.environ, **REAL_PROFILE_ENV, CUM_APPDATA_DIR=str(tmp_path / "dev"))
-    env.pop("CUM_DEV_INSTANCE", None)
+    env = dict(os.environ, **REAL_PROFILE_ENV, USAGE_MONITOR_APPDATA_DIR=str(tmp_path / "dev"))
+    env.pop("USAGE_MONITOR_DEV_INSTANCE", None)
     child = subprocess.Popen(
         [sys.executable, "-m", "usage_monitor.ui.devserver", "--port", str(port), "--db", str(path),
          "--theme", "gates/blue-light"],

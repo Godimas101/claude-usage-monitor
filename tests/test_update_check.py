@@ -9,7 +9,7 @@ unattended. What it will run, and how it starts the helper that runs it, is what
     the release page, and the app exits only once the helper is running;
   * the helper: a constant ASCII batch file that holds no path, started so that no character in the user's
     temp folder (& ^ % ( ) , ; = @ !, spaces, accents) can break it. The real cmd.exe tests start processes,
-    so they need CUM_UI_TESTS=1 like the other process tests. None of them may open a console window on the
+    so they need USAGE_MONITOR_UI_TESTS=1 like the other process tests. None of them may open a console window on the
     desktop: the app the helper relaunches is a windowed stand-in (StandInApp), every console program a test starts
     carries CREATE_NO_WINDOW, and the last section checks all the test files for a call that forgets it.
 
@@ -48,7 +48,7 @@ import update_check as uc
 import version
 
 UI = pytest.mark.skipif(
-    os.environ.get("CUM_UI_TESTS") != "1", reason="starts processes: set CUM_UI_TESTS=1",
+    os.environ.get("USAGE_MONITOR_UI_TESTS") != "1", reason="starts processes: set USAGE_MONITOR_UI_TESTS=1",
 )
 # Every console program a test starts (ping, cmd, ISCC, PowerShell, python) gets this flag. A program that is started
 # by a process without a console of its own (pytest run from an editor, a task runner, an agent) otherwise opens a
@@ -643,10 +643,10 @@ def test_a_matching_digest_stages_the_update(stage: Stage) -> None:
     assert (work / uc.HELPER_NAME).read_bytes() == uc._helper_script().encode("ascii")
     (command, cwd, env), = stage.launched
     assert cwd == str(work) and command.endswith(r" /d /e:on /v:off /s /c .\update.cmd")
-    assert env["CUM_UPDATE_SETUP"] == SETUP
-    assert env["CUM_UPDATE_PID"] == str(os.getpid())
-    assert env["CUM_UPDATE_EXE"] == sys.executable
-    assert env["CUM_UPDATE_LOG"] == str(stage.temp / "ClaudeUsageMonitor-update.log")
+    assert env["USAGE_MONITOR_UPDATE_SETUP"] == SETUP
+    assert env["USAGE_MONITOR_UPDATE_PID"] == str(os.getpid())
+    assert env["USAGE_MONITOR_UPDATE_EXE"] == sys.executable
+    assert env["USAGE_MONITOR_UPDATE_LOG"] == str(stage.temp / "ClaudeUsageMonitor-update.log")
 
 
 def test_the_digest_the_caller_already_has_saves_the_lookup(stage: Stage) -> None:
@@ -794,7 +794,7 @@ def test_staging_does_not_depend_on_what_the_temp_folder_is_called(
     assert cwd == str(work)                                # the folder is entered, not named on the command line
     assert folder not in command and str(nasty) not in command
     assert (work / uc.HELPER_NAME).read_bytes() == uc._helper_script().encode("ascii")   # the same ASCII text for everybody
-    assert env["CUM_UPDATE_LOG"] == str(nasty / "ClaudeUsageMonitor-update.log")
+    assert env["USAGE_MONITOR_UPDATE_LOG"] == str(nasty / "ClaudeUsageMonitor-update.log")
 
 
 # ── apply_update: the order of things and the single flight ───────────────────
@@ -954,16 +954,16 @@ def test_the_helper_script_is_a_constant_ascii_batch_file() -> None:
 def test_the_helper_script_holds_nothing_that_varies() -> None:
     """Only environment variables carry the installer's name, the exe to relaunch, the pid and the log."""
     script = uc._helper_script()
-    used = set(re.findall(r"%(CUM_[A-Z_]+)%", script))
+    used = set(re.findall(r"%(USAGE_MONITOR_[A-Z_]+)%", script))
     provided = set(uc._helper_environment(r"C:\x\Setup.exe", r"C:\x\App.exe", 1))
-    assert used - provided == {"CUM_N"}                    # the loop counter is the script's own
+    assert used - provided == {"USAGE_MONITOR_N"}                    # the loop counter is the script's own
     assert not re.search(r"[A-Za-z]:\\", script.replace("%SystemRoot%", ""))   # no drive path anywhere
     assert "Users" not in script and sys.executable not in script
 
 
 def test_the_helper_script_runs_the_installer_the_way_the_updater_promises() -> None:
     script = uc._helper_script()
-    assert f'"%~dp0%CUM_UPDATE_SETUP%" {uc.SILENT_ARGS} /LOG=' in script
+    assert f'"%~dp0%USAGE_MONITOR_UPDATE_SETUP%" {uc.SILENT_ARGS} /LOG=' in script
     for flag in ("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", '/MERGETASKS="!startup"'):
         assert flag in uc.SILENT_ARGS
 
@@ -988,7 +988,7 @@ def test_the_helper_script_cleans_up_last_and_waits_for_the_monitor_first() -> N
     lines = uc._helper_script().splitlines()
     assert lines[-1] == 'rmdir /s /q "%~dp0"'
     first_wait = next(i for i, line in enumerate(lines) if "tasklist.exe" in line)
-    installer = next(i for i, line in enumerate(lines) if "CUM_UPDATE_SETUP%\" " in line)
+    installer = next(i for i, line in enumerate(lines) if "USAGE_MONITOR_UPDATE_SETUP%\" " in line)
     relaunch = next(i for i, line in enumerate(lines) if line.startswith("if exist") and "start" in line)
     assert first_wait < installer < relaunch < len(lines) - 1
 
@@ -998,33 +998,33 @@ def test_the_restart_helper_waits_for_the_monitor_starts_it_again_and_runs_no_in
     script = uc._helper_script(install=False)
     lines = script.splitlines()
     assert script.isascii() and script.endswith("\r\n") and lines[-1] == 'rmdir /s /q "%~dp0"'
-    assert "CUM_UPDATE_SETUP%\" " not in script and "/VERYSILENT" not in script and "installer exit code" not in script
-    assert lines[3].startswith('>>"%CUM_UPDATE_LOG%" echo') and "restart helper" in lines[3]   # adds to the log of the one that stopped
+    assert "USAGE_MONITOR_UPDATE_SETUP%\" " not in script and "/VERYSILENT" not in script and "installer exit code" not in script
+    assert lines[3].startswith('>>"%USAGE_MONITOR_UPDATE_LOG%" echo') and "restart helper" in lines[3]   # adds to the log of the one that stopped
     first_wait = next(i for i, line in enumerate(lines) if "tasklist.exe" in line)
     relaunch = next(i for i, line in enumerate(lines) if line.startswith("if exist") and "start" in line)
     assert first_wait < relaunch < len(lines) - 1
     # The same rules as the update helper: nothing that varies, no pipe, system tools by absolute path, redirection first.
-    used = set(re.findall(r"%(CUM_[A-Z_]+)%", script))
-    assert used - set(uc._helper_environment(r"C:\x\Setup.exe", r"C:\x\App.exe", 1)) == {"CUM_N"}
+    used = set(re.findall(r"%(USAGE_MONITOR_[A-Z_]+)%", script))
+    assert used - set(uc._helper_environment(r"C:\x\Setup.exe", r"C:\x\App.exe", 1)) == {"USAGE_MONITOR_N"}
     assert "|" not in script and not re.search(r"[A-Za-z]:\\", script.replace("%SystemRoot%", ""))
     for line in lines:
         if re.search(r"\becho\b", line) and line != "@echo off":
             assert line.startswith(">"), line
     # The update helper is what the default gives, and it still starts a fresh log.
     assert uc._helper_script() == uc._helper_script(install=True)
-    assert uc._helper_script().splitlines()[3].startswith('>"%CUM_UPDATE_LOG%" echo') and "update helper started" in uc._helper_script()
+    assert uc._helper_script().splitlines()[3].startswith('>"%USAGE_MONITOR_UPDATE_LOG%" echo') and "update helper started" in uc._helper_script()
 
 
 def test_a_helper_in_a_drive_folder_is_started_by_its_relative_name() -> None:
-    helper = r"C:\Users\Tom&Jerry (x)\AppData\Local\Temp\cum-update-ab12\update.cmd"
+    helper = r"C:\Users\Tom&Jerry (x)\AppData\Local\Temp\usage-monitor-update-ab12\update.cmd"
     command, cwd = uc._helper_command(helper)
-    assert cwd == r"C:\Users\Tom&Jerry (x)\AppData\Local\Temp\cum-update-ab12"
+    assert cwd == r"C:\Users\Tom&Jerry (x)\AppData\Local\Temp\usage-monitor-update-ab12"
     assert command.endswith(r'" /d /e:on /v:off /s /c .\update.cmd')
     assert "Tom" not in command and "AppData" not in command
 
 
 def test_a_helper_in_a_unc_folder_is_named_in_full_inside_doubled_quotes() -> None:
-    helper = r"\\server\share\Tom&Jerry ^ 100%\cum-update-ab12\update.cmd"
+    helper = r"\\server\share\Tom&Jerry ^ 100%\usage-monitor-update-ab12\update.cmd"
     command, cwd = uc._helper_command(helper)
     assert cwd is None                                     # cmd cannot use a UNC folder as its current directory
     assert command.endswith(f' /d /e:on /v:off /s /c ""{helper}""')
@@ -1047,7 +1047,7 @@ def test_the_helper_is_started_hidden_with_its_own_process_group(monkeypatch: py
     assert seen["stdin"] is seen["stdout"] is seen["stderr"] is subprocess.DEVNULL and seen["close_fds"] is True
 
 
-# ── The real helper under the real cmd.exe (CUM_UI_TESTS=1) ───────────────────
+# ── The real helper under the real cmd.exe (USAGE_MONITOR_UI_TESTS=1) ───────────────────
 #
 # No test in this section may open a console window. Three things start console programs: the stand-in "monitor"
 # (ping.exe, started by the test: NO_WINDOW), the helper's own cmd.exe (started by update_check with CREATE_NO_WINDOW,
@@ -1060,13 +1060,13 @@ class StandInApp:
     It is pythonw.exe (GUI subsystem: whatever starts it, no console window) run through `start`, exactly as the
     helper starts the real app. It has no script. The sitecustomize.py that Python finds through PYTHONPATH writes
     ``marker`` as the interpreter starts, and Python then exits at once (no stdin). The exe is reached through a
-    junction in a folder whose name holds spaces and cmd metacharacters, so the quoted `start "" "%CUM_UPDATE_EXE%"`
+    junction in a folder whose name holds spaces and cmd metacharacters, so the quoted `start "" "%USAGE_MONITOR_UPDATE_EXE%"`
     runs on a hard path, the way a user's profile folder makes it one.
 
     The first stand-in was a .cmd file. `start` runs a .cmd with cmd /K, which opens a console window that never
     closes: one left on the desktop of whoever ran the tests, every run, per relaunch.
 
-    ``exe`` is what CUM_UPDATE_EXE should be, ``env`` the variables the helper must inherit for the marker to be
+    ``exe`` is what USAGE_MONITOR_UPDATE_EXE should be, ``env`` the variables the helper must inherit for the marker to be
     written, ``gone()`` removes the junction (never what it points at) and is safe to call again."""
 
     def __init__(self, root: Path, marker: Path) -> None:
@@ -1119,7 +1119,7 @@ def test_the_real_helper_waits_for_the_monitor_installs_relaunches_and_cleans_up
     try:
         for index, folder in enumerate(NASTY_FOLDERS):
             temp = tmp_path / folder
-            work = temp / "cum-update-abc123"
+            work = temp / "usage-monitor-update-abc123"
             work.mkdir(parents=True)
             shutil.copy(ping, work / "Setup.exe")
             relaunched = tmp_path / f"relaunched{index}.txt"
@@ -1171,7 +1171,7 @@ def test_the_real_helper_waits_for_the_monitor_installs_relaunches_and_cleans_up
 
 @UI
 def test_a_real_helper_that_stops_at_once_is_reported(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    work = tmp_path / "cum-update-x"
+    work = tmp_path / "usage-monitor-update-x"
     work.mkdir()
     (work / "Setup.exe").write_bytes(b"x")
     monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
@@ -1190,7 +1190,7 @@ def test_the_real_restart_helper_waits_for_the_monitor_starts_the_app_and_cleans
     The app it starts is a windowed stand-in (StandInApp), never a program that opens a console."""
     ping = Path(os.environ["SystemRoot"]) / "System32" / "ping.exe"
     temp = tmp_path / "Tom&Jerry (x) 100%"
-    work = temp / "cum-update-abc123"
+    work = temp / "usage-monitor-update-abc123"
     work.mkdir(parents=True)
     shutil.copy(ping, work / "Setup.exe")
     marker = tmp_path / "restarted.txt"
@@ -1228,7 +1228,7 @@ def test_a_real_helper_in_a_unc_folder_with_metacharacters_runs(monkeypatch: pyt
     unc_root = Path("\\\\localhost\\" + str(tmp_path).replace(":", "$", 1))
     if not unc_root.exists():
         pytest.skip("the administrative share C$ is not reachable here")
-    work = unc_root / "Tom&Jerry ^ 100% (x)" / "cum-update-abc123"
+    work = unc_root / "Tom&Jerry ^ 100% (x)" / "usage-monitor-update-abc123"
     work.mkdir(parents=True)
     ping = Path(os.environ["SystemRoot"]) / "System32" / "ping.exe"
     shutil.copy(ping, work / "Setup.exe")
@@ -1567,7 +1567,7 @@ def test_the_iss_is_ascii() -> None:
     ISS.encode("ascii")
 
 
-# ── installer.iss, compiled (CUM_UI_TESTS=1) and run in a sandbox (CUM_INSTALLER_E2E=1 as well) ────────────────
+# ── installer.iss, compiled (USAGE_MONITOR_UI_TESTS=1) and run in a sandbox (USAGE_MONITOR_INSTALLER_E2E=1 as well) ────────────────
 #
 # The text checks above cannot see whether the [Code] section compiles, or what a silent upgrade does to the
 # registry and the program folder. ISCC checks the first; the sandbox runs check the second. NOTHING here ever
@@ -1579,10 +1579,10 @@ def test_the_iss_is_ascii() -> None:
 # a script without that check, the reader test runs one more stand-in in another folder that must survive, and
 # keeps_real_readers checks after every run that the owner's long-running processes are all still there.
 
-SANDBOX = "CUM Test Sandbox"                         # AppId and AppName: the uninstall key is "CUM Test Sandbox_is1"
-SANDBOX_RUN_VALUE = "CUMTestSandbox"
-SANDBOX_MUTEX = "Global\\CUMTestSandboxMutex"
-SANDBOX_DATA = "CUMTestSandboxData"
+SANDBOX = "Usage Monitor Test Sandbox"                         # AppId and AppName: the uninstall key is "Usage Monitor Test Sandbox_is1"
+SANDBOX_RUN_VALUE = "UsageMonitorTestSandbox"
+SANDBOX_MUTEX = "Global\\UsageMonitorTestSandboxMutex"
+SANDBOX_DATA = "UsageMonitorTestSandboxData"
 APPROVED_TEST_KEY = r"Software\UsageMonitorTestSandboxApproved"            # the sandbox's stand-in for Explorer\StartupApproved\Run
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 UNINSTALL_ROOT = r"Software\Microsoft\Windows\CurrentVersion\Uninstall"
@@ -1604,8 +1604,8 @@ def find_iscc() -> Path | None:
 
 needs_iscc = pytest.mark.skipif(find_iscc() is None, reason="Inno Setup 6 (ISCC.exe) is not installed")
 SANDBOX_RUNS = pytest.mark.skipif(
-    os.environ.get("CUM_UI_TESTS") != "1" or os.environ.get("CUM_INSTALLER_E2E") != "1" or find_iscc() is None,
-    reason="runs a renamed copy of the installer: set CUM_UI_TESTS=1 and CUM_INSTALLER_E2E=1 (needs Inno Setup 6)",
+    os.environ.get("USAGE_MONITOR_UI_TESTS") != "1" or os.environ.get("USAGE_MONITOR_INSTALLER_E2E") != "1" or find_iscc() is None,
+    reason="runs a renamed copy of the installer: set USAGE_MONITOR_UI_TESTS=1 and USAGE_MONITOR_INSTALLER_E2E=1 (needs Inno Setup 6)",
 )
 
 

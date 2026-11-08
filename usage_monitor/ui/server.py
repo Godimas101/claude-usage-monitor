@@ -53,7 +53,7 @@ from usage_monitor.ui import startup
 
 log = get_logger(__name__)
 
-DEV_ENV = "CUM_DEV_INSTANCE"
+DEV_ENV = "USAGE_MONITOR_DEV_INSTANCE"
 TOKEN_HEADER = "X-Monitor-Token"
 KEY_PARAM = "k"                 # GET /?k=<the per-run token> opens the page; without it the answer is 401
 MAX_BODY_BYTES = 64 * 1024
@@ -825,7 +825,7 @@ class ApiServer:
         self._on_settings_applied = on_settings_applied
         self._dashboard_closed_cb = dashboard_closed_cb
         self._version = str(version)
-        # CUM_DEV_INSTANCE=1 makes a dev server whatever the caller says: the environment is how every
+        # USAGE_MONITOR_DEV_INSTANCE=1 makes a dev server whatever the caller says: the environment is how every
         # process of a dev run (and a test shell) is told not to touch the installed copy's state.
         self._dev = bool(dev) or os.environ.get(DEV_ENV) == "1"
         self._requested_port = int(port)

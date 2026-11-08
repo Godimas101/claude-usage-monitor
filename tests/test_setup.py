@@ -30,7 +30,7 @@ CMD = "C:/Users/Test User/AppData/Local/ClaudeUsageMonitor/ClaudeUsageMonitor.ex
 CLAUDE_CMD = r"C:\Users\Test User\AppData\Roaming\npm\claude.CMD"
 CLAUDE_EXE = r"C:\Users\Test User\.local\bin\claude.exe"
 NOW = datetime(2026, 10, 28, 18, 5, 9)
-BACKUP_NAME = "settings.json.cum-backup-20261028-180509"
+BACKUP_NAME = "settings.json.usage-monitor-backup-20261028-180509"
 GET_TEXT = (
     "claude-usage:\n  Scope: User config (available in all your projects)\n  Status: ✓ Connected\n  Type: stdio\n"
     "  Command: {command}\n  Args: {args}\n  Environment:\n\n"
@@ -322,7 +322,7 @@ def test_remove_takes_out_what_install_put_in_and_leaves_everything_else(tmp_pat
     assert result["changed"] == ["Removed the SessionStart hook.", "Removed the UserPromptSubmit hook.",
                                  "Removed the PostToolUse hook.", "Removed the claude-usage MCP tool."]
     assert rig.claude.tool is None and rig.claude.kinds() == ["get", "remove"]
-    assert Path(result["backup"]).exists() and Path(result["backup"]).name.startswith("settings.json.cum-backup-")
+    assert Path(result["backup"]).exists() and Path(result["backup"]).name.startswith("settings.json.usage-monitor-backup-")
 
 
 def test_remove_drops_an_event_list_and_the_hooks_object_that_it_empties(tmp_path: Path) -> None:
@@ -1130,8 +1130,8 @@ def test_at_the_timeout_the_runner_ends_the_whole_process_tree(monkeypatch: pyte
     assert ended[-1] == "kill" and (sys.platform != "win32" or ended[0] == ["/T", "/F", "/PID", "4242"])
 
 
-@pytest.mark.skipif(os.environ.get("CUM_UI_TESTS") != "1" or sys.platform != "win32",
-                    reason="starts processes: set CUM_UI_TESTS=1")
+@pytest.mark.skipif(os.environ.get("USAGE_MONITOR_UI_TESTS") != "1" or sys.platform != "win32",
+                    reason="starts processes: set USAGE_MONITOR_UI_TESTS=1")
 def test_a_cmd_shim_whose_child_holds_the_pipes_still_times_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     shim = tmp_path / "claude.cmd"           # as npm's shim runs node.exe, this runs a child that keeps the pipes open
     shim.write_text("@ping -n 30 127.0.0.1 >nul\r\n", encoding="ascii")
@@ -1221,3 +1221,19 @@ def test_a_linked_settings_file_stays_linked(tmp_path: Path) -> None:
     assert setup.install(rig.ctx)["ok"] is True
     assert rig.settings.is_symlink()
     assert json.loads(real.read_text(encoding="utf-8")) == {"model": "opus", "hooks": ours()}
+
+
+def test_backups_from_before_v2_3_count_toward_the_five_and_age_out(tmp_path: Path) -> None:
+    """Copies made before v2.3 have a shorter, three-letter prefix. They are the user's backups too: they count toward
+    KEEP_BACKUPS, and the oldest go first, whichever name they have."""
+    rig = make_rig(tmp_path)
+    rig.write({"theme": "dark"})
+    for day in range(1, 7):
+        old = rig.folder / f"settings.json.abc-backup-202610{day:02d}-120000"
+        old.write_text("{}", encoding="utf-8")
+        os.utime(old, (1_700_000_000 + day, 1_700_000_000 + day))
+    (rig.folder / "settings.json.notes-backup-20261001-120000").write_text("not ours", encoding="utf-8")
+    setup.backup_settings(rig.settings, NOW)
+    kept = [name for name in rig.files() if "-backup-" in name]
+    assert BACKUP_NAME in kept and "settings.json.notes-backup-20261001-120000" in kept      # another tool's file stays
+    assert sorted(name for name in kept if ".abc-" in name) == [f"settings.json.abc-backup-202610{day:02d}-120000" for day in (3, 4, 5, 6)]

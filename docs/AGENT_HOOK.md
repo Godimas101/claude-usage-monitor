@@ -253,8 +253,8 @@ PowerShell does not wait for a windowed program unless its output goes through a
   an older one it changes nothing, names the `claude` it found, and tells you to run
   `claude update`.
 - It backs up your Claude Code user settings (`%USERPROFILE%\.claude\settings.json`, or the folder in
-  `CLAUDE_CONFIG_DIR`) to `settings.json.cum-backup-<date>-<time>` beside the file, and keeps the five
-  newest of those backups. The file is saved again in a standard layout (a two-space indent); every
+  `CLAUDE_CONFIG_DIR`) to `settings.json.usage-monitor-backup-<date>-<time>` beside the file, and keeps the five
+  newest of those backups. Copies from before v2.3 have a shorter name and count toward the five too. The file is saved again in a standard layout (a two-space indent); every
   value in it stays as it was.
 - It adds the SessionStart, UserPromptSubmit and PostToolUse entries shown under [Hooks](#hooks). An
   entry of this app's already in one of those events, such as a `--hook` you added by hand for v2.1 or

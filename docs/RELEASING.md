@@ -80,11 +80,11 @@ signature as well as the digest.
 
 ## Before you bump `VERSION`
 
-- [ ] `python -m pytest -q` passes, and so does `CUM_UI_TESTS=1 python -m pytest -q` on your desktop (it adds the
+- [ ] `python -m pytest -q` passes, and so does `USAGE_MONITOR_UI_TESTS=1 python -m pytest -q` on your desktop (it adds the
       window and process tests, including the update helpers under the real `cmd.exe`, the installer script
       compiled by Inno Setup, and the signature check of the WebView2 download). `tests.yml` is green on the
       commit that will reach `main`.
-- [ ] The sandboxed installer runs pass: `CUM_UI_TESTS=1 CUM_INSTALLER_E2E=1 python -m pytest -q tests/test_update_check.py -k sandboxed`.
+- [ ] The sandboxed installer runs pass: `USAGE_MONITOR_UI_TESTS=1 USAGE_MONITOR_INSTALLER_E2E=1 python -m pytest -q tests/test_update_check.py -k sandboxed`.
       They install and uninstall a **renamed** copy of the installer (own AppId, folder, Run value and mutex; the test
       refuses to run if a real name is left in it) and check the Start with Windows entry for each updater and each
       starting state, and that an update with a file held open stops with the old install whole. Your own install is
@@ -93,8 +93,8 @@ signature as well as the digest.
       `## [X.Y.Z]` or the notes are not found), and `[Unreleased]` is empty above it. `README.md` agrees.
 - [ ] `build.bat` succeeds. It builds the exe and the installer from `VERSION`, checks that the frozen exe
       reports that version (`--print-version`) and prints the installer's SHA-256. It needs Inno Setup 6.3+
-      and `python -m pip install -r requirements.txt pyinstaller`. Set `CUM_DISTPATH`, `CUM_WORKPATH` and
-      `CUM_OUTDIR` to short folders if the checkout is deep (both tools fail past 260 characters). Its toolchain line
+      and `python -m pip install -r requirements.txt pyinstaller`. Set `USAGE_MONITOR_DISTPATH`, `USAGE_MONITOR_WORKPATH` and
+      `USAGE_MONITOR_OUTDIR` to short folders if the checkout is deep (both tools fail past 260 characters). Its toolchain line
       (Python, PyInstaller, Pillow, pywebview) should match what the release workflow's last log shows; if it does
       not, build again with CI's versions before the next two items.
 - [ ] **The pipeline has run on a runner.** Run the workflow by hand with publish left off (a rehearsal), from a
@@ -103,10 +103,10 @@ signature as well as the digest.
       is the one that can fail for a reason of that machine: read its report before blaming the build. The workflow
       reads the WebView2 runtime's files before the smoke test. On a fresh runner they are cold, and a cold runtime
       started the dashboard in up to 32 s (image win25-vs2026/20261030), past the smoke test's 15 s.
-- [ ] The frozen smoke run is clean on your own machine too: with `CUM_DEV_INSTANCE=1`, `CUM_APPDATA_DIR=<scratch folder>` and
+- [ ] The frozen smoke run is clean on your own machine too: with `USAGE_MONITOR_DEV_INSTANCE=1`, `USAGE_MONITOR_APPDATA_DIR=<scratch folder>` and
       `CLAUDE_CONFIG_DIR=<empty folder>` (so your own transcripts stay out of it) run
       `dist\ClaudeUsageMonitor\ClaudeUsageMonitor.exe --smoke-test 45 report.json`. Exit code 0 and `"ok": true`.
-      Close any other dev instance first (`python main.py` with `CUM_DEV_INSTANCE=1`): there is one dev mutex,
+      Close any other dev instance first (`python main.py` with `USAGE_MONITOR_DEV_INSTANCE=1`): there is one dev mutex,
       and while another holds it the report says `the app never started its loop`.
 - [ ] On a spare Windows 11 user or a VM, **not over your own install**, run the new `ClaudeUsageMonitorSetup`:
   - the tray icon, widgets and dashboard window appear, and **Start with Windows** is ticked;
@@ -120,7 +120,7 @@ signature as well as the digest.
       `/mcp` shows `claude-usage` as connected. Close the monitor, and run the new installer by hand over that install
       (your own install is fine for this one). It goes through without an "in use" stop, and its last page says it closed
       the monitor's tool in a Claude Code session. In that session the tool
-      answers again on its next use, or after `/mcp`. The sandboxed runs (`CUM_UI_TESTS=1` and `CUM_INSTALLER_E2E=1`;
+      answers again on its next use, or after `/mcp`. The sandboxed runs (`USAGE_MONITOR_UI_TESTS=1` and `USAGE_MONITOR_INSTALLER_E2E=1`;
       the stand-in tests also need the .NET Framework's `csc.exe`) cover the same with stand-in readers, hooks that
       keep starting the exe all through an update, and the uninstall.
 - [ ] **Upgrade from v1, the way v1.1.5's updater does it.** That updater cannot be changed and is the one every v1

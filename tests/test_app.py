@@ -3,7 +3,7 @@
 Most of it runs on fakes: a fake host with hand-fired timers, fake layered windows, a fake platform
 (monitors, taskbar, fullscreen) and a fake skin, so placement, wiring, shutdown order and the
 animation timers are checked without a desktop. Tests that create real windows, tray icons or
-processes are skipped unless CUM_UI_TESTS=1 (CI has no interactive desktop). Those park every
+processes are skipped unless USAGE_MONITOR_UI_TESTS=1 (CI has no interactive desktop). Those park every
 widget off-screen, tag the tray tooltip "(dev)", use a fake data service and never open the
 dashboard or touch the real settings, mutex or controller window.
 """
@@ -81,7 +81,7 @@ from usage_monitor.ui.widgets import (
 )
 
 UI = pytest.mark.skipif(
-    os.environ.get("CUM_UI_TESTS") != "1", reason="needs an interactive desktop: set CUM_UI_TESTS=1",
+    os.environ.get("USAGE_MONITOR_UI_TESTS") != "1", reason="needs an interactive desktop: set USAGE_MONITOR_UI_TESTS=1",
 )
 NOW = datetime(2026, 10, 21, 20, 12, tzinfo=timezone.utc)
 
@@ -92,8 +92,8 @@ NOW = datetime(2026, 10, 21, 20, 12, tzinfo=timezone.utc)
 def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Nothing here may reach the real app data, the real mutex or the installed copy's window."""
     app_dir = tmp_path / "app"
-    monkeypatch.setenv("CUM_APPDATA_DIR", str(app_dir))
-    monkeypatch.setenv("CUM_DEV_INSTANCE", "1")   # the dev controller class: never the installed copy's window
+    monkeypatch.setenv("USAGE_MONITOR_APPDATA_DIR", str(app_dir))
+    monkeypatch.setenv("USAGE_MONITOR_DEV_INSTANCE", "1")   # the dev controller class: never the installed copy's window
     monkeypatch.setenv("APPDATA", str(tmp_path / "roaming"))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
@@ -636,16 +636,16 @@ def test_the_mutex_names():
     assert mutex_name(True) == "Global\\ClaudeUsageMonitor-dev"
 
 
-@pytest.mark.parametrize("env, expected", [({}, False), ({"CUM_DEV_INSTANCE": "1"}, True),
-                                           ({"CUM_DEV_INSTANCE": "0"}, False), ({"CUM_DEV_INSTANCE": "true"}, False),
-                                           ({"CUM_DEV_INSTANCE": ""}, False)])
-def test_only_cum_dev_instance_1_is_a_dev_instance(env, expected):
+@pytest.mark.parametrize("env, expected", [({}, False), ({"USAGE_MONITOR_DEV_INSTANCE": "1"}, True),
+                                           ({"USAGE_MONITOR_DEV_INSTANCE": "0"}, False), ({"USAGE_MONITOR_DEV_INSTANCE": "true"}, False),
+                                           ({"USAGE_MONITOR_DEV_INSTANCE": ""}, False)])
+def test_only_usage_monitor_dev_instance_1_is_a_dev_instance(env, expected):
     assert is_dev_instance(env) is expected
 
 
 def test_a_dev_app_uses_the_dev_mutex_and_a_normal_one_does_not(monkeypatch):
-    assert MonitorApp()._mutex == "Global\\ClaudeUsageMonitor-dev"             # the fixture sets CUM_DEV_INSTANCE=1
-    monkeypatch.delenv("CUM_DEV_INSTANCE")
+    assert MonitorApp()._mutex == "Global\\ClaudeUsageMonitor-dev"             # the fixture sets USAGE_MONITOR_DEV_INSTANCE=1
+    monkeypatch.delenv("USAGE_MONITOR_DEV_INSTANCE")
     assert MonitorApp()._mutex == "Global\\ClaudeUsageMonitor"
     assert MonitorApp(dev=True)._mutex == "Global\\ClaudeUsageMonitor-dev"
     assert MonitorApp(mutex="Local\\custom")._mutex == "Local\\custom"
@@ -677,7 +677,7 @@ def test_the_smoke_test_is_always_a_dev_instance(monkeypatch, tmp_path):
 
 
 def test_the_second_holder_of_a_mutex_is_refused_until_the_first_lets_go():
-    name = f"Local\\CUM-test-{uuid.uuid4().hex}"
+    name = f"Local\\UsageMonitor-test-{uuid.uuid4().hex}"
     first, second = SingleInstance(name), SingleInstance(name)
     assert first.acquire() is True
     assert second.acquire() is False
@@ -688,7 +688,7 @@ def test_the_second_holder_of_a_mutex_is_refused_until_the_first_lets_go():
 
 
 def test_a_second_launch_signals_the_first_and_exits_without_starting(monkeypatch):
-    name = f"Local\\CUM-test-{uuid.uuid4().hex}"
+    name = f"Local\\UsageMonitor-test-{uuid.uuid4().hex}"
     holder = SingleInstance(name)
     assert holder.acquire()
     signalled: list[bool] = []
@@ -723,7 +723,7 @@ def start_until_the_ui(monkeypatch, settings_obj: Settings) -> MonitorApp:
     monkeypatch.setattr(app_mod, "UIHost", no_host)
     monkeypatch.setattr(app_mod.startup, "repair_if_enabled",
                         lambda: pytest.fail("a dev instance must not touch the Run entry"))
-    app = MonitorApp(settings=settings_obj, mutex=f"Local\\CUM-test-{uuid.uuid4().hex}")
+    app = MonitorApp(settings=settings_obj, mutex=f"Local\\UsageMonitor-test-{uuid.uuid4().hex}")
     with pytest.raises(StopAfterMigration):
         app.run()
     return app
@@ -765,7 +765,7 @@ def test_the_installed_build_repairs_its_startup_entry_and_a_dev_build_does_not(
     monkeypatch.setattr(app_mod, "UIHost", lambda: (_ for _ in ()).throw(StopAfterMigration()))
     for dev in (False, True):
         s = Settings(tmp_path / f"s{dev}.json", save_delay_s=0.0)
-        app = MonitorApp(dev=dev, settings=s, mutex=f"Local\\CUM-test-{uuid.uuid4().hex}")
+        app = MonitorApp(dev=dev, settings=s, mutex=f"Local\\UsageMonitor-test-{uuid.uuid4().hex}")
         with pytest.raises(StopAfterMigration):
             app.run()
         s.close()
@@ -806,7 +806,7 @@ def test_a_source_run_leaves_an_installed_copys_startup_entry_alone(monkeypatch,
     entry = RunEntry(monkeypatch, INSTALLED_ENTRY)
     monkeypatch.delattr(sys, "frozen", raising=False)
     s = Settings(tmp_path / "s.json", save_delay_s=0.0)
-    MonitorApp(dev=False, settings=s, mutex=f"Local\\CUM-test-{uuid.uuid4().hex}")._repair_startup()
+    MonitorApp(dev=False, settings=s, mutex=f"Local\\UsageMonitor-test-{uuid.uuid4().hex}")._repair_startup()
     s.close()
     assert (entry.reads, entry.writes, entry.deletes) == (0, [], 0)
     assert entry.value == INSTALLED_ENTRY
@@ -816,9 +816,9 @@ def test_the_frozen_build_repairs_a_moved_startup_entry_and_the_dev_build_never_
     entry = RunEntry(monkeypatch, INSTALLED_ENTRY)
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     s = Settings(tmp_path / "s.json", save_delay_s=0.0)
-    MonitorApp(dev=True, settings=s, mutex=f"Local\\CUM-test-{uuid.uuid4().hex}")._repair_startup()
+    MonitorApp(dev=True, settings=s, mutex=f"Local\\UsageMonitor-test-{uuid.uuid4().hex}")._repair_startup()
     assert (entry.reads, entry.writes) == (0, [])                        # dev: not even a look
-    MonitorApp(dev=False, settings=s, mutex=f"Local\\CUM-test-{uuid.uuid4().hex}")._repair_startup()
+    MonitorApp(dev=False, settings=s, mutex=f"Local\\UsageMonitor-test-{uuid.uuid4().hex}")._repair_startup()
     s.close()
     assert entry.writes == [app_mod.startup.command_line(frozen=True)]    # the installed build points it at itself
 
@@ -830,7 +830,7 @@ def test_a_registry_error_while_repairing_the_startup_entry_does_not_stop_the_ap
     monkeypatch.setattr(app_mod.startup, "repair_if_enabled", refuse)
     monkeypatch.setattr(app_mod, "UIHost", lambda: (_ for _ in ()).throw(StopAfterMigration()))
     s = Settings(tmp_path / "s.json", save_delay_s=0.0)
-    app = MonitorApp(dev=False, settings=s, mutex=f"Local\\CUM-test-{uuid.uuid4().hex}")
+    app = MonitorApp(dev=False, settings=s, mutex=f"Local\\UsageMonitor-test-{uuid.uuid4().hex}")
     with pytest.raises(StopAfterMigration):                                      # got past the repair to the UI
         app.run()
     s.close()
@@ -3586,7 +3586,7 @@ def test_the_analytics_step_runs_after_the_dashboard_step_in_a_full_smoke_run():
     assert source.index('"dashboard"') < source.index('"analytics"')
 
 
-# ── Real windows (CUM_UI_TESTS=1) ─────────────────────────────────────────────
+# ── Real windows (USAGE_MONITOR_UI_TESTS=1) ─────────────────────────────────────────────
 
 OFF = -30000
 
@@ -3636,7 +3636,7 @@ class AppRunner:
         self.service = service or FakeService(self.events, sample_state("normal3", datetime.now(timezone.utc)))
         self.app = MonitorApp(
             settings=settings, service_factory=lambda s: self.service, update_check_fn=lambda repo, cur, cb, on_error=None: cb(None),
-            platform_api=OffscreenPlatform(), mutex=mutex or f"Local\\CUM-test-{uuid.uuid4().hex}",
+            platform_api=OffscreenPlatform(), mutex=mutex or f"Local\\UsageMonitor-test-{uuid.uuid4().hex}",
             animate_when_locked=True,
         )
         self.exit_code: list[int] = []
@@ -3737,7 +3737,7 @@ def test_a_steady_stream_of_data_leaks_no_window_objects(tmp_path):
 
 @UI
 def test_a_second_launch_opens_the_running_instances_dashboard(tmp_path, monkeypatch):
-    name = f"Local\\CUM-test-{uuid.uuid4().hex}"
+    name = f"Local\\UsageMonitor-test-{uuid.uuid4().hex}"
     settings = Settings(tmp_path / "settings.json", save_delay_s=0.0)
     runner = AppRunner(settings, mutex=name).start()
     opened: list[str] = []
@@ -3757,7 +3757,7 @@ def test_real_layered_windows_carry_the_widgets_frames(tmp_path):
     from usage_monitor.render.skins import get_skin
     from usage_monitor.ui.host import UIHost
 
-    host = UIHost(controller_class=f"CUM.Test.Controller.{uuid.uuid4().hex[:8]}")
+    host = UIHost(controller_class=f"UsageMonitor.Test.Controller.{uuid.uuid4().hex[:8]}")
     pieces: list[Any] = []
     try:
         fake_plat = OffscreenPlatform()

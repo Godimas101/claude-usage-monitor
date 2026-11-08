@@ -120,7 +120,7 @@ _CloseHandle.restype = wintypes.BOOL
 
 
 def is_dev_instance(env: Mapping[str, str] | None = None) -> bool:
-    """True when CUM_DEV_INSTANCE=1: a test build that runs beside the installed copy."""
+    """True when USAGE_MONITOR_DEV_INSTANCE=1: a test build that runs beside the installed copy."""
     return (os.environ if env is None else env).get(DEV_ENV) == "1"
 
 

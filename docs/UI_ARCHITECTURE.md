@@ -299,7 +299,7 @@ Explorer restart) gets the icon added again and the same balloon sent once more,
 that was lost is never counted as shown (the update announcement is then offered again, not marked as told).
 
 ### Dev isolation
-`CUM_APPDATA_DIR=<dir>` puts settings, DB and log in `<dir>`. `CUM_DEV_INSTANCE=1` uses the
+`USAGE_MONITOR_APPDATA_DIR=<dir>` puts settings, DB and log in `<dir>`. `USAGE_MONITOR_DEV_INSTANCE=1` uses the
 mutex `Global\ClaudeUsageMonitor-dev`, its own controller window class, and tags the tray
 tooltip "(dev)", so a test build runs alongside an installed copy. `main.py --dump-frames <dir>`
 renders every theme × variant × state × scale to PNGs without opening windows;
@@ -313,10 +313,10 @@ six-hourly update re-check timer is armed (`update_recheck`).
   memory (shown in `/api/state`, gone when the process ends, logged as skipped). Only the frozen
   installed build repairs the entry at launch, so a source checkout cannot repoint it.
   `--smoke-test` always runs as a dev instance, whatever the environment says. The API server is
-  a dev server when its `dev` flag is set **or** `CUM_DEV_INSTANCE=1` is in the environment.
+  a dev server when its `dev` flag is set **or** `USAGE_MONITOR_DEV_INSTANCE=1` is in the environment.
 - **Dev server.** `python -m usage_monitor.ui.devserver [--port N] [--scenario
   normal|warning|critical|stale|guard|no_login|limits_only] [--db PATH] [--theme ID[/VARIANT]]` serves the real webui and API
-  from a fake `MonitorState`, with settings in `CUM_APPDATA_DIR` (or a temporary folder). `stale` and `no_login` carry
+  from a fake `MonitorState`, with settings in `USAGE_MONITOR_APPDATA_DIR` (or a temporary folder). `stale` and `no_login` carry
   the data layer's own sign-in texts (`usage_api.EXPIRED_DETAIL`, `usage_api.NO_SIGN_IN_DETAIL`).
   The two scenarios of someone who uses Claude on the web or in the app (#28) have no Claude Code on the PC:
   `no_login` has no sign-in (no limits, no plan), and `limits_only` is signed in with the limits of `normal` and a week
@@ -368,7 +368,7 @@ Settings: `theme_id`, `theme_variant`, `theme_mode` (Gates: light / dark / syste
   family PC): they find the port with `netstat`, read the token and have the whole API. The Host and header checks only
   stop web pages. So `GET /` answers `401` (plain text) unless the query holds exactly one `k` equal to the token,
   compared in constant time, and `ApiServer.url` is `http://127.0.0.1:<port>/?k=<token>`. The dashboard process
-  opens that address (it has the token in `CUM_DASHBOARD_TOKEN`, which only the same user can read), and so does the
+  opens that address (it has the token in `USAGE_MONITOR_DASHBOARD_TOKEN`, which only the same user can read), and so does the
   browser fallback; the dev server prints it. The key stays in the address, so a reload works; `Referrer-Policy:
   no-referrer` keeps it from leaving, and the request log drops the query. `/static/` holds only the app's own files
   and needs no key.
@@ -664,7 +664,7 @@ default browser instead, and the exit code says so (below).
   to the same standard at 1200x780 and 1000x700, where no row of a taller card hides a jump: its Fast mode card says the same
   explainer sentence in every state (the placeholder, the report with no fast-mode use and the report with some, as a full-width
   tile so its sub-lines do not wrap differently) and its thread tiles are sized for a real figure, and a test in a real web view
-  holds the reports back, lets them land and fails if any card changed height (`test_server.py`, `CUM_UI_TESTS=1`). The Overview's
+  holds the reports back, lets them land and fails if any card changed height (`test_server.py`, `USAGE_MONITOR_UI_TESTS=1`). The Overview's
   cost, efficiency and model cards draw from the cost report like the Cost page does: while it is on its way they are pending,
   and when it fails they say so (`data-state="error"` and the page's `problem` banner) instead of staying pending for good.
   A PC with no Claude Code activity is the exception: nothing is asked for there (below).
@@ -717,14 +717,14 @@ default browser instead, and the exit code says so (below).
   same function.
 - Fonts are bundled under `webui/fonts/` (OFL) — no network requests at runtime.
 - **Text is measured, not guessed.** `charts.js` asks the page how wide a run of text is (a probe `<text>`
-  element; answers are cached and `CUMCharts.refresh()` clears them when the font or size changes), so a bar
+  element; answers are cached and `MonitorCharts.refresh()` clears them when the font or size changes), so a bar
   chart's label column and the value text beside its bar fit the real font of any theme. A label that does not
   fit is cut in the middle with an ellipsis (`fitLabel`), so folders that differ at the end still differ.
-- **Test hook.** With `window.__CUM_TEST__` set before the script runs, `app.js` hands its helpers back
-  (`__CUM_TEST__.api`: `esc`, `fmtPct`, `paceOf`, `ratioCells`, `remainHTML`, `sessionsTable`, ...) and returns
+- **Test hook.** With `window.__USAGE_MONITOR_TEST__` set before the script runs, `app.js` hands its helpers back
+  (`__USAGE_MONITOR_TEST__.api`: `esc`, `fmtPct`, `paceOf`, `ratioCells`, `remainHTML`, `sessionsTable`, ...) and returns
   without starting the page. Nothing else sets it. `tests/webui_checks.js` loads `charts.js` and `app.js` in a
   node `vm` context with a fake DOM and prints what they do as JSON; `tests/test_webui.py` asserts on it. Those
-  tests start node, so they need `CUM_UI_TESTS=1`, and `tests.yml` runs them (and `tests/test_motion.py`) once more with it set.
+  tests start node, so they need `USAGE_MONITOR_UI_TESTS=1`, and `tests.yml` runs them (and `tests/test_motion.py`) once more with it set.
 - **Money.** Real money (the extra-usage Spend card) is shown in the account's own currency (`fmtMoney`, an
   `Intl.NumberFormat` with the ISO code the usage API reports; USD where it reports none). API-equivalent cost
   stays dollars. `/api/state.plan` carries the detected plan and price only: `plan_price_override` is a setting,
@@ -752,10 +752,10 @@ when, and draw the characters of a figure that types, decodes or rolls in.
 
 | File | What it is |
 |---|---|
-| `webui/motion.js` | The engine, `window.CUM_FX`: one `requestAnimationFrame` loop for every character-level job (`typer`, `decoder`, `roller`), ghost text, the pending and arrival watcher, `FX.director(cfg)`, the boot curtain and the reduced-motion listener |
+| `webui/motion.js` | The engine, `window.USAGE_MONITOR_FX`: one `requestAnimationFrame` loop for every character-level job (`typer`, `decoder`, `roller`), ghost text, the pending and arrival watcher, `FX.director(cfg)`, the boot curtain and the reduced-motion listener |
 | `webui/motion.css` | What every theme shares: the ghost text, the typing cursor, `@property --t`, `.fx-land`, the boot curtain and the reduced-motion guard. It holds no colour and no timing |
 | `webui/themes/<id>.motion.css` | The theme's look: entrance, hover, placeholders, arrival and boot. Every rule is scoped by `html[data-theme="<id>"]`, colours come only from the theme's tokens |
-| `webui/themes/<id>.js` | The theme's director: registers `window.CUM_THEME_FX[id] = { start, enter, cancel, arrive }` and plays the boot |
+| `webui/themes/<id>.js` | The theme's director: registers `window.USAGE_MONITOR_THEME_FX[id] = { start, enter, cancel, arrive }` and plays the boot |
 
 **Hooks (`app.js` calls them; the header comment of `app.js` is the contract).** `start()` runs once the theme's script has
 loaded and again whenever the theme is applied. `enter(main, page)`: the page just drawn into `#main` is due its entrance (a
@@ -764,7 +764,7 @@ place). It is called once the theme's stylesheet and script are in and the windo
 `cancel(main)`: finish what plays, at the final state, before another page or theme replaces the page and when `reduce_motion`
 turns on (not when a card is filled in place). `arrive(card, info)`: a card's numbers arrived or changed in place; `info` is
 `{ page, card, first, from, to, fresh, entering, reduced }` (`from` and `to` are the card's `data-state` before and after).
-For code that is not a theme script, `cum:card-data` bubbles from the card with the same `info` and `cum:page-rendered` fires
+For code that is not a theme script, `mon:card-data` bubbles from the card with the same `info` and `mon:page-rendered` fires
 on `#main` with `{ page, opened, reduced, updated, added }` (the card keys). With `reduce_motion` or `prefers-reduced-motion`
 `enter` and `arrive` are never called (`cancel` still is, since it only finishes what was playing), and the files add no
 animation of their own.
@@ -854,7 +854,7 @@ transition in `motion.css`.
 hygiene `tests/test_webui.py` keeps for the other scripts) and node checks that run `motion.js` on a minimal fake DOM and each
 theme script (`themes/<id>.js`) with no `motion.js` at all (`tests/theme_scripts_checks.js`: the script has to load, start twice,
 survive its timers, a theme switch and reduced motion without throwing, because the page is complete without the engine); the node
-ones need `CUM_UI_TESTS=1`, start node with `CREATE_NO_WINDOW`, and `tests.yml` runs them with `tests/test_webui.py`. The
+ones need `USAGE_MONITOR_UI_TESTS=1`, start node with `CREATE_NO_WINDOW`, and `tests.yml` runs them with `tests/test_webui.py`. The
 hover rule above is pinned from both sides: the static checks fail a `:hover` rule that animates, moves or clips its target
 without `[data-fx-hot]` or `[data-fx-play]`, and the node scenarios drive the hover marks through a fake pointer (one entry, a
 card that moves off a resting pointer and back thirty times, the cool-down, the 4 px hold, the entrance, a quiet page, reduced

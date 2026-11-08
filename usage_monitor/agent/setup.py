@@ -7,7 +7,7 @@ python.exe or a dev path never goes into a user's settings. ``--gate`` stays opt
 nor removes it, and leaves a user's own ``--gate`` entry alone.
 
 The settings file is edited the careful way. It is read first and refused when it is not a JSON object; an existing file
-is copied to ``settings.json.cum-backup-<stamp>`` beside it before any change; only the handlers whose command is this
+is copied to ``settings.json.usage-monitor-backup-<stamp>`` beside it before any change; only the handlers whose command is this
 exe are touched (every other key and hook is kept); nothing is written when nothing changes, so running install twice
 changes nothing; and the write goes through a temporary file and ``os.replace``. The MCP tool goes through the
 ``claude`` command, run with an argument list (never a shell), a timeout and no console window.
@@ -48,7 +48,9 @@ MIN_CLAUDE_TEXT = "2.1.139"
 MCP_NAME = "claude-usage"
 MANUAL_DOC = "docs/AGENT_HOOK.md"  # the setup to do by hand, when this one is unavailable
 SETTINGS_NAME = "settings.json"
-BACKUP_INFIX = ".cum-backup-"      # settings.json.cum-backup-<YYYYMMDD-HHMMSS>
+BACKUP_INFIX = ".usage-monitor-backup-"      # settings.json.usage-monitor-backup-<YYYYMMDD-HHMMSS>
+# Copies from before v2.3 have a shorter, three-letter prefix. They count toward KEEP_BACKUPS too, so they age out.
+_BACKUP_NAME = r"\.(?:usage-monitor|[a-z]{3})-backup-\d{8}-\d{6}(?:-\d+)?"
 CLAUDE_COMMAND = "claude"
 CLAUDE_TIMEOUT_S = 20.0
 CONFIG_ENV = "CLAUDE_CONFIG_DIR"   # Claude Code's own override of its config folder
@@ -491,7 +493,7 @@ def read_settings(path: Path) -> tuple[dict | None, str | None]:
 
 
 def backup_settings(path: Path, now: datetime) -> Path:
-    """Copy the settings file to settings.json.cum-backup-<YYYYMMDD-HHMMSS> beside it (numbered when that name is
+    """Copy the settings file to settings.json.usage-monitor-backup-<YYYYMMDD-HHMMSS> beside it (numbered when that name is
     taken), and drop all but the newest KEEP_BACKUPS of those copies. Returns the copy."""
     stamp = now.strftime("%Y%m%d-%H%M%S")
     target = path.with_name(f"{path.name}{BACKUP_INFIX}{stamp}")
@@ -511,7 +513,8 @@ def _prune_backups(path: Path, *, keep: Path) -> None:
         except OSError:
             return 0.0
 
-    copies = sorted((item for item in path.parent.glob(f"{path.name}{BACKUP_INFIX}*") if item != keep),
+    pattern = re.compile(re.escape(path.name) + _BACKUP_NAME)
+    copies = sorted((item for item in path.parent.iterdir() if item != keep and pattern.fullmatch(item.name)),
                     key=age, reverse=True)
     for old in copies[KEEP_BACKUPS - 1:]:
         with contextlib.suppress(OSError):

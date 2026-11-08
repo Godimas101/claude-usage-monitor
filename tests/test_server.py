@@ -2,7 +2,7 @@
 
 Offline by design: the server listens on loopback only; the registry, the Win32 focus call, the
 supporters fetch and the themes loader are replaced with fakes. Tests that create real windows,
-tray icons or child processes are skipped unless CUM_UI_TESTS=1.
+tray icons or child processes are skipped unless USAGE_MONITOR_UI_TESTS=1.
 """
 from __future__ import annotations
 
@@ -49,12 +49,12 @@ from usage_monitor.settings import Settings
 from usage_monitor.ui import dashboard, devserver, server as server_mod, startup
 from usage_monitor.ui.server import ApiServer, to_jsonable
 
-UI_TESTS = os.environ.get("CUM_UI_TESTS") == "1"
+UI_TESTS = os.environ.get("USAGE_MONITOR_UI_TESTS") == "1"
 # The autouse fixture points APPDATA and HOME at temp folders. Child processes started by the UI-gated
 # tests need the real profile (pywebview lives in the user site-packages), so the values are kept here.
 REAL_PROFILE_ENV = {k: os.environ[k] for k in ("APPDATA", "LOCALAPPDATA", "USERPROFILE", "HOME", "PYTHONUSERBASE")
                     if k in os.environ}
-ui_only = pytest.mark.skipif(not UI_TESTS, reason="needs CUM_UI_TESTS=1 (real windows or processes)")
+ui_only = pytest.mark.skipif(not UI_TESTS, reason="needs USAGE_MONITOR_UI_TESTS=1 (real windows or processes)")
 # Every console program a test starts (python, tasklist, taskkill) gets this flag: pytest may have no console of its own
 # (an editor, a task runner, an agent), and then each such process would open a terminal window on the desktop.
 # test_update_check.py has the test that keeps every test file honest about it.
@@ -155,7 +155,7 @@ def sample_state(*, status: m.ApiStatus = m.ApiStatus.LIVE, percent: float = 13.
 @pytest.fixture(autouse=True)
 def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Nothing in these tests may reach the real app data, registry or home folder."""
-    monkeypatch.setenv("CUM_APPDATA_DIR", str(tmp_path / "app"))
+    monkeypatch.setenv("USAGE_MONITOR_APPDATA_DIR", str(tmp_path / "app"))
     monkeypatch.setenv("APPDATA", str(tmp_path / "roaming"))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
@@ -2284,7 +2284,7 @@ class FakeSetup:
         self.calls: list[str] = []
         self.answers: dict[str, Any] = {
             "install": {"ok": True, "action": "install", "changed": ["Added the SessionStart hook."], "unchanged": [],
-                        "backup": "C:/Users/t/.claude/settings.json.cum-backup-20261028-180509", "warnings": [],
+                        "backup": "C:/Users/t/.claude/settings.json.usage-monitor-backup-20261028-180509", "warnings": [],
                         "errors": [], "manual": None, "settings_path": SETUP_STATUS["settings_path"]},
             "remove": {"ok": False, "action": "remove", "changed": [], "unchanged": [], "backup": None, "warnings": [],
                        "errors": ["The Claude Code settings file is not valid JSON, so setup left it alone."],
@@ -2396,7 +2396,7 @@ def test_with_no_session_files_the_lists_are_empty_and_nothing_is_created(guard_
 
 
 def test_the_guard_files_are_read_from_the_app_data_folder_unless_told_otherwise(make_server: Any, tmp_path: Path) -> None:
-    server, rec = make_server(setup_cb=FakeSetup().callbacks())                   # no guard_dir: CUM_APPDATA_DIR, as the app has it
+    server, rec = make_server(setup_cb=FakeSetup().callbacks())                   # no guard_dir: USAGE_MONITOR_APPDATA_DIR, as the app has it
     rec.state = dataclasses.replace(sample_state(), guard=HOLDING)
     here = {"pid": os.getpid(), "session_id": "s", "since": "2026-10-21T16:05:00Z", "cwd": "C:/Demo"}
     seed_sessions(tmp_path / "app", HOLDING, [("11111111-aaaa", "2026-10-21T16:00:00Z")], [here])
@@ -2645,7 +2645,7 @@ def test_the_dev_environment_variable_makes_a_dev_server_whatever_the_flag_says(
 
 
 @pytest.mark.parametrize("value", ["0", "", "true", "yes", "2"])
-def test_only_cum_dev_instance_1_counts_for_the_server(make_server: Any, monkeypatch: pytest.MonkeyPatch,
+def test_only_usage_monitor_dev_instance_1_counts_for_the_server(make_server: Any, monkeypatch: pytest.MonkeyPatch,
                                                        value: str) -> None:
     monkeypatch.setenv(server_mod.DEV_ENV, value)
     server, _ = make_server(dev=False)
@@ -4387,7 +4387,7 @@ def test_a_page_script_cannot_walk_from_the_api_to_os_system_through_the_bridge(
 def test_dashboard_child_opens_a_window_and_stays_up(tmp_path: Path, make_server: Any) -> None:
     """Starts the real pywebview child against a live API and checks that its window stays open."""
     server, _ = make_server()
-    env = dict(os.environ, **REAL_PROFILE_ENV, CUM_DASHBOARD_TOKEN=server.token, CUM_APPDATA_DIR=str(tmp_path / "app"))
+    env = dict(os.environ, **REAL_PROFILE_ENV, USAGE_MONITOR_DASHBOARD_TOKEN=server.token, USAGE_MONITOR_APPDATA_DIR=str(tmp_path / "app"))
     repo = str(Path(__file__).resolve().parents[1])
     child = subprocess.Popen([sys.executable, "-m", "usage_monitor.ui.dashboard", "--port", str(server.port)],
                              env=env, cwd=repo, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -4411,7 +4411,7 @@ def test_a_dashboard_saved_off_screen_opens_on_a_screen(tmp_path: Path, make_ser
 
     settings.update({"dashboard_bounds": {"x": 9000, "y": 100, "w": 1200, "h": 780}})
     server, _ = make_server()
-    env = dict(os.environ, **REAL_PROFILE_ENV, CUM_DASHBOARD_TOKEN=server.token, CUM_APPDATA_DIR=str(tmp_path / "app"))
+    env = dict(os.environ, **REAL_PROFILE_ENV, USAGE_MONITOR_DASHBOARD_TOKEN=server.token, USAGE_MONITOR_APPDATA_DIR=str(tmp_path / "app"))
     repo = str(Path(__file__).resolve().parents[1])
     child = subprocess.Popen([sys.executable, "-m", "usage_monitor.ui.dashboard", "--port", str(server.port)],
                              env=env, cwd=repo, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -4622,7 +4622,7 @@ def probe(window):
         for width, height in SIZES:
             window.resize(width, height)
             time.sleep(1.0)
-            # A full CUM_UI_TESTS run on a busy machine once measured every Nostromo card 3 to 5 px over at 1200 x 700,
+            # A full USAGE_MONITOR_UI_TESTS run on a busy machine once measured every Nostromo card 3 to 5 px over at 1200 x 700,
             # which never happened when the test ran alone: the page was still settling a second after the resize. Measure
             # until two reads agree, which still catches a card that stays clipped; a failure prints what else took room.
             measured = window.evaluate_js(MEASURE)
@@ -4656,7 +4656,7 @@ def test_overview_cards_never_clip_their_content_in_the_real_web_view(tmp_path: 
     server, settings = devserver.make_server("normal", 0, settings_dir=tmp_path / "dev", theme=theme, clock=lambda: NOW)
     server.start()
     try:
-        env = dict(os.environ, **REAL_PROFILE_ENV, CUM_APPDATA_DIR=str(tmp_path / "app"))
+        env = dict(os.environ, **REAL_PROFILE_ENV, USAGE_MONITOR_APPDATA_DIR=str(tmp_path / "app"))
         sizes = [[1200, 780], [1200, 700], [1100, 780], [1060, 640]]
         run = subprocess.run([sys.executable, "-c", _LAYOUT_PROBE, server.url, json.dumps(sizes)], env=env,
                              cwd=str(Path(__file__).resolve().parents[1]), capture_output=True, text=True,
@@ -4776,7 +4776,7 @@ def test_no_cost_card_changes_height_when_its_report_lands_in_the_real_web_view(
     _hold_reports(server, 5.0)
     server.start()
     try:
-        env = dict(os.environ, **REAL_PROFILE_ENV, CUM_APPDATA_DIR=str(tmp_path / "app"))
+        env = dict(os.environ, **REAL_PROFILE_ENV, USAGE_MONITOR_APPDATA_DIR=str(tmp_path / "app"))
         sizes = [[1200, 780], [1000, 700]]
         run = subprocess.run([sys.executable, "-c", _SHIFT_PROBE, server.url, json.dumps(sizes)], env=env,
                              cwd=str(Path(__file__).resolve().parents[1]), capture_output=True, text=True,
@@ -4894,7 +4894,7 @@ def test_devserver_process_answers_on_loopback(tmp_path: Path) -> None:
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
-    env = dict(os.environ, **REAL_PROFILE_ENV, CUM_APPDATA_DIR=str(tmp_path / "dev"))
+    env = dict(os.environ, **REAL_PROFILE_ENV, USAGE_MONITOR_APPDATA_DIR=str(tmp_path / "dev"))
     child = subprocess.Popen([sys.executable, "-m", "usage_monitor.ui.devserver", "--port", str(port),
                               "--scenario", "warning"], env=env, cwd=str(Path(__file__).resolve().parents[1]),
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=NO_WINDOW)

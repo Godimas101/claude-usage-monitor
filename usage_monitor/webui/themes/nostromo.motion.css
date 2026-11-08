@@ -46,25 +46,25 @@ html[data-theme="nostromo"] .fx-run .nm-table tbody tr { animation: nmx-row 100m
 
 /* charts: pips of a column light bottom to top, column by column; a line is drawn in 18 steps with its dots; the rest
    (grid, labels, forecast) comes up in four steps */
-html[data-theme="nostromo"] :is(.fx-run, .fx-land) :is(.cum-pip.cum-mark, .cum-pip.cum-hot) {
+html[data-theme="nostromo"] :is(.fx-run, .fx-land) :is(.mon-pip.mon-mark, .mon-pip.mon-hot) {
   animation: nmx-cpip 130ms steps(2, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 55ms + 180ms + var(--fx-c, 0) * 8ms + var(--fx-p, 0) * 14ms) backwards;
 }
-html[data-theme="nostromo"] :is(.fx-run, .fx-land) .cum-columns :is(.cum-mark, .cum-hot):not(.cum-pip) {
+html[data-theme="nostromo"] :is(.fx-run, .fx-land) .mon-columns :is(.mon-mark, .mon-hot):not(.mon-pip) {
   animation: nmx-cpip 130ms steps(2, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 55ms + 180ms + var(--fx-c, 0) * 8ms) backwards;
 }
 @keyframes nmx-cpip { from { opacity: 0; } }
-html[data-theme="nostromo"] :is(.fx-run, .fx-land) .cum-line { animation: nmx-draw 440ms steps(18, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 55ms + 110ms) backwards; }
+html[data-theme="nostromo"] :is(.fx-run, .fx-land) .mon-line { animation: nmx-draw 440ms steps(18, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 55ms + 110ms) backwards; }
 @keyframes nmx-draw { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
-html[data-theme="nostromo"] :is(.fx-run, .fx-land) .cum-dot { animation: nmx-cpip 100ms steps(2, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 55ms + 110ms + var(--fx-d, 0) * 440ms / var(--fx-dn, 1)) backwards; }
-html[data-theme="nostromo"] :is(.fx-run, .fx-land) :is(.cum-grid, .cum-now, .cum-t) { animation: nmx-fade 220ms steps(4, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 55ms + 80ms) backwards; }
-html[data-theme="nostromo"] :is(.fx-run, .fx-land) :is(.cum-ideal, .cum-fore) { animation: nmx-fade 220ms steps(4, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 55ms + 480ms) backwards; }
+html[data-theme="nostromo"] :is(.fx-run, .fx-land) .mon-dot { animation: nmx-cpip 100ms steps(2, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 55ms + 110ms + var(--fx-d, 0) * 440ms / var(--fx-dn, 1)) backwards; }
+html[data-theme="nostromo"] :is(.fx-run, .fx-land) :is(.mon-grid, .mon-now, .mon-t) { animation: nmx-fade 220ms steps(4, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 55ms + 80ms) backwards; }
+html[data-theme="nostromo"] :is(.fx-run, .fx-land) :is(.mon-ideal, .mon-fore) { animation: nmx-fade 220ms steps(4, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 55ms + 480ms) backwards; }
 @keyframes nmx-fade { from { opacity: 0; } }
-html[data-theme="nostromo"] :is(.fx-run, .fx-land) .cum-seg { transform-box: fill-box; transform-origin: 0 50%; animation: nmx-seg 320ms steps(10, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 55ms + 160ms) backwards; }
+html[data-theme="nostromo"] :is(.fx-run, .fx-land) .mon-seg { transform-box: fill-box; transform-origin: 0 50%; animation: nmx-seg 320ms steps(10, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 55ms + 160ms) backwards; }
 @keyframes nmx-seg { from { transform: scaleX(0); } }
-html[data-theme="nostromo"] :is(.fx-run, .fx-land) .cum-hbars .cum-row { animation: nmx-fade 220ms steps(4, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 55ms + 100ms + var(--fx-r, 0) * 40ms) backwards; }
+html[data-theme="nostromo"] :is(.fx-run, .fx-land) .mon-hbars .mon-row { animation: nmx-fade 220ms steps(4, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 55ms + 100ms + var(--fx-r, 0) * 40ms) backwards; }
 /* the heat maps come in as one unit, wiped on from the left a column at a time (4 ms a column, at most 400 ms): one animation
    for the whole map, not one per cell (a year is about 540 of them, and each had its own timeline and its own style write) */
-html[data-theme="nostromo"] :is(.fx-run, .fx-land) :is(.cum-calendar, .cum-matrix) { animation: nmx-draw min(var(--fx-cn, 1) * 4ms, 400ms) steps(var(--fx-cn, 1), end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 55ms + 100ms) backwards; }
+html[data-theme="nostromo"] :is(.fx-run, .fx-land) :is(.mon-calendar, .mon-matrix) { animation: nmx-draw min(var(--fx-cn, 1) * 4ms, 400ms) steps(var(--fx-cn, 1), end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 55ms + 100ms) backwards; }
 
 /* ── placeholders: a figure's slot has a block cursor blinking where it will be typed, the pips are unlit, a chart says
    it is waiting. (Static, not blinking, under reduced motion: the sheets' reduced-motion rule stops every animation.) ── */
@@ -86,7 +86,7 @@ html[data-theme="nostromo"] .nm-chart-host[data-fx-pend="chart"]::before {
   content: "AWAITING DATA"; position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none;
   font: 600 11px/1 var(--f-body); letter-spacing: .16em; color: var(--label);
 }
-html[data-theme="nostromo"] svg.cum-spark[data-fx-pend="chart"] { opacity: .45; }
+html[data-theme="nostromo"] svg.mon-spark[data-fx-pend="chart"] { opacity: .45; }
 
 /* ── hover: phosphor brightens, the card settles by 1 px (down, up, home: 200 ms, no spring). Only where a pointer can hover. ── */
 html[data-theme="nostromo"] .nm-card { transition: filter 120ms steps(3, end); }

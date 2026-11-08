@@ -10,7 +10,7 @@
  *   - gives each status chip a tone from its words (data-g-tone), so "Under pace" is green and "At risk" amber;
  *   - sets the small percent sign on the big percentages;
  *   - reads the accent colours from /api/themes (the call app.js makes too) and flags html[data-g-swatches].
- * Nothing here stores or prints a token, a message or a file. app.js calls window.CUM_THEME_FX.gates.start() once this
+ * Nothing here stores or prints a token, a message or a file. app.js calls window.USAGE_MONITOR_THEME_FX.gates.start() once this
  * file has loaded and again whenever the theme is applied; the script watches data-theme and stops when it is not gates.
  *
  * The motion layer (motion.js, gates.motion.css) is Windows 11 Fluent: enter(main, page) plays the page's entrance (the
@@ -49,7 +49,7 @@
   var PHRASES = { "NONE": "None", "TOK / MIN": "Tokens / min", "CLAUDE CODE": "Claude Code" };
   var SVG_WORDS = { TODAY: "Today", NOW: "Now", LESS: "Less", MORE: "More", AVG: "Avg" };
 
-  var FX = window.CUM_FX || null;
+  var FX = window.USAGE_MONITOR_FX || null;
   var active = false;
   var screen = null;
   var observer = null;
@@ -256,7 +256,7 @@
   }
 
   function fixSvg(svg) {
-    Array.prototype.forEach.call(svg.querySelectorAll("text.cum-t"), fixChartText);
+    Array.prototype.forEach.call(svg.querySelectorAll("text.mon-t"), fixChartText);
   }
 
   function onMutations(records) {
@@ -550,11 +550,11 @@
     });
   }
 
-  window.CUM_THEME_FX = window.CUM_THEME_FX || {};
-  window.CUM_THEME_FX.gates = { start: start };
+  window.USAGE_MONITOR_THEME_FX = window.USAGE_MONITOR_THEME_FX || {};
+  window.USAGE_MONITOR_THEME_FX.gates = { start: start };
   if (dir) {
-    window.CUM_THEME_FX.gates.enter = dir.enter;
-    window.CUM_THEME_FX.gates.cancel = dir.cancel;
-    window.CUM_THEME_FX.gates.arrive = FX.noticeCard;
+    window.USAGE_MONITOR_THEME_FX.gates.enter = dir.enter;
+    window.USAGE_MONITOR_THEME_FX.gates.cancel = dir.cancel;
+    window.USAGE_MONITOR_THEME_FX.gates.arrive = FX.noticeCard;
   }
 })();

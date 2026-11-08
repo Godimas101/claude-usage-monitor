@@ -1,7 +1,7 @@
 // Real-browser check of the dashboard's hover effects: every one plays once per entry of the pointer and never again by itself.
 //
 // Not part of the pytest run (it needs Playwright for node and a Chromium). It starts the dev server itself, on a throwaway
-// settings folder (CUM_DEV_INSTANCE=1, CUM_APPDATA_DIR in the temp folder: never your real settings or data), drives the real
+// settings folder (USAGE_MONITOR_DEV_INSTANCE=1, USAGE_MONITOR_APPDATA_DIR in the temp folder: never your real settings or data), drives the real
 // dashboard and counts the animation starts of the hover effects.
 //
 //   NODE_PATH=<folder with node_modules/playwright> node tests/browser/hover_probe.js [options]
@@ -46,7 +46,7 @@ const REDUCED = args.includes('--reduced');
 const THEMES = opt('themes', 'nostromo,night_city,gates').split(',');
 const SIDES = opt('sides', 'left,right,top,bottom,edge-left,edge-right,edge-top,edge-bottom').split(',');
 const PAGES = opt('pages', 'overview,limits,cost,efficiency,history,settings,about').split(',').filter(p => p !== 'none');
-const APPDATA = fs.mkdtempSync(path.join(os.tmpdir(), 'cum-hover-'));
+const APPDATA = fs.mkdtempSync(path.join(os.tmpdir(), 'usage-monitor-hover-'));
 const HOVER_ANIMATIONS = new Set(['ncx-jit', 'ncx-tear', 'ncx-fringe', 'ncx-nav', 'nmx-settle']);
 
 const THEME_SETTINGS = {
@@ -67,7 +67,7 @@ const KINDS = [
 
 function startServer() {
   return new Promise((resolve, reject) => {
-    const env = Object.assign({}, process.env, { CUM_DEV_INSTANCE: '1', CUM_APPDATA_DIR: APPDATA, PYTHONUNBUFFERED: '1' });
+    const env = Object.assign({}, process.env, { USAGE_MONITOR_DEV_INSTANCE: '1', USAGE_MONITOR_APPDATA_DIR: APPDATA, PYTHONUNBUFFERED: '1' });
     const child = spawn(process.env.PYTHON || 'python', ['-m', 'usage_monitor.ui.devserver', '--port', '0', '--scenario', 'normal'],
       { cwd: REPO, env, windowsHide: true });
     let buf = '';

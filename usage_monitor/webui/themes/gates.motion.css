@@ -43,23 +43,23 @@ html[data-theme="gates"] .fx-run .nm-table tbody tr { animation: gx-row 200ms va
 @keyframes gx-row { from { opacity: 0; transform: translateY(4px); } }
 
 /* charts: columns rise from the baseline, 8 ms apart; a line is wiped on and its dots pop in; the rest fades in */
-html[data-theme="gates"] :is(.fx-run, .fx-land) .cum-columns :is(.cum-mark, .cum-hot) {
+html[data-theme="gates"] :is(.fx-run, .fx-land) .mon-columns :is(.mon-mark, .mon-hot) {
   transform-box: fill-box; transform-origin: 50% 100%;
   animation: gx-col 380ms var(--gx-out) calc(var(--fx-c0, 30ms) + var(--fx-i, 0) * 30ms + 90ms + var(--fx-c, 0) * 8ms) backwards;
 }
 @keyframes gx-col { from { transform: scaleY(0); } }
-html[data-theme="gates"] :is(.fx-run, .fx-land) .cum-line { animation: gx-draw 420ms var(--gx-out) calc(var(--fx-c0, 30ms) + var(--fx-i, 0) * 30ms + 90ms) backwards; }
+html[data-theme="gates"] :is(.fx-run, .fx-land) .mon-line { animation: gx-draw 420ms var(--gx-out) calc(var(--fx-c0, 30ms) + var(--fx-i, 0) * 30ms + 90ms) backwards; }
 @keyframes gx-draw { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
-html[data-theme="gates"] :is(.fx-run, .fx-land) .cum-dot { transform-box: fill-box; transform-origin: 50% 50%; animation: gx-pop 180ms var(--gx-out) calc(var(--fx-c0, 30ms) + var(--fx-i, 0) * 30ms + 90ms + var(--fx-d, 0) * 420ms / var(--fx-dn, 1)) backwards; }
+html[data-theme="gates"] :is(.fx-run, .fx-land) .mon-dot { transform-box: fill-box; transform-origin: 50% 50%; animation: gx-pop 180ms var(--gx-out) calc(var(--fx-c0, 30ms) + var(--fx-i, 0) * 30ms + 90ms + var(--fx-d, 0) * 420ms / var(--fx-dn, 1)) backwards; }
 @keyframes gx-pop { from { opacity: 0; transform: scale(.2); } }
-html[data-theme="gates"] :is(.fx-run, .fx-land) :is(.cum-grid, .cum-now, .cum-t, .cum-ideal, .cum-fore) { animation: gx-fade 320ms var(--gx-out) calc(var(--fx-c0, 30ms) + var(--fx-i, 0) * 30ms + 90ms) backwards; }
+html[data-theme="gates"] :is(.fx-run, .fx-land) :is(.mon-grid, .mon-now, .mon-t, .mon-ideal, .mon-fore) { animation: gx-fade 320ms var(--gx-out) calc(var(--fx-c0, 30ms) + var(--fx-i, 0) * 30ms + 90ms) backwards; }
 @keyframes gx-fade { from { opacity: 0; } }
-html[data-theme="gates"] :is(.fx-run, .fx-land) .cum-seg { transform-box: fill-box; transform-origin: 0 50%; animation: gx-seg 440ms var(--gx-out) calc(var(--fx-c0, 30ms) + var(--fx-i, 0) * 30ms + 90ms) backwards; }
+html[data-theme="gates"] :is(.fx-run, .fx-land) .mon-seg { transform-box: fill-box; transform-origin: 0 50%; animation: gx-seg 440ms var(--gx-out) calc(var(--fx-c0, 30ms) + var(--fx-i, 0) * 30ms + 90ms) backwards; }
 @keyframes gx-seg { from { transform: scaleX(0); } }
-html[data-theme="gates"] :is(.fx-run, .fx-land) .cum-hbars .cum-row { animation: gx-fade 320ms var(--gx-out) calc(var(--fx-c0, 30ms) + var(--fx-i, 0) * 30ms + 90ms + var(--fx-r, 0) * 40ms) backwards; }
+html[data-theme="gates"] :is(.fx-run, .fx-land) .mon-hbars .mon-row { animation: gx-fade 320ms var(--gx-out) calc(var(--fx-c0, 30ms) + var(--fx-i, 0) * 30ms + 90ms + var(--fx-r, 0) * 40ms) backwards; }
 /* the heat maps come in as one unit: wiped on from the left (4 ms a column, at most 400 ms, and 220 ms to settle) while they fade
    up, on the decelerate curve. One animation for the whole map, not one per cell */
-html[data-theme="gates"] :is(.fx-run, .fx-land) :is(.cum-calendar, .cum-matrix) { animation: gx-reveal calc(min(var(--fx-cn, 1) * 4ms, 400ms) + 220ms) var(--gx-out) calc(var(--fx-c0, 30ms) + var(--fx-i, 0) * 30ms + 90ms) backwards; }
+html[data-theme="gates"] :is(.fx-run, .fx-land) :is(.mon-calendar, .mon-matrix) { animation: gx-reveal calc(min(var(--fx-cn, 1) * 4ms, 400ms) + 220ms) var(--gx-out) calc(var(--fx-c0, 30ms) + var(--fx-i, 0) * 30ms + 90ms) backwards; }
 @keyframes gx-reveal { from { opacity: 0; clip-path: inset(0 100% 0 0); } to { opacity: 1; clip-path: inset(0 0 0 0); } }
 
 /* the small % lands after the figure: it comes back (a transition, so reduce motion removes it) when the ghost text goes */
@@ -108,7 +108,7 @@ html[data-theme="gates"] .nm-chart-host[data-fx-pend="chart"]::before {
   background: linear-gradient(90deg, var(--g-skel) 0%, var(--g-skel-hi) 45%, var(--g-skel) 90%) 0 0 / 300% 100%;
   animation: gx-shimmer 1.6s linear infinite;
 }
-html[data-theme="gates"] svg.cum-spark[data-fx-pend="chart"] { opacity: .45; }
+html[data-theme="gates"] svg.mon-spark[data-fx-pend="chart"] { opacity: .45; }
 
 /* ── hover: a 2 px lift on a soft shadow with a gentle spring settle; press scales down a touch. Only where a pointer can hover. ── */
 html[data-theme="gates"] :is(.nm-card, .nm-stat) {

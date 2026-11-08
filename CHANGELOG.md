@@ -6,6 +6,9 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 - README screenshots: retake from the v2.2.0 build ([#35](https://github.com/Godimas101/claude-usage-monitor/issues/35)) — closed 2026-11-04 by @Godimas101
 
+### Changed
+- The Usage guard's backups of Claude Code's settings file are now named `settings.json.usage-monitor-backup-<date>-<time>`. Copies from before keep counting toward the five it keeps, and the dashboard keeps the choices you made in it.
+
 ### Fixed
 - The hint beside **Plan price override** follows your plan. It kept its old text if you signed in or changed plan while Settings was open, and read "no price known" if you reloaded Settings in a browser ([#46](https://github.com/Godimas101/claude-usage-monitor/issues/46)).
 - The Usage guard card finds Claude Code from Anthropic's Windows installer, whose folder isn't on the PATH. It read NOT FOUND, and told you to install what you had just installed ([#43](https://github.com/Godimas101/claude-usage-monitor/issues/43)).

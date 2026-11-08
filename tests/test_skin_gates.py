@@ -2,7 +2,7 @@
 
 Everything renders to memory or to pytest's tmp_path, so none of it needs a desktop and all of it runs
 in CI. The two tests that hand frames to real (off-screen) windows and icons are skipped unless
-CUM_UI_TESTS=1.
+USAGE_MONITOR_UI_TESTS=1.
 
 Pixel checks look at shapes (bars, plates, rings, the card), not at text, so they hold with whatever
 font the machine has. Text is checked through the runs the skin queues (positions and widths).
@@ -38,7 +38,7 @@ STATES = dump.STATE_NAMES
 NOW = dump.SAMPLE_NOW
 
 UI = pytest.mark.skipif(
-    os.environ.get("CUM_UI_TESTS") != "1", reason="needs an interactive desktop: set CUM_UI_TESTS=1"
+    os.environ.get("USAGE_MONITOR_UI_TESTS") != "1", reason="needs an interactive desktop: set USAGE_MONITOR_UI_TESTS=1"
 )
 
 
@@ -1059,7 +1059,7 @@ def test_dump_frames_writes_gates_frames_and_a_contact_sheet(tmp_path: Path):
         assert sheet.format == "PNG" and sheet.width > 600
 
 
-# ── Real windows and icons (CUM_UI_TESTS=1) ───────────────────────────────────
+# ── Real windows and icons (USAGE_MONITOR_UI_TESTS=1) ───────────────────────────────────
 
 @UI
 @pytest.mark.skipif(sys.platform != "win32", reason="the Win32 UI layer is Windows only")
@@ -1067,7 +1067,7 @@ def test_gates_frames_show_in_layered_windows():
     from usage_monitor.ui.host import UIHost
     from usage_monitor.ui.layered import LayeredWindow
 
-    host = UIHost(controller_class=f"CUM.Test.Gates.{uuid.uuid4().hex[:8]}")
+    host = UIHost(controller_class=f"UsageMonitor.Test.Gates.{uuid.uuid4().hex[:8]}")
     try:
         offscreen = (-30000, -30000)
         m = dump.sample_model("warning")

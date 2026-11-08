@@ -1,7 +1,7 @@
 """Tests for usage_monitor.render: the view model, the Pillow toolkit, the Nostromo skin and the dump.
 
 Everything renders to memory or to pytest's tmp_path. No window, tray icon or process is created,
-so none of these tests needs CUM_UI_TESTS=1 and all of them run in CI.
+so none of these tests needs USAGE_MONITOR_UI_TESTS=1 and all of them run in CI.
 """
 from __future__ import annotations
 

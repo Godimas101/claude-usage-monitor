@@ -9,7 +9,7 @@ is missing, or the window cannot show the page, the same address opens in the de
 the exit code says so (pywebview itself raises nothing in either case: without a WebView2 runtime it quietly
 picks the IE11 engine, and a runtime that will not start leaves a blank window, so the child checks the
 runtime first and watches the window's load). The child talks to the API over HTTP with the per-run token
-it receives in the CUM_DASHBOARD_TOKEN environment variable, to 127.0.0.1 only and without following a
+it receives in the USAGE_MONITOR_DASHBOARD_TOKEN environment variable, to 127.0.0.1 only and without following a
 redirect, and opens the page as /?k=<that token>: the page is served only to a caller that knows it.
 The page can call four functions of DashboardApi and nothing else: the token, the window chrome, a link
 opener and save_export, which writes a daily-rollup download through the native save dialog. They are
@@ -48,7 +48,7 @@ from usage_monitor.ui.startup import pythonw_for
 log = get_logger(__name__)
 
 WINDOW_TITLE = "Claude Usage Monitor"
-TOKEN_ENV = "CUM_DASHBOARD_TOKEN"
+TOKEN_ENV = "USAGE_MONITOR_DASHBOARD_TOKEN"
 KEY_PARAM = "k"      # the query parameter that opens the page (server.KEY_PARAM; the child does not import the server)
 DEFAULT_SIZE = (1200, 780)
 MIN_SIZE = (720, 480)

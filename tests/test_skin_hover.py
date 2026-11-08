@@ -14,7 +14,7 @@ already in Windows' format.
 
 Everything runs on fakes (host with hand-fired timers, windows that remember what they were given, a
 platform with a screen) while the real skins draw. The test that times a swap on a real layered window
-is skipped unless CUM_UI_TESTS=1.
+is skipped unless USAGE_MONITOR_UI_TESTS=1.
 """
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ from usage_monitor.ui.widgets import (
 )
 
 UI = pytest.mark.skipif(
-    os.environ.get("CUM_UI_TESTS") != "1", reason="needs an interactive desktop: set CUM_UI_TESTS=1",
+    os.environ.get("USAGE_MONITOR_UI_TESTS") != "1", reason="needs an interactive desktop: set USAGE_MONITOR_UI_TESTS=1",
 )
 THEME_IDS = ("nostromo", "night_city", "gates")
 SCALES = (1.0, 1.5, 2.0)
@@ -1187,7 +1187,7 @@ def test_a_swap_of_a_response_frame_costs_under_two_milliseconds_on_a_real_windo
     from usage_monitor.ui.host import UIHost
     from usage_monitor.ui.layered import LayeredWindow
 
-    host = UIHost(controller_class=f"CUM.Test.Controller.{uuid.uuid4().hex[:8]}")
+    host = UIHost(controller_class=f"UsageMonitor.Test.Controller.{uuid.uuid4().hex[:8]}")
     window = None
     results: list[str] = []
     try:
@@ -1268,7 +1268,7 @@ def test_the_response_plays_on_a_real_host_with_real_timers(capsys):
     reports it: the response runs on WM_TIMER ticks, ends on its own, and each tick is cheap."""
     from usage_monitor.ui.host import UIHost
 
-    host = UIHost(controller_class=f"CUM.Test.Controller.{uuid.uuid4().hex[:8]}")
+    host = UIHost(controller_class=f"UsageMonitor.Test.Controller.{uuid.uuid4().hex[:8]}")
     floating = None
     ticks: list[float] = []
     original = widgets._Hover._tick

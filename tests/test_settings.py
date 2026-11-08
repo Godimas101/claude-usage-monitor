@@ -43,7 +43,7 @@ V1_FILE: dict[str, Any] = {
 @pytest.fixture(autouse=True)
 def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A Settings() without an explicit path must never reach the real %APPDATA%."""
-    monkeypatch.setenv("CUM_APPDATA_DIR", str(tmp_path / "app"))
+    monkeypatch.setenv("USAGE_MONITOR_APPDATA_DIR", str(tmp_path / "app"))
     monkeypatch.setenv("APPDATA", str(tmp_path / "roaming"))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))

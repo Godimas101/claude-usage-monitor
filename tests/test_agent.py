@@ -86,7 +86,7 @@ def document(*, at: datetime = NOW, fetched_at: datetime | None = None, state: s
 def offline(tmp_path, monkeypatch) -> list:
     """No test reads the real mutex, sign-in or history, or reaches the network: the app is closed,
     and a fetch fails as if offline unless a test asks for ``fetches``."""
-    monkeypatch.setenv("CUM_APPDATA_DIR", str(tmp_path / "appdata"))
+    monkeypatch.setenv("USAGE_MONITOR_APPDATA_DIR", str(tmp_path / "appdata"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
     monkeypatch.setattr(status, "monitor_running", lambda env=None: False)
     calls: list = []
@@ -339,7 +339,7 @@ def test_every_cycle_writes_the_status_file_when_given_a_folder(tmp_path, folder
 
 
 def test_without_a_folder_nothing_is_written(tmp_path, monkeypatch):
-    monkeypatch.setenv("CUM_APPDATA_DIR", str(tmp_path / "elsewhere"))
+    monkeypatch.setenv("USAGE_MONITOR_APPDATA_DIR", str(tmp_path / "elsewhere"))
     run_cycle(tmp_path, None)
     assert not (tmp_path / "elsewhere" / status.STATUS_NAME).exists()
 

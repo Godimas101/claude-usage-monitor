@@ -64,7 +64,7 @@ MAX_INSTALLER_BYTES = 512 * 1024 * 1024                    # far above any real 
 MAX_JSON_BYTES = 4 * 1024 * 1024
 HELPER_GRACE_S = 0.6                                       # the helper must still be running this long after it starts
 HELPER_NAME = "update.cmd"
-WORK_PREFIX = "cum-update-"
+WORK_PREFIX = "usage-monitor-update-"
 
 _CREATE_NEW_PROCESS_GROUP = 0x00000200
 _CREATE_NO_WINDOW = 0x08000000
@@ -486,8 +486,8 @@ def _helper_script(install=True):
     and removes its own folder. ``install=False`` is the restart helper: the same file without the
     installer step, used when the update helper died while the app was closing (see
     _helper_is_waiting). It holds no path and no value that varies: it reads
-    CUM_UPDATE_PID (our pid), CUM_UPDATE_SETUP (the installer's file name, beside the script),
-    CUM_UPDATE_EXE (what to relaunch) and CUM_UPDATE_LOG from the environment, so the file is the
+    USAGE_MONITOR_UPDATE_PID (our pid), USAGE_MONITOR_UPDATE_SETUP (the installer's file name, beside the script),
+    USAGE_MONITOR_UPDATE_EXE (what to relaunch) and USAGE_MONITOR_UPDATE_LOG from the environment, so the file is the
     same ASCII text for everybody. System tools are called by absolute path (a Git for Windows
     'find' ahead of System32 on PATH must not answer), there is no pipe in it (see the top of this
     file), and every echo puts its redirection first (a digit right before > would be read as a
@@ -496,20 +496,20 @@ def _helper_script(install=True):
     lines = [
         "@echo off",
         "setlocal EnableExtensions DisableDelayedExpansion",
-        'set "CUM_N=0"',
+        'set "USAGE_MONITOR_N=0"',
         # The restart helper adds to the log of the update helper that stopped, so the story stays in one place.
-        (">" if install else ">>") + '"%CUM_UPDATE_LOG%" echo %DATE% %TIME% ' + ("update helper started" if install else "restart helper started, no update"),
+        (">" if install else ">>") + '"%USAGE_MONITOR_UPDATE_LOG%" echo %DATE% %TIME% ' + ("update helper started" if install else "restart helper started, no update"),
         # Wait for the monitor to be gone (up to ~2.5 min): the installer refuses to run while its mutex is held.
         ":wait",
-        '"%SystemRoot%\\System32\\tasklist.exe" /FI "PID eq %CUM_UPDATE_PID%" /NH >"%~dp0pid.txt" 2>nul',
-        '"%SystemRoot%\\System32\\find.exe" " %CUM_UPDATE_PID% " "%~dp0pid.txt" >nul 2>nul',
+        '"%SystemRoot%\\System32\\tasklist.exe" /FI "PID eq %USAGE_MONITOR_UPDATE_PID%" /NH >"%~dp0pid.txt" 2>nul',
+        '"%SystemRoot%\\System32\\find.exe" " %USAGE_MONITOR_UPDATE_PID% " "%~dp0pid.txt" >nul 2>nul',
         "if %ERRORLEVEL% EQU 0 goto still",
         # find says 1 when the pid is no longer listed. Anything else means the check itself failed: give the app a few seconds.
         "if %ERRORLEVEL% GTR 1 " + ping + " -n 6 127.0.0.1 >nul",
         "goto go",
         ":still",
-        "set /a CUM_N+=1",
-        "if %CUM_N% GEQ 120 goto giveup",
+        "set /a USAGE_MONITOR_N+=1",
+        "if %USAGE_MONITOR_N% GEQ 120 goto giveup",
         ping + " -n 2 127.0.0.1 >nul",
         "goto wait",
         ":go",
@@ -517,19 +517,19 @@ def _helper_script(install=True):
     ]
     if install:
         lines += [
-            '"%~dp0%CUM_UPDATE_SETUP%" ' + SILENT_ARGS + ' /LOG="%TEMP%\\ClaudeUsageMonitor-setup.log"',
-            '>>"%CUM_UPDATE_LOG%" echo %DATE% %TIME% installer exit code %ERRORLEVEL%',
+            '"%~dp0%USAGE_MONITOR_UPDATE_SETUP%" ' + SILENT_ARGS + ' /LOG="%TEMP%\\ClaudeUsageMonitor-setup.log"',
+            '>>"%USAGE_MONITOR_UPDATE_LOG%" echo %DATE% %TIME% installer exit code %ERRORLEVEL%',
             ping + " -n 8 127.0.0.1 >nul",                                  # ~7 s: let the install flush and Defender scan the new exe before we launch it
         ]
     lines += [
         'cd /d "%TEMP%"',                                                # the relaunched app must not hold this folder as its current directory
-        'set "CUM_N="',
-        'set "CUM_UPDATE_PID="',
-        'set "CUM_UPDATE_SETUP="',
-        'if exist "%CUM_UPDATE_EXE%" start "" "%CUM_UPDATE_EXE%"',      # relaunch only once the exe is actually in place
+        'set "USAGE_MONITOR_N="',
+        'set "USAGE_MONITOR_UPDATE_PID="',
+        'set "USAGE_MONITOR_UPDATE_SETUP="',
+        'if exist "%USAGE_MONITOR_UPDATE_EXE%" start "" "%USAGE_MONITOR_UPDATE_EXE%"',      # relaunch only once the exe is actually in place
         "goto cleanup",
         ":giveup",
-        '>>"%CUM_UPDATE_LOG%" echo %DATE% %TIME% the monitor never exited, so ' + ("the installer was not run" if install else "the app was not started again"),
+        '>>"%USAGE_MONITOR_UPDATE_LOG%" echo %DATE% %TIME% the monitor never exited, so ' + ("the installer was not run" if install else "the app was not started again"),
         ":cleanup",
         'cd /d "%TEMP%"',
         'rmdir /s /q "%~dp0"',                                           # the installer, pid.txt and this script (must be last)
@@ -540,10 +540,10 @@ def _helper_script(install=True):
 def _helper_environment(installer_path, exe, pid):
     env = dict(os.environ)
     env.update({
-        "CUM_UPDATE_PID": str(pid),
-        "CUM_UPDATE_SETUP": os.path.basename(installer_path),
-        "CUM_UPDATE_EXE": exe,
-        "CUM_UPDATE_LOG": os.path.join(tempfile.gettempdir(), "ClaudeUsageMonitor-update.log"),
+        "USAGE_MONITOR_UPDATE_PID": str(pid),
+        "USAGE_MONITOR_UPDATE_SETUP": os.path.basename(installer_path),
+        "USAGE_MONITOR_UPDATE_EXE": exe,
+        "USAGE_MONITOR_UPDATE_LOG": os.path.join(tempfile.gettempdir(), "ClaudeUsageMonitor-update.log"),
     })
     return env
 

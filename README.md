@@ -230,7 +230,7 @@ pip install -r requirements.txt
 pythonw main.py
 ```
 
-Use `python main.py` instead if you want a console that shows errors (Ctrl+C quits). To try a build next to your installed copy without touching it, set `CUM_DEV_INSTANCE=1` and `CUM_APPDATA_DIR` to a scratch folder first. Contributors: see [`CONTRIBUTING.md`](CONTRIBUTING.md), [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/UI_ARCHITECTURE.md`](docs/UI_ARCHITECTURE.md); `pip install -r requirements-dev.txt` then `python -m pytest` runs the tests.
+Use `python main.py` instead if you want a console that shows errors (Ctrl+C quits). To try a build next to your installed copy without touching it, set `USAGE_MONITOR_DEV_INSTANCE=1` and `USAGE_MONITOR_APPDATA_DIR` to a scratch folder first. Contributors: see [`CONTRIBUTING.md`](CONTRIBUTING.md), [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/UI_ARCHITECTURE.md`](docs/UI_ARCHITECTURE.md); `pip install -r requirements-dev.txt` then `python -m pytest` runs the tests.
 
 ## 🔩 Requirements
 

@@ -3,7 +3,7 @@
     python -m usage_monitor.ui.devserver --port 8765
         --scenario normal|warning|critical|stale|guard|no_login|limits_only [--db PATH] [--theme ID[/VARIANT]]
 
-Used for Playwright checks and design review. Settings go to CUM_APPDATA_DIR (or a temporary
+Used for Playwright checks and design review. Settings go to USAGE_MONITOR_APPDATA_DIR (or a temporary
 folder), never to the owner's real app data, and the server is a dev one, so the "Start with
 Windows" switch never reaches the sign-in (Run) entry. The numbers are realistic: the session
 window is 31 % elapsed, the weekly window 57 % elapsed, and the month sits at about $1,659
@@ -618,7 +618,7 @@ def make_server(scenario: str, port: int, settings_dir: Path | None = None, *, d
     as an aware datetime; it dates the fake state, the invented year and every report, so a test can pin
     them all to one instant (the default is the real clock, rounded down to the minute for the fake state).
     """
-    folder = settings_dir or Path(os.environ.get("CUM_APPDATA_DIR") or tempfile.mkdtemp(prefix="cum-dev-"))
+    folder = settings_dir or Path(os.environ.get("USAGE_MONITOR_APPDATA_DIR") or tempfile.mkdtemp(prefix="usage-monitor-dev-"))
     settings = Settings(folder / "devserver-settings.json", save_delay_s=0.2)
     now = clock or _quantised_now
     history = None if db is not None else SyntheticHistory(scenario, now=now)
