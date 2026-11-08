@@ -1499,12 +1499,22 @@ def test_the_guard_status_says_off_armed_or_holding(checks: dict[str, Any]) -> N
 
 
 @ui_only
+def test_the_card_counts_conversations_and_agents_apart_and_names_a_conversation_not_told(checks: dict[str, Any]) -> None:
+    """#41: the card said two sessions were told when only a workflow's agents had heard, and its conversation had not."""
+    rows = kv(checks["guard"]["live"]["holdingAgents"])
+    assert rows[2] == ("TOLD THIS EPISODE", "1 CONVERSATION, 3 AGENTS")
+    assert rows[3][0] == "3f9a1c2e" and rows[3][1].endswith(" · 3 AGENTS ONLY")
+    assert rows[4][0] == "5d2b7e41" and rows[4][1].endswith(" · CONVERSATION")
+    assert rows[5] == ("NOT TOLD", "1 CONVERSATION: ITS AGENTS WERE")
+
+
+@ui_only
 def test_while_holding_it_names_what_is_over_when_it_ends_who_was_told_and_who_waits(checks: dict[str, Any]) -> None:
     rows, clock = kv(checks["guard"]["live"]["holding"]), checks["guard"]["clock"]
     assert rows[:2] == [("SESSION", "96% OF A 95% CAP"), ("FABLE WEEKLY", "91.5% OF A 90% CAP")]      # percent against cap, as the limit is named
     assert rows[2] == ("RESUMES", f"{clock['resumes']} · IN 3 H 27 M")                                 # local time and a countdown
-    assert rows[3] == ("TOLD THIS EPISODE", "2 SESSIONS")
-    assert rows[4] == ("3f9a1c2e", clock["told"]) and rows[5][0] == "3f9a1c2e" and rows[5][1] != rows[4][1]   # short ids, and when
+    assert rows[3] == ("TOLD THIS EPISODE", "2 CONVERSATIONS")                            # a list from before #41 counted conversations
+    assert rows[4] == ("3f9a1c2e", clock["told"] + " · CONVERSATION") and rows[5][0] == "3f9a1c2e" and rows[5][1] != rows[4][1]
     assert rows[6] == ("WAITING", "1 SESSION") and rows[7] == ("atlas-web · 77b0aa10", f"SINCE {clock['since']}")   # the folder, and since when
     assert 'title="C:\\Demo\\atlas-web"' in checks["guard"]["live"]["holding"]                          # the whole path is one hover away
     assert len(rows) == 8
@@ -1543,7 +1553,7 @@ def test_the_hold_says_so_when_it_does_not_know_when_it_ends_and_when_it_is_abou
 def test_a_long_list_of_sessions_is_cut_and_counted(checks: dict[str, Any]) -> None:
     rows = kv(checks["guard"]["live"]["holdingMany"])
     labels = [label for label, _value in rows]
-    assert rows[labels.index("TOLD THIS EPISODE")][1] == "7 SESSIONS" and rows[labels.index("WAITING")][1] == "7 SESSIONS"
+    assert rows[labels.index("TOLD THIS EPISODE")][1] == "7 CONVERSATIONS" and rows[labels.index("WAITING")][1] == "7 SESSIONS"
     # the limit, when it ends, the told header and its five and a "more" row, the waiting header and its five and a "more" row
     assert labels.count("AND 2 MORE") == 2 and len(rows) == 1 + 1 + 1 + 5 + 1 + 1 + 5 + 1
     assert [row for row in rows if row[0] == "AND 2 MORE"] == [("AND 2 MORE", "")] * 2

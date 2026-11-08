@@ -420,7 +420,8 @@ Settings: `theme_id`, `theme_variant`, `theme_mode` (Gates: light / dark / syste
 `setup_cb` maps `status`, `install` and `remove` to callables, by default `agent/setup.py`'s.
 
 - **`GET /api/guard`** answers `guard` (the state's guard block, `{}` before the first cycle), `told` (the
-  sessions told of the current holding episode, with when), `waiting` (the live `--wait` processes, oldest
+  sessions told of the current holding episode, with when and who: `main`, whether its main conversation heard it,
+  and `agents`, how many of its agents did; #41), `waiting` (the live `--wait` processes, oldest
   first) and `setup` (`setup.status()`). The status runs `claude --version` and `claude mcp get`, so it is kept
   for `SETUP_STATUS_TTL_S` (10 minutes) and computed by one caller at a time (`_TimedValue`). A setup click
   and `POST /api/dashboard/closed` clear it, so each dashboard window and each click look afresh. The card
@@ -685,7 +686,9 @@ default browser instead, and the exit code says so (below).
   (`#guard-setup`), are filled by `syncGuard` from `/api/guard`, asked once at a time every `GUARD_POLL_MS` while Settings is
   on screen; a block is rewritten only when its markup changed (`data-sig`), so a poll never drops the focus. The status is
   an OFF, ARMED or HOLDING chip with one line of story, which adds that sessions may not be told while setup reports the
-  hooks missing or partly installed. Install, Remove and Resume now are `disabled` only where they cannot work (no setup
+  hooks missing or partly installed. While holding, the told rows count conversations and agents apart, each session's
+  row says who of it heard, and a NOT TOLD row counts the conversations only their agents heard (#41; an entry without
+  `main` counts as its conversation). Install, Remove and Resume now are `disabled` only where they cannot work (no setup
   here, nothing waiting; Remove needs `can_remove`, not Claude Code) and only `aria-disabled` while a click is on its way,
   so the focus stays. A blank cap is "not watched"; text a number box cannot hold (`validity.badInput`) is refused under the
   field instead of read as blank.

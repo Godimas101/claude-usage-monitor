@@ -500,6 +500,23 @@ def test_the_policy_carries_when_the_guard_was_switched_on(tmp_path):
     assert guard.policy_from_file(path)["enabled_at"] is None
 
 
+def test_the_told_list_counts_the_conversation_and_its_agents_apart(folder):
+    """#41: the card said two sessions were told when only a workflow's agents were. The list says, per session, whether
+    its main conversation heard and how many of its agents did."""
+    save(folder, guarded(document(weekly=78.0)))
+    hook(folder, {**TOOL, "agent_id": "a1"})                 # the agents of s1 hear it first
+    hook(folder, {**TOOL, "agent_id": "a2"})
+    hook(folder, {**TOOL, "session_id": "s2"})               # s2's main conversation
+
+    def who() -> dict:
+        verdict = guard.for_reader(status.read(folder / status.STATUS_NAME), NOW, folder)
+        return {entry["session_id"]: (entry["main"], entry["agents"]) for entry in sessions.told(folder, guard.episode(verdict))}
+
+    assert who() == {"s1": (False, 2), "s2": (True, 0)}
+    hook(folder, TOOL)                                       # s1's conversation hears it at its next tool call
+    assert who()["s1"] == (True, 2)
+
+
 def test_a_new_holding_episode_is_told_again(folder):
     save(folder, guarded(document(weekly=78.0)))
     assert hook(folder, TOOL) is not None

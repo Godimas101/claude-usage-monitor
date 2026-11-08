@@ -664,6 +664,11 @@ const RESETS = isoAt(GUARD_T + 3 * HOUR + 27 * 60000);
 const SESSION_OVER = { name: "session", label: "session", percent: 96, cap: 95, resets_at: RESETS };
 const FABLE_OVER = { name: "Fable weekly", label: "Fable weekly", percent: 91.5, cap: 90, resets_at: RESETS };
 const toldN = (n) => Array.from({ length: n }, (_, i) => ({ session_id: "3f9a1c2e-" + i + "aaa-bbbb", told_at: isoAt(GUARD_T - (30 - i) * 60000) }));
+// a workflow's agents heard it but its conversation did not (#41), and another conversation that did
+const AGENTS_TOLD = [
+  { session_id: "3f9a1c2e-0aaa-bbbb", told_at: isoAt(GUARD_T - 20 * 60000), main: false, agents: 3 },
+  { session_id: "5d2b7e41-1ccc-dddd", told_at: isoAt(GUARD_T - 10 * 60000), main: true, agents: 0 },
+];
 const waiterOf = (id, cwd, pid) => ({ pid: pid || 4242, session_id: id, since: isoAt(GUARD_T - 18 * 60000), cwd });
 const guardAnswer = (guard, told, waiting, setup) => ({ guard, told: told || [], waiting: waiting || [], setup: setup || null });
 const holding = (over, extra) => Object.assign({ state: "holding", over, resume_at: RESETS, policy: POLICY }, extra || {});
@@ -709,6 +714,7 @@ out.guard = {
     armedHooked: liveFor(guardAnswer({ state: "armed", over: [], resume_at: null, policy: POLICY }, [], [], setupWith({ hooks: { state: "installed", installed: 3, total: 3, events: {} } }))),
     holdingPartHooked: liveFor(guardAnswer(holding([SESSION_OVER]), [], [], setupWith({ hooks: { state: "partial", installed: 2, total: 3, events: {} } }))),
     holding: liveFor(guardAnswer(holding([SESSION_OVER, FABLE_OVER]), toldN(2), [waiterOf("77b0aa10-9d3e", "C:\\Demo\\atlas-web")])),
+    holdingAgents: liveFor(guardAnswer(holding([SESSION_OVER]), AGENTS_TOLD)),
     holdingBusy: liveFor(guardAnswer(holding([SESSION_OVER]), toldN(1), [waiterOf("77b0aa10-9d3e", "C:\\Demo\\atlas-web")]), { busy: true }),
     holdingNobody: liveFor(guardAnswer(holding([SESSION_OVER]))),
     holdingNoResetTime: liveFor(guardAnswer(holding([SESSION_OVER], { resume_at: null }), toldN(1))),

@@ -10,6 +10,7 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 - The usage guard no longer hands its notice to an agent's last call, the one that returns its answer, where nothing read it, and that agent no longer counts as told ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).
 - Agents that hear the usage guard's notice are told that only the main conversation can wait, so they finish the step they are on and hand back what they have ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).
 - `get_plan_usage`'s summary line says when the usage guard holds, and when work can resume ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).
+- The usage guard card counts the conversations and the agents told apart, says who of each session heard, and names a conversation that only its agents heard. It used to count a session as told when only a workflow's agents had heard ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).
 - Switching the usage guard off and on again starts a new hold, so every session hears the notice again. The same caps in the same window used to count as the hold they had already heard of ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).
 - The Usage guard's backups of Claude Code's settings file are now named `settings.json.usage-monitor-backup-<date>-<time>`. Copies from before keep counting toward the five it keeps, and the dashboard keeps the choices you made in it.
 

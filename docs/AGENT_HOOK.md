@@ -196,8 +196,9 @@ model-limited week such as Fable (off by default). Then press **Install** on the
     notice after its next tool call. If its last step is its answer, it never does.
   - "Told" means the notice was handed over, not that it was read. The call that returns an agent's
     result (`StructuredOutput`) gets no notice, as nothing reads what follows it, and does not count
-    the agent as told. The card counts a session as told when the notice
-    reached its main conversation or any of its agents.
+    the agent as told. The card lists each session told with who heard it: its main conversation,
+    its agents, or both. It counts conversations and agents apart. A conversation whose agents
+    heard it, while it has not, shows under NOT TOLD. It hears at its own next prompt or tool call.
 - The notice goes into Claude's context. Claude Code does not show it in the chat.
 - The guard pauses nothing. A workflow or a background agent carries on until it wraps up, or until
   you stop it.

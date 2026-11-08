@@ -2375,8 +2375,9 @@ def test_the_guard_endpoint_reports_the_state_the_sessions_told_and_waiting_and_
     answer = get_guard(guard_rig.server)
     assert set(answer) == {"guard", "told", "waiting", "setup"}
     assert answer["guard"] == HOLDING
-    assert answer["told"] == [{"session_id": "22222222-bbbb", "told_at": "2026-10-21T15:30:00Z"},
-                              {"session_id": "11111111-aaaa", "told_at": "2026-10-21T16:00:00Z"}]    # this episode, oldest first
+    assert answer["told"] == [{"session_id": "22222222-bbbb", "told_at": "2026-10-21T15:30:00Z", "main": True, "agents": 0},
+                              {"session_id": "11111111-aaaa", "told_at": "2026-10-21T16:00:00Z", "main": True, "agents": 0}]
+    # this episode, oldest first; who heard it (#41): these records keep no agent list, so their conversations did
     assert answer["waiting"] == [here]                                                                 # a dead --wait counts for nothing
     assert answer["setup"] == SETUP_STATUS
 

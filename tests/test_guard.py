@@ -158,7 +158,8 @@ def test_told_lists_the_sessions_told_of_this_episode(tmp_path):
         "s2": {"at": "x", "guard": {"episode": "session@S", "told_at": "2026-10-28T20:00:00Z"}},
         "s3": {"at": "x", "steps": {}},
     }), encoding="utf-8")
-    assert sessions.told(tmp_path, "weekly@W") == [{"session_id": "s1", "told_at": "2026-10-28T21:05:00Z"}]
+    assert sessions.told(tmp_path, "weekly@W") == [{"session_id": "s1", "told_at": "2026-10-28T21:05:00Z", "main": True, "agents": 0}]
+    # a record with no agent list (from before it was kept) counts its conversation as told (#41)
     assert sessions.told(tmp_path, "") == []
 
 

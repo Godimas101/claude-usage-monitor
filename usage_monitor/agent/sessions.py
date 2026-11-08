@@ -40,15 +40,25 @@ _ERROR_INVALID_PARAMETER = 87  # OpenProcess on an id that no process has
 
 
 def told(folder: Path, episode: str) -> list[dict]:
-    """[{"session_id", "told_at"}] for the sessions told of ``episode``, oldest first."""
+    """[{"session_id", "told_at", "main", "agents"}] for the sessions told of ``episode``, oldest first. "main" says
+    whether the session's main conversation heard it, "agents" how many of its agents did (#41)."""
     if not episode:
         return []
     seen = _load(folder / SEEN_NAME)
-    entries = [{"session_id": key, "told_at": value["guard"].get("told_at")}
+    entries = [{"session_id": key, "told_at": value["guard"].get("told_at"), **_who(value["guard"].get("agents"))}
                for key, value in seen.items()
                if isinstance(value, Mapping) and isinstance(value.get("guard"), Mapping)
                and same_episode(value["guard"].get("episode"), episode)]
     return sorted(entries, key=lambda entry: entry["told_at"] or "")
+
+
+def _who(agents: Any) -> dict:
+    """Who of a session heard the notice, from the agent ids --hook recorded ("" is the main conversation). A record
+    with no list counts its conversation as told."""
+    if not isinstance(agents, list):
+        return {"main": True, "agents": 0}
+    ids = {str(item) for item in agents}
+    return {"main": "" in ids, "agents": len(ids - {""})}
 
 
 def same_episode(told_key: Any, key: str) -> bool:

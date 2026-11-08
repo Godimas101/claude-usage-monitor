@@ -3352,6 +3352,26 @@
       '<div class="nm-actions"><button class="nm-btn" type="button" data-fid="guard-resume" disabled>Resume now</button></div>';
   }
 
+  /* Who of a told session heard the notice: its main conversation, and how many of its agents (#41). An entry without
+     these fields counts as its conversation, as the card counted before. */
+  function toldWho(t) {
+    var n = t && typeof t.agents === "number" && isFinite(t.agents) && t.agents > 0 ? Math.round(t.agents) : 0;
+    return { main: !t || t.main !== false, agents: n };
+  }
+
+  function toldCount(mains, agents, sessions) {
+    var parts = [];
+    if (mains) { parts.push(plural(mains, "conversation")); }
+    if (agents) { parts.push(plural(agents, "agent")); }
+    return (parts.length ? parts.join(", ") : plural(sessions, "session")).toUpperCase();
+  }
+
+  function whoWords(w) {
+    if (w.main && w.agents) { return "CONVERSATION + " + plural(w.agents, "agent").toUpperCase(); }
+    if (w.main) { return "CONVERSATION"; }
+    return w.agents ? plural(w.agents, "agent").toUpperCase() + " ONLY" : "SESSION";
+  }
+
   /* Off, Armed or Holding. While holding: which limits are over their caps, when the hold ends, the sessions told of it and the
    * sessions that wait. "Resume now" is there always and works only while something waits. */
   function guardLiveHtml(v, nowMs) {
@@ -3385,12 +3405,19 @@
       });
       var left = v.resumeAt === null ? null : v.resumeAt - nowMs;
       rows.push(["RESUMES", left === null ? "NO RESET TIME KNOWN" : clockText(v.resumeAt) + (left > 60000 ? " · IN " + fmtRemain(left) : " · NOW")]);
-      rows.push(["TOLD THIS EPISODE", v.told.length ? plural(v.told.length, "session").toUpperCase() : "NONE YET"]);
-      v.told.slice(0, GUARD_LISTED).forEach(function (t) {
-        rows.push([shortId(t.session_id) || "unknown session", clockText(parseTime(t.told_at))]);
+      var heard = v.told.map(toldWho);
+      var mains = heard.filter(function (w) { return w.main; }).length;
+      var agents = heard.reduce(function (sum, w) { return sum + w.agents; }, 0);
+      var untold = heard.filter(function (w) { return !w.main && w.agents; }).length;
+      rows.push(["TOLD THIS EPISODE", v.told.length ? toldCount(mains, agents, v.told.length) : "NONE YET"]);
+      v.told.slice(0, GUARD_LISTED).forEach(function (t, i) {
+        rows.push([shortId(t.session_id) || "unknown session", clockText(parseTime(t.told_at)) + " · " + whoWords(heard[i])]);
       });
       if (v.told.length > GUARD_LISTED) {
         rows.push(["AND " + (v.told.length - GUARD_LISTED) + " MORE", ""]);
+      }
+      if (untold) {    // it waits for its agents, so it hears at its next prompt or tool call (#41)
+        rows.push(["NOT TOLD", untold === 1 ? "1 CONVERSATION: ITS AGENTS WERE" : plural(untold, "conversation").toUpperCase() + ": THEIR AGENTS WERE"]);
       }
     }
     if (v.state === "holding" || v.waiting.length) {
