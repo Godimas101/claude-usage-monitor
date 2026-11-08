@@ -44,6 +44,11 @@ def run_status(*, as_json: bool, folder: Path, clock: Callable[[], datetime], ap
     return 0 if doc and doc.get("usage_fetched_at") else 1  # the same test as the summary's "no reading"
 
 
+ANSWER_TOOL = "StructuredOutput"     # how an agent hands back its answer: its last call
+# Agents are not offered the wait: only the main conversation's background command wakes it (#41).
+AGENT_CANNOT_WAIT = "Only the main conversation can wait for the reset. Finish the step you are on and hand back what you have."
+
+
 def run_hook(*, threshold: float, always: bool, folder: Path, clock: Callable[[], datetime],
              app_version: str, stdin: BinaryIO | None, out: BinaryIO) -> int:
     """--hook: a Claude Code hook (SessionStart, UserPromptSubmit, PostToolUse) that adds to the context.
@@ -56,10 +61,13 @@ def run_hook(*, threshold: float, always: bool, folder: Path, clock: Callable[[]
       after a compaction. Only the main conversation is offered --wait.
 
     It never blocks the prompt or the tool: it always exits 0 and stays silent when there is nothing
-    to say. Only SessionStart may fetch a reading of its own.
+    to say. Only SessionStart may fetch a reading of its own. An agent's ANSWER_TOOL call is its last: nothing
+    reads what follows it, so it is told nothing and uses nothing up (#41).
     """
     event = _hook_input(stdin)
     name = event.get("hook_event_name") if isinstance(event.get("hook_event_name"), str) else "UserPromptSubmit"
+    if name == "PostToolUse" and event.get("tool_name") == ANSWER_TOOL:
+        return 0
     try:
         now = clock()
         doc, running = status.current(folder, now=now, fetch=name == SESSION_START, app_version=app_version)
@@ -228,11 +236,12 @@ def _guard_notice(memory: dict, folder: Path, session_id: str, agent_id: str, do
     entry.update(at=now.isoformat(), guard={
         "episode": episode, "told_at": told.get("told_at") if same and told.get("told_at") else now.isoformat(),
         "agents": agents if agent_id in agents else [*agents, agent_id]})
-    return guard_text(verdict, now, wait=None if agent_id else wait_command(session_id or None))
+    return guard_text(verdict, now, wait=None if agent_id else wait_command(session_id or None), agent=bool(agent_id))
 
 
-def guard_text(verdict: Mapping[str, Any], now: datetime, *, wait: str | None) -> str:
-    """What a session is told when the guard holds: the facts, then how to be woken. It only informs."""
+def guard_text(verdict: Mapping[str, Any], now: datetime, *, wait: str | None, agent: bool = False) -> str:
+    """What a session is told when the guard holds: the facts, then how to be woken (an agent: that it cannot wait). It
+    only informs."""
     over = ", ".join(f"{item['label']} {item['percent']:.0f}% (cap {item['cap']}%)" for item in verdict["over"])
     resume = status.parse_time(verdict.get("resume_at"))
     when = f" {status.when(resume, now)}, when" if resume is not None else " when"
@@ -243,6 +252,8 @@ def guard_text(verdict: Mapping[str, Any], now: datetime, *, wait: str | None) -
         text += (f" To be woken then, run this as a background command: `{wait}`. In PowerShell run "
                  f"`& {wait} | Out-String` instead: PowerShell does not wait for this program otherwise. It "
                  f"exits when work can resume, or when the user presses Resume now.")
+    elif agent:
+        text += " " + AGENT_CANNOT_WAIT
     return text
 
 

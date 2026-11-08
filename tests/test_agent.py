@@ -440,6 +440,43 @@ def test_a_holding_guard_tells_each_agent_of_a_session_once(folder):
     assert hook(folder, {**TOOL, "session_id": "s2"}) is not None
 
 
+def test_an_agents_last_call_is_told_nothing_and_uses_nothing_up(folder):
+    """An agent's StructuredOutput call hands back its answer, and nothing reads what follows it. The notice it got there
+    was wasted, and still counted the agent as told (#41). Now it hears at its next ordinary call instead."""
+    save(folder, guarded(document(weekly=78.0)))
+    answer = {**TOOL, "agent_id": "a1", "tool_name": "StructuredOutput"}
+    assert hook(folder, answer) is None and told(folder) == []
+    assert "wind-down point" in context(hook(folder, {**TOOL, "agent_id": "a1"}))
+    assert hook(folder, answer) is None
+
+
+def test_a_main_conversations_answer_call_does_not_use_up_the_threshold_line(folder):
+    save(folder, document(weekly=81.0))
+    assert hook(folder, {**TOOL, "tool_name": "StructuredOutput"}) is None
+    assert context(hook(folder, PROMPT)).startswith("Claude plan usage")
+
+
+def test_an_agent_is_told_that_only_the_main_conversation_can_wait(folder):
+    """Agents are not offered the wait, and were not told why. One wrapped up early on its own (#41)."""
+    save(folder, guarded(document(weekly=78.0)))
+    main = context(hook(folder, TOOL))
+    sub = context(hook(folder, {**TOOL, "agent_id": "a1"}))
+    assert cli.AGENT_CANNOT_WAIT in sub and cli.AGENT_CANNOT_WAIT not in main
+
+
+def test_get_plan_usage_says_when_the_guard_holds(folder, fetches):
+    """Sessions call the tool before long work, and read its summary line first. That line now says the guard holds,
+    and when work can resume (#41)."""
+    save(folder, guarded(document(weekly=78.0)))
+    (called,) = rpc(folder, {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "get_plan_usage", "arguments": {}}})
+    first = called["result"]["content"][0]["text"].split("\n")[0]
+    assert "usage guard holding: weekly 78% (cap 75%)" in first and "Wrap up at a safe point" in first
+    assert first == called["result"]["structuredContent"]["summary"]
+    save(folder, guarded(document(weekly=60.0)))
+    (called,) = rpc(folder, {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "get_plan_usage", "arguments": {}}})
+    assert "usage guard" not in called["result"]["content"][0]["text"].split("\n")[0]
+
+
 def test_a_new_holding_episode_is_told_again(folder):
     save(folder, guarded(document(weekly=78.0)))
     assert hook(folder, TOOL) is not None

@@ -7,6 +7,9 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 - README screenshots: retake from the v2.2.0 build ([#35](https://github.com/Godimas101/claude-usage-monitor/issues/35)) — closed 2026-11-04 by @Godimas101
 
 ### Changed
+- The usage guard no longer hands its notice to an agent's last call, the one that returns its answer, where nothing read it, and that agent no longer counts as told ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).
+- Agents that hear the usage guard's notice are told that only the main conversation can wait, so they finish the step they are on and hand back what they have ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).
+- `get_plan_usage`'s summary line says when the usage guard holds, and when work can resume ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).
 - The Usage guard's backups of Claude Code's settings file are now named `settings.json.usage-monitor-backup-<date>-<time>`. Copies from before keep counting toward the five it keeps, and the dashboard keeps the choices you made in it.
 
 ### Fixed

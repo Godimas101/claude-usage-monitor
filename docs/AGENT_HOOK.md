@@ -47,7 +47,9 @@ path that does not exist, means it was added wrongly: remove it with
 `claude mcp remove claude-usage -s user` and run the add command again. In a Claude Code window that
 was already open, `/mcp` reconnects it.
 
-The tool, `get_plan_usage`, takes no arguments and returns a summary line and the reading as JSON:
+The tool, `get_plan_usage`, takes no arguments and returns a summary line and the reading as JSON. While the
+usage guard holds, the summary line ends with what it holds at and when work can resume, such as
+`| usage guard holding: weekly 96% (cap 95%). Wrap up at a safe point; work can resume in 1d 2h (Wed 16:00).`:
 
 ```
 Claude plan usage (Max 5x, reading from 2m ago): session 30%, resets in 1h 50m (14:30), safe at this rate | weekly 80%, resets in 4d 3h (Wed 16:00), 39 pts ahead of an even pace, at its average pace so far 100% is reached in 17h 10m (Sun 05:49) | Fable weekly 0%, resets in 4d 3h (Wed 16:00), 41 pts under an even pace | burn 1.2k output tokens/min (fast).
@@ -184,15 +186,17 @@ model-limited week such as Fable (off by default). Then press **Install** on the
   nothing is blocked, to wrap up at a safe point, and when work can resume. Idle sessions are not
   disturbed.
 - Each subagent hears it once too, at its own next tool call. That includes the agents of a workflow.
-  Only the main conversation is offered the wait command.
+  Only the main conversation is offered the wait command, and agents are told so: they finish the
+  step they are on and hand back what they have.
 - The guard's hooks run only when a session gets a prompt, makes a tool call or starts. Nothing
   reaches a session in between:
   - A conversation that waits for a workflow or a background agent is idle. Nothing tells it while
     it waits. It hears the notice only at its next prompt or tool call.
   - An agent in the middle of a long model call is not reached until that call ends. It hears the
     notice after its next tool call. If its last step is its answer, it never does.
-  - "Told" means the notice was handed over, not that it was read. A workflow agent handed it on the
-    call that returns its result never reads it. The card counts a session as told when the notice
+  - "Told" means the notice was handed over, not that it was read. The call that returns an agent's
+    result (`StructuredOutput`) gets no notice, as nothing reads what follows it, and does not count
+    the agent as told. The card counts a session as told when the notice
     reached its main conversation or any of its agents.
 - The notice goes into Claude's context. Claude Code does not show it in the chat.
 - The guard pauses nothing. A workflow or a background agent carries on until it wraps up, or until
