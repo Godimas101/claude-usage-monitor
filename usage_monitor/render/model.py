@@ -29,7 +29,7 @@ GUARD_ARMED = "armed"                   # the usage guard (#27): watching its ca
 GUARD_HOLDING = "holding"               # ... or a watched limit is at its cap and Claude sessions were told to wind down
 GUARD_STATES: tuple[str, ...] = (GUARD_ARMED, GUARD_HOLDING)
 
-STALE_MESSAGE_EXPIRED = "LOGIN EXPIRED - OPEN CLAUDE CODE"
+STALE_MESSAGE_EXPIRED = "LOGIN EXPIRED - USE CLAUDE CODE"   # used, not open: an idle Claude Code renews nothing (#52)
 STALE_MESSAGE_NO_LOGIN = "NO LOGIN FOUND - OPEN THE DASHBOARD"   # it has the steps for a claude.ai or app user (#28)
 
 STATUS_TEXT: dict[ApiStatus, str] = {

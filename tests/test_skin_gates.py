@@ -723,6 +723,7 @@ def test_the_footer_copy_follows_the_state():
         return gates._footer_runs(m)[0][0]
 
     assert lead(dump.sample_model("stale")) == "Hmm, we lost touch."
+    assert gates._footer_runs(dump.sample_model("stale"))[1][0] == " Send Claude Code a message."   # an open one is not enough (#52)
     assert gates._footer_runs(dump.sample_model("offline"))[0][0].startswith("No connection")
     assert gates._footer_runs(dump.sample_model("paused"))[0][0].startswith("Paused")
     assert lead(dump.sample_model("rate_limited")) == "Rate limited."
@@ -823,6 +824,15 @@ def test_footers_fit_the_card():
         gates._footer(ink, pal, m, gates.FOOT_TOP)
         for text, left, right, _ in queued_runs(ink):
             assert gates.LEFT <= left and right <= gates.RIGHT + 0.5, (name, text)
+
+
+def test_the_sign_in_advice_fits_whole_without_an_ellipsis():
+    """The fit above holds even for a cut line. The advice must be read whole (#52)."""
+    pal = Palette.for_variant(theme(), variant("system-dark"))
+    for scale in (1.0, 1.5, 2.0):
+        ink = gates.Ink(gates.CARD_W, gates.CARD_H, scale, gates._fonts(theme()))
+        gates._footer(ink, pal, dump.sample_model("stale"), gates.FOOT_TOP)
+        assert "".join(text for text, *_ in queued_runs(ink)) == "Hmm, we lost touch. Send Claude Code a message.", scale
 
 
 def test_fit_cuts_a_long_text_with_an_ellipsis():

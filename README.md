@@ -252,14 +252,14 @@ Why not just `claude`? Anthropic's installer puts Claude Code in that folder but
 
 - **What works:** the limits, their pace and forecasts, the alerts and the widgets. The usage guard only reaches Claude Code sessions, so it does nothing for chats on the web or in the app.
 - **What stays empty:** Cost & value, Efficiency and History, and on Overview the cost, cache and model cards. They count the work Claude Code records on your PC, and Claude on the web or in an app leaves no records here. The pages say so instead of showing zeros.
-- **How long a sign-in lasts:** Claude Code renews it each time it runs, but the monitor never renews it itself. If you don't use Claude Code, the sign-in runs out after a while and the widgets show **STALE** until you start Claude Code again with the command in step 3 (or `claude`, if that starts Claude Code). The monitor then picks up the renewed sign-in by itself.
+- **How long a sign-in lasts:** about 8 hours at a time. Claude Code renews it when you use it, but the monitor never renews it itself. If you don't use Claude Code for that long, the sign-in runs out and the widgets show **STALE** until you start Claude Code again with the command in step 3 (or `claude`, if that starts Claude Code). The monitor then picks up the renewed sign-in by itself.
 - **What the monitor won't do:** read the Claude desktop app's sign-in or your browser's claude.ai cookies (a claude.ai session key is a full key to your account), or sign you in itself. Only Claude Code does that: the monitor just reads the sign-in file Claude Code saves, and never writes it.
 
 ## 🩺 Troubleshooting
 
 | You see | What is going on | What to do |
 |---|---|---|
-| **STALE**, with a message to open Claude Code | The sign-in Claude Code saved has expired or was rejected. The monitor never signs in for you. | Open Claude Code. It refreshes the sign-in file, and the monitor picks the change up by itself. |
+| **STALE**, with a message to use Claude Code | The sign-in Claude Code saved has expired or was rejected. Claude Code renews it only when you use it, so one that is open but idle lets it run out. The monitor never signs in for you. | Send Claude Code a message. It renews the sign-in file, and the monitor picks the change up by itself within a minute. If Claude Code asks you to sign in again, do that. |
 | **NO LOGIN** | There is no Claude sign-in on this PC. | Sign in to Claude Code with your Claude account, even if you use Claude on the web or in the app: [the steps](#-using-claude-on-the-web-or-in-the-app). An API-key-only setup has no plan limits to show. |
 | Cost & value, Efficiency and History are empty | There are no Claude Code records on this PC, so there is nothing to count. That is normal if you use Claude on the web or in an app. | Nothing: the limits, pace and alerts work as usual. |
 | **OFFLINE** | The usage API could not be reached. Your last numbers stay on screen. | Check your network. It retries after 30 seconds, then waits longer each time, up to 15 minutes. |

@@ -260,11 +260,13 @@ Night City's strip tag, whatever the link status is: a paused or loading widget 
 pill beside the shield. Without a reading (no sign-in, still loading) no surface shows the guard: it cannot act on
 nothing.
 
-Sign-in copy. `WidgetModel.stale_message` is the neutral wording ("LOGIN EXPIRED - OPEN CLAUDE CODE");
+Sign-in copy. `WidgetModel.stale_message` is the neutral wording ("LOGIN EXPIRED - USE CLAUDE CODE");
 a skin words the state as its approved mockup does and falls back to the neutral text where it has
-none. Nostromo: the dashed auth box reads "AUTH LINK LOST." / "OPEN CLAUDE CODE TO RESTORE."
-(`STALE_MESSAGES`, by status). Night City: the hazard band reads "RELINK // OPEN CLAUDE CODE"
-(`theme.extras.copy.stale_auth`). Gates: the footer reads "Hmm, we lost touch. Sign in to Claude Code."
+none. Nostromo: the dashed auth box reads "AUTH LINK LOST." / "USE CLAUDE CODE TO RESTORE."
+(`STALE_MESSAGES`, by status). Night City: the hazard band reads "RELINK // USE CLAUDE CODE"
+(`theme.extras.copy.stale_auth`). Gates: the footer reads "Hmm, we lost touch. Send Claude Code a message."
+Each says to use Claude Code, not to open it: Claude Code renews the sign-in only when it sends a request, so
+an open but idle Claude Code lets it run out (#52).
 
 No sign-in at all is a different case (#28): the person may never have used Claude Code (claude.ai and the
 Claude apps share its limits), so the widgets send them to the dashboard, which has the steps, rather than to

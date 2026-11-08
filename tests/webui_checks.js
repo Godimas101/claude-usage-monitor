@@ -539,7 +539,7 @@ for (const page of PAGE_LIST) {
   monitorState("no_credentials");
   out.signIn.onPages[page] = topPart(page, "status");
 }
-monitorState("stale", { status_detail: "The Claude sign-in has expired; open Claude Code to renew it" });
+monitorState("stale", { status_detail: "The Claude sign-in has expired; send Claude Code a message to renew it" });
 out.signIn.expired = api.statusBanner();
 monitorState("stale", { status_detail: hostile });
 out.signIn.hostile = api.statusBanner();
@@ -936,7 +936,7 @@ async function signInActions() {
     during, check: where(), html: api.statusBanner(),
   };
   // the same for an expired sign-in, in its own words
-  monitorState("stale", { status_detail: "The Claude sign-in has expired; open Claude Code to renew it" });
+  monitorState("stale", { status_detail: "The Claude sign-in has expired; send Claude Code a message to renew it" });
   await run(Object.assign({ "GET /api/state": [200, payload("stale", SIGN_LATER)] }, REFRESHED), () => api.helpAction("check-again"));
   out2.stillExpired = { check: where(), html: api.statusBanner() };
   // one request at a time: clicks while a check is on its way send nothing

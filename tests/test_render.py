@@ -159,12 +159,13 @@ def test_stale_flag_and_message_per_status(status, stale, message):
 
 
 def test_expired_login_message_text_is_the_agreed_wording():
-    assert STALE_MESSAGE_EXPIRED == "LOGIN EXPIRED - OPEN CLAUDE CODE"
+    # "use", not "open": Claude Code renews the sign-in only when it sends a request, so an idle one lets it run out (#52)
+    assert STALE_MESSAGE_EXPIRED == "LOGIN EXPIRED - USE CLAUDE CODE"
 
 
 # ── Sign-in copy: the view model is neutral, each skin words it as its approved mockup ──────────
 
-NOSTROMO_AUTH_LINES = ["AUTH LINK LOST.", "OPEN CLAUDE CODE TO RESTORE."]
+NOSTROMO_AUTH_LINES = ["AUTH LINK LOST.", "USE CLAUDE CODE TO RESTORE."]
 
 
 def mockup_html(theme_id: str) -> str:
@@ -201,11 +202,11 @@ def test_night_city_and_gates_word_the_expired_sign_in_as_their_approved_mockups
 
     stale = dump.sample_model("stale")
     band = night_city._band_text(themes()["night_city"], stale)
-    assert band == "RELINK // OPEN CLAUDE CODE"
+    assert band == "RELINK // USE CLAUDE CODE"
     assert band.lower() in mockup_html("night_city").lower()
     footer = "".join(run[0] for run in gates._footer_runs(stale))
-    assert footer == "Hmm, we lost touch. Sign in to Claude Code."
-    assert "Hmm, we lost touch.</b> Sign in to Claude Code." in mockup_html("gates")
+    assert footer == "Hmm, we lost touch. Send Claude Code a message."
+    assert "Hmm, we lost touch.</b> Send Claude Code a message." in mockup_html("gates")
 
 
 def test_no_usage_keeps_status_but_dashes_the_rows():

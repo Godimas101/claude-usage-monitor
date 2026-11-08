@@ -673,8 +673,9 @@ def test_a_model_without_rows_still_renders():
 # ── Band wording ──────────────────────────────────────────────────────────────
 
 def test_band_wording_follows_the_theme_copy_and_the_status():
-    expired = replace(model(sample_rows(), ApiStatus.STALE), stale_message="LOGIN EXPIRED - OPEN CLAUDE CODE")
-    assert nc._band_text(theme(), expired) == theme().extras["copy"]["stale_auth"] == "RELINK // OPEN CLAUDE CODE"
+    expired = replace(model(sample_rows(), ApiStatus.STALE), stale_message="LOGIN EXPIRED - USE CLAUDE CODE")
+    assert nc._band_text(theme(), expired) == theme().extras["copy"]["stale_auth"] == "RELINK // USE CLAUDE CODE"
+    assert nc.DEFAULT_STALE_AUTH == "RELINK // USE CLAUDE CODE"      # an open Claude Code is not enough (#52)
     assert nc._band_text(theme(), model(sample_rows(), ApiStatus.NO_CREDENTIALS)) == theme().extras["copy"]["no_login"]
     assert theme().extras["copy"]["no_login"] == nc.DEFAULT_NO_LOGIN == "NO LOGIN // OPEN DASHBOARD"   # no Claude Code to open (#28)
     assert nc._band_text(theme(), model(sample_rows(), ApiStatus.OFFLINE)) == theme().extras["copy"]["offline"]

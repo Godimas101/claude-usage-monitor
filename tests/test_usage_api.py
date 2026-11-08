@@ -466,6 +466,22 @@ def test_401_and_403_are_stale_until_the_credentials_file_changes(tmp_path, code
     assert opener.calls == 2 and result.status is ApiStatus.LIVE and result.fresh is True
 
 
+def test_the_expired_detail_says_to_use_claude_code_not_just_open_it(tmp_path):
+    """An open but idle Claude Code lets the sign-in run out: it renews it only when it sends a request (#52)."""
+    assert ua.EXPIRED_DETAIL == "The Claude sign-in has expired; send Claude Code a message to renew it"
+    client, _ = make_client(write_credentials(tmp_path / ".credentials.json", expires_ms=ms_at(T0 - secs(1))), ok())
+    assert client.fetch(T0).detail == ua.EXPIRED_DETAIL
+
+
+@pytest.mark.parametrize(("code", "advice"), [
+    (401, "send Claude Code a message, and sign in again if it asks"),   # its next request renews it, or asks for a sign-in
+    (403, "sign in to Claude Code again with /login"),                   # a sign-in that works for Claude Code, not for usage
+])
+def test_a_rejected_sign_in_says_what_fixes_its_code(tmp_path, code, advice):
+    client, _ = make_client(write_credentials(tmp_path / ".credentials.json"), http_error(code))
+    assert client.fetch(T0).detail == f"Claude did not accept the sign-in (HTTP {code}); {advice}"
+
+
 def test_expired_token_recovers_once_the_file_is_refreshed(tmp_path):
     path = write_credentials(tmp_path / ".credentials.json", expires_ms=ms_at(T0 - secs(1)))
     client, opener = make_client(path, ok())

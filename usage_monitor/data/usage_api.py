@@ -51,7 +51,12 @@ _LEGACY_RESERVED = frozenset({
     "limits", "weekly_scoped_shares",
 })
 _BACKOFF_STATUSES = frozenset({ApiStatus.RATE_LIMITED, ApiStatus.OFFLINE})
-EXPIRED_DETAIL = "The Claude sign-in has expired; open Claude Code to renew it"
+# Claude Code renews the sign-in only when it sends a request, so an open but idle Claude Code lets it run out (#52).
+EXPIRED_DETAIL = "The Claude sign-in has expired; send Claude Code a message to renew it"
+# What fixes a refused sign-in. Claude Code's next request renews a token refused with 401, or asks for a sign-in when it
+# can't. A 403 is a sign-in that works for Claude Code but can't read usage, which only a new sign-in fixes (#52).
+REJECTED_ADVICE = {401: "send Claude Code a message, and sign in again if it asks",
+                   403: "sign in to Claude Code again with /login"}
 # Said to people who may never have used Claude Code (claude.ai and the Claude apps share its limits, #28), so it names
 # no file and no token, and points at the dashboard, which has the steps.
 NO_SIGN_IN_DETAIL = "No Claude sign-in on this PC; sign in to Claude Code once (the dashboard shows how)"
@@ -478,7 +483,7 @@ class UsageClient:
         if code in (401, 403):
             log.warning("usage API rejected the sign-in (HTTP %d); waiting for the credentials file "
                         "to change", code)
-            return self._stale(mtime, f"Claude did not accept the sign-in (HTTP {code}); open Claude Code to sign in again")
+            return self._stale(mtime, f"Claude did not accept the sign-in (HTTP {code}); {REJECTED_ADVICE[code]}")
         if code == 429:
             return self._rate_limited(now, _retry_after_seconds(headers, now))
         return self._offline(now, f"HTTP {code}")

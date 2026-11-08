@@ -32,6 +32,7 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 - Uninstalling also removes Windows' own startup record for the app. One left set to off would have kept a later install from starting with Windows ([#32](https://github.com/Godimas101/claude-usage-monitor/issues/32)).
 - Setup's and the uninstaller's windows keep answering while they wait, and the uninstall window says what it is waiting for. It could show "Not Responding" while Claude Code was slow ([#32](https://github.com/Godimas101/claude-usage-monitor/issues/32)).
 - A sign-in whose expiry Claude Code wrote as 0 no longer reads as expired. Some Claude Code builds wrote it that way, and the monitor showed STALE although the sign-in worked ([#51](https://github.com/Godimas101/claude-usage-monitor/issues/51)).
+- The advice for an expired sign-in says to use Claude Code, not just open it. An open but idle Claude Code doesn't renew the sign-in, so the widget stayed STALE with Claude Code open. The widgets, the dashboard's help and the README now say to send Claude Code a message, and after an HTTP 403 to sign in again with /login ([#52](https://github.com/Godimas101/claude-usage-monitor/issues/52)).
 - About asks for the supporters list again at your next visit if it failed to load. It stayed "unavailable" until the window was closed ([#47](https://github.com/Godimas101/claude-usage-monitor/issues/47)).
 
 ## [2.2.0] — 2026-11-03

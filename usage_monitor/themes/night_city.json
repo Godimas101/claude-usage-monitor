@@ -560,7 +560,7 @@
     "stale": {
       "rule": "The stale band replaces the header row. Rows stay visible at the dim tokens (labels, values, bars and time line use ink-3). No opacity anywhere. Last good values stay readable at 4.88:1 on blackwall.",
       "copy": {
-        "auth": "RELINK // OPEN CLAUDE CODE",
+        "auth": "RELINK // USE CLAUDE CODE",
         "offline": "NO SIGNAL // NET DOWN",
         "age_tag": "14 M OLD"
       },
@@ -1336,7 +1336,7 @@
       "rule": "Colour and layout only. No Breach art, no game text. The quickhack references set the blackwall red, cyan selection and RAM-cell layout, and the REC dot idea."
     },
     "copy": {
-      "stale_auth": "RELINK // OPEN CLAUDE CODE",
+      "stale_auth": "RELINK // USE CLAUDE CODE",
       "no_login": "NO LOGIN // OPEN DASHBOARD",
       "offline": "NO SIGNAL // NET DOWN",
       "age_tag": "14 M OLD",

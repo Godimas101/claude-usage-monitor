@@ -205,7 +205,7 @@
   var COPY_TITLES = { install: "Copy the install command", start: "Copy the command that starts Claude Code" };
   var SIGNIN_HEAD = "NO CLAUDE SIGN-IN YET";
   var SIGNIN_WHY = "The monitor reads your plan's limits through the sign-in that Claude Code saves on this PC. Signing in to Claude Code once is enough, even if you use Claude on the web or in the Claude app. Claude Code needs a paid plan such as Pro or Max.";
-  var SIGNIN_RENEWS = "Claude Code renews the sign-in each time it runs. If the monitor later says the sign-in has expired, open Claude Code again.";
+  var SIGNIN_RENEWS = "Claude Code renews the sign-in when you use it. If the monitor later says the sign-in has expired, send Claude Code a message.";
   var CHECK_NONE = "Still no sign-in found.";
   var CHECK_STALE = "Still no working sign-in.";
   var CHECK_FAILED = "Could not check just now. Try again.";
@@ -3845,7 +3845,7 @@
       ];
       body = "<p>" + esc(SIGNIN_WHY) + "</p><ol>" + steps.map(function (step) { return "<li>" + step + "</li>"; }).join("") + "</ol><p>" + esc(SIGNIN_RENEWS) + "</p>";
     } else {
-      body = (s.status_detail ? "<p>" + esc(s.status_detail) + "</p>" : "") + "<p>" + esc("Claude Code renews the sign-in each time it runs. Open Claude Code, or run ") +
+      body = (s.status_detail ? "<p>" + esc(s.status_detail) + "</p>" : "") + "<p>" + esc("Claude Code renews the sign-in when you use it. Send it a message, or run ") +
         codeText("claude") + esc(" in PowerShell, then press Check again.") + "</p><p>" + esc("If PowerShell says ") + codeText("claude") +
         esc(" is not recognized, or the Claude app opens instead, run this:") + "</p>" + commandRow("start");
     }

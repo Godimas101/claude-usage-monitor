@@ -1771,8 +1771,9 @@ SIGNIN_STEPS = ["Open PowerShell: press Start and type PowerShell.", "Install Cl
                 "Come back here and press Check again."]
 SIGNIN_PATH_NOTE = "If it warns that a folder is not in your PATH, carry on. The next step does not need it."      # under the second step's command
 SIGNIN_SIGN_IN = "Then sign in with your Claude account in the browser that opens."      # the end of the third step, under its command
-SIGNIN_RENEWS = "Claude Code renews the sign-in each time it runs. If the monitor later says the sign-in has expired, open Claude Code again."
-SIGNIN_EXPIRED = "Claude Code renews the sign-in each time it runs. Open Claude Code, or run claude in PowerShell, then press Check again."
+# "when you use it", not "each time it runs": an open but idle Claude Code lets the sign-in run out (#52)
+SIGNIN_RENEWS = "Claude Code renews the sign-in when you use it. If the monitor later says the sign-in has expired, send Claude Code a message."
+SIGNIN_EXPIRED = "Claude Code renews the sign-in when you use it. Send it a message, or run claude in PowerShell, then press Check again."
 # an older Claude app took the name "claude" on some PCs, so typing it opens the app (Anthropic's install troubleshooting page)
 SIGNIN_NOT_FOUND = "If PowerShell says claude is not recognized, or the Claude app opens instead, run this:"
 COPY_TITLES = {"install": "Copy the install command", "start": "Copy the command that starts Claude Code"}
@@ -1810,7 +1811,7 @@ def test_the_help_and_the_no_activity_pages_say_what_they_were_given_to_say() ->
     links = re.search(r"var LINKS = \{(.*?)\};", APP_CODE, re.S).group(1)
     assert f'readme: "{README_WEB_AND_APP}"' in links
     body = function_body(APP_CODE, "signInHelp")
-    for step in (SIGNIN_STEPS[0], SIGNIN_STEPS[3], "Claude Code renews the sign-in each time it runs. Open Claude Code, or run "):
+    for step in (SIGNIN_STEPS[0], SIGNIN_STEPS[3], "Claude Code renews the sign-in when you use it. Send it a message, or run "):
         assert f'esc("{step}")' in body, step
     assert f'esc("{SIGNIN_STEPS[1]}") + commandRow("install") + esc("{SIGNIN_PATH_NOTE}")' in body  # the installer's note must not stop anyone
     assert f'esc("{SIGNIN_STEPS[2]}") + commandRow("start") + esc("{SIGNIN_SIGN_IN}")' in body      # no "new window": the PATH does not matter
@@ -1959,7 +1960,7 @@ def test_with_no_sign_in_the_help_says_what_to_do_in_the_words_it_was_given(chec
 def test_an_expired_sign_in_keeps_the_monitors_reason_and_adds_the_one_thing_to_do(checks: dict[str, Any]) -> None:
     html = checks["signIn"]["expired"]
     assert html.startswith('<div class="nm-msg nm-help" role="region" aria-label="Claude sign-in"><b>AUTH LOST</b>')       # the banner's own heading
-    assert paragraphs(html) == ["The Claude sign-in has expired; open Claude Code to renew it", SIGNIN_EXPIRED, SIGNIN_NOT_FOUND]
+    assert paragraphs(html) == ["The Claude sign-in has expired; send Claude Code a message to renew it", SIGNIN_EXPIRED, SIGNIN_NOT_FOUND]
     page = Markup(html)
     assert page.find("ol") == [] and page.find("a") == []                              # no steps to start from nothing, no manual to read
     # no install command to copy; the command that starts Claude Code where claude is not found (#42)
