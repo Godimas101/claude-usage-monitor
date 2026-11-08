@@ -1089,7 +1089,8 @@ class ApiServer:
 
     def _get_guard(self, req: _Handler) -> None:
         """The usage guard as the Settings card shows it: the guard block of the state (``{}`` before the first
-        cycle), the sessions told of this holding episode, the sessions waiting, and the setup status."""
+        cycle), the sessions told of this holding episode, the sessions waiting, the conversations the Stop hook
+        watches (#41), and the setup status."""
         state = self._state_provider()
         guard = to_jsonable(state.guard) if state is not None and state.guard else {}
         folder = self._guard_folder()
@@ -1097,6 +1098,7 @@ class ApiServer:
             "guard": guard,
             "told": agent_sessions.told(folder, agent_guard.episode(guard)),
             "waiting": agent_sessions.waiting(folder),
+            "watching": agent_sessions.watching(folder),
             "setup": self._setup_status.get(),
         })
 

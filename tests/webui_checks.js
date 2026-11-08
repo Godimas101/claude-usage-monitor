@@ -656,7 +656,7 @@ async function failures() {
 }
 
 // ── the usage guard card: its markup, the status block in every state, the setup block, the fields and the clicks ──────────────
-// Every input is made up. The page asks /api/guard, which answers { guard, told, waiting, setup }.
+// Every input is made up. The page asks /api/guard, which answers { guard, told, waiting, watching, setup }.
 const GUARD_T = Date.UTC(2026, 9, 21, 16, 12);
 const isoAt = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
 const POLICY = { enabled: true, session_cap: 95, weekly_cap: 90, scoped_cap: null, stagger_s: 120 };
@@ -670,7 +670,10 @@ const AGENTS_TOLD = [
   { session_id: "5d2b7e41-1ccc-dddd", told_at: isoAt(GUARD_T - 10 * 60000), main: true, agents: 0 },
 ];
 const waiterOf = (id, cwd, pid) => ({ pid: pid || 4242, session_id: id, since: isoAt(GUARD_T - 18 * 60000), cwd });
-const guardAnswer = (guard, told, waiting, setup) => ({ guard, told: told || [], waiting: waiting || [], setup: setup || null });
+const guardAnswer = (guard, told, waiting, setup, watching) => ({ guard, told: told || [], waiting: waiting || [], watching: watching || [], setup: setup || null });
+// a conversation the Stop hook watches while it waits for its background work (#41)
+const watcherOf = (id, work) => ({ pid: 5151, session_id: id, since: isoAt(GUARD_T - 25 * 60000), work });
+const ARMED_GUARD = { state: "armed", over: [], resume_at: null, policy: POLICY };
 const holding = (over, extra) => Object.assign({ state: "holding", over, resume_at: RESETS, policy: POLICY }, extra || {});
 const SETUP_OK = {
   available: true, can_remove: true, reason: null, manual: "docs/AGENT_HOOK.md", exe: "C:/x/ClaudeUsageMonitor.exe", settings_path: "C:/Users/t/.claude/settings.json", errors: [],
@@ -715,16 +718,25 @@ out.guard = {
     holdingPartHooked: liveFor(guardAnswer(holding([SESSION_OVER]), [], [], setupWith({ hooks: { state: "partial", installed: 2, total: 3, events: {} } }))),
     holding: liveFor(guardAnswer(holding([SESSION_OVER, FABLE_OVER]), toldN(2), [waiterOf("77b0aa10-9d3e", "C:\\Demo\\atlas-web")])),
     holdingAgents: liveFor(guardAnswer(holding([SESSION_OVER]), AGENTS_TOLD)),
+    armedWatching: liveFor(guardAnswer(ARMED_GUARD, [], [], null, [watcherOf("3f9a1c2e-0aaa-bbbb", { workflow: 1, agent: 2 })])),
+    offWatching: liveFor(guardAnswer({ state: "off", over: [], resume_at: null, policy: Object.assign({}, POLICY, { enabled: false }) }, [], [], null,
+      [watcherOf("3f9a1c2e-0aaa-bbbb", { workflow: 1 })])),
+    holdingWatchingMany: liveFor(guardAnswer(holding([SESSION_OVER]), [], [], null,
+      Array.from({ length: 7 }, (_, i) => watcherOf("5d2b7e4" + i + "-1ccc", { agent: i + 1 })))),
+    watchingOdd: liveFor(guardAnswer(ARMED_GUARD, [], [], null, [{ session_id: null, since: null, work: "x" },
+      { session_id: "abc", since: "nonsense", work: { agent: -1, workflow: "2", teammate: 1 } }])),
     holdingBusy: liveFor(guardAnswer(holding([SESSION_OVER]), toldN(1), [waiterOf("77b0aa10-9d3e", "C:\\Demo\\atlas-web")]), { busy: true }),
     holdingNobody: liveFor(guardAnswer(holding([SESSION_OVER]))),
     holdingNoResetTime: liveFor(guardAnswer(holding([SESSION_OVER], { resume_at: null }), toldN(1))),
     holdingAMomentLeft: liveFor(guardAnswer(holding([SESSION_OVER]), toldN(1)), { now: Date.parse(RESETS) - 20000 }),
     holdingMany: liveFor(guardAnswer(holding([SESSION_OVER]), toldN(7), manyWaiting)),
     holdingHostile: liveFor(guardAnswer(holding([{ name: hostile, label: hostile, percent: 96, cap: 95, resets_at: RESETS }]),
-      [{ session_id: hostile, told_at: isoAt(GUARD_T) }], [waiterOf(hostile, "C:\\<b>x</b>\\" + hostile)])),
+      [{ session_id: hostile, told_at: isoAt(GUARD_T) }], [waiterOf(hostile, "C:\\<b>x</b>\\" + hostile)], null,
+      [{ session_id: hostile, since: isoAt(GUARD_T), work: { [hostile]: 1 } }])),
     odd: liveFor({ guard: "x", told: "y", waiting: 3, setup: [] }),
   },
-  clock: { resumes: api.clockText(Date.parse(RESETS)), told: api.clockText(GUARD_T - 30 * 60000), since: api.clockText(GUARD_T - 18 * 60000) },
+  clock: { resumes: api.clockText(Date.parse(RESETS)), told: api.clockText(GUARD_T - 30 * 60000), since: api.clockText(GUARD_T - 18 * 60000),
+    watched: api.clockText(GUARD_T - 25 * 60000) },
   setup: {
     pending: setupFor(null),
     missing: setupFor(SETUP_OK),

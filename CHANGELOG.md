@@ -8,6 +8,7 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ### Added
 - The usage guard reaches a conversation that waits for its background work, such as the one that started a workflow. A new Stop hook watches while that work runs, and wakes the conversation with the notice when the guard starts holding. Before, nothing told it until its next prompt or tool call ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).
+- The usage guard card lists the conversations the Stop hook watches, with since when and the background work each waits for ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).
 - An agent that starts while the usage guard holds hears the notice before its first prompt, through a new SubagentStart hook ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).
 
 ### Changed

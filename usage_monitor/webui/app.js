@@ -3311,6 +3311,7 @@
       policy: guard.policy && typeof guard.policy === "object" && !Array.isArray(guard.policy) ? guard.policy : {},
       told: Array.isArray(answer.told) ? answer.told : [],
       waiting: Array.isArray(answer.waiting) ? answer.waiting : [],
+      watching: Array.isArray(answer.watching) ? answer.watching : [],
       setup: answer.setup && typeof answer.setup === "object" && !Array.isArray(answer.setup) ? answer.setup : null
     };
   }
@@ -3372,8 +3373,19 @@
     return w.agents ? plural(w.agents, "agent").toUpperCase() + " ONLY" : "SESSION";
   }
 
+  /* The background work a watched conversation waits for, as words: "1 WORKFLOW, 2 AGENTS" (#41). */
+  function workWords(work) {
+    if (!work || typeof work !== "object" || Array.isArray(work)) {
+      return "";
+    }
+    return Object.keys(work).filter(function (word) {
+      return typeof work[word] === "number" && isFinite(work[word]) && work[word] >= 1;
+    }).map(function (word) { return plural(Math.round(work[word]), word).toUpperCase(); }).join(", ");
+  }
+
   /* Off, Armed or Holding. While holding: which limits are over their caps, when the hold ends, the sessions told of it and the
-   * sessions that wait. "Resume now" is there always and works only while something waits. */
+   * sessions that wait. Armed or holding, the conversations the Stop hook watches (#41). "Resume now" is there always and
+   * works only while something waits. */
   function guardLiveHtml(v, nowMs) {
     if (!v.known) {
       return S.guardLost ? '<p class="nm-error" role="status">The dashboard could not get the guard’s status from the monitor.</p>' : guardLivePlaceholder();
@@ -3418,6 +3430,16 @@
       }
       if (untold) {    // it waits for its agents, so it hears at its next prompt or tool call (#41)
         rows.push(["NOT TOLD", untold === 1 ? "1 CONVERSATION: ITS AGENTS WERE" : plural(untold, "conversation").toUpperCase() + ": THEIR AGENTS WERE"]);
+      }
+    }
+    if (v.state !== "off" && v.watching.length) {   // they wait for their background work: woken when the guard holds (#41)
+      rows.push(["WATCHING", plural(v.watching.length, "conversation").toUpperCase()]);
+      v.watching.slice(0, GUARD_LISTED).forEach(function (w) {
+        var work = workWords(w && w.work);
+        rows.push([shortId(w && w.session_id) || "unknown session", "SINCE " + clockText(parseTime(w && w.since)) + (work ? " · " + work : "")]);
+      });
+      if (v.watching.length > GUARD_LISTED) {
+        rows.push(["AND " + (v.watching.length - GUARD_LISTED) + " MORE", ""]);
       }
     }
     if (v.state === "holding" || v.waiting.length) {

@@ -1499,6 +1499,23 @@ def test_the_guard_status_says_off_armed_or_holding(checks: dict[str, Any]) -> N
 
 
 @ui_only
+def test_the_card_lists_the_conversations_the_stop_hook_watches(checks: dict[str, Any]) -> None:
+    """#41: a conversation that waits for its workflow is watched, and woken when the guard holds. The card says which
+    are watched, since when and for what work, but not while the guard is off: the watches end with it."""
+    live, clock = checks["guard"]["live"], checks["guard"]["clock"]
+    assert kv(live["armedWatching"]) == [("WATCHING", "1 CONVERSATION"),
+                                          ("3f9a1c2e", "SINCE " + clock["watched"] + " · 1 WORKFLOW, 2 AGENTS")]
+    assert kv(live["offWatching"]) == []
+    many = kv(live["holdingWatchingMany"])
+    at = [label for label, _value in many].index("WATCHING")
+    assert many[at] == ("WATCHING", "7 CONVERSATIONS") and many[at + 1] == ("5d2b7e40", "SINCE " + clock["watched"] + " · 1 AGENT")
+    assert many[at + 6] == ("AND 2 MORE", "")
+    odd = kv(live["watchingOdd"])                                            # what came back is not trusted
+    assert odd[0] == ("WATCHING", "2 CONVERSATIONS") and odd[1][0] == "unknown session" and " · " not in odd[1][1]
+    assert odd[2][0] == "abc" and odd[2][1].endswith(" · 1 TEAMMATE")
+
+
+@ui_only
 def test_the_card_counts_conversations_and_agents_apart_and_names_a_conversation_not_told(checks: dict[str, Any]) -> None:
     """#41: the card said two sessions were told when only a workflow's agents had heard, and its conversation had not."""
     rows = kv(checks["guard"]["live"]["holdingAgents"])

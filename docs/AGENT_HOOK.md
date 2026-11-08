@@ -197,6 +197,7 @@ a conversation finishes its turn.
   starts holding, it wakes the conversation with the notice.
 - It ends when the conversation's next turn ends (the next Stop takes over), when the guard is off,
   when Claude Code closes, or after 24 hours.
+- The usage guard card lists the conversations it watches, under WATCHING, with the work each waits for.
 - It exits with code 2 only to wake the conversation: that is how a Claude Code `asyncRewake` hook
   wakes Claude. It blocks nothing, as the turn has already ended.
 - Keep `async` and `asyncRewake` in the entry. Without them, Claude Code waits for it at the end of

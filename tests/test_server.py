@@ -2304,8 +2304,9 @@ class FakeSetup:
 
 
 def seed_sessions(folder: Path, guard: dict[str, Any], told: list[tuple[str, str]],
-                  waiting: list[dict[str, Any]] | None = None) -> None:
-    """The files agent/sessions.py documents: hook-seen.json for the sessions told of this episode, waiting/<pid>.json."""
+                  waiting: list[dict[str, Any]] | None = None, watching: list[dict[str, Any]] | None = None) -> None:
+    """The files agent/sessions.py documents: hook-seen.json for the sessions told of this episode, waiting/<pid>.json,
+    watching/<session>.json."""
     folder.mkdir(parents=True, exist_ok=True)
     seen = {sid: {"at": at, "steps": {}, "guard": {"episode": agent_guard.episode(guard), "told_at": at}}
             for sid, at in told}
@@ -2315,6 +2316,9 @@ def seed_sessions(folder: Path, guard: dict[str, Any], told: list[tuple[str, str
     (folder / agent_sessions.WAITING_DIR).mkdir(exist_ok=True)
     for entry in waiting or []:
         (folder / agent_sessions.WAITING_DIR / f"{entry['pid']}.json").write_text(json.dumps(entry), encoding="utf-8")
+    (folder / agent_sessions.WATCHING_DIR).mkdir(exist_ok=True)
+    for entry in watching or []:
+        (folder / agent_sessions.WATCHING_DIR / f"{entry['session_id']}.json").write_text(json.dumps(entry), encoding="utf-8")
 
 
 @pytest.fixture
@@ -2371,9 +2375,12 @@ def test_the_guard_endpoint_reports_the_state_the_sessions_told_and_waiting_and_
     told = [("11111111-aaaa", "2026-10-21T16:00:00Z"), ("22222222-bbbb", "2026-10-21T15:30:00Z")]
     here = {"pid": os.getpid(), "session_id": "33333333-cccc", "since": "2026-10-21T16:05:00Z", "cwd": "C:/Demo/atlas-web"}
     gone = {"pid": DEAD_PID, "session_id": "44444444-dddd", "since": "2026-10-21T15:00:00Z", "cwd": "C:/Demo/gone"}
-    seed_sessions(guard_rig.folder, HOLDING, told, [here, gone])
+    watched = {"pid": os.getpid(), "started": None, "session_id": "55555555-eeee", "since": "2026-10-21T15:55:00Z",
+               "work": {"workflow": 1, "agent": 2}}
+    seed_sessions(guard_rig.folder, HOLDING, told, [here, gone], [watched, {**watched, "pid": DEAD_PID, "session_id": "6666"}])
     answer = get_guard(guard_rig.server)
-    assert set(answer) == {"guard", "told", "waiting", "setup"}
+    assert set(answer) == {"guard", "told", "waiting", "watching", "setup"}
+    assert answer["watching"] == [{key: value for key, value in watched.items() if key != "started"}]  # #41; a dead one: no
     assert answer["guard"] == HOLDING
     assert answer["told"] == [{"session_id": "22222222-bbbb", "told_at": "2026-10-21T15:30:00Z", "main": True, "agents": 0},
                               {"session_id": "11111111-aaaa", "told_at": "2026-10-21T16:00:00Z", "main": True, "agents": 0}]

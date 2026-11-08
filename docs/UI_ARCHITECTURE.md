@@ -409,7 +409,7 @@ Settings: `theme_id`, `theme_variant`, `theme_mode` (Gates: light / dark / syste
 | POST | `/api/refresh` | `DataService.refresh_now()` |
 | POST | `/api/dashboard/closed` | `{"pid": n}`: the dashboard process says its window is gone (`dashboard_closed_cb`, wired to `DashboardLauncher.window_closed`); `400` without a pid, `501` where nothing manages the dashboard |
 | POST | `/api/update/check` · `/api/update/apply` · `/api/update/skip` | updater (see "Updates") |
-| GET | `/api/guard` | the usage guard for the Settings card: `{guard, told, waiting, setup}` (below) |
+| GET | `/api/guard` | the usage guard for the Settings card: `{guard, told, waiting, watching, setup}` (below) |
 | POST | `/api/guard/resume` | "Resume now": every running `--wait` ends at once, whatever the limits say |
 | POST | `/api/guard/setup` | `{"action": "install" \| "remove"}`: the one-click setup (below) |
 
@@ -422,7 +422,8 @@ Settings: `theme_id`, `theme_variant`, `theme_mode` (Gates: light / dark / syste
 - **`GET /api/guard`** answers `guard` (the state's guard block, `{}` before the first cycle), `told` (the
   sessions told of the current holding episode, with when and who: `main`, whether its main conversation heard it,
   and `agents`, how many of its agents did; #41), `waiting` (the live `--wait` processes, oldest
-  first) and `setup` (`setup.status()`). The status runs `claude --version` and `claude mcp get`, so it is kept
+  first), `watching` (the live `--watch` processes, oldest first: the conversations that wait for their background
+  work, and that work; #41) and `setup` (`setup.status()`). The status runs `claude --version` and `claude mcp get`, so it is kept
   for `SETUP_STATUS_TTL_S` (10 minutes) and computed by one caller at a time (`_TimedValue`). A setup click
   and `POST /api/dashboard/closed` clear it, so each dashboard window and each click look afresh. The card
   asks every `GUARD_POLL_MS` (3 s) while it is on screen.
@@ -688,7 +689,8 @@ default browser instead, and the exit code says so (below).
   an OFF, ARMED or HOLDING chip with one line of story, which adds that sessions may not be told while setup reports the
   hooks missing or partly installed. While holding, the told rows count conversations and agents apart, each session's
   row says who of it heard, and a NOT TOLD row counts the conversations only their agents heard (#41; an entry without
-  `main` counts as its conversation). Install, Remove and Resume now are `disabled` only where they cannot work (no setup
+  `main` counts as its conversation). Armed or holding, a WATCHING block lists the conversations the Stop hook watches,
+  with since when and their background work (#41). Install, Remove and Resume now are `disabled` only where they cannot work (no setup
   here, nothing waiting; Remove needs `can_remove`, not Claude Code) and only `aria-disabled` while a click is on its way,
   so the focus stays. A blank cap is "not watched"; text a number box cannot hold (`validity.badInput`) is refused under the
   field instead of read as blank.
