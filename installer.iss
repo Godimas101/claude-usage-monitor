@@ -54,13 +54,15 @@ ArchitecturesAllowed=x64compatible
 ; stop with "please close it" while it exists; both check it at startup only. The exe's other processes hold no
 ; mutex: the dashboard window, and the windowless readers Claude Code starts from the same exe (--mcp lives as
 ; long as a Claude session; --hook and --gate briefly; --wait until the usage guard lets its session go, which
-; can be days). They hold no state. PrepareToInstall asks the dashboard to close and then ends what is left of
+; can be days; --watch while a session waits for its background work, up to a day). They hold no state.
+; PrepareToInstall asks the dashboard to close and then ends what is left of
 ; them (EndOtherProcesses); Uninstall does the same before it deletes. Restart Manager (CloseApplications) cannot
 ; be left to do that: it closes applications only once the installation has started, after
 ; CurStepChanged(ssInstall), and MoveOldInstallAside must find the folder free before then. Left to it, one
 ; --mcp reader stopped every update with "in use" while Claude Code was open (2.1.0). "force" stays for anything
 ; else Restart Manager finds. A --wait that is ended wakes its session without the "wait is over" line, and an
 ; ended --mcp is started again when its session next uses the tool, or with /mcp (docs/AGENT_HOOK.md says both).
+; An ended --watch wakes nobody: its session is watched again from its next Stop.
 ; Nothing is restarted by Setup: a closed dashboard cannot come back without the port and token of a monitor, and
 ; the monitor is relaunched by the Finish page (or by the update helper after a silent update).
 AppMutex=Global\ClaudeUsageMonitor
@@ -119,7 +121,7 @@ const
   UninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#AppIdValue}_is1';
   DashboardTitle = 'Claude Usage Monitor';     // title of the dashboard window; the controller window's differs
   // The exe's modes other than the monitor's (main.py parse_args), one space apart. The monitor is started with none.
-  OtherModes = '--dashboard --mcp --hook --gate --wait --status --print-version --remove-setup --dump-frames --smoke-test';
+  OtherModes = '--dashboard --mcp --hook --gate --wait --watch --status --print-version --remove-setup --dump-frames --smoke-test';
   WmClose = $0010;
   WmQuit = $0012;
   PmRemove = $0001;

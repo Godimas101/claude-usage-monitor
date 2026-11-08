@@ -14,10 +14,12 @@
     main.py --mcp                        an MCP server on stdio with the tool get_plan_usage
     main.py --wait [--session ID]        wait until the usage guard lets work resume (a Claude session's
                                          background command; its exit wakes the session)
+    main.py --watch                      a Claude Code Stop hook run in the background: when the usage guard holds,
+                                         its exit wakes a conversation that waits for its background work
 
 The build is windowed, so there is no console: results go to files, and an unhandled exception is
-written to the log. --status, --hook, --gate, --mcp and --wait answer on stdout, which exists when the caller
-gives the process a pipe, as Claude Code does. Dev isolation: USAGE_MONITOR_APPDATA_DIR puts settings, database and log in another
+written to the log. --status, --hook, --gate, --mcp and --wait answer on stdout and --watch on stderr, which
+exist when the caller gives the process pipes, as Claude Code does. Dev isolation: USAGE_MONITOR_APPDATA_DIR puts settings, database and log in another
 folder, and USAGE_MONITOR_DEV_INSTANCE=1 uses its own single-instance mutex and tags the tray tooltip.
 """
 from __future__ import annotations
@@ -36,7 +38,7 @@ import version
 
 DASHBOARD_LOG = "dashboard.log"
 AGENT_LOG = "agent.log"             # --status, --hook, --gate and --mcp: many can run at once, beside the app
-AGENT_KINDS = ("status", "hook", "gate", "mcp", "wait")
+AGENT_KINDS = ("status", "hook", "gate", "mcp", "wait", "watch")
 HOOK_KINDS = ("hook", "gate")       # Claude Code hooks: exit 0 whatever happens, never blocking a prompt or a tool
 FAULT_LOG = "faults.log"
 UNKNOWN_VERSION = "0.0.0"           # what version.py reports when it cannot read the VERSION file
@@ -46,7 +48,7 @@ _fault_file: IO[str] | None = None  # faulthandler needs its file open for the l
 @dataclass(frozen=True)
 class Command:
     """What the command line asks for. ``kind`` is "app", "dashboard", "print_version", "remove_setup",
-    "dump_frames", "smoke_test", "status", "hook", "gate", "mcp", "wait" or "error" (then ``error`` says why)."""
+    "dump_frames", "smoke_test", "status", "hook", "gate", "mcp", "wait", "watch" or "error" (then ``error`` says why)."""
 
     kind: str = "app"
     port: int = 0
@@ -103,7 +105,7 @@ def _session_id(args: list[str]) -> str | None:
 def parse_args(argv: Sequence[str]) -> Command:
     """Read the command line. Unknown words are ignored (a windowed app must not die on them), and
     when several modes are given the first of print-version, remove-setup, dashboard, dump-frames,
-    smoke-test, status, hook, gate, wait, mcp wins."""
+    smoke-test, status, hook, gate, wait, watch, mcp wins."""
     args = list(argv)
     if "--print-version" in args:
         words = _values(args, "--print-version", 1)
@@ -136,6 +138,8 @@ def parse_args(argv: Sequence[str]) -> Command:
         return Command("gate", session_cap=_percent(args, "--session"), weekly_cap=_percent(args, "--weekly"))
     if "--wait" in args:
         return Command("wait", session_id=_session_id(args))
+    if "--watch" in args:
+        return Command("watch")
     if "--mcp" in args:
         return Command("mcp")
     return Command("app")
@@ -235,7 +239,7 @@ def _smoke_test(seconds: float, report: str) -> int:
 
 
 def _agent(command: Command) -> int:
-    """--status, --hook, --gate, --mcp and --wait. No UI and no single-instance mutex, so they run beside the app."""
+    """--status, --hook, --gate, --mcp, --wait and --watch. No UI and no single-instance mutex, so they run beside the app."""
     from datetime import datetime, timezone
 
     from usage_monitor import paths
@@ -251,6 +255,13 @@ def _agent(command: Command) -> int:
     if command.kind == "wait":  # its ending wakes the session, so it runs even with nowhere to answer
         return cli.run_wait(session_id=command.session_id, folder=folder, clock=clock,
                             app_version=version.APP_VERSION, out=sys.stdout.buffer if sys.stdout else None)
+    if command.kind == "watch":  # Claude Code wakes the session with its stderr, or its stdout when stderr is empty
+        from usage_monitor.agent import sessions
+
+        stream = sys.stderr if sys.stderr is not None else sys.stdout
+        return cli.run_watch(folder=folder, clock=clock, app_version=version.APP_VERSION,
+                             stdin=sys.stdin.buffer if sys.stdin is not None else None,
+                             err=stream.buffer if stream is not None else None, parent_alive=sessions.parent_check())
     if sys.stdout is None:  # a windowed build started without a pipe has nowhere to answer
         return 0 if command.kind in HOOK_KINDS else 1
     out = sys.stdout.buffer

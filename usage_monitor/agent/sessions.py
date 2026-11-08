@@ -1,6 +1,6 @@
-"""Which Claude sessions the usage guard has told, and which are waiting (#27).
+"""Which Claude sessions the usage guard has told, and which are waiting (#27) or watched (#41).
 
-Three small files in the app data folder, shared by the hook and --wait processes, which write
+Small files in the app data folder, shared by the hook and --wait processes, which write
 them, and the dashboard, which reads them:
 
     hook-seen.json        {session_id: {"at": ISO, "steps": {...}, "guard": {"episode": key, "told_at": ISO}}}
@@ -13,6 +13,9 @@ them, and the dashboard, which reads them:
     wait-released         {"at": ISO}: when the last --wait was let go, so the next one goes a stagger later
     resume-now            an empty marker: every --wait that started before its time ends at once
                           ("Resume now" in the tray or the dashboard)
+    watching/<session>.json {"pid", "started", "session_id", "since": ISO, "work": {word: count}}: the --watch of a
+                          conversation that waits for its background work (#41). A newer Stop's watch takes the file
+                          over, a Stop with nothing to watch removes it, and a watch that ends removes its own.
 """
 from __future__ import annotations
 
@@ -21,7 +24,7 @@ import ctypes
 import json
 import os
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from ctypes import wintypes
 from datetime import datetime, timezone
 from pathlib import Path
@@ -33,6 +36,7 @@ SEEN_NAME = "hook-seen.json"
 WAITING_DIR = "waiting"
 RELEASED_NAME = "wait-released"
 RESUME_NAME = "resume-now"
+WATCHING_DIR = "watching"
 ALIVE, GONE, UNKNOWN = "alive", "gone", "unknown"
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 _STILL_ACTIVE = 259
@@ -76,20 +80,8 @@ def waiting(folder: Path) -> list[dict]:
 
     The file of a wait whose process is gone, or whose id now belongs to another process, is removed.
     A file that cannot be read is skipped and left alone: its wait may be writing it."""
-    found = []
-    for path in (folder / WAITING_DIR).glob("*.json"):
-        entry = _load(path)
-        pid = entry.get("pid")
-        if not isinstance(pid, int):
-            continue
-        state = _state(pid, entry.get("started"))
-        if state == GONE:
-            with contextlib.suppress(OSError):
-                path.unlink()
-        if state != ALIVE:
-            continue
-        found.append({"pid": pid, "session_id": entry.get("session_id"), "since": entry.get("since"),
-                      "cwd": entry.get("cwd")})
+    found = [{"pid": entry["pid"], "session_id": entry.get("session_id"), "since": entry.get("since"),
+              "cwd": entry.get("cwd")} for entry in _alive(folder / WAITING_DIR)]
     return sorted(found, key=lambda entry: (entry["since"] or "", entry["pid"]))
 
 
@@ -132,6 +124,69 @@ def resumed_since(folder: Path, started_epoch: float) -> bool:
         return (folder / RESUME_NAME).stat().st_mtime >= started_epoch
     except OSError:
         return False
+
+
+def register_watch(folder: Path, key: str, session_id: str, now: datetime, work: Mapping[str, int]) -> Path:
+    """Record this process as the watch of the conversation ``key`` (its cleaned session id), taking over from the
+    watch of an earlier Stop. Returns its file."""
+    path = folder / WATCHING_DIR / f"{key}.json"
+    status.write({"pid": os.getpid(), "started": _started(os.getpid()), "session_id": session_id,
+                  "since": _iso(now), "work": dict(work)}, path)
+    return path
+
+
+def owns_watch(folder: Path, key: str) -> bool:
+    """Whether this process still holds the watch of the conversation ``key``: not once a newer Stop's watch took its
+    file over, or a Stop with nothing to watch removed it. A file that cannot be read just now still counts as held."""
+    try:
+        data = json.loads((folder / WATCHING_DIR / f"{key}.json").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return False
+    except (OSError, ValueError):
+        return True
+    return isinstance(data, dict) and data.get("pid") == os.getpid()
+
+
+def end_watch(folder: Path, key: str, *, only_mine: bool = False) -> None:
+    """End the watch of the conversation ``key``: its file goes, and the watch that held it ends at its next look.
+    With ``only_mine``, only while this process holds it."""
+    if only_mine and not owns_watch(folder, key):
+        return
+    with contextlib.suppress(OSError):
+        (folder / WATCHING_DIR / f"{key}.json").unlink()
+
+
+def watching(folder: Path) -> list[dict]:
+    """The running watches, oldest first: [{"pid", "session_id", "since", "work"}], as waiting() lists the waits."""
+    found = [{"pid": entry["pid"], "session_id": entry.get("session_id"), "since": entry.get("since"),
+              "work": entry["work"] if isinstance(entry.get("work"), dict) else {}} for entry in _alive(folder / WATCHING_DIR)]
+    return sorted(found, key=lambda entry: (entry["since"] or "", entry["pid"]))
+
+
+def parent_check() -> Callable[[], bool]:
+    """A test of whether the process that started this one still runs (for a hook, the Claude Code that started it),
+    by its id and its creation time, since Windows hands a dead process's id to the next one."""
+    pid = os.getppid()
+    started = _started(pid)
+    return lambda: _state(pid, started) != GONE
+
+
+def _alive(directory: Path) -> list[dict]:
+    """The entries of the files in ``directory`` whose process still runs. The file of one that is gone, or whose id
+    now belongs to another process, is removed; one that cannot be read is skipped and left alone: its process may be
+    writing it."""
+    found = []
+    for path in directory.glob("*.json"):
+        entry = _load(path)
+        if not isinstance(entry.get("pid"), int):
+            continue
+        state = _state(entry["pid"], entry.get("started"))
+        if state == GONE:
+            with contextlib.suppress(OSError):
+                path.unlink()
+        if state == ALIVE:
+            found.append(entry)
+    return found
 
 
 def _load(path: Path) -> dict:

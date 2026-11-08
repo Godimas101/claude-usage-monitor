@@ -160,16 +160,16 @@ its own (a hook line adds about 100 tokens to the conversation, a tool call a fe
   percent, reset time and pace, the projected time to the limit and the burn rate.
 - **`--hook`** adds a one-line summary to Claude's context at session start, and when a limit
   passes a threshold.
-- **The usage guard** tells working sessions to wrap up when usage reaches a cap you set, and wakes
-  any session that waits (with `--wait`, a background command the notice offers) once every watched
-  limit is under its cap again. Nothing is blocked. Switch it on in Settings → Usage guard or from the
+- **The usage guard** tells working sessions to wrap up when usage reaches a cap you set, wakes a
+  conversation that waits for its workflow to tell it too, and wakes any session that waits (with
+  `--wait`, a background command the notice offers) once every watched limit is under its cap again. Nothing is blocked. Switch it on in Settings → Usage guard or from the
   tray menu, then press **Install** on the same card once: it adds the hooks and the MCP tool to
   Claude Code.
 - **`--gate`** refuses new agents and workflows once a limit reaches a cap you choose.
 - **`--status --json`** prints the same reading for your own scripts.
 
 The setup, the settings snippet and the fields are in [docs/AGENT_HOOK.md](docs/AGENT_HOOK.md). The
-hooks need Claude Code 2.1.139 or newer. Only the usage guard's **Install** and **Remove**, and the uninstaller, change
+hooks need Claude Code 2.1.287 or newer. Only the usage guard's **Install** and **Remove**, and the uninstaller, change
 anything of Claude Code's: its settings file (after a backup beside it) and its MCP tool list.
 
 ## 📡 Data Sources

@@ -352,7 +352,7 @@ def test_setup_in_the_dev_server_runs_the_real_code_on_a_sandbox(started: Callab
     server = started("guard")
     before = get_json(server, "/api/guard")["setup"]
     assert before["available"] is True and before["hooks"]["state"] == "missing" and before["mcp"] == {"state": "missing"}
-    assert before["claude"]["version"] == "2.1.160" and before["claude"]["supported"] is True
+    assert before["claude"]["version"] == "2.1.316" and before["claude"]["supported"] is True
     sandbox = tmp_path / "dev" / "claude-config" / "settings.json"
     assert before["settings_path"] == str(sandbox)
 

@@ -54,7 +54,7 @@ class FakeClaude:
     """The claude command, in memory: it answers --version and mcp get / add / remove the way Claude Code does, keeps
     the claude-usage tool, and records every call. ``forced`` makes one kind of call answer something else."""
 
-    def __init__(self, version: str = "2.1.160 (Claude Code)", tool: tuple[str, list[str]] | None = None) -> None:
+    def __init__(self, version: str = "2.1.316 (Claude Code)", tool: tuple[str, list[str]] | None = None) -> None:
         self.version = version
         self.tool = tool                         # (command, args) of the claude-usage tool, or None
         self.calls: list[list[str]] = []
@@ -124,7 +124,7 @@ class Rig:
         return sorted(path.name for path in self.folder.iterdir()) if self.folder.exists() else []
 
 
-def make_rig(tmp_path: Path, *, frozen: bool = True, version: str = "2.1.160 (Claude Code)", tool: Any = None,
+def make_rig(tmp_path: Path, *, frozen: bool = True, version: str = "2.1.316 (Claude Code)", tool: Any = None,
              claude_path: str | None = CLAUDE_EXE, executable: str = EXE, config_dir: bool = False,
              env: dict[str, str] | None = None) -> Rig:
     home = tmp_path / "home"
@@ -141,13 +141,16 @@ def make_rig(tmp_path: Path, *, frozen: bool = True, version: str = "2.1.160 (Cl
 
 
 def ours(command: str = CMD) -> dict:
-    """The three events as setup writes them."""
+    """The five events as setup writes them."""
     return {
         "SessionStart": [{"hooks": [{"type": "command", "command": command, "args": ["--hook", "--always"],
                                      "timeout": 30}]}],
         "UserPromptSubmit": [{"hooks": [{"type": "command", "command": command, "args": ["--hook"], "timeout": 10}]}],
         "PostToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": command, "args": ["--hook"],
                                                     "timeout": 10}]}],
+        "SubagentStart": [{"hooks": [{"type": "command", "command": command, "args": ["--hook"], "timeout": 10}]}],
+        "Stop": [{"hooks": [{"type": "command", "command": command, "args": ["--watch"], "timeout": 86400,
+                             "async": True, "asyncRewake": True}]}],
     }
 
 
@@ -170,7 +173,7 @@ def rich_settings() -> dict:
 
 # ── A fresh file ────────────────────────────────────────────────────────────────────
 
-def test_a_fresh_install_writes_the_three_hooks_and_registers_the_tool(tmp_path: Path) -> None:
+def test_a_fresh_install_writes_the_five_hooks_and_registers_the_tool(tmp_path: Path) -> None:
     rig = make_rig(tmp_path)
     result = setup.install(rig.ctx)
     assert result["ok"] is True and result["errors"] == [] and result["action"] == "install"
@@ -178,7 +181,8 @@ def test_a_fresh_install_writes_the_three_hooks_and_registers_the_tool(tmp_path:
     assert rig.files() == ["settings.json"]                                  # no backup: there was nothing to keep
     assert result["backup"] is None and result["settings_path"] == str(rig.settings)
     assert result["changed"] == ["Added the SessionStart hook.", "Added the UserPromptSubmit hook.",
-                                 "Added the PostToolUse hook.", "Registered the claude-usage MCP tool."]
+                                 "Added the PostToolUse hook.", "Added the SubagentStart hook.", "Added the Stop hook.",
+                                 "Registered the claude-usage MCP tool."]
     assert setup.VSCODE_WARNING in result["warnings"] and result["manual"] is None
     assert rig.claude.calls == [
         [CLAUDE_EXE, "--version"],
@@ -225,6 +229,8 @@ def test_install_keeps_every_other_key_and_hook_and_backs_the_file_up_first(tmp_
     expected["hooks"]["SessionStart"] = ours()["SessionStart"]
     expected["hooks"]["UserPromptSubmit"] = ours()["UserPromptSubmit"]
     expected["hooks"]["PostToolUse"] = [THEIR_FORMATTER, *ours()["PostToolUse"]]
+    expected["hooks"]["SubagentStart"] = ours()["SubagentStart"]
+    expected["hooks"]["Stop"] = [THEIR_STOP, *ours()["Stop"]]                 # beside their Stop hook, which stays
     assert after == expected
     assert after["hooks"]["PreToolUse"] == [GATE_ENTRY]                      # the user's own --gate entry is not ours to touch
     assert list(after) == ["model", "permissions", "env", "hooks"]           # order kept, hooks last where it was
@@ -295,7 +301,7 @@ def test_running_install_twice_changes_nothing(tmp_path: Path) -> None:
     rig.claude.calls.clear()
     again = setup.install(rig.ctx)
     assert again["ok"] is True and again["changed"] == [] and again["backup"] is None
-    assert again["unchanged"] == ["The three hooks were already in place.",
+    assert again["unchanged"] == ["The hooks were already in place.",
                                   "The claude-usage MCP tool was already registered."]
     assert rig.settings.read_bytes() == before and rig.settings.stat().st_mtime_ns == stamp   # not even rewritten
     assert rig.files() == files                                              # and no second backup
@@ -320,7 +326,8 @@ def test_remove_takes_out_what_install_put_in_and_leaves_everything_else(tmp_pat
     assert result["ok"] is True and result["action"] == "remove"
     assert rig.load() == rich_settings()                                    # the file as the user had it, hooks of theirs and all
     assert result["changed"] == ["Removed the SessionStart hook.", "Removed the UserPromptSubmit hook.",
-                                 "Removed the PostToolUse hook.", "Removed the claude-usage MCP tool."]
+                                 "Removed the PostToolUse hook.", "Removed the SubagentStart hook.", "Removed the Stop hook.",
+                                 "Removed the claude-usage MCP tool."]
     assert rig.claude.tool is None and rig.claude.kinds() == ["get", "remove"]
     assert Path(result["backup"]).exists() and Path(result["backup"]).name.startswith("settings.json.usage-monitor-backup-")
 
@@ -490,7 +497,7 @@ def test_a_settings_file_that_cannot_be_read_is_refused_and_the_status_says_so(t
 
 def test_an_event_setup_does_not_write_has_no_entry() -> None:
     with pytest.raises(KeyError):
-        setup.wanted_group("Stop", EXE)
+        setup.wanted_group("PreToolUse", EXE)                                # the --gate's event: manual, the user's own
 
 
 def test_a_byte_order_mark_from_an_editor_is_not_a_problem(tmp_path: Path) -> None:
@@ -501,8 +508,9 @@ def test_a_byte_order_mark_from_an_editor_is_not_a_problem(tmp_path: Path) -> No
 
 
 @pytest.mark.parametrize(("version", "accepted"), [
-    ("2.1.94 (Claude Code)", False), ("2.1.138 (Claude Code)", False), ("1.9.999", False), ("2.0.200", False),
-    ("2.1.139 (Claude Code)", True), ("2.1.140", True), ("2.2.0 (Claude Code)", True), ("3.0.0", True),
+    ("2.1.94 (Claude Code)", False), ("2.1.139 (Claude Code)", False), ("1.9.999", False), ("2.0.300", False),
+    ("2.1.286 (Claude Code)", False), ("2.1.287 (Claude Code)", True), ("2.1.300", True), ("2.2.0 (Claude Code)", True),
+    ("3.0.0", True),
 ])
 def test_an_old_claude_code_is_refused_with_nothing_written(tmp_path: Path, version: str, accepted: bool) -> None:
     rig = make_rig(tmp_path, version=version)
@@ -511,7 +519,7 @@ def test_an_old_claude_code_is_refused_with_nothing_written(tmp_path: Path, vers
     assert result["ok"] is accepted
     if accepted:
         return
-    assert "is older than 2.1.139" in result["errors"][0] and version.split()[0] in result["errors"][0]
+    assert "is older than 2.1.287" in result["errors"][0] and version.split()[0] in result["errors"][0]
     assert "claude update" in result["errors"][0]
     assert rig.settings.read_bytes() == original and rig.files() == ["settings.json"]
     assert rig.claude.kinds() == ["version"]                                 # nothing beyond the version was asked or done
@@ -602,7 +610,7 @@ def test_a_cmd_shim_with_a_risky_path_gets_the_hooks_but_not_the_tool(tmp_path: 
                                 f"'{risky}' --mcp")
     assert any("cmd.exe" in warning for warning in result["warnings"])
     assert result["changed"] == ["Added the SessionStart hook.", "Added the UserPromptSubmit hook.",
-                                 "Added the PostToolUse hook."]
+                                 "Added the PostToolUse hook.", "Added the SubagentStart hook.", "Added the Stop hook."]
 
 
 def test_a_cmd_shim_with_an_ordinary_path_still_gets_the_tool(tmp_path: Path) -> None:
@@ -651,12 +659,14 @@ def test_a_tool_that_is_there_but_did_not_say_what_it_starts_is_a_warning(tmp_pa
 def test_hooks_of_this_app_at_an_old_path_are_replaced_and_removed(tmp_path: Path) -> None:
     rig = make_rig(tmp_path)
     old = "C:/Program Files/Old Place/ClaudeUsageMonitor.exe"
-    rig.write({"hooks": {**ours(old), "Stop": [{"hooks": [{"type": "command", "command": old, "args": ["--hook"]}]}]}})
+    elsewhere = {"Notification": [{"hooks": [{"type": "command", "command": old, "args": ["--hook"]}]}]}  # not an event of setup
+    rig.write({"hooks": {**ours(old), **elsewhere}})
     assert setup.status(rig.ctx)["hooks"]["events"] == dict.fromkeys(setup.EVENTS, "different")  # not "installed"
     assert setup.install(rig.ctx)["ok"] is True
     assert rig.load()["hooks"]["PostToolUse"] == ours()["PostToolUse"]                         # one set, the new path
+    assert rig.load()["hooks"]["Stop"] == ours()["Stop"]
     assert setup.remove(rig.ctx)["ok"] is True
-    assert rig.load() == {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": old, "args": ["--hook"]}]}]}}
+    assert rig.load() == {"hooks": elsewhere}
 
 
 def test_a_hook_written_as_one_command_line_is_recognised(tmp_path: Path) -> None:
@@ -881,7 +891,7 @@ def test_when_claude_will_not_register_the_tool_the_hooks_stay_and_the_command_i
     result = setup.install(rig.ctx)
     assert result["ok"] is False and "exit code 1: something went wrong" in result["errors"][0]
     assert "The hooks are in place" in result["errors"][0] and result["manual"].startswith("claude mcp add ")
-    assert len(result["changed"]) == 3 and rig.load() == {"hooks": ours()}
+    assert len(result["changed"]) == 5 and rig.load() == {"hooks": ours()}
 
 
 def test_when_claude_will_not_remove_a_foreign_tool_nothing_is_added(tmp_path: Path) -> None:
@@ -949,16 +959,17 @@ def test_the_status_before_and_after_a_click(tmp_path: Path) -> None:
     assert before == {
         "available": True, "can_remove": True, "reason": None, "manual": "docs/AGENT_HOOK.md", "exe": CMD,
         "settings_path": str(rig.settings), "errors": [],
-        "hooks": {"state": "missing", "installed": 0, "total": 3,
-                  "events": {"SessionStart": "missing", "UserPromptSubmit": "missing", "PostToolUse": "missing"}},
+        "hooks": {"state": "missing", "installed": 0, "total": 5,
+                  "events": {"SessionStart": "missing", "UserPromptSubmit": "missing", "PostToolUse": "missing",
+                             "SubagentStart": "missing", "Stop": "missing"}},
         "mcp": {"state": "missing"},
-        "claude": {"found": True, "path": CLAUDE_EXE, "version": "2.1.160", "min_version": "2.1.139", "supported": True,
+        "claude": {"found": True, "path": CLAUDE_EXE, "version": "2.1.316", "min_version": "2.1.287", "supported": True,
                    "command": "claude"},
     }
     assert rig.files() == [] and rig.claude.kinds() == ["version", "get"]       # looking changes nothing and runs nothing else
     setup.install(rig.ctx)
     after = setup.status(rig.ctx)
-    assert after["hooks"]["state"] == "installed" and after["hooks"]["installed"] == 3
+    assert after["hooks"]["state"] == "installed" and after["hooks"]["installed"] == 5
     assert set(after["hooks"]["events"].values()) == {"installed"} and after["mcp"] == {"state": "registered"}
 
 
@@ -969,8 +980,9 @@ def test_the_status_tells_partly_installed_and_different_apart(tmp_path: Path) -
     some["UserPromptSubmit"][0]["hooks"][0]["args"] = ["--hook", "--threshold", "80"]
     rig.write({"hooks": some})
     hooks = setup.status(rig.ctx)["hooks"]
-    assert hooks["state"] == "partial" and hooks["installed"] == 1
-    assert hooks["events"] == {"SessionStart": "installed", "UserPromptSubmit": "different", "PostToolUse": "missing"}
+    assert hooks["state"] == "partial" and hooks["installed"] == 3
+    assert hooks["events"] == {"SessionStart": "installed", "UserPromptSubmit": "different", "PostToolUse": "missing",
+                               "SubagentStart": "installed", "Stop": "installed"}
     assert setup.hooks_summary({"a": "different", "b": "different", "c": "different"})["state"] == "partial"
 
 
@@ -1047,20 +1059,50 @@ def test_the_folder_of_the_settings_file_is_made_when_claude_never_made_it(tmp_p
     assert rig.settings.is_file()
 
 
-def test_the_hooks_are_the_three_the_guard_needs() -> None:
+def test_the_hooks_are_the_five_the_guard_needs() -> None:
+    from usage_monitor.agent import cli
+
+    background = {"async": True, "asyncRewake": True}
     assert setup.HOOKS == (
-        ("SessionStart", None, ("--hook", "--always"), 30),
-        ("UserPromptSubmit", None, ("--hook",), 10),
-        ("PostToolUse", "*", ("--hook",), 10),
+        ("SessionStart", None, ("--hook", "--always"), 30, {}),
+        ("UserPromptSubmit", None, ("--hook",), 10, {}),
+        ("PostToolUse", "*", ("--hook",), 10, {}),
+        ("SubagentStart", None, ("--hook",), 10, {}),
+        ("Stop", None, ("--watch",), 86400, background),
     )
-    assert all("--gate" not in args for _event, _matcher, args, _timeout in setup.HOOKS)    # --gate stays opt-in and manual
+    assert all("--gate" not in args for _event, _matcher, args, _timeout, _extra in setup.HOOKS)  # --gate stays manual
+    assert cli.WATCH_TIMEOUT_S == 86400 and cli.WATCH_MAX_S + cli.WATCH_POLL_S < 86400    # a watch ends itself first
+
+
+def test_the_stop_watch_is_installed_only_when_it_runs_in_the_background(tmp_path: Path) -> None:
+    """Claude Code holds up the end of every turn for a Stop hook it does not run in the background, and --watch can
+    watch for a day. Setup's entry counts as installed only with both flags (async too, for a Claude Code that does not
+    know asyncRewake), and Install puts them back."""
+    rig = make_rig(tmp_path)
+    for missing in ("async", "asyncRewake"):
+        hooks = ours()
+        del hooks["Stop"][0]["hooks"][0][missing]
+        rig.write({"hooks": hooks})
+        assert setup.status(rig.ctx)["hooks"]["events"]["Stop"] == "different", missing
+        assert setup.install(rig.ctx)["changed"][0] == "Updated the Stop hook." and rig.load() == {"hooks": ours()}
+
+
+def test_an_install_from_before_v2_3_is_partly_installed_and_install_adds_the_two_new_hooks(tmp_path: Path) -> None:
+    rig = make_rig(tmp_path)
+    rig.write({"hooks": {event: groups for event, groups in ours().items() if event not in ("SubagentStart", "Stop")}})
+    hooks = setup.status(rig.ctx)["hooks"]
+    assert (hooks["state"], hooks["installed"], hooks["total"]) == ("partial", 3, 5)
+    result = setup.install(rig.ctx)
+    assert result["changed"][:2] == ["Added the SubagentStart hook.", "Added the Stop hook."]
+    assert rig.load() == {"hooks": ours()}
 
 
 def test_the_pure_merges_do_not_modify_the_document_they_are_given() -> None:
     doc = rich_settings()
     snapshot = json.dumps(doc)
     merged, changed = setup.merge_install(doc, EXE)
-    assert json.dumps(doc) == snapshot and changed == ["SessionStart", "UserPromptSubmit", "PostToolUse"]
+    assert json.dumps(doc) == snapshot and changed == ["SessionStart", "UserPromptSubmit", "PostToolUse", "SubagentStart",
+                                                       "Stop"]
     again, none = setup.merge_install(merged, EXE)
     assert none == [] and again == merged
     cleaned, removed = setup.merge_remove(merged, EXE)

@@ -1,8 +1,8 @@
 """One-click setup for the usage guard (#27): the Claude Code hooks and the MCP tool, written for the user.
 
-Setup does what docs/AGENT_HOOK.md asks the user to do by hand. It adds three hooks to Claude Code's user settings
-(SessionStart, UserPromptSubmit and PostToolUse, each starting this exe with ``--hook``) and registers the
-``claude-usage`` MCP tool. It works only in the installed app: from source there is no exe to point the hooks at, and a
+Setup does what docs/AGENT_HOOK.md asks the user to do by hand. It adds five hooks to Claude Code's user settings
+(SessionStart, UserPromptSubmit, PostToolUse and SubagentStart, each starting this exe with ``--hook``, and Stop, which
+starts it with ``--watch`` in the background) and registers the ``claude-usage`` MCP tool. It works only in the installed app: from source there is no exe to point the hooks at, and a
 python.exe or a dev path never goes into a user's settings. ``--gate`` stays opt-in and manual: this module neither adds
 nor removes it, and leaves a user's own ``--gate`` entry alone.
 
@@ -39,12 +39,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, NamedTuple
 
+from usage_monitor.agent.cli import WATCH_TIMEOUT_S
 from usage_monitor.log import get_logger
 
 log = get_logger(__name__)
 
-MIN_CLAUDE = (2, 1, 139)           # the first Claude Code that reads "args" (the exec form) in a hook
-MIN_CLAUDE_TEXT = "2.1.139"
+# The first Claude Code whose asyncRewake hook (the Stop watch) reports a missing program once, instead of waking Claude
+# over and over (2.1.287). It also sends the Stop hook its background work (2.1.145) and reads "args" in a hook (2.1.139).
+MIN_CLAUDE = (2, 1, 287)
+MIN_CLAUDE_TEXT = "2.1.287"
 MCP_NAME = "claude-usage"
 MANUAL_DOC = "docs/AGENT_HOOK.md"  # the setup to do by hand, when this one is unavailable
 SETTINGS_NAME = "settings.json"
@@ -55,6 +58,7 @@ CLAUDE_COMMAND = "claude"
 CLAUDE_TIMEOUT_S = 20.0
 CONFIG_ENV = "CLAUDE_CONFIG_DIR"   # Claude Code's own override of its config folder
 GATE_FLAG = "--gate"
+WATCH_FLAG = "--watch"
 VSCODE_WARNING = ("This card checks only the claude command. Claude Code in VS Code has its own version: "
                   f"in VS Code, check under Extensions that it is {MIN_CLAUDE_TEXT} or newer.")  # #38: not a check
 NOT_INSTALLED_REASON = "One-click setup works in the installed app. This copy runs from source."
@@ -70,11 +74,16 @@ GATE_LEFT = "A --gate hook of this app stays in Claude Code's settings. It was a
 KEEP_BACKUPS = 5                   # the newest backups of the settings file kept beside it; older ones go
 _STAMP_UNKNOWN = ("unknown",)      # a settings file whose size and time cannot be read
 
-# What setup writes: (event, matcher, args, timeout in seconds).
+# What setup writes: (event, matcher, args, timeout in seconds, more fields of the hook). The Stop hook watches, for up to
+# a day, while the conversation waits for its background work (#41). Claude Code must run it in the background, or every
+# turn's end waits for it: asyncRewake does, and wakes Claude when it exits with 2; async too, for a Claude Code that
+# does not know asyncRewake, which then never wakes but never waits either.
 HOOKS = (
-    ("SessionStart", None, ("--hook", "--always"), 30),
-    ("UserPromptSubmit", None, ("--hook",), 10),
-    ("PostToolUse", "*", ("--hook",), 10),
+    ("SessionStart", None, ("--hook", "--always"), 30, {}),
+    ("UserPromptSubmit", None, ("--hook",), 10, {}),
+    ("PostToolUse", "*", ("--hook",), 10, {}),
+    ("SubagentStart", None, ("--hook",), 10, {}),
+    ("Stop", None, (WATCH_FLAG,), WATCH_TIMEOUT_S, {"async": True, "asyncRewake": True}),
 )
 EVENTS = tuple(item[0] for item in HOOKS)
 
@@ -290,13 +299,14 @@ def _handlers(doc: Mapping[str, Any], event: str) -> Iterator[Any]:
 
 
 def _is_ours(handler: Any, exe_key: str) -> bool:
-    """A command hook that starts this app's exe with --hook. It is told by the exe's file name, not its folder: an app
-    reinstalled elsewhere leaves hooks with the old path, which Install must replace and Remove must take out. A
-    --gate entry is the user's own, and stays."""
+    """A command hook that starts this app's exe with --hook or --watch. It is told by the exe's file name, not its
+    folder: an app reinstalled elsewhere leaves hooks with the old path, which Install must replace and Remove must take
+    out. A --gate entry is the user's own, and stays."""
     if not isinstance(handler, dict) or handler.get("type") != "command":
         return False
     program, args = _program_and_args(handler)
-    return bool(program) and _name(program) == _name(exe_key) and "--hook" in args and GATE_FLAG not in args
+    return (bool(program) and _name(program) == _name(exe_key) and ("--hook" in args or WATCH_FLAG in args)
+            and GATE_FLAG not in args)
 
 
 def _program_and_args(handler: Mapping[str, Any]) -> tuple[str, list[str]]:
@@ -317,22 +327,25 @@ def _name(key: str) -> str:
 
 def wanted_group(event: str, exe: str) -> dict:
     """The entry setup writes for ``event``: a matcher group holding one command hook in the exec form."""
-    for name, matcher, args, timeout in HOOKS:
+    for name, matcher, args, timeout, extra in HOOKS:
         if name == event:
             group: dict[str, Any] = {"matcher": matcher} if matcher else {}
-            group["hooks"] = [{"type": "command", "command": command_of(exe), "args": list(args), "timeout": timeout}]
+            group["hooks"] = [{"type": "command", "command": command_of(exe), "args": list(args), "timeout": timeout,
+                               **extra}]
             return group
     raise KeyError(event)
 
 
 def hook_states(doc: Mapping[str, Any], exe: str) -> dict[str, str]:
-    """Per event of setup: ``installed`` (a hook with this exe and exactly the args setup writes), ``different``
-    (this app's hook with other args, or with the path of an exe that moved) or ``missing``."""
+    """Per event of setup: ``installed`` (a hook with this exe and exactly the args and the more fields setup writes),
+    ``different`` (this app's hook with other args, without a field such as the Stop hook's asyncRewake, or with the
+    path of an exe that moved) or ``missing``."""
     key = _key(exe)
     states = {}
-    for event, _matcher, args, _timeout in HOOKS:
+    for event, _matcher, args, _timeout, extra in HOOKS:
         mine = [handler for handler in _handlers(doc, event) if _is_ours(handler, key)]
-        if any(handler.get("args") == list(args) and _key(handler.get("command")) == key for handler in mine):
+        if any(handler.get("args") == list(args) and _key(handler.get("command")) == key
+               and all(handler.get(field) == value for field, value in extra.items()) for handler in mine):
             states[event] = "installed"
         else:
             states[event] = "different" if mine else "missing"
@@ -383,7 +396,7 @@ def _merge_event(groups: list, wanted: dict, exe_key: str) -> list:
 
 
 def merge_install(doc: Mapping[str, Any], exe: str) -> tuple[dict, list[str]]:
-    """``doc`` with the three hooks of this exe in place, and the events that changed. ``doc`` is not modified.
+    """``doc`` with the hooks of this exe in place, and the events that changed. ``doc`` is not modified.
     Every other key and every other hook is kept as it is. The caller has checked hooks_problem(): the shapes it
     names are the ones this would have to guess at."""
     key = _key(exe)
@@ -423,7 +436,7 @@ def _gate_left(doc: Mapping[str, Any], exe: str) -> bool:
 
 
 def merge_remove(doc: Mapping[str, Any], exe: str, *, only_here: bool = False) -> tuple[dict, list[str]]:
-    """``doc`` without the hooks of this exe in the three events of setup, and the events that lost one. An event
+    """``doc`` without the hooks of this exe in the events of setup, and the events that lost one. An event
     list, or the ``hooks`` object, that this leaves empty goes too. A ``--gate`` entry and everything else stays.
     ``only_here``: the hooks of another copy that is still on this PC stay too."""
     key = _key(exe)
@@ -619,7 +632,7 @@ def status(ctx: Context | None = None) -> dict:
         available     setup can run here; ``reason`` says why not when it cannot, ``manual`` where to do it by hand
         can_remove    Remove can run: it needs the installed app, not Claude Code (a file it cannot edit is a refusal)
         hooks         ``state`` installed | partial | missing | unknown, ``installed`` of ``total``, and ``events``:
-                      the state of each of the three, installed | different | missing
+                      the state of each, installed | different | missing
         mcp           ``state`` registered | missing | other | unknown
         claude        found, path, version ("2.1.160" or None), min_version, ``supported`` (None when unknown) and
                       ``command``, what a person types to start it
@@ -661,12 +674,12 @@ def _finish(result: dict) -> dict:
 
 
 def install(ctx: Context | None = None) -> dict:
-    """Put the three hooks into Claude Code's settings and register the MCP tool.
+    """Put the hooks into Claude Code's settings and register the MCP tool.
 
     Returns ``{ok, action, changed, unchanged, backup, warnings, errors, manual, settings_path}``: what was done and what
     was already in place, the backup file made (None when nothing was written), notes, what went wrong in plain words,
     and the command to run by hand when the MCP tool could not be registered. It refuses, writing nothing, when setup is
-    unavailable, the settings file is not a JSON object or Claude Code is older than 2.1.139. A failure of the MCP step
+    unavailable, the settings file is not a JSON object or Claude Code is older than 2.1.287. A failure of the MCP step
     leaves the hooks written and says so in ``errors``.
     """
     ctx = ctx or default_context()
@@ -716,7 +729,7 @@ def _install(ctx: Context) -> dict:
                               for event in changed]
         log.info("setup: hooks written (%s)", ", ".join(changed))
     else:
-        result["unchanged"].append("The three hooks were already in place.")
+        result["unchanged"].append("The hooks were already in place.")
     _install_mcp(ctx, claude, exe, result)
     result["warnings"].append(VSCODE_WARNING)
     return _finish(result)

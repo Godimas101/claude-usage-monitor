@@ -1,4 +1,4 @@
-"""The command-line modes for Claude sessions (#24): --status, --hook, --gate, --mcp and --wait (#27).
+"""The command-line modes for Claude sessions (#24): --status, --hook, --gate, --mcp, --wait (#27) and --watch (#41).
 
 They start without the UI and without the single-instance mutex, so they run beside the app.
 A windowed build has a stdout only when the caller hands it a pipe, as Claude Code always does.
@@ -33,6 +33,13 @@ GATE_WEEKLY_CAP = 90.0
 GATE_WAIT_S = 5.0          # the gate waits less for a paused monitor: it runs before every agent launch
 WAIT_POLL_S = 30.0         # --wait looks at the reading this often (a file read: the app does the fetching)
 WAIT_FETCH = timedelta(minutes=15)  # with the app closed, --wait asks the API itself at most this often
+SUBAGENT_START = "SubagentStart"
+WATCH_POLL_S = 30.0          # --watch looks at the reading this often, as --wait does
+WATCH_TIMEOUT_S = 24 * 3600  # the timeout setup gives the Stop hook (agent/setup.py): Claude Code ends a --watch there
+WATCH_MAX_S = WATCH_TIMEOUT_S - 120.0  # ...so --watch ends itself before then, and takes its file with it
+WAKE_EXIT = 2                # an asyncRewake hook that exits with this wakes Claude with what it wrote on stderr
+# The background work in a Stop hook's input that spends the plan, and its word in the notice. Shells and monitors do not.
+SPENDING = {"workflow": "workflow", "subagent": "agent", "teammate": "teammate", "cloud session": "cloud session"}
 
 
 def run_status(*, as_json: bool, folder: Path, clock: Callable[[], datetime], app_version: str,
@@ -51,14 +58,15 @@ AGENT_CANNOT_WAIT = "Only the main conversation can wait for the reset. Finish t
 
 def run_hook(*, threshold: float, always: bool, folder: Path, clock: Callable[[], datetime],
              app_version: str, stdin: BinaryIO | None, out: BinaryIO) -> int:
-    """--hook: a Claude Code hook (SessionStart, UserPromptSubmit, PostToolUse) that adds to the context.
+    """--hook: a Claude Code hook (SessionStart, UserPromptSubmit, PostToolUse, SubagentStart) that adds to the context.
 
     - The summary line, in the main conversation, when a limit first reaches ``threshold`` in a session
       and again each time one climbs another HOOK_STEP, or every time with ``always``. A subagent's
       tool calls never use it up: the session's memory is the main conversation's.
     - The usage guard's notice (#27) while the guard holds: once per holding episode for each agent of
       a session (the main conversation and each subagent), and at every SessionStart, which also comes
-      after a compaction. Only the main conversation is offered --wait.
+      after a compaction. Only the main conversation is offered --wait. An agent that starts during a hold hears
+      it at SubagentStart, before its first prompt (#41); Claude Code's own agents, with no agent type, hear nothing.
 
     It never blocks the prompt or the tool: it always exits 0 and stays silent when there is nothing
     to say. Only SessionStart may fetch a reading of its own. An agent's ANSWER_TOOL call is its last: nothing
@@ -67,6 +75,8 @@ def run_hook(*, threshold: float, always: bool, folder: Path, clock: Callable[[]
     event = _hook_input(stdin)
     name = event.get("hook_event_name") if isinstance(event.get("hook_event_name"), str) else "UserPromptSubmit"
     if name == "PostToolUse" and event.get("tool_name") == ANSWER_TOOL:
+        return 0
+    if name == SUBAGENT_START and not event.get("agent_type"):
         return 0
     try:
         now = clock()
@@ -140,6 +150,64 @@ def run_wait(*, session_id: str | None, folder: Path, clock: Callable[[], dateti
     finally:
         if entry is not None:
             sessions.unregister_wait(entry)
+
+
+def run_watch(*, folder: Path, clock: Callable[[], datetime], app_version: str, stdin: BinaryIO | None,
+              err: BinaryIO | None, sleep: Callable[[float], None] = time.sleep,
+              epoch: Callable[[], float] = time.monotonic, parent_alive: Callable[[], bool] | None = None) -> int:
+    """--watch (#41): a Stop hook that Claude Code runs in the background (``asyncRewake``). It reaches the conversation
+    that waits for its background work, which nothing else reaches until its next prompt or tool call.
+
+    When the main conversation stops while work that spends the plan runs in the background (a workflow, agents,
+    teammates, a cloud session; shells and monitors do not count), it watches the reading. Once the usage guard holds
+    and that conversation has not heard of this holding episode, it records it as told, writes the notice on ``err``
+    and exits with WAKE_EXIT: Claude Code then wakes the conversation with that text. It only informs, as --hook does.
+
+    It exits 0 at once when no such work runs (an idle conversation is not disturbed), with no session id or nowhere to
+    write, and while the guard is off. A newer Stop of the conversation takes over from it. It also ends, with 0, when
+    the guard is switched off, when the Claude Code that started it is gone, after WATCH_MAX_S, and on an error.
+    """
+    event = _hook_input(stdin)
+    session = str(event.get("session_id") or "")
+    key = re.sub(r"[^A-Za-z0-9_-]", "", session)[:64]
+    if err is None or not key:
+        return 0
+    work = _spending(event.get("background_tasks"))
+    mine = False
+    try:
+        if not work:
+            sessions.end_watch(folder, key)    # a Stop with nothing to watch ends the watch of the Stop before it
+            return 0
+        started, asked = epoch(), None
+        while True:
+            now = clock()
+            doc, running = status.current(folder, now=now, fetch=False, app_version=app_version)
+            if not running and status.is_stale(doc, now) and (asked is None or now - asked >= WAIT_FETCH):
+                asked = now
+                doc, running = status.current(folder, now=now, fetch=True, app_version=app_version)
+            verdict = guard.for_reader(doc, now, folder)
+            if verdict["state"] == guard.OFF:
+                return 0
+            if not mine:
+                sessions.register_watch(folder, key, session, now, work)
+                mine = True
+            if verdict["state"] == guard.HOLDING:
+                notice = _watch_notice(folder, session, doc, now)
+                if notice:
+                    _write(err, f"{notice} {_woken_for(work)}")
+                    return WAKE_EXIT
+            if epoch() - started >= WATCH_MAX_S or (parent_alive is not None and not parent_alive()):
+                return 0
+            sleep(WATCH_POLL_S)
+            if not sessions.owns_watch(folder, key):
+                mine = False                   # a newer Stop's watch holds it now: its file stays
+                return 0
+    except Exception:  # a broken watch wakes nobody
+        log.exception("the usage watch failed")
+        return 0
+    finally:
+        if mine:
+            sessions.end_watch(folder, key, only_mine=True)
 
 
 def wait_command(session_id: str | None) -> str:
@@ -257,6 +325,34 @@ def guard_text(verdict: Mapping[str, Any], now: datetime, *, wait: str | None, a
     return text
 
 
+def _watch_notice(folder: Path, session: str, doc: Mapping[str, Any] | None, now: datetime) -> str | None:
+    """The notice for the main conversation of ``session``, once it is recorded as told. None when it heard of this
+    holding episode already, or while who was told cannot be read and written: --watch looks again at its next poll,
+    since a conversation woken twice is worse than one told a poll later."""
+    with status.file_lock(folder, HOOK_LOCK, HOOK_LOCK_S) as held:
+        memory = _load_memory(folder, now)
+        if not held or memory is None:
+            return None
+        notice = _guard_notice(memory, folder, session, "", doc, now, every_time=False)
+        return notice if notice and _save_memory(folder, memory) else None
+
+
+def _spending(tasks: Any) -> dict[str, int]:
+    """{word: how many} of the background work in a Stop hook's ``background_tasks`` that spends the plan, in the
+    order of SPENDING. Empty when there is none, or no list (Claude Code before 2.1.145 sends none)."""
+    if not isinstance(tasks, list):
+        return {}
+    kinds = [task["type"].strip().lower() for task in tasks
+             if isinstance(task, Mapping) and isinstance(task.get("type"), str)]
+    return {word: kinds.count(kind) for kind, word in SPENDING.items() if kind in kinds}
+
+
+def _woken_for(work: Mapping[str, int]) -> str:
+    what = ", ".join(f"{count} {word}{'' if count == 1 else 's'}" for word, count in work.items())
+    return (f"The monitor woke this conversation to say so, as it waits for its background work ({what}). That work "
+            "goes on until it wraps up or is stopped.")
+
+
 def _slot(folder: Path) -> int:
     """This wait's place among the running waits, oldest first: only 0 may go."""
     pids = [entry["pid"] for entry in sessions.waiting(folder)]
@@ -324,11 +420,13 @@ def _load_memory(folder: Path, now: datetime) -> dict | None:
             if isinstance(value, dict) and _after(value.get("at"), cutoff)}
 
 
-def _save_memory(folder: Path, memory: dict) -> None:
+def _save_memory(folder: Path, memory: dict) -> bool:
     try:
         status.write(memory, folder / HOOK_MEMORY)
     except OSError as exc:  # the hook then speaks again next time, which is harmless
         log.warning("could not save what the usage hook said (%s)", type(exc).__name__)
+        return False
+    return True
 
 
 def _after(stamp: Any, cutoff: datetime) -> bool:

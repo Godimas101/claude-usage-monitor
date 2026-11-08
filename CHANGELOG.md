@@ -6,7 +6,12 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 - README screenshots: retake from the v2.2.0 build ([#35](https://github.com/Godimas101/claude-usage-monitor/issues/35)) — closed 2026-11-04 by @Godimas101
 
+### Added
+- The usage guard reaches a conversation that waits for its background work, such as the one that started a workflow. A new Stop hook watches while that work runs, and wakes the conversation with the notice when the guard starts holding. Before, nothing told it until its next prompt or tool call ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).
+- An agent that starts while the usage guard holds hears the notice before its first prompt, through a new SubagentStart hook ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).
+
 ### Changed
+- The usage guard's setup needs Claude Code 2.1.287 or newer (it was 2.1.139), and adds five hooks. A setup from before shows "partly installed" until you press **Install** again ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).
 - The usage guard no longer hands its notice to an agent's last call, the one that returns its answer, where nothing read it, and that agent no longer counts as told ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).
 - Agents that hear the usage guard's notice are told that only the main conversation can wait, so they finish the step they are on and hand back what they have ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).
 - `get_plan_usage`'s summary line says when the usage guard holds, and when work can resume ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).

@@ -565,7 +565,7 @@ class _DevClaude:
     def __call__(self, argv: Sequence[str]) -> agent_setup.Ran:
         words = list(argv)[1:]
         if words == ["--version"]:
-            return agent_setup.Ran(0, "2.1.160 (Claude Code)\n", "")
+            return agent_setup.Ran(0, "2.1.316 (Claude Code)\n", "")
         if words[:3] == ["mcp", "get", agent_setup.MCP_NAME]:
             if self.tool is None:
                 return agent_setup.Ran(1, "", f'No MCP server found with name: "{agent_setup.MCP_NAME}".\n')
