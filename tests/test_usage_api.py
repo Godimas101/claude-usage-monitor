@@ -348,7 +348,7 @@ def test_read_credentials_block_without_token_is_present_but_tokenless(tmp_path)
     assert info.present is True and token is None
 
 
-@pytest.mark.parametrize("expires", ["soon", True, 1e30, None])
+@pytest.mark.parametrize("expires", ["soon", True, 1e30, None, 0, -5])     # 0: written by some Claude Code builds (#51)
 def test_read_credentials_bad_expiry_is_unknown_not_expired(tmp_path, expires):
     data = json.loads(json.dumps(CREDS))
     data["claudeAiOauth"]["expiresAt"] = expires
@@ -356,6 +356,18 @@ def test_read_credentials_bad_expiry_is_unknown_not_expired(tmp_path, expires):
     path.write_text(json.dumps(data), encoding="utf-8")
     info, token = ua.read_credentials(path)
     assert info.expires_at is None and info.is_expired(T0) is False and token == TOKEN
+
+
+def test_a_sign_in_with_an_expiry_of_zero_is_asked_about_not_called_expired(tmp_path):
+    """Some Claude Code builds wrote expiresAt 0 on a fresh sign-in, with a token that works (#51). Read as 1970, it was
+    STALE without a request, and signing in again did not help. Unknown instead: the server's answer decides."""
+    data = json.loads(json.dumps(CREDS))
+    data["claudeAiOauth"]["expiresAt"] = 0
+    path = tmp_path / ".credentials.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    client, opener = make_client(path, ok(), http_error(401))
+    assert client.fetch(T0).status is ApiStatus.LIVE
+    assert client.fetch(T0 + secs(600)).status is ApiStatus.STALE        # and a token the server refuses is still stale
 
 
 def test_credentials_info_never_carries_the_token(tmp_path):

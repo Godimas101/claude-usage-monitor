@@ -140,7 +140,7 @@ def _absent(mtime: float | None) -> CredentialsInfo:
 
 def _expires_at(value: Any) -> datetime | None:
     millis = _num(value)
-    if millis is None:
+    if millis is None or millis <= 0:      # 0 is no time: some Claude Code builds have written it (#51)
         return None
     try:
         return datetime.fromtimestamp(millis / 1000.0, tz=timezone.utc)
