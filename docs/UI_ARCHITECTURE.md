@@ -79,8 +79,11 @@ usage_monitor/
   shell lets it down, and only the taskbar's own children go with it. Layered, because the
   taskbar's XAML content covers a plain GDI child. Raised over its siblings every 500 ms. A new
   taskbar (Explorer restarted), or a strip window that died with the old one, gets a new window at
-  the next re-place; a taskbar that refuses the child (`CreateWindowExW` fails) leaves the strip a
-  top-level window, floating over it, until a re-place finds another taskbar. A child gets
+  the next re-place. A taskbar that refuses the child (`CreateWindowExW` fails) leaves the strip a
+  top-level window, floating over it. When the taskbar is gone (`ERROR_INVALID_WINDOW_HANDLE`, Explorer
+  restarting) it floats until a re-place finds another taskbar; any other refusal (`ERROR_ACCESS_DENIED`,
+  say) is asked again at a re-place `REFUSED_RETRY_S` (1 minute) later, and a refusal again keeps the
+  floating window as it is (#32). `create_window`'s `OSError` carries the code as `winerror`. A child gets
   `WM_DPICHANGED_AFTERPARENT`, never `WM_DPICHANGED`, when the taskbar moves to a monitor of
   another DPI; `LayeredWindow` turns both into `on_dpi_changed`. Windows ties the taskbar's input to
   the thread of its child windows, so the strip is the first thing shutdown destroys: the steps

@@ -42,6 +42,7 @@ import collections
 import ctypes
 import dataclasses
 import math
+import time
 from collections.abc import Callable, Mapping
 from ctypes import wintypes
 from dataclasses import dataclass
@@ -70,6 +71,7 @@ log = get_logger(__name__)
 
 KEEP_INTERVAL_MS = 500      # raise the strip over the taskbar and follow fullscreen apps
 REPLACE_EVERY = 6           # keep ticks between taskbar re-placements: 6 x 500 ms = 3 s
+REFUSED_RETRY_S = 60.0      # a live taskbar that refused the strip window is asked again this long after (#32)
 WATCH_INTERVAL_MS = 200     # while a tooltip shows: has the pointer left, has the widget gone away
 FLOAT_MARGIN = 12           # default floating position: px (at 100 %) in from the work-area corner
 STRIP_GAP = 4               # px (at 100 %) between the strip and the notification area
@@ -844,7 +846,9 @@ class TaskbarWidget(_Surface):
         window_factory: Callable[..., Any] = LayeredWindow,
         stats: FrameStats | None = None,
         animations_enabled: Callable[[], bool] | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
+        self._clock = clock               # before super().__init__, which makes the first window
         super().__init__(
             host, draggable=False, tooltip=tooltip, on_visibility=on_visibility,
             platform=platform, window_factory=window_factory, stats=stats,
@@ -859,22 +863,44 @@ class TaskbarWidget(_Surface):
 
     # The window: a child of the taskbar (#29)
 
-    _dead_parent: int | None = None  # a taskbar that refused the strip window: not asked again
+    _dead_parent: int | None = None             # a taskbar that is gone (ERROR_INVALID_WINDOW_HANDLE): never asked again
+    _refused: tuple[int, float] | None = None   # (taskbar, when) for one that refused the strip window for another reason
 
     def _new_window(self, draggable: bool) -> Any:
         info = self._plat.taskbar_info()
         return self._make_window(draggable, info.hwnd if info else None)
 
-    def _make_window(self, draggable: bool, parent: int | None) -> Any:
-        """A strip window in the taskbar ``parent``. A taskbar that died since it was looked up (Explorer
-        restarting) refuses children: the strip is then a top-level window until a re-place finds a live one."""
+    def _make_window(self, draggable: bool, parent: int | None, keep: Any = None) -> Any:
+        """A strip window in the taskbar ``parent``. A taskbar that died since it was looked up (Explorer restarting)
+        answers ERROR_INVALID_WINDOW_HANDLE: the strip is then a top-level window until a re-place finds a new one. Any
+        other refusal (ERROR_ACCESS_DENIED, say) floats it too, and a re-place REFUSED_RETRY_S later asks again (#32).
+        ``keep``, a floating strip window that is still fine, is kept instead of a new one when the taskbar refuses."""
         if parent:
             try:
-                return self._window_factory(self._host, draggable=draggable, parent=parent)
-            except OSError:
-                log.warning("the taskbar refused the strip window; it floats over the taskbar for now", exc_info=True)
-                self._dead_parent = parent
-        return self._window_factory(self._host, draggable=draggable, parent=None)
+                window = self._window_factory(self._host, draggable=draggable, parent=parent)
+            except OSError as exc:
+                self._note_refusal(parent, exc)
+            else:
+                self._refused = None
+                return window
+        return keep if keep is not None else self._window_factory(self._host, draggable=draggable, parent=None)
+
+    def _note_refusal(self, parent: int, exc: OSError) -> None:
+        if getattr(exc, "winerror", None) == win32.ERROR_INVALID_WINDOW_HANDLE:
+            log.warning("the taskbar is gone; the strip floats over the taskbar until a new one turns up")
+            self._dead_parent = parent
+            return
+        if self._refused is None or self._refused[0] != parent:
+            log.warning("the taskbar refused the strip window; it floats over the taskbar and asks again in %d s",
+                        REFUSED_RETRY_S, exc_info=True)
+        else:
+            log.debug("the taskbar refused the strip window again: %s", exc)
+        self._refused = (parent, self._clock())
+
+    def _waiting_on(self, taskbar: int) -> bool:
+        """True while ``taskbar`` refused the strip window less than REFUSED_RETRY_S ago."""
+        refused = self._refused
+        return refused is not None and refused[0] == taskbar and self._clock() - refused[1] < REFUSED_RETRY_S
 
     def _wire(self, window: Any) -> None:
         super()._wire(window)
@@ -891,11 +917,16 @@ class TaskbarWidget(_Surface):
         taskbar (Explorer restarted), or a strip window that died with the old one, gets a new window.
         """
         window = self._window
-        if window is not None and window.alive and info.hwnd in (window.parent, self._dead_parent):
+        if window is not None and window.alive and (info.hwnd in (window.parent, self._dead_parent)
+                                                    or self._waiting_on(info.hwnd)):
             return
+        floating = window if window is not None and window.alive and window.parent is None else None
+        new = self._make_window(False, info.hwnd, keep=floating)
+        if new is window:
+            return                        # asked again and refused again: the floating strip stays as it is
         self._response.stop()
         self.hide_tooltip()
-        self._window = self._make_window(False, info.hwnd)
+        self._window = new
         self._wire(self._window)
         self._shown = None
         if window is not None:

@@ -154,7 +154,8 @@ def create_window(
         parent or None, None, win32.GetModuleHandleW(None), None,
     )
     if not hwnd:
-        raise OSError(f"CreateWindowExW({class_name!r}) failed: {win32.error_text()}")
+        code = win32.last_error()     # carried as winerror: the strip tells a taskbar that is gone from one that refused
+        raise OSError(0, f"CreateWindowExW({class_name!r}) failed: {ctypes.FormatError(code).strip()}", None, code)
     _handlers[hwnd] = handler
     return int(hwnd)
 

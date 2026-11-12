@@ -955,22 +955,64 @@ def test_a_strip_made_before_the_taskbar_existed_moves_onto_it():
     assert windows.windows[-1].visible
 
 
-def test_a_taskbar_that_refuses_the_strip_leaves_it_floating_until_a_live_one_turns_up():
-    host, plat, windows = FakeHost(), FakePlatform(), WindowFactory()
+def test_a_taskbar_that_is_gone_leaves_the_strip_floating_until_a_live_one_turns_up():
+    from usage_monitor.ui import widgets as widgets_mod
+
+    host, plat, windows, now = FakeHost(), FakePlatform(), WindowFactory(), [1000.0]
     dead = plat.info.hwnd
 
     def refusing(host_: Any, *, draggable: bool, topmost: bool = True, parent: int | None = None) -> FakeWindow:
         if parent == dead:  # Explorer died between the lookup and the window
-            raise OSError("CreateWindowExW('ClaudeUsageMonitor.Layered') failed: [WinError 1400] Invalid window handle.")
+            raise OSError(0, "CreateWindowExW('ClaudeUsageMonitor.Layered') failed: Invalid window handle.", None,
+                          win32.ERROR_INVALID_WINDOW_HANDLE)
         return windows(host_, draggable=draggable, topmost=topmost, parent=parent)
 
-    widget = TaskbarWidget(host, on_open=lambda: None, on_menu=lambda x, y: None, platform=plat, window_factory=refusing)
+    widget = TaskbarWidget(host, on_open=lambda: None, on_menu=lambda x, y: None, platform=plat, window_factory=refusing,
+                           clock=lambda: now[0])
     assert windows.windows[0].parent is None
     widget.render(context())
-    assert len(windows.windows) == 1 and windows.windows[0].visible   # the dead taskbar is not asked again
+    now[0] += widgets_mod.REFUSED_RETRY_S * 10
+    widget.render(context())
+    assert len(windows.windows) == 1 and windows.windows[0].visible   # the dead taskbar is never asked again
     plat.info = dataclasses.replace(plat.info, hwnd=dead + 1)           # Explorer is back
     widget.render(context())
     assert windows.windows[0].destroyed and windows.windows[-1].parent == dead + 1
+
+
+def test_a_live_taskbar_that_refuses_the_strip_is_asked_again_a_minute_later_not_at_every_re_place(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """A refusal other than ERROR_INVALID_WINDOW_HANDLE (here ERROR_ACCESS_DENIED) used to keep the strip floating until
+    the app restarted (#32). It is asked again REFUSED_RETRY_S later: a refusal again leaves the floating strip as it is,
+    and the warning is logged once, so a taskbar that always refuses costs one try a minute."""
+    from usage_monitor.ui import widgets as widgets_mod
+
+    host, plat, windows, now, tries, warnings = FakeHost(), FakePlatform(), WindowFactory(), [1000.0], [0], []
+    monkeypatch.setattr(widgets_mod.log, "warning", lambda message, *args, **kwargs: warnings.append(message))
+
+    def refusing_twice(host_: Any, *, draggable: bool, topmost: bool = True, parent: int | None = None) -> FakeWindow:
+        if parent is not None:
+            tries[0] += 1
+            if tries[0] <= 2:
+                raise OSError(0, "CreateWindowExW('ClaudeUsageMonitor.Layered') failed: Access is denied.", None,
+                              win32.ERROR_ACCESS_DENIED)
+        return windows(host_, draggable=draggable, topmost=topmost, parent=parent)
+
+    widget = TaskbarWidget(host, on_open=lambda: None, on_menu=lambda x, y: None, platform=plat,
+                           window_factory=refusing_twice, clock=lambda: now[0])
+    floating = windows.windows[0]
+    assert floating.parent is None and tries[0] == 1
+    for _ in range(5):                                                  # the re-places of the next minute do not ask
+        widget.render(context())
+        now[0] += widgets_mod.REFUSED_RETRY_S / 6
+    assert tries[0] == 1 and windows.windows == [floating] and floating.visible
+    now[0] += widgets_mod.REFUSED_RETRY_S / 6
+    widget.render(context())                                            # a minute on: asked again, refused again
+    assert tries[0] == 2 and windows.windows == [floating] and not floating.destroyed and floating.visible
+    now[0] += widgets_mod.REFUSED_RETRY_S
+    widget.render(context())                                            # and the next time it takes the child
+    assert tries[0] == 3 and floating.destroyed
+    assert windows.windows[-1].parent == plat.info.hwnd and windows.windows[-1].visible
+    assert len([message for message in warnings if "refused" in message]) == 1
 
 
 def test_a_top_taskbar_is_supported():

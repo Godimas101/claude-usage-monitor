@@ -1540,3 +1540,18 @@ def test_the_host_removes_the_tray_icon_when_it_shuts_down():
     assert icon.ensure_added()
     host.close()
     assert not icon.added and icon._removed
+
+def test_a_window_windows_refuses_raises_an_oserror_that_carries_the_win32_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The strip tells a taskbar that is gone (ERROR_INVALID_WINDOW_HANDLE) from one that refused for another reason (#32)."""
+    from usage_monitor.ui import host as host_mod
+
+    def refuse(*_args: object) -> None:
+        ctypes.set_last_error(win32.ERROR_ACCESS_DENIED)
+        return None
+
+    monkeypatch.setattr(host_mod.win32, "CreateWindowExW", refuse)
+    with pytest.raises(OSError) as caught:
+        host_mod.create_window("UsageMonitorTest.Refused", 0, object())
+    assert caught.value.winerror == win32.ERROR_ACCESS_DENIED
+    assert str(caught.value).startswith("[WinError 5] CreateWindowExW('UsageMonitorTest.Refused') failed: ")
+    assert str(caught.value).count("WinError") == 1
