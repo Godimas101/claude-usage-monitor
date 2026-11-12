@@ -18,6 +18,7 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 - `get_plan_usage`'s summary line says when the usage guard holds, and when work can resume ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).
 - The usage guard card counts the conversations and the agents told apart, says who of each session heard, and names a conversation that only its agents heard. It used to count a session as told when only a workflow's agents had heard ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).
 - Switching the usage guard off and on again starts a new hold, so every session hears the notice again. The same caps in the same window used to count as the hold they had already heard of ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).
+- Setup and the uninstaller close a running monitor themselves, and Setup starts it again when it's done. They used to stop and ask you to close it. If the monitor doesn't close, they say how to close it by hand ([#53](https://github.com/Godimas101/claude-usage-monitor/issues/53)).
 - The Usage guard's backups of Claude Code's settings file are now named `settings.json.usage-monitor-backup-<date>-<time>`. Copies from before keep counting toward the five it keeps, and the dashboard keeps the choices you made in it.
 
 ### Fixed

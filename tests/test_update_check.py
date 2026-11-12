@@ -1325,10 +1325,22 @@ def test_the_app_id_is_the_one_the_v1_installs_already_carry() -> None:
     assert iss_setup("PrivilegesRequired") == "lowest"
 
 
-def test_setup_stops_while_the_monitor_runs() -> None:
+def test_setup_and_uninstall_close_a_running_monitor_themselves() -> None:
+    """No AppMutex: Setup checked that at startup and stopped with "please close it" (#53). CloseMonitor finds the
+    monitor by its mutex and asks its controller window to quit, which it does as on Exit in its menu."""
     from usage_monitor import app as app_mod
+    from usage_monitor.ui import host
 
-    assert iss_setup("AppMutex") == app_mod.MUTEX_NAME == "Global\\ClaudeUsageMonitor"
+    assert not [line for line in iss_section("Setup") if line.startswith("AppMutex")]
+    assert iss_code_constant("MonitorMutex") == app_mod.MUTEX_NAME == "Global\\ClaudeUsageMonitor"
+    assert iss_code_constant("ControllerClass") == host.CONTROLLER_CLASS
+    close = iss_routine("CloseMonitor")
+    assert "CheckForMutexes(MonitorMutex)" in close and "FindWindowByClassName(ControllerClass)" in close
+    assert "PostMessage(Wnd, WmClose, 0, 0)" in close
+    prepare = iss_routine("PrepareToInstall")
+    assert prepare.index("MonitorClosed('Setup')") < prepare.index("CloseDashboardWindow") < prepare.index("EndOtherProcesses")
+    uninstall = iss_routine("CurUninstallStepChanged")
+    assert uninstall.index("MonitorClosed('Uninstall')") < uninstall.index("Abort") < uninstall.index("RemoveFromClaudeCode")
 
 
 def test_restart_manager_closes_what_is_using_the_files_and_restarts_nothing() -> None:
@@ -1340,11 +1352,12 @@ def test_restart_manager_closes_what_is_using_the_files_and_restarts_nothing() -
 def test_setup_ends_the_exes_other_processes_before_the_folder_check() -> None:
     """Restart Manager closes applications only once the installation has started, after CurStepChanged(ssInstall),
     where MoveOldInstallAside must already find the folder free. Left to it, one --mcp reader of an open Claude
-    Code session stopped every update with "in use". So PrepareToInstall ends them, after asking the dashboard to
-    close, and Uninstall does the same at usUninstall, before it deletes."""
+    Code session stopped every update with "in use". So PrepareToInstall ends them, after closing the monitor and
+    asking the dashboard to close, and Uninstall does the same at usUninstall, before it deletes (#53)."""
     prepare = iss_routine("PrepareToInstall")
     assert prepare.index("CloseDashboardWindow;") < prepare.index("EndOtherProcesses;")
-    assert re.search(r"if CurUninstallStep = usUninstall then begin\s+CloseDashboardWindow;[^\n]*\s+RemoveFromClaudeCode;[^\n]*\s+EndOtherProcesses;",
+    assert re.search(r"if CurUninstallStep = usUninstall then begin\s+if not MonitorClosed\('Uninstall'\) then begin\s+Log\([^\n]*\);\s+Abort;\s+end;"
+                     r"\s+CloseDashboardWindow;[^\n]*\s+RemoveFromClaudeCode;[^\n]*\s+EndOtherProcesses;",
                      iss_routine("CurUninstallStepChanged"))
     assert re.search(r"if CurStep = ssInstall then\s+MoveOldInstallAside;", iss_routine("CurStepChanged"))
     ending = iss_routine("EndOtherProcesses")
@@ -1375,8 +1388,8 @@ def assert_terminate_is_guarded(text: str) -> None:
 
 def test_only_the_install_folders_own_exe_is_ended_and_never_the_monitor() -> None:
     """A copy of the exe elsewhere (a second install, a dev build, the owner's install during a sandbox run) is not
-    touched: the full path must match. The monitor, started with no mode, is left to AppMutex and
-    MoveOldInstallAside."""
+    touched: the full path must match. The monitor, started with no mode, is asked to quit (CloseMonitor), never
+    ended; one started since then makes MoveOldInstallAside stop."""
     assert_terminate_is_guarded(ISS)
 
 
@@ -1582,6 +1595,7 @@ def test_the_iss_is_ascii() -> None:
 SANDBOX = "Usage Monitor Test Sandbox"                         # AppId and AppName: the uninstall key is "Usage Monitor Test Sandbox_is1"
 SANDBOX_RUN_VALUE = "UsageMonitorTestSandbox"
 SANDBOX_MUTEX = "Global\\UsageMonitorTestSandboxMutex"
+SANDBOX_CONTROLLER = "UsageMonitorTestSandbox.Controller"     # the monitor's window class: a sandbox never asks the real one to quit
 SANDBOX_DATA = "UsageMonitorTestSandboxData"
 APPROVED_TEST_KEY = r"Software\UsageMonitorTestSandboxApproved"            # the sandbox's stand-in for Explorer\StartupApproved\Run
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
@@ -1591,7 +1605,7 @@ V2_SWITCHES = [*V1_SWITCHES, '/MERGETASKS="!startup"']                          
 REAL_IDENTITY = (                                                                # none of these may survive in a sandbox script
     "{localappdata}", "{userappdata}\\ClaudeUsageMonitor", "Global\\ClaudeUsageMonitor", "'ClaudeUsageMonitor'", "Explorer\\StartupApproved",
     '"ClaudeUsageMonitor"', "AppName=Claude Usage Monitor", '#define AppIdValue "Claude Usage Monitor"',
-    "DefaultGroupName=Claude Usage Monitor", "DashboardTitle = 'Claude Usage Monitor'",
+    "DefaultGroupName=Claude Usage Monitor", "DashboardTitle = 'Claude Usage Monitor'", "ClaudeUsageMonitor.Controller",
 )
 
 
@@ -1682,7 +1696,9 @@ def sandbox_script(real: str, app: Path) -> str:
         ("AppName=Claude Usage Monitor", f"AppName={SANDBOX}"),
         ("DefaultDirName={localappdata}\\ClaudeUsageMonitor", f"DefaultDirName={app}"),
         ("DefaultGroupName=Claude Usage Monitor", f"DefaultGroupName={SANDBOX}"),
-        ("AppMutex=Global\\ClaudeUsageMonitor", f"AppMutex={SANDBOX_MUTEX}"),
+        ("MonitorMutex = 'Global\\ClaudeUsageMonitor';", f"MonitorMutex = '{SANDBOX_MUTEX}';"),
+        ("ControllerClass = 'ClaudeUsageMonitor.Controller';", f"ControllerClass = '{SANDBOX_CONTROLLER}';"),
+        ("MonitorQuitTries = 100;", "MonitorQuitTries = 30;"),                          # a monitor that stays costs 3 s, not 10
         ("SetupIconFile=usage_monitor.ico", f"SetupIconFile={ROOT / 'usage_monitor.ico'}"),
         ("RemoveSetupWaitTries = 900;", "RemoveSetupWaitTries = 100;"),                 # a test need not wait 90 s to see the limit
         ("ApprovedKey = 'Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run';",
@@ -1977,18 +1993,76 @@ def test_a_sandboxed_update_with_a_file_held_open_stops_and_changes_nothing(tmp_
 # without delete sharing (as a loaded DLL is held), writes the file named last once it does, and waits to be ended.
 # Built over the sandbox install's exe, it is to Setup what a reader of Claude Code is: a process of
 # {app}\ClaudeUsageMonitor.exe, with a mode on its command line or (the monitor) without one.
+# Started with --x-monitor-quits or --x-monitor-stays, then a mutex name and a window class, it is the monitor as Setup
+# finds it: it holds the mutex and a hidden window of that class, and quits on WM_CLOSE (or, staying, ignores it). Those
+# words are no mode of the exe, so Setup counts it as the monitor. It ends by itself after 180 s either way.
 CSC = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Microsoft.NET" / "Framework64" / "v4.0.30319" / "csc.exe"
 STAND_IN_SOURCE = """\
+using System;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Threading;
 
 static class StandIn {
+    delegate IntPtr Procedure(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct WindowClass {
+        public uint style; public Procedure procedure; public int classExtra; public int windowExtra; public IntPtr instance;
+        public IntPtr icon; public IntPtr cursor; public IntPtr background; public string menu; public string name;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct Message { public IntPtr hwnd; public uint message; public IntPtr wParam; public IntPtr lParam; public uint time; public int x; public int y; }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern IntPtr GetModuleHandleW(string name);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern ushort RegisterClassW(ref WindowClass windowClass);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr CreateWindowExW(uint exStyle, string className,
+        string title, uint style, int x, int y, int width, int height, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr param);
+    [DllImport("user32.dll")] static extern IntPtr DefWindowProcW(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")] static extern int GetMessageW(out Message message, IntPtr hwnd, uint first, uint last);
+    [DllImport("user32.dll")] static extern IntPtr DispatchMessageW(ref Message message);
+    [DllImport("user32.dll")] static extern void PostQuitMessage(int code);
+    [DllImport("user32.dll")] static extern IntPtr SetTimer(IntPtr hwnd, IntPtr id, uint milliseconds, IntPtr callback);
+
+    static bool quits;
+    static readonly Procedure procedure = OnMessage;      // a field: the collector must never take the window's procedure
+
+    static IntPtr OnMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam) {
+        if (message == 0x0113 || (message == 0x0010 && quits)) {   // WM_TIMER (180 s are up), or WM_CLOSE for one that quits
+            PostQuitMessage(0);
+            return IntPtr.Zero;
+        }
+        if (message == 0x0010)
+            return IntPtr.Zero;                           // a monitor that stays: WM_CLOSE changes nothing
+        return DefWindowProcW(hwnd, message, wParam, lParam);
+    }
+
     static void Main(string[] args) {
         if (args[0] == "--remove-setup") {                // the uninstaller's call: it holds nothing, and nothing is left
             File.WriteAllBytes(args[1], new byte[] { 0xEF, 0xBB, 0xBF });
             return;
         }
         using (File.Open(args[args.Length - 2], FileMode.Open, FileAccess.Read, FileShare.Read)) {
+            if (args[0] == "--x-monitor-quits" || args[0] == "--x-monitor-stays") {
+                quits = args[0] == "--x-monitor-quits";
+                using (new Mutex(false, args[1])) {
+                    IntPtr instance = GetModuleHandleW(null);
+                    WindowClass windowClass = new WindowClass();
+                    windowClass.procedure = procedure;
+                    windowClass.instance = instance;
+                    windowClass.name = args[2];
+                    RegisterClassW(ref windowClass);
+                    IntPtr hwnd = CreateWindowExW(0x80, args[2], "stand-in monitor", 0x80000000, 0, 0, 0, 0,
+                                                  IntPtr.Zero, IntPtr.Zero, instance, IntPtr.Zero);   // hidden, as the real one
+                    SetTimer(hwnd, (IntPtr)1, 180000, IntPtr.Zero);
+                    File.WriteAllText(args[args.Length - 1], "holding");
+                    Message message;
+                    while (GetMessageW(out message, IntPtr.Zero, 0, 0) > 0)
+                        DispatchMessageW(ref message);
+                }
+                return;
+            }
             File.WriteAllText(args[args.Length - 1], "holding");
             Thread.Sleep(180000);
         }
@@ -2229,8 +2303,8 @@ def test_a_sandboxed_update_steps_round_what_an_earlier_update_left_behind(tmp_p
 @needs_csc
 @pytest.mark.usefixtures("keeps_real_readers")
 def test_a_sandboxed_update_leaves_a_running_monitor_alone_and_stops(tmp_path: Path) -> None:
-    """Setup checks AppMutex at startup only, so a monitor can be started while it runs. That one is not ended: the
-    folder check stops Setup with "close the program", and the install is as it was."""
+    """A monitor Setup cannot ask to quit (this stand-in has no mutex and no window, like one started just after Setup
+    closed the monitor) is not ended: the folder check stops Setup with "close the program", and the install is as it was."""
     box = Sandbox(tmp_path)
     before = real_install_state()
     monitor: list[subprocess.Popen[bytes]] = []
@@ -2246,6 +2320,134 @@ def test_a_sandboxed_update_leaves_a_running_monitor_alone_and_stops(tmp_path: P
         assert monitor[0].poll() is None, "Setup ended the monitor"
         assert box.files() == listing
         assert box.moved_aside() == []
+    finally:
+        try:
+            end_stand_ins(monitor)
+        finally:
+            box.cleanup()
+    assert real_install_state() == before
+
+
+def running_sandbox_monitor(box: Sandbox, exe: Path, quits: bool) -> subprocess.Popen[bytes]:
+    """The stand-in as the monitor Setup finds: the sandbox's mutex and a hidden window of its controller class."""
+    return start_stand_in(box, exe, "--x-monitor-quits" if quits else "--x-monitor-stays", SANDBOX_MUTEX, SANDBOX_CONTROLLER)
+
+
+def run_sandbox_uninstaller(box: Sandbox, label: str) -> str:
+    """Uninstall silently with a log of its own, wait until that log closes, and return it."""
+    log = box.logs / f"{label}.log"
+    subprocess.run(f'"{box.app / "unins000.exe"}" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG="{log}"',
+                   stdin=subprocess.DEVNULL, capture_output=True, timeout=240, creationflags=NO_WINDOW)
+    deadline = time.monotonic() + 90
+    while not log_closed(log) and time.monotonic() < deadline:   # the uninstaller hands over to a copy in %TEMP%
+        time.sleep(0.3)
+    assert log_closed(log)
+    return log.read_text(encoding="utf-8-sig", errors="replace")
+
+
+@SANDBOX_RUNS
+@needs_csc
+@pytest.mark.usefixtures("keeps_real_readers")
+def test_a_sandboxed_update_closes_a_running_monitor_and_goes_through(tmp_path: Path) -> None:
+    """Setup closes the monitor itself when the install starts (#53): its controller window gets WM_CLOSE, it quits, and
+    the update goes on. Setup used to stop at its start with "please close it" (AppMutex). keeps_real_readers checks that
+    the owner's own monitor, which carries the real names, is still running afterwards."""
+    box = Sandbox(tmp_path)
+    before = real_install_state()
+    monitor: list[subprocess.Popen[bytes]] = []
+    try:
+        box.reset("v2", None)
+        exe = build_stand_in(box)
+        monitor.append(running_sandbox_monitor(box, exe, quits=True))
+        assert box.run(box.v2, V2_SWITCHES, "monitor quits") == 0
+        log = (box.logs / "monitor_quits.log").read_text(encoding="utf-8", errors="replace")
+        assert "Asking the monitor to quit." in log and "The monitor quit." in log
+        assert log.index("The monitor quit.") < log.index("The old exe and bundle are moved aside.")
+        assert monitor[0].wait(timeout=10) == 0, "the monitor did not quit"
+        assert "Ending process" not in log, "Setup ended the monitor instead of asking it"
+        assert box.moved_aside() == []
+        assert box.display_version() == "2.0.0"
+    finally:
+        try:
+            end_stand_ins(monitor)
+        finally:
+            box.cleanup()
+    assert real_install_state() == before
+
+
+@SANDBOX_RUNS
+@needs_csc
+@pytest.mark.usefixtures("keeps_real_readers")
+def test_a_sandboxed_update_stops_with_nothing_changed_when_the_monitor_stays(tmp_path: Path) -> None:
+    """A monitor that does not quit when asked: a silent Setup has no one to ask to close it, so it stops on the
+    Preparing page (exit code 7) with the install as it was, as AppMutex made it do. The monitor is not ended."""
+    box = Sandbox(tmp_path)
+    before = real_install_state()
+    monitor: list[subprocess.Popen[bytes]] = []
+    try:
+        box.reset("v2", None)
+        exe = build_stand_in(box)
+        monitor.append(running_sandbox_monitor(box, exe, quits=False))
+        listing = box.files()
+        assert box.run(box.v2, V2_SWITCHES, "monitor stays") == 7
+        log = (box.logs / "monitor_stays.log").read_text(encoding="utf-8", errors="replace")
+        assert "Asking the monitor to quit." in log and "The monitor is still running." in log
+        assert "The monitor is still running; Setup stops before anything is changed." in log
+        assert monitor[0].poll() is None, "Setup ended the monitor"
+        assert box.files() == listing
+        assert box.moved_aside() == []
+        assert box.display_version() == "2.0.0"
+    finally:
+        try:
+            end_stand_ins(monitor)
+        finally:
+            box.cleanup()
+    assert real_install_state() == before
+
+
+@SANDBOX_RUNS
+@needs_csc
+@pytest.mark.usefixtures("keeps_real_readers")
+def test_a_sandboxed_uninstall_closes_a_running_monitor_and_removes_it(tmp_path: Path) -> None:
+    """The uninstaller closes the monitor too (#53), once the uninstall is confirmed, and everything goes."""
+    box = Sandbox(tmp_path)
+    before = real_install_state()
+    monitor: list[subprocess.Popen[bytes]] = []
+    try:
+        box.reset("v2", None)
+        exe = build_stand_in(box)
+        monitor.append(running_sandbox_monitor(box, exe, quits=True))
+        log = run_sandbox_uninstaller(box, "uninstall-monitor-quits")
+        assert "Asking the monitor to quit." in log and "The monitor quit." in log
+        assert monitor[0].wait(timeout=10) == 0, "the monitor did not quit"
+        assert not exe.exists() and not (box.app / "_internal").exists()
+        assert box.display_version() is None
+    finally:
+        try:
+            end_stand_ins(monitor)
+        finally:
+            box.cleanup()
+    assert real_install_state() == before
+
+
+@SANDBOX_RUNS
+@needs_csc
+@pytest.mark.usefixtures("keeps_real_readers")
+def test_a_sandboxed_uninstall_stops_with_nothing_removed_when_the_monitor_stays(tmp_path: Path) -> None:
+    """A monitor that stays: a silent uninstall stops before it removes anything, and leaves the monitor running."""
+    box = Sandbox(tmp_path)
+    before = real_install_state()
+    monitor: list[subprocess.Popen[bytes]] = []
+    try:
+        box.reset("v2", None)
+        exe = build_stand_in(box)
+        monitor.append(running_sandbox_monitor(box, exe, quits=False))
+        listing = box.files()
+        log = run_sandbox_uninstaller(box, "uninstall-monitor-stays")
+        assert "The monitor is still running; the uninstall stops before anything is removed." in log
+        assert monitor[0].poll() is None, "the uninstaller ended the monitor"
+        assert box.files() == listing
+        assert box.display_version() == "2.0.0"
     finally:
         try:
             end_stand_ins(monitor)

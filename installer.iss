@@ -50,12 +50,13 @@ WizardStyle=modern
 ; enforces, not a promise of support.
 MinVersion=10.0
 ArchitecturesAllowed=x64compatible
-; The monitor holds this mutex for as long as it runs (usage_monitor/app.py MUTEX_NAME). Setup and Uninstall
-; stop with "please close it" while it exists; both check it at startup only. The exe's other processes hold no
-; mutex: the dashboard window, and the windowless readers Claude Code starts from the same exe (--mcp lives as
-; long as a Claude session; --hook and --gate briefly; --wait until the usage guard lets its session go, which
-; can be days; --watch while a session waits for its background work, up to a day). They hold no state.
-; PrepareToInstall asks the dashboard to close and then ends what is left of
+; The monitor holds a mutex for as long as it runs (usage_monitor/app.py MUTEX_NAME). Setup and Uninstall close it
+; themselves (CloseMonitor): its controller window quits on WM_CLOSE as on Exit in its menu, and they ask the person only
+; when it stays. So there is no AppMutex, which made both stop with "please close it" at their start (#53). The exe's
+; other processes hold no mutex: the dashboard window, and the windowless readers Claude Code starts from the same exe
+; (--mcp lives as long as a Claude session; --hook and --gate briefly; --wait until the usage guard lets its session go,
+; which can be days; --watch while a session waits for its background work, up to a day). They hold no state.
+; PrepareToInstall closes the monitor, asks the dashboard to close and then ends what is left of
 ; them (EndOtherProcesses); Uninstall does the same before it deletes. Restart Manager (CloseApplications) cannot
 ; be left to do that: it closes applications only once the installation has started, after
 ; CurStepChanged(ssInstall), and MoveOldInstallAside must find the folder free before then. Left to it, one
@@ -65,7 +66,6 @@ ArchitecturesAllowed=x64compatible
 ; An ended --watch wakes nobody: its session is watched again from its next Stop.
 ; Nothing is restarted by Setup: a closed dashboard cannot come back without the port and token of a monitor, and
 ; the monitor is relaunched by the Finish page (or by the update helper after a silent update).
-AppMutex=Global\ClaudeUsageMonitor
 CloseApplications=force
 CloseApplicationsFilter=*.exe,*.dll,*.pyd
 RestartApplications=no
@@ -123,6 +123,9 @@ const
   // The exe's modes other than the monitor's (main.py parse_args), one space apart. The monitor is started with none.
   OtherModes = '--dashboard --mcp --hook --gate --wait --watch --status --print-version --remove-setup --dump-frames --smoke-test';
   WmClose = $0010;
+  MonitorMutex = 'Global\ClaudeUsageMonitor';         // usage_monitor/app.py MUTEX_NAME: held while the monitor runs
+  ControllerClass = 'ClaudeUsageMonitor.Controller';  // usage_monitor/ui/host.py CONTROLLER_CLASS
+  MonitorQuitTries = 100;                              // tenths of a second the monitor gets to quit when asked
   WmQuit = $0012;
   PmRemove = $0001;
   // Tenths of a second. Above the most the exe's two claude calls can take (about 70 s, see run_claude).
@@ -372,6 +375,55 @@ begin
   Log('The dashboard window is still open.');
 end;
 
+// The monitor holds MonitorMutex while it runs, and quits when its controller window gets WM_CLOSE, as on Exit in its
+// menu: it stops its work, closes its dashboard and lets go of the mutex. Asks it to, and waits up to MonitorQuitTries
+// tenths of a second. True once no monitor runs. Another Windows user's monitor holds the same mutex, but its window is
+// not on this desktop, so it is not found; nor is one that hangs. MonitorClosed then asks the person.
+function CloseMonitor: Boolean;
+var
+  Wnd: HWND;
+  Tries: Integer;
+begin
+  Result := not CheckForMutexes(MonitorMutex);
+  if Result then
+    Exit;
+  Wnd := FindWindowByClassName(ControllerClass);
+  if Wnd = 0 then begin
+    Log('The monitor is running, but its window was not found.');
+    Exit;
+  end;
+  Log('Asking the monitor to quit.');
+  PostMessage(Wnd, WmClose, 0, 0);
+  for Tries := 1 to MonitorQuitTries do begin
+    Pause(100);
+    if not CheckForMutexes(MonitorMutex) then begin
+      Log('The monitor quit.');
+      Result := True;
+      Exit;
+    end;
+  end;
+  Log('The monitor is still running.');
+end;
+
+// Closes the monitor. While it stays, asks the person to close it and click Retry, or to Cancel. False means stop with
+// nothing changed. A silent run has no one to ask and stops at once (SuppressibleMsgBox answers Cancel), as AppMutex did.
+function MonitorClosed(const Who: String): Boolean;
+var
+  Text: String;
+begin
+  Result := CloseMonitor;
+  Text := 'Claude Usage Monitor is still running. It did not close when ' + Who + ' asked it to.' + #13#10 + #13#10 +
+          'Close it from its icon near the clock (right-click it, then Exit), and click Retry.';
+  while not Result do begin
+    if IsUninstaller then begin
+      if UninstallSilent or (MsgBox(Text, mbError, MB_RETRYCANCEL) <> IDRETRY) then
+        Exit;
+    end else if SuppressibleMsgBox(Text, mbError, MB_RETRYCANCEL, IDCANCEL) <> IDRETRY then
+      Exit;
+    Result := CloseMonitor;
+  end;
+end;
+
 // The mode word on a command line of the exe, or '' when it has none (the monitor is started with no mode). Quotes
 // and tabs become spaces and the line is padded with spaces, so a mode matches only as a whole word, as in main.py.
 // (StringSplit would read better, but it needs Inno Setup 6.4 and this script promises 6.3.)
@@ -400,7 +452,7 @@ end;
 // list them. With EndThem True it also ends each one it counts, and logs why any other process of that name is left
 // alone (by its number; command lines are never logged). Windows reports the path a process was started by; the
 // dashboard and the readers are started by this full path. A copy of the exe in another folder is left alone, and so
-// is the monitor: AppMutex made Setup wait for it, and one started since then makes MoveOldInstallAside stop. Once
+// is the monitor: CloseMonitor asked it to quit, and one started since then makes MoveOldInstallAside stop. Once
 // MoveOldInstallAside has moved the exe, Windows 11 still reports its processes by the path they were started by (measured
 // in the sandbox), and the moved name counts too in case a Windows does not. Ended MCP tools and usage guard waits are
 // counted for the note that says so (EndedNote).
@@ -543,9 +595,14 @@ end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
+  Result := '';
+  if not MonitorClosed('Setup') then begin
+    Log('The monitor is still running; Setup stops before anything is changed.');
+    Result := 'Claude Usage Monitor is still running, so Setup stopped without changing anything. Close the monitor, then run Setup again.';
+    Exit;
+  end;
   CloseDashboardWindow;
   EndOtherProcesses;
-  Result := '';
 end;
 
 // The first name free for Path's old copy. An earlier update leaves one behind when something still held it.
@@ -854,7 +911,11 @@ end;
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usUninstall then begin
-    CloseDashboardWindow;      // the monitor itself is already gone: AppMutex made Uninstall wait for it
+    if not MonitorClosed('Uninstall') then begin
+      Log('The monitor is still running; the uninstall stops before anything is removed.');
+      Abort;                   // here Abort ends the uninstall
+    end;
+    CloseDashboardWindow;      // the monitor closed its dashboard as it quit; this is for one left behind
     RemoveFromClaudeCode;      // the exe is still here, and from now on no new hook starts it
     EndOtherProcesses;         // a running reader would keep the exe and bundle files from being deleted
   end;

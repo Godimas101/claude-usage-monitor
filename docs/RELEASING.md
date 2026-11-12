@@ -117,9 +117,9 @@ signature as well as the digest.
   - uninstalling removes that Run value and Windows' startup record for it, takes the hooks and the MCP tool out of
     Claude Code, and asks before deleting `%APPDATA%\ClaudeUsageMonitor` (No keeps it).
 - [ ] **With Claude Code open.** In a Claude Code session that started after the monitor's MCP tool was registered,
-      `/mcp` shows `claude-usage` as connected. Close the monitor, and run the new installer by hand over that install
-      (your own install is fine for this one). It goes through without an "in use" stop, and its last page says it closed
-      the monitor's tool in a Claude Code session. In that session the tool
+      `/mcp` shows `claude-usage` as connected. With the monitor running, run the new installer by hand over that install
+      (your own install is fine for this one). It closes the monitor without asking, goes through without an "in use"
+      stop, and its last page says it closed the monitor's tool in a Claude Code session. In that session the tool
       answers again on its next use, or after `/mcp`. The sandboxed runs (`USAGE_MONITOR_UI_TESTS=1` and `USAGE_MONITOR_INSTALLER_E2E=1`;
       the stand-in tests also need the .NET Framework's `csc.exe`) cover the same with stand-in readers, hooks that
       keep starting the exe all through an update, and the uninstall.
