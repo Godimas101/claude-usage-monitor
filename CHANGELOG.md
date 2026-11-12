@@ -4,8 +4,6 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
-- README screenshots: retake from the v2.2.0 build ([#35](https://github.com/Godimas101/claude-usage-monitor/issues/35)) — closed 2026-11-04 by @Godimas101
-
 ### Added
 - The usage guard reaches a conversation that waits for its background work, such as the one that started a workflow. A new Stop hook watches while that work runs, and wakes the conversation with the notice when the guard starts holding. Before, nothing told it until its next prompt or tool call ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).
 - The usage guard card lists the conversations the Stop hook watches, with since when and the background work each waits for ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).

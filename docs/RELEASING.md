@@ -72,11 +72,11 @@ So attach the one `ClaudeUsageMonitorSetup-v<VERSION>.exe` that the workflow bui
 not swap it by hand later. The updater reads `releases/latest`, which skips drafts and pre-releases, so a
 pre-release is offered to nobody.
 
-What the digest proves is that the file is the one GitHub lists for that release, not who published it. Anyone who can
-edit the release can upload another installer, GitHub lists the new digest, and every installed copy runs it. The
-installer is not code-signed. Two things would close the gap: turn on GitHub's **immutable releases** for the
-repository, so a published asset cannot be replaced; and sign the installer and have `update_check.py` verify the
-signature as well as the digest.
+What the digest proves is that the file is the one GitHub lists for that release, not who published it. GitHub's
+**immutable releases** are on for this repository (since v2.3.0), so once a release is published nobody can replace,
+add or delete its assets, or move its tag. Its title and notes can still be edited. A draft is not protected, which is
+why the asset goes on the draft and is checked there (see below). The installer is not code-signed. Signing it, and
+having `update_check.py` verify the signature as well as the digest, would also prove who built it.
 
 ## Before you bump `VERSION`
 
@@ -199,5 +199,6 @@ new version is back within about half a minute. `monitor.log` has `update verifi
 
 ## A bad release
 
-Delete it (`gh release delete vX.Y.Z --cleanup-tag`), fix the cause and release the next version. The updater
-only moves forward, so installs that already updated stay on the bad one until the next release.
+Delete it (`gh release delete vX.Y.Z --cleanup-tag`), fix the cause and release the next version. A published release
+is immutable, so its installer cannot be swapped for a fixed one, and its tag name can never be used again, even after
+the delete. The updater only moves forward, so installs that already updated stay on the bad one until the next release.
