@@ -3409,6 +3409,8 @@ def test_describe_summarises_the_live_ui(wired):
     info = wired.app.describe()
     assert info["theme"] == ["nostromo", "amber"]
     assert info["floating"]["visible"] and info["taskbar"]["visible"]
+    assert info["taskbar"]["parent"] == wired.plat.info.hwnd and info["floating"]["parent"] is None   # the strip is a child (#29)
+    assert info["taskbar_hostable"] is True                                  # and this taskbar can hold it (#32)
     assert info["tray"] == {"added": True, "icon_px": 16}
     assert info["update_recheck"] is True                                    # the six-hourly update check is armed
     assert info["frames"]["rendered"]["floating"] >= 1 and info["frames"]["failed"] == 0
@@ -3621,6 +3623,47 @@ def test_the_smoke_windows_step_wants_the_update_recheck_armed(tmp_path):
     smoke._app = stub(False)
     with pytest.raises(RuntimeError, match="six-hourly update check is not armed"):
         smoke._step_windows()
+
+
+def test_the_smoke_test_fails_when_the_strip_floats_over_a_taskbar_that_could_hold_it(tmp_path):
+    """The windows step checked only that the floating widget showed. A build whose strip never became a child of the
+    taskbar (#29) passed. Now it fails, unless no taskbar here can hold the strip (#32)."""
+    def stub(parent: int | None, hostable: bool) -> types.SimpleNamespace:
+        info = {"floating": {"visible": True, "parent": None}, "taskbar": {"visible": True, "parent": parent},
+                "taskbar_hostable": hostable, "tray": {"added": True}, "frames": {}, "update_recheck": True}
+        widget = types.SimpleNamespace(show_tooltip=lambda: None, hide_tooltip=lambda: None)
+        return types.SimpleNamespace(call_on_ui=lambda fn: fn(), describe=lambda: info, floating=widget, taskbar=widget,
+                                     tooltip=types.SimpleNamespace(visible=True))
+
+    smoke = SmokeTest(45, tmp_path / "r.json")
+    smoke._app = stub(65552, True)
+    assert smoke._step_windows()["strip_in_taskbar"] is True
+    smoke._app = stub(None, False)                                           # no taskbar here can hold it: floating is right
+    assert smoke._step_windows()["strip_in_taskbar"] is False
+    smoke._app = stub(None, True)
+    with pytest.raises(RuntimeError, match="strip floats over the taskbar instead of sitting in it"):
+        smoke._step_windows()
+    assert SmokeTest._strip_problem({"taskbar": None, "taskbar_hostable": True}) is None          # the strip is off
+    assert SmokeTest._strip_problem({"taskbar": {"parent": None}, "taskbar_hostable": True}) is not None
+
+
+def test_the_smoke_live_settings_step_checks_the_strip_it_turns_on(monkeypatch, tmp_path):
+    """The step turns the strip off and on again: the strip it brings back must be in the taskbar too (#32)."""
+    themes = {1: "night_city", 2: "gates"}
+
+    def run(parent: int | None) -> dict[str, Any]:
+        smoke, posted = SmokeTest(45, tmp_path / "r.json"), []
+        monkeypatch.setattr(smoke, "_get_json", lambda path: {"settings": {}, "theme": {}})
+        monkeypatch.setattr(smoke, "_post", lambda path, change: posted.append(change))
+        monkeypatch.setattr(smoke, "_ui", lambda: {
+            "theme": [themes.get(len(posted), "nostromo"), "x"], "taskbar_hostable": True, "frames": {"rendered": {}},
+            "taskbar": None if len(posted) == 4 else {"visible": True, "parent": parent}})   # the 4th change turns it off
+        return smoke._step_live_settings()
+
+    monkeypatch.setattr(app_mod.time, "sleep", lambda _s: None)
+    assert run(65552)["taskbar_on"]["taskbar"] is True
+    with pytest.raises(RuntimeError, match="strip floats over the taskbar instead of sitting in it"):
+        run(None)
 
 
 def test_the_smoke_shape_check_names_what_is_missing():

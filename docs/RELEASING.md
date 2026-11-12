@@ -107,13 +107,17 @@ signature as well as the digest.
       `CLAUDE_CONFIG_DIR=<empty folder>` (so your own transcripts stay out of it) run
       `dist\ClaudeUsageMonitor\ClaudeUsageMonitor.exe --smoke-test 45 report.json`. Exit code 0 and `"ok": true`.
       Close any other dev instance first (`python main.py` with `USAGE_MONITOR_DEV_INSTANCE=1`): there is one dev mutex,
-      and while another holds it the report says `the app never started its loop`.
+      and while another holds it the report says `the app never started its loop`. The run fails when the strip floats
+      over a taskbar that could hold it, so its windows step says `"strip_in_taskbar": true` on a bottom taskbar.
+- [ ] **The strip in the taskbar, by eye.** With the new build running and the strip on, open Start, then Search, then
+      the tray's hidden icons (^). The strip stays in sight and does not blink. Hover a taskbar button until its preview
+      shows: the strip stays too (#29). The smoke run cannot see that Windows lifts the taskbar over it.
 - [ ] On a spare Windows 11 user or a VM, **not over your own install**, run the new `ClaudeUsageMonitorSetup`:
   - the tray icon, widgets and dashboard window appear, and **Start with Windows** is ticked;
   - `reg query HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v ClaudeUsageMonitor` shows the quoted path
     of the exe and nothing else, and the monitor starts at the next sign-in;
-  - running the installer again while the monitor runs makes Setup ask you to close it, and the dashboard
-    window closes with it;
+  - running the installer again while the monitor runs closes the monitor without asking (#53), the dashboard
+    window closes with it, and the last page starts the monitor again;
   - uninstalling removes that Run value and Windows' startup record for it, takes the hooks and the MCP tool out of
     Claude Code, and asks before deleting `%APPDATA%\ClaudeUsageMonitor` (No keeps it).
 - [ ] **With Claude Code open.** In a Claude Code session that started after the monitor's MCP tool was registered,

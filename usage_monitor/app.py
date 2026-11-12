@@ -75,6 +75,7 @@ from usage_monitor.ui.widgets import (
     RenderContext,
     TaskbarWidget,
     Tooltip,
+    strip_supported,
 )
 
 log = get_logger(__name__)
@@ -1268,14 +1269,17 @@ class MonitorApp:
             if widget is None:
                 return None
             window = widget.window
-            return {"visible": bool(window.visible), "rect": list(window.rect), "dpi": window.dpi}
+            return {"visible": bool(window.visible), "rect": list(window.rect), "dpi": window.dpi,
+                    "parent": window.parent}
 
         theme = self._resolved
+        taskbar = self._plat.taskbar_info()
         return {
             "locked": bool(self.host and self.host.locked),
             "theme": [theme[0].id, theme[1].id] if theme else None,
             "floating": window_info(self.floating),
             "taskbar": window_info(self.taskbar),
+            "taskbar_hostable": bool(taskbar is not None and strip_supported(taskbar)),   # a taskbar the strip can sit in
             "tray": {"added": bool(self.tray and self.tray.added), "icon_px": self.tray.icon_size if self.tray else 0},
             "tooltip_visible": bool(self.tooltip and self.tooltip.visible),
             "frames": self.stats.snapshot(),
@@ -1560,8 +1564,22 @@ class SmokeTest:
             raise RuntimeError("the tray icon was not added")
         if before["update_recheck"] is not True:
             raise RuntimeError("the six-hourly update check is not armed")
+        problem = self._strip_problem(before)
+        if problem:
+            raise RuntimeError(problem)
         self.report["windows"] = before
-        return {"tooltip_shown": shown, "frames_before": before["frames"], "frames_after": after["frames"]}
+        strip = before.get("taskbar")
+        return {"tooltip_shown": shown, "frames_before": before["frames"], "frames_after": after["frames"],
+                "strip_in_taskbar": bool(strip is not None and strip.get("parent") is not None)}
+
+    @staticmethod
+    def _strip_problem(snap: Mapping[str, Any]) -> str | None:
+        """Why the strip is not where it belongs, or None: a taskbar here can hold it (#29), and it floats instead.
+        A refused taskbar floats it until it is asked again a minute later (#32), so a release run must not see that."""
+        strip = snap.get("taskbar")
+        if strip is not None and snap.get("taskbar_hostable") and strip.get("parent") is None:
+            return "the taskbar strip floats over the taskbar instead of sitting in it"
+        return None
 
     def _show_tooltip(self) -> bool:
         """Show the tooltip the way a hover dwell does, then hide it again."""
@@ -1613,6 +1631,9 @@ class SmokeTest:
                 raise RuntimeError(f"the UI did not switch to {theme_id}")
         if seen["taskbar_off"]["taskbar"] is not None or seen["taskbar_on"]["taskbar"] is None:
             raise RuntimeError("the taskbar widget did not follow show_taskbar")
+        problem = self._strip_problem(seen["taskbar_on"])        # the strip it brings back must be in the taskbar too
+        if problem:
+            raise RuntimeError(problem)
         return {label: {"theme": snap["theme"], "taskbar": snap["taskbar"] is not None,
                         "frames": snap["frames"]["rendered"]} for label, snap in seen.items()}
 
