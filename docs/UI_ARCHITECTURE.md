@@ -426,9 +426,11 @@ Settings: `theme_id`, `theme_variant`, `theme_mode` (Gates: light / dark / syste
   and `agents`, how many of its agents did; #41), `waiting` (the live `--wait` processes, oldest
   first), `watching` (the live `--watch` processes, oldest first: the conversations that wait for their background
   work, and that work; #41) and `setup` (`setup.status()`). The status runs `claude --version` and `claude mcp get`, so it is kept
-  for `SETUP_STATUS_TTL_S` (10 minutes) and computed by one caller at a time (`_TimedValue`). A setup click
-  and `POST /api/dashboard/closed` clear it, so each dashboard window and each click look afresh. The card
-  asks every `GUARD_POLL_MS` (3 s) while it is on screen.
+  for `SETUP_STATUS_TTL_S` (10 minutes) and computed by one look at a time (`_TimedValue`). A setup click
+  and `POST /api/dashboard/closed` clear it, so each dashboard window and each click look afresh. The answer
+  waits for a look at most `SETUP_STATUS_WAIT_S` (0.5 s): past that the look goes on in the background, and
+  `setup` is the last status, or `null` until the first is in, which the card shows as pending (#32). The card
+  asks every `GUARD_POLL_MS` (3 s) while it is on screen, so the setup part fills in at a later ask.
 - **`POST /api/guard/setup`** answers `setup.install()` or `setup.remove()` as it is: `ok: false` with
   `errors` is a refusal in plain words (Claude Code too old, a settings file that is not JSON), shown beside
   the buttons, not an HTTP error. An unknown action is `400`.

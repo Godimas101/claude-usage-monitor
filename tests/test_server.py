@@ -2446,7 +2446,19 @@ def test_a_setup_click_makes_the_next_look_a_fresh_one(guard_rig: Any, action: s
     assert guard_rig.setup.calls == ["status", action, "status"]
 
 
-def test_two_polls_at_once_share_one_look_at_the_setup(make_server: Any, tmp_path: Path) -> None:
+def setup_once_ready(server: ApiServer, ready: Callable[[Any], bool]) -> dict[str, Any]:
+    """Poll /api/guard, as the card does, until its setup part passes ``ready`` (10 s at most); the last answer."""
+    deadline = time.monotonic() + 10
+    answer = get_guard(server)
+    while not ready(answer["setup"]) and time.monotonic() < deadline:
+        time.sleep(0.05)
+        answer = get_guard(server)
+    return answer
+
+
+def test_polls_during_a_slow_look_at_the_setup_answer_at_once_and_share_that_look(make_server: Any, tmp_path: Path) -> None:
+    """The first look starts claude twice, which takes seconds. Meanwhile /api/guard answers without the setup part
+    (null), so the card shows its live part at once; one look serves every poll, and a later poll has its answer (#32)."""
     gate, entered, calls = threading.Event(), threading.Event(), []
 
     def slow() -> Any:
@@ -2456,17 +2468,20 @@ def test_two_polls_at_once_share_one_look_at_the_setup(make_server: Any, tmp_pat
         return SETUP_STATUS
 
     server, rec = make_server(guard_dir=tmp_path / "guard", setup_cb={"status": slow})
+    rec.state = dataclasses.replace(sample_state(), guard=HOLDING)
     answers: list[dict[str, Any]] = []
     threads = [threading.Thread(target=lambda: answers.append(get_guard(server))) for _ in range(3)]
+    started = time.monotonic()
     for thread in threads:
         thread.start()
-    assert entered.wait(10)
-    time.sleep(0.2)                                                              # the others are waiting for that one answer
-    assert calls == ["status"]
-    gate.set()
     for thread in threads:
         thread.join(10)
-    assert calls == ["status"] and len(answers) == 3 and all(a["setup"] == SETUP_STATUS for a in answers)
+    assert time.monotonic() - started < server_mod.SETUP_STATUS_WAIT_S + 3              # no poll waited for the look
+    assert entered.is_set() and calls == ["status"]                                    # one look for all three
+    assert len(answers) == 3 and all(a["setup"] is None and a["guard"] == HOLDING for a in answers)
+    gate.set()
+    assert setup_once_ready(server, lambda setup: setup is not None)["setup"] == SETUP_STATUS
+    assert calls == ["status"]
 
 
 def test_a_click_while_the_status_is_being_computed_is_not_undone_by_it(make_server: Any, tmp_path: Path) -> None:
@@ -2484,18 +2499,32 @@ def test_a_click_while_the_status_is_being_computed_is_not_undone_by_it(make_ser
         return {"ok": True}
 
     server, _ = make_server(guard_dir=tmp_path / "guard", setup_cb={"status": status, "install": install})
-    first: list[dict[str, Any]] = []
-    thread = threading.Thread(target=lambda: first.append(get_guard(server)))
-    thread.start()
+    assert get_guard(server)["setup"] is None                                        # the look runs on without this poll
     assert entered.wait(10)
-    entered.clear()
-    clicked = threading.Thread(target=lambda: post_json(server, "/api/guard/setup", {"action": "install"}))
-    clicked.start()
-    clicked.join(10)
+    assert post_json(server, "/api/guard/setup", {"action": "install"})[0] == 200
+    gate.set()                                                                       # the old look ends after the click
+    answer = setup_once_ready(server, lambda setup: setup is not None)
+    assert answer["setup"]["hooks"] == {"hooks": "installed"}                        # the next look's answer, never the old one
+
+
+def test_an_old_setup_status_is_shown_while_the_next_look_runs(make_server: Any, tmp_path: Path) -> None:
+    """Past SETUP_STATUS_TTL_S the card keeps showing what it had, not a blank, until the new look is done."""
+    gate, calls, clock = threading.Event(), [], FakeClock()
     gate.set()
-    thread.join(10)
-    assert first[0]["setup"]["hooks"] == {"hooks": "missing"}                    # that poll saw the old state
-    assert get_guard(server)["setup"]["hooks"] == {"hooks": "installed"}         # and the next one looked again
+
+    def status() -> Any:
+        calls.append("status")
+        gate.wait(10)
+        return {**SETUP_STATUS, "look": len(calls)}
+
+    server, _ = make_server(guard_dir=tmp_path / "guard", setup_cb={"status": status}, clock=clock)
+    assert get_guard(server)["setup"]["look"] == 1
+    gate.clear()                                                                     # the next look is slow
+    clock.now += server_mod.SETUP_STATUS_TTL_S + 1
+    assert get_guard(server)["setup"]["look"] == 1                                   # the old answer, without waiting
+    assert calls == ["status", "status"]
+    gate.set()
+    assert setup_once_ready(server, lambda setup: setup["look"] == 2)["setup"]["look"] == 2
 
 
 def test_a_setup_status_that_fails_is_an_unavailable_status_not_an_error(make_server: Any, tmp_path: Path) -> None:
