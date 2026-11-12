@@ -91,6 +91,22 @@ def custom(session: float = 38.0, weekly: float = 52.0, fable: float | None = 4.
     return build_model(dataclasses.replace(state, guard=verdict), NOW, show_scoped=show_scoped, blink_on=blink_on)
 
 
+def fit_models() -> tuple[WidgetModel, ...]:
+    """Guard lines for the fit tests (#32): armed with every cap listed, holding on the session alone, holding on all
+    three with a long model name, and holds whose line starts with the weekly row or with that long scoped row."""
+    long_name = {"label": "CLAUDE SONNET 4.5 WEEKLY", "model": "Claude Sonnet 4.5"}
+    return (guarded("normal3", "armed", scoped_cap=80), guarded("normal3", "holding"),
+            custom(97, 92, 12, scoped_cap=10, **long_name),
+            custom(38, 93, 4),                                                  # the weekly row first
+            custom(38, 52, 12, scoped_cap=10, **long_name),                     # the long scoped row first
+            custom(38, 93, 12, scoped_cap=10, **long_name))                     # weekly, then the long scoped row
+
+
+def assert_grew_by(card: Image.Image, base: Image.Image, logical: float, scale: float) -> None:
+    """The card is ``logical`` px taller than the same card without the guard, give or take the rounding of a scale."""
+    assert abs(card.height - base.height - logical * scale) <= 1, (card.height, base.height, logical, scale)
+
+
 def draw(theme_id: str, variant: Any, model: WidgetModel, scale: float, surface: str, opts: Any = None,
          bar: int = 48) -> Image.Image:
     skin, theme = get_skin(theme_id), theme_of(theme_id)
@@ -480,20 +496,23 @@ def test_nostromo_the_guard_line_of_the_hover_card_is_in_capitals():
     assert nostromo._guard_statement(dataclasses.replace(armed, guard=None)) is None
 
 
-def test_nostromo_the_guard_line_fits_the_card_and_the_card_grows_by_exactly_its_lines():
+@pytest.mark.parametrize("scale", dump.SCALES)
+def test_nostromo_the_guard_line_fits_the_card_and_the_card_grows_by_exactly_its_lines(scale):
     theme = theme_of("nostromo")
-    cv = nostromo._canvas(nostromo.FLOAT_W, 1, 1.0, theme)     # as wide as the card, as render_tooltip measures
+    cv = nostromo._canvas(nostromo.FLOAT_W, 1, scale, theme)   # as wide as the card, as render_tooltip measures
     reg = cv.font(nostromo.FONT_REG, nostromo.LABEL_SIZE)
+    semi = cv.font(nostromo.FONT_SEMI, nostromo.LABEL_SIZE)
     variant = picked("nostromo", "default")
-    for model in (guarded("normal3", "armed", scoped_cap=80), guarded("normal3", "holding"),
-                  custom(97, 92, 12, scoped_cap=10, label="CLAUDE SONNET 4.5 WEEKLY", model="Claude Sonnet 4.5")):
+    for model in fit_models():
         lead, lines = nostromo._guard_lines(cv, model)
         assert lines and lead > 0
-        for line in lines:
-            assert cv.advance(line, reg, nostromo.QUALIFIER_TRACKING) <= nostromo.RIGHT - nostromo.LEFT + 1e-6, line
-        card = draw("nostromo", variant, model, 1.0, "tooltip")
-        base = draw("nostromo", variant, dataclasses.replace(model, guard=None), 1.0, "tooltip")
-        assert card.height - base.height == nostromo.GUARD_BLOCK_PAD + nostromo.GUARD_LINE_H * len(lines)
+        for index, line in enumerate(lines):
+            head, tail = (line[:lead], line[lead:]) if index == 0 else ("", line)      # the lead is semibold
+            width = cv.advance(head, semi, nostromo.QUALIFIER_TRACKING) + cv.advance(tail, reg, nostromo.QUALIFIER_TRACKING)
+            assert width <= nostromo.RIGHT - nostromo.LEFT + 1e-6, (scale, line)
+        card = draw("nostromo", variant, model, scale, "tooltip")
+        base = draw("nostromo", variant, dataclasses.replace(model, guard=None), scale, "tooltip")
+        assert_grew_by(card, base, nostromo.GUARD_BLOCK_PAD + nostromo.GUARD_LINE_H * len(lines), scale)
 
 
 def test_nostromo_the_sign_in_box_moves_down_by_the_guard_block_and_stays_in_the_card():
@@ -652,20 +671,20 @@ def test_night_city_the_guard_line_of_the_hover_card_has_the_themes_slashes():
     assert (lead, plain_text(rest)) == ("GUARD // HOLDING:", f"WEEKLY 91% (CAP 90%). RESUMES {held.guard.resume_clock.upper()} (IN 2D 3H).")
 
 
-def test_night_city_the_guard_line_fits_the_card_and_the_card_grows_by_exactly_its_lines():
+@pytest.mark.parametrize("scale", dump.SCALES)
+def test_night_city_the_guard_line_fits_the_card_and_the_card_grows_by_exactly_its_lines(scale):
     theme, variant = theme_of("night_city"), picked("night_city", "default")
     pal = night_city.Palette.for_variant(theme, variant)
-    ink = night_city._Ink(night_city._canvas(1, 1, 1.0, theme), pal, RenderOptions())
-    for model in (guarded("normal3", "armed", scoped_cap=80), guarded("normal3", "holding"),
-                  custom(97, 92, 12, scoped_cap=10, label="CLAUDE SONNET 4.5 WEEKLY", model="Claude Sonnet 4.5")):
+    ink = night_city._Ink(night_city._canvas(1, 1, scale, theme), pal, RenderOptions())   # as render_tooltip measures
+    for model in fit_models():
         lead, lines = night_city._guard_lines(ink, model)
         first_room = night_city.CONTENT_W - ink.width(lead, night_city.CHIP) - night_city.GUARD_GAP
         for index, line in enumerate(lines):
             room = first_room if index == 0 else night_city.CONTENT_W
-            assert ink.width(line, night_city.RESET) <= room + 1e-6, line
-        card = city_frame(model, surface="tooltip")
-        base = city_frame(dataclasses.replace(model, guard=None), surface="tooltip")
-        assert card.height - base.height == night_city.GUARD_BLOCK_PAD + night_city.GUARD_LINE_H * max(1, len(lines))
+            assert ink.width(line, night_city.RESET) <= room + 1e-6, (scale, line)
+        card = city_frame(model, scale=scale, surface="tooltip")
+        base = city_frame(dataclasses.replace(model, guard=None), scale=scale, surface="tooltip")
+        assert_grew_by(card, base, night_city.GUARD_BLOCK_PAD + night_city.GUARD_LINE_H * max(1, len(lines)), scale)
 
 
 def test_night_city_a_guard_with_no_caps_to_list_is_its_lead_alone():
@@ -832,20 +851,20 @@ def test_gates_the_guard_line_of_the_hover_card_reads_as_the_brief_words_it():
     assert gates._guard_statement(dataclasses.replace(armed, guard=None)) is None
 
 
-def test_gates_the_guard_line_fits_the_bar_and_the_card_grows_by_exactly_the_bar():
+@pytest.mark.parametrize("scale", dump.SCALES)
+def test_gates_the_guard_line_fits_the_bar_and_the_card_grows_by_exactly_the_bar(scale):
     theme = theme_of("gates")
-    ink = gates._card_canvas(1, 1.0, theme)
+    ink = gates._card_canvas(1, scale, theme)                                   # as render_tooltip measures
     body = ink.face(ink.fonts.body, gates.SIZE_FOOT, 400)
     room = gates.RIGHT - gates.LEFT - 2 * gates.BAR_PAD - gates.BAR_ICON_W - gates.BAR_TEXT_GAP
-    for model in (guarded("normal3", "armed", scoped_cap=80), guarded("normal3", "holding"),
-                  custom(97, 92, 12, scoped_cap=10, label="CLAUDE SONNET 4.5 WEEKLY", model="Claude Sonnet 4.5")):
+    for model in fit_models():
         lead, lines = gates._guard_bar_lines(ink, model)
         lead_w = ink.advance(lead + ":", ink.face(ink.fonts.body, gates.SIZE_FOOT, 600))
         for index, line in enumerate(lines):
-            assert ink.advance(line, body) <= (room - lead_w - 4 if index == 0 else room) + 1e-6, line
-        card = gates_frame(model, surface="tooltip")
-        base = gates_frame(dataclasses.replace(model, guard=None), surface="tooltip")
-        assert card.height - base.height == gates.BAR_GAP + 2 * gates.BAR_PAD + gates.FOOT_LINE * max(1, len(lines))
+            assert ink.advance(line, body) <= (room - lead_w - 4 if index == 0 else room) + 1e-6, (scale, line)
+        card = gates_frame(model, scale=scale, surface="tooltip")
+        base = gates_frame(dataclasses.replace(model, guard=None), scale=scale, surface="tooltip")
+        assert_grew_by(card, base, gates.BAR_GAP + 2 * gates.BAR_PAD + gates.FOOT_LINE * max(1, len(lines)), scale)
 
 
 def test_gates_a_guard_with_no_caps_to_list_is_its_lead_alone():

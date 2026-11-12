@@ -89,6 +89,9 @@ signature as well as the digest.
       refuses to run if a real name is left in it) and check the Start with Windows entry for each updater and each
       starting state, and that an update with a file held open stops with the old install whole. Your own install is
       read before and after and must be unchanged. They need Inno Setup 6.
+- [ ] Every frame `CHANGED` in `tests/test_frame_golden.py` lists is a change this release means to make. That test
+      checks every widget frame against the last release's, pixel for pixel, and `CHANGED` names the ones that differ
+      on purpose (#32). Compare any you doubt with `python main.py --dump-frames DIR` here and at the last tag.
 - [ ] `CHANGELOG.md` has the user-facing notes under `## [X.Y.Z] — YYYY-MM-DD` (the heading must start with
       `## [X.Y.Z]` or the notes are not found), and `[Unreleased]` is empty above it. `README.md` agrees.
 - [ ] `build.bat` succeeds. It builds the exe and the installer from `VERSION`, checks that the frozen exe
@@ -173,6 +176,10 @@ own build; these run on that one.
 ## After you publish
 
 - [ ] `releases/latest` is the new release (`gh release view --json tagName`), with its one asset and `sha256:` digest.
+- [ ] The golden frames are this release's. On the next release's branch, record the new tag's frames (the three
+      commands at the top of `tests/frame_digests.py`: a worktree of the tag, the record, then remove the worktree),
+      empty `CHANGED` in `tests/test_frame_golden.py`, and commit both. Until then that branch is checked against this
+      release's predecessor.
 
 On a machine with the previous version, update through the app. What you look for depends on which version that is.
 
