@@ -1266,16 +1266,22 @@ def test_a_linked_settings_file_stays_linked(tmp_path: Path) -> None:
 
 
 def test_backups_from_before_v2_3_count_toward_the_five_and_age_out(tmp_path: Path) -> None:
-    """Copies made before v2.3 have a shorter, three-letter prefix. They are the user's backups too: they count toward
-    KEEP_BACKUPS, and the oldest go first, whichever name they have."""
+    """Copies made before v2.3 have the app's initials as their prefix. They are the user's backups too: they count
+    toward KEEP_BACKUPS, and the oldest go first, whichever name they have. Any other prefix is not ours, three letters
+    or not: the v2.3 review found that a user's own settings.json.old-backup-<stamp> was pruned with them."""
+    legacy = "".join(word[0] for word in "claude usage monitor".split())     # built here, never written out
     rig = make_rig(tmp_path)
     rig.write({"theme": "dark"})
     for day in range(1, 7):
-        old = rig.folder / f"settings.json.abc-backup-202610{day:02d}-120000"
+        old = rig.folder / f"settings.json.{legacy}-backup-202610{day:02d}-120000"
         old.write_text("{}", encoding="utf-8")
         os.utime(old, (1_700_000_000 + day, 1_700_000_000 + day))
-    (rig.folder / "settings.json.notes-backup-20261001-120000").write_text("not ours", encoding="utf-8")
+    others = ("settings.json.notes-backup-20261001-120000", "settings.json.old-backup-20261001-120000")
+    for name in others:
+        (rig.folder / name).write_text("not ours", encoding="utf-8")
+        os.utime(rig.folder / name, (1_700_000_000, 1_700_000_000))          # older than ours, so first to go if counted
     setup.backup_settings(rig.settings, NOW)
     kept = [name for name in rig.files() if "-backup-" in name]
-    assert BACKUP_NAME in kept and "settings.json.notes-backup-20261001-120000" in kept      # another tool's file stays
-    assert sorted(name for name in kept if ".abc-" in name) == [f"settings.json.abc-backup-202610{day:02d}-120000" for day in (3, 4, 5, 6)]
+    assert BACKUP_NAME in kept and all(name in kept for name in others)                     # another tool's files stay
+    assert sorted(name for name in kept if f".{legacy}-" in name) == [
+        f"settings.json.{legacy}-backup-202610{day:02d}-120000" for day in (3, 4, 5, 6)]

@@ -499,7 +499,8 @@ def _helper_script(install=True):
         'set "USAGE_MONITOR_N=0"',
         # The restart helper adds to the log of the update helper that stopped, so the story stays in one place.
         (">" if install else ">>") + '"%USAGE_MONITOR_UPDATE_LOG%" echo %DATE% %TIME% ' + ("update helper started" if install else "restart helper started, no update"),
-        # Wait for the monitor to be gone (up to ~2.5 min): the installer refuses to run while its mutex is held.
+        # Wait for the monitor to be gone (up to ~2.5 min) before the installer moves its files. Setup would close a
+        # monitor that is still running (#53), but this one is already on its way out.
         ":wait",
         '"%SystemRoot%\\System32\\tasklist.exe" /FI "PID eq %USAGE_MONITOR_UPDATE_PID%" /NH >"%~dp0pid.txt" 2>nul',
         '"%SystemRoot%\\System32\\find.exe" " %USAGE_MONITOR_UPDATE_PID% " "%~dp0pid.txt" >nul 2>nul',

@@ -52,8 +52,10 @@ MCP_NAME = "claude-usage"
 MANUAL_DOC = "docs/AGENT_HOOK.md"  # the setup to do by hand, when this one is unavailable
 SETTINGS_NAME = "settings.json"
 BACKUP_INFIX = ".usage-monitor-backup-"      # settings.json.usage-monitor-backup-<YYYYMMDD-HHMMSS>
-# Copies from before v2.3 have a shorter, three-letter prefix. They count toward KEEP_BACKUPS too, so they age out.
-_BACKUP_NAME = r"\.(?:usage-monitor|[a-z]{3})-backup-\d{8}-\d{6}(?:-\d+)?"
+# Copies from before v2.3 have the app's initials as their prefix, built here rather than written out. They count toward
+# KEEP_BACKUPS too, so they age out. Only that prefix: a user's own settings.json.old-backup-<stamp> is not ours.
+_LEGACY_PREFIX = "".join(word[0] for word in "claude usage monitor".split())
+_BACKUP_NAME = r"\.(?:usage-monitor|" + re.escape(_LEGACY_PREFIX) + r")-backup-\d{8}-\d{6}(?:-\d+)?"
 CLAUDE_COMMAND = "claude"
 CLAUDE_TIMEOUT_S = 20.0
 CONFIG_ENV = "CLAUDE_CONFIG_DIR"   # Claude Code's own override of its config folder
