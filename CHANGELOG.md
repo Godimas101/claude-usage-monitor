@@ -4,6 +4,8 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
+- Test: the Cost page height check fails early in a month ([#44](https://github.com/Godimas101/claude-usage-monitor/issues/44)) — closed 2026-11-13 by @Godimas101
+
 ## [2.3.0] — 2026-11-12
 
 Claude Usage Monitor 2.3 makes updates safer, lets the usage guard reach every Claude Code conversation, and cleans up after an uninstall.
