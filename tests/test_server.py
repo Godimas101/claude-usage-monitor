@@ -2,7 +2,7 @@
 
 Offline by design: the server listens on loopback only; the registry, the Win32 focus call, the
 supporters fetch and the themes loader are replaced with fakes. Tests that create real windows,
-tray icons or child processes are skipped unless CUM_UI_TESTS=1.
+tray icons or child processes are skipped unless USAGE_MONITOR_UI_TESTS=1.
 """
 from __future__ import annotations
 
@@ -49,12 +49,12 @@ from usage_monitor.settings import Settings
 from usage_monitor.ui import dashboard, devserver, server as server_mod, startup
 from usage_monitor.ui.server import ApiServer, to_jsonable
 
-UI_TESTS = os.environ.get("CUM_UI_TESTS") == "1"
+UI_TESTS = os.environ.get("USAGE_MONITOR_UI_TESTS") == "1"
 # The autouse fixture points APPDATA and HOME at temp folders. Child processes started by the UI-gated
 # tests need the real profile (pywebview lives in the user site-packages), so the values are kept here.
 REAL_PROFILE_ENV = {k: os.environ[k] for k in ("APPDATA", "LOCALAPPDATA", "USERPROFILE", "HOME", "PYTHONUSERBASE")
                     if k in os.environ}
-ui_only = pytest.mark.skipif(not UI_TESTS, reason="needs CUM_UI_TESTS=1 (real windows or processes)")
+ui_only = pytest.mark.skipif(not UI_TESTS, reason="needs USAGE_MONITOR_UI_TESTS=1 (real windows or processes)")
 # Every console program a test starts (python, tasklist, taskkill) gets this flag: pytest may have no console of its own
 # (an editor, a task runner, an agent), and then each such process would open a terminal window on the desktop.
 # test_update_check.py has the test that keeps every test file honest about it.
@@ -155,7 +155,7 @@ def sample_state(*, status: m.ApiStatus = m.ApiStatus.LIVE, percent: float = 13.
 @pytest.fixture(autouse=True)
 def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Nothing in these tests may reach the real app data, registry or home folder."""
-    monkeypatch.setenv("CUM_APPDATA_DIR", str(tmp_path / "app"))
+    monkeypatch.setenv("USAGE_MONITOR_APPDATA_DIR", str(tmp_path / "app"))
     monkeypatch.setenv("APPDATA", str(tmp_path / "roaming"))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
@@ -2284,7 +2284,7 @@ class FakeSetup:
         self.calls: list[str] = []
         self.answers: dict[str, Any] = {
             "install": {"ok": True, "action": "install", "changed": ["Added the SessionStart hook."], "unchanged": [],
-                        "backup": "C:/Users/t/.claude/settings.json.cum-backup-20261028-180509", "warnings": [],
+                        "backup": "C:/Users/t/.claude/settings.json.usage-monitor-backup-20261028-180509", "warnings": [],
                         "errors": [], "manual": None, "settings_path": SETUP_STATUS["settings_path"]},
             "remove": {"ok": False, "action": "remove", "changed": [], "unchanged": [], "backup": None, "warnings": [],
                        "errors": ["The Claude Code settings file is not valid JSON, so setup left it alone."],
@@ -2304,8 +2304,9 @@ class FakeSetup:
 
 
 def seed_sessions(folder: Path, guard: dict[str, Any], told: list[tuple[str, str]],
-                  waiting: list[dict[str, Any]] | None = None) -> None:
-    """The files agent/sessions.py documents: hook-seen.json for the sessions told of this episode, waiting/<pid>.json."""
+                  waiting: list[dict[str, Any]] | None = None, watching: list[dict[str, Any]] | None = None) -> None:
+    """The files agent/sessions.py documents: hook-seen.json for the sessions told of this episode, waiting/<pid>.json,
+    watching/<session>.json."""
     folder.mkdir(parents=True, exist_ok=True)
     seen = {sid: {"at": at, "steps": {}, "guard": {"episode": agent_guard.episode(guard), "told_at": at}}
             for sid, at in told}
@@ -2315,6 +2316,9 @@ def seed_sessions(folder: Path, guard: dict[str, Any], told: list[tuple[str, str
     (folder / agent_sessions.WAITING_DIR).mkdir(exist_ok=True)
     for entry in waiting or []:
         (folder / agent_sessions.WAITING_DIR / f"{entry['pid']}.json").write_text(json.dumps(entry), encoding="utf-8")
+    (folder / agent_sessions.WATCHING_DIR).mkdir(exist_ok=True)
+    for entry in watching or []:
+        (folder / agent_sessions.WATCHING_DIR / f"{entry['session_id']}.json").write_text(json.dumps(entry), encoding="utf-8")
 
 
 @pytest.fixture
@@ -2371,12 +2375,16 @@ def test_the_guard_endpoint_reports_the_state_the_sessions_told_and_waiting_and_
     told = [("11111111-aaaa", "2026-10-21T16:00:00Z"), ("22222222-bbbb", "2026-10-21T15:30:00Z")]
     here = {"pid": os.getpid(), "session_id": "33333333-cccc", "since": "2026-10-21T16:05:00Z", "cwd": "C:/Demo/atlas-web"}
     gone = {"pid": DEAD_PID, "session_id": "44444444-dddd", "since": "2026-10-21T15:00:00Z", "cwd": "C:/Demo/gone"}
-    seed_sessions(guard_rig.folder, HOLDING, told, [here, gone])
+    watched = {"pid": os.getpid(), "started": None, "session_id": "55555555-eeee", "since": "2026-10-21T15:55:00Z",
+               "work": {"workflow": 1, "agent": 2}}
+    seed_sessions(guard_rig.folder, HOLDING, told, [here, gone], [watched, {**watched, "pid": DEAD_PID, "session_id": "6666"}])
     answer = get_guard(guard_rig.server)
-    assert set(answer) == {"guard", "told", "waiting", "setup"}
+    assert set(answer) == {"guard", "told", "waiting", "watching", "setup"}
+    assert answer["watching"] == [{key: value for key, value in watched.items() if key != "started"}]  # #41; a dead one: no
     assert answer["guard"] == HOLDING
-    assert answer["told"] == [{"session_id": "22222222-bbbb", "told_at": "2026-10-21T15:30:00Z"},
-                              {"session_id": "11111111-aaaa", "told_at": "2026-10-21T16:00:00Z"}]    # this episode, oldest first
+    assert answer["told"] == [{"session_id": "22222222-bbbb", "told_at": "2026-10-21T15:30:00Z", "main": True, "agents": 0},
+                              {"session_id": "11111111-aaaa", "told_at": "2026-10-21T16:00:00Z", "main": True, "agents": 0}]
+    # this episode, oldest first; who heard it (#41): these records keep no agent list, so their conversations did
     assert answer["waiting"] == [here]                                                                 # a dead --wait counts for nothing
     assert answer["setup"] == SETUP_STATUS
 
@@ -2396,7 +2404,7 @@ def test_with_no_session_files_the_lists_are_empty_and_nothing_is_created(guard_
 
 
 def test_the_guard_files_are_read_from_the_app_data_folder_unless_told_otherwise(make_server: Any, tmp_path: Path) -> None:
-    server, rec = make_server(setup_cb=FakeSetup().callbacks())                   # no guard_dir: CUM_APPDATA_DIR, as the app has it
+    server, rec = make_server(setup_cb=FakeSetup().callbacks())                   # no guard_dir: USAGE_MONITOR_APPDATA_DIR, as the app has it
     rec.state = dataclasses.replace(sample_state(), guard=HOLDING)
     here = {"pid": os.getpid(), "session_id": "s", "since": "2026-10-21T16:05:00Z", "cwd": "C:/Demo"}
     seed_sessions(tmp_path / "app", HOLDING, [("11111111-aaaa", "2026-10-21T16:00:00Z")], [here])
@@ -2438,7 +2446,19 @@ def test_a_setup_click_makes_the_next_look_a_fresh_one(guard_rig: Any, action: s
     assert guard_rig.setup.calls == ["status", action, "status"]
 
 
-def test_two_polls_at_once_share_one_look_at_the_setup(make_server: Any, tmp_path: Path) -> None:
+def setup_once_ready(server: ApiServer, ready: Callable[[Any], bool]) -> dict[str, Any]:
+    """Poll /api/guard, as the card does, until its setup part passes ``ready`` (10 s at most); the last answer."""
+    deadline = time.monotonic() + 10
+    answer = get_guard(server)
+    while not ready(answer["setup"]) and time.monotonic() < deadline:
+        time.sleep(0.05)
+        answer = get_guard(server)
+    return answer
+
+
+def test_polls_during_a_slow_look_at_the_setup_answer_at_once_and_share_that_look(make_server: Any, tmp_path: Path) -> None:
+    """The first look starts claude twice, which takes seconds. Meanwhile /api/guard answers without the setup part
+    (null), so the card shows its live part at once; one look serves every poll, and a later poll has its answer (#32)."""
     gate, entered, calls = threading.Event(), threading.Event(), []
 
     def slow() -> Any:
@@ -2448,17 +2468,20 @@ def test_two_polls_at_once_share_one_look_at_the_setup(make_server: Any, tmp_pat
         return SETUP_STATUS
 
     server, rec = make_server(guard_dir=tmp_path / "guard", setup_cb={"status": slow})
+    rec.state = dataclasses.replace(sample_state(), guard=HOLDING)
     answers: list[dict[str, Any]] = []
     threads = [threading.Thread(target=lambda: answers.append(get_guard(server))) for _ in range(3)]
+    started = time.monotonic()
     for thread in threads:
         thread.start()
-    assert entered.wait(10)
-    time.sleep(0.2)                                                              # the others are waiting for that one answer
-    assert calls == ["status"]
-    gate.set()
     for thread in threads:
         thread.join(10)
-    assert calls == ["status"] and len(answers) == 3 and all(a["setup"] == SETUP_STATUS for a in answers)
+    assert time.monotonic() - started < server_mod.SETUP_STATUS_WAIT_S + 3              # no poll waited for the look
+    assert entered.is_set() and calls == ["status"]                                    # one look for all three
+    assert len(answers) == 3 and all(a["setup"] is None and a["guard"] == HOLDING for a in answers)
+    gate.set()
+    assert setup_once_ready(server, lambda setup: setup is not None)["setup"] == SETUP_STATUS
+    assert calls == ["status"]
 
 
 def test_a_click_while_the_status_is_being_computed_is_not_undone_by_it(make_server: Any, tmp_path: Path) -> None:
@@ -2476,18 +2499,32 @@ def test_a_click_while_the_status_is_being_computed_is_not_undone_by_it(make_ser
         return {"ok": True}
 
     server, _ = make_server(guard_dir=tmp_path / "guard", setup_cb={"status": status, "install": install})
-    first: list[dict[str, Any]] = []
-    thread = threading.Thread(target=lambda: first.append(get_guard(server)))
-    thread.start()
+    assert get_guard(server)["setup"] is None                                        # the look runs on without this poll
     assert entered.wait(10)
-    entered.clear()
-    clicked = threading.Thread(target=lambda: post_json(server, "/api/guard/setup", {"action": "install"}))
-    clicked.start()
-    clicked.join(10)
+    assert post_json(server, "/api/guard/setup", {"action": "install"})[0] == 200
+    gate.set()                                                                       # the old look ends after the click
+    answer = setup_once_ready(server, lambda setup: setup is not None)
+    assert answer["setup"]["hooks"] == {"hooks": "installed"}                        # the next look's answer, never the old one
+
+
+def test_an_old_setup_status_is_shown_while_the_next_look_runs(make_server: Any, tmp_path: Path) -> None:
+    """Past SETUP_STATUS_TTL_S the card keeps showing what it had, not a blank, until the new look is done."""
+    gate, calls, clock = threading.Event(), [], FakeClock()
     gate.set()
-    thread.join(10)
-    assert first[0]["setup"]["hooks"] == {"hooks": "missing"}                    # that poll saw the old state
-    assert get_guard(server)["setup"]["hooks"] == {"hooks": "installed"}         # and the next one looked again
+
+    def status() -> Any:
+        calls.append("status")
+        gate.wait(10)
+        return {**SETUP_STATUS, "look": len(calls)}
+
+    server, _ = make_server(guard_dir=tmp_path / "guard", setup_cb={"status": status}, clock=clock)
+    assert get_guard(server)["setup"]["look"] == 1
+    gate.clear()                                                                     # the next look is slow
+    clock.now += server_mod.SETUP_STATUS_TTL_S + 1
+    assert get_guard(server)["setup"]["look"] == 1                                   # the old answer, without waiting
+    assert calls == ["status", "status"]
+    gate.set()
+    assert setup_once_ready(server, lambda setup: setup["look"] == 2)["setup"]["look"] == 2
 
 
 def test_a_setup_status_that_fails_is_an_unavailable_status_not_an_error(make_server: Any, tmp_path: Path) -> None:
@@ -2645,7 +2682,7 @@ def test_the_dev_environment_variable_makes_a_dev_server_whatever_the_flag_says(
 
 
 @pytest.mark.parametrize("value", ["0", "", "true", "yes", "2"])
-def test_only_cum_dev_instance_1_counts_for_the_server(make_server: Any, monkeypatch: pytest.MonkeyPatch,
+def test_only_usage_monitor_dev_instance_1_counts_for_the_server(make_server: Any, monkeypatch: pytest.MonkeyPatch,
                                                        value: str) -> None:
     monkeypatch.setenv(server_mod.DEV_ENV, value)
     server, _ = make_server(dev=False)
@@ -4387,7 +4424,7 @@ def test_a_page_script_cannot_walk_from_the_api_to_os_system_through_the_bridge(
 def test_dashboard_child_opens_a_window_and_stays_up(tmp_path: Path, make_server: Any) -> None:
     """Starts the real pywebview child against a live API and checks that its window stays open."""
     server, _ = make_server()
-    env = dict(os.environ, **REAL_PROFILE_ENV, CUM_DASHBOARD_TOKEN=server.token, CUM_APPDATA_DIR=str(tmp_path / "app"))
+    env = dict(os.environ, **REAL_PROFILE_ENV, USAGE_MONITOR_DASHBOARD_TOKEN=server.token, USAGE_MONITOR_APPDATA_DIR=str(tmp_path / "app"))
     repo = str(Path(__file__).resolve().parents[1])
     child = subprocess.Popen([sys.executable, "-m", "usage_monitor.ui.dashboard", "--port", str(server.port)],
                              env=env, cwd=repo, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -4411,7 +4448,7 @@ def test_a_dashboard_saved_off_screen_opens_on_a_screen(tmp_path: Path, make_ser
 
     settings.update({"dashboard_bounds": {"x": 9000, "y": 100, "w": 1200, "h": 780}})
     server, _ = make_server()
-    env = dict(os.environ, **REAL_PROFILE_ENV, CUM_DASHBOARD_TOKEN=server.token, CUM_APPDATA_DIR=str(tmp_path / "app"))
+    env = dict(os.environ, **REAL_PROFILE_ENV, USAGE_MONITOR_DASHBOARD_TOKEN=server.token, USAGE_MONITOR_APPDATA_DIR=str(tmp_path / "app"))
     repo = str(Path(__file__).resolve().parents[1])
     child = subprocess.Popen([sys.executable, "-m", "usage_monitor.ui.dashboard", "--port", str(server.port)],
                              env=env, cwd=repo, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -4622,7 +4659,7 @@ def probe(window):
         for width, height in SIZES:
             window.resize(width, height)
             time.sleep(1.0)
-            # A full CUM_UI_TESTS run on a busy machine once measured every Nostromo card 3 to 5 px over at 1200 x 700,
+            # A full USAGE_MONITOR_UI_TESTS run on a busy machine once measured every Nostromo card 3 to 5 px over at 1200 x 700,
             # which never happened when the test ran alone: the page was still settling a second after the resize. Measure
             # until two reads agree, which still catches a card that stays clipped; a failure prints what else took room.
             measured = window.evaluate_js(MEASURE)
@@ -4653,10 +4690,10 @@ def test_overview_cards_never_clip_their_content_in_the_real_web_view(tmp_path: 
     size leaves a 1184 x 741 page): the plan block had a line more than the approved design, and the cost
     row had a fixed floor below its content. Measured in WebView2, the engine the dashboard really uses,
     for each theme (the page opens in the theme's own look, see _themed_shell)."""
-    server, settings = devserver.make_server("normal", 0, settings_dir=tmp_path / "dev", theme=theme)
+    server, settings = devserver.make_server("normal", 0, settings_dir=tmp_path / "dev", theme=theme, clock=lambda: NOW)
     server.start()
     try:
-        env = dict(os.environ, **REAL_PROFILE_ENV, CUM_APPDATA_DIR=str(tmp_path / "app"))
+        env = dict(os.environ, **REAL_PROFILE_ENV, USAGE_MONITOR_APPDATA_DIR=str(tmp_path / "app"))
         sizes = [[1200, 780], [1200, 700], [1100, 780], [1060, 640]]
         run = subprocess.run([sys.executable, "-c", _LAYOUT_PROBE, server.url, json.dumps(sizes)], env=env,
                              cwd=str(Path(__file__).resolve().parents[1]), capture_output=True, text=True,
@@ -4769,12 +4806,14 @@ def test_no_cost_card_changes_height_when_its_report_lands_in_the_real_web_view(
     hides it: the row is held open by taller cards beside it, which is why a check at 1280 x 800 never saw it). The Main and
     subagents card grew a line in a narrow window the same way, because the placeholder "0% · 0 requests" is shorter than a
     real "97% · 2,670 requests". Measured in WebView2, the engine the dashboard really uses, in the default window and a
-    narrower one, with the reports held back for 5 s so the placeholders are what is measured first."""
-    server, settings = devserver.make_server("normal", 0, settings_dir=tmp_path / "dev", theme=theme, warm=True)
+    narrower one, with the reports held back for 5 s so the placeholders are what is measured first. The clock is pinned to the
+    middle of a month: the invented history and "this month" move with the date, and early in a month By model and By folder are
+    shorter than their placeholders and Month by month has a row more, which says nothing about the page (#44)."""
+    server, settings = devserver.make_server("normal", 0, settings_dir=tmp_path / "dev", theme=theme, warm=True, clock=lambda: NOW)
     _hold_reports(server, 5.0)
     server.start()
     try:
-        env = dict(os.environ, **REAL_PROFILE_ENV, CUM_APPDATA_DIR=str(tmp_path / "app"))
+        env = dict(os.environ, **REAL_PROFILE_ENV, USAGE_MONITOR_APPDATA_DIR=str(tmp_path / "app"))
         sizes = [[1200, 780], [1000, 700]]
         run = subprocess.run([sys.executable, "-c", _SHIFT_PROBE, server.url, json.dumps(sizes)], env=env,
                              cwd=str(Path(__file__).resolve().parents[1]), capture_output=True, text=True,
@@ -4892,7 +4931,7 @@ def test_devserver_process_answers_on_loopback(tmp_path: Path) -> None:
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
-    env = dict(os.environ, **REAL_PROFILE_ENV, CUM_APPDATA_DIR=str(tmp_path / "dev"))
+    env = dict(os.environ, **REAL_PROFILE_ENV, USAGE_MONITOR_APPDATA_DIR=str(tmp_path / "dev"))
     child = subprocess.Popen([sys.executable, "-m", "usage_monitor.ui.devserver", "--port", str(port),
                               "--scenario", "warning"], env=env, cwd=str(Path(__file__).resolve().parents[1]),
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=NO_WINDOW)

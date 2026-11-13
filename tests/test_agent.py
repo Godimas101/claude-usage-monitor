@@ -86,7 +86,7 @@ def document(*, at: datetime = NOW, fetched_at: datetime | None = None, state: s
 def offline(tmp_path, monkeypatch) -> list:
     """No test reads the real mutex, sign-in or history, or reaches the network: the app is closed,
     and a fetch fails as if offline unless a test asks for ``fetches``."""
-    monkeypatch.setenv("CUM_APPDATA_DIR", str(tmp_path / "appdata"))
+    monkeypatch.setenv("USAGE_MONITOR_APPDATA_DIR", str(tmp_path / "appdata"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
     monkeypatch.setattr(status, "monitor_running", lambda env=None: False)
     calls: list = []
@@ -339,7 +339,7 @@ def test_every_cycle_writes_the_status_file_when_given_a_folder(tmp_path, folder
 
 
 def test_without_a_folder_nothing_is_written(tmp_path, monkeypatch):
-    monkeypatch.setenv("CUM_APPDATA_DIR", str(tmp_path / "elsewhere"))
+    monkeypatch.setenv("USAGE_MONITOR_APPDATA_DIR", str(tmp_path / "elsewhere"))
     run_cycle(tmp_path, None)
     assert not (tmp_path / "elsewhere" / status.STATUS_NAME).exists()
 
@@ -438,6 +438,83 @@ def test_a_holding_guard_tells_each_agent_of_a_session_once(folder):
     assert hook(folder, {**TOOL, "agent_id": "a1"}) is None
     assert told(folder) == ["s1"]
     assert hook(folder, {**TOOL, "session_id": "s2"}) is not None
+
+
+def test_an_agents_last_call_is_told_nothing_and_uses_nothing_up(folder):
+    """An agent's StructuredOutput call hands back its answer, and nothing reads what follows it. The notice it got there
+    was wasted, and still counted the agent as told (#41). Now it hears at its next ordinary call instead."""
+    save(folder, guarded(document(weekly=78.0)))
+    answer = {**TOOL, "agent_id": "a1", "tool_name": "StructuredOutput"}
+    assert hook(folder, answer) is None and told(folder) == []
+    assert "wind-down point" in context(hook(folder, {**TOOL, "agent_id": "a1"}))
+    assert hook(folder, answer) is None
+
+
+def test_a_main_conversations_answer_call_does_not_use_up_the_threshold_line(folder):
+    save(folder, document(weekly=81.0))
+    assert hook(folder, {**TOOL, "tool_name": "StructuredOutput"}) is None
+    assert context(hook(folder, PROMPT)).startswith("Claude plan usage")
+
+
+def test_an_agent_is_told_that_only_the_main_conversation_can_wait(folder):
+    """Agents are not offered the wait, and were not told why. One wrapped up early on its own (#41)."""
+    save(folder, guarded(document(weekly=78.0)))
+    main = context(hook(folder, TOOL))
+    sub = context(hook(folder, {**TOOL, "agent_id": "a1"}))
+    assert cli.AGENT_CANNOT_WAIT in sub and cli.AGENT_CANNOT_WAIT not in main
+
+
+def test_get_plan_usage_says_when_the_guard_holds(folder, fetches):
+    """Sessions call the tool before long work, and read its summary line first. That line now says the guard holds,
+    and when work can resume (#41)."""
+    save(folder, guarded(document(weekly=78.0)))
+    (called,) = rpc(folder, {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "get_plan_usage", "arguments": {}}})
+    first = called["result"]["content"][0]["text"].split("\n")[0]
+    assert "usage guard holding: weekly 78% (cap 75%)" in first and "Wrap up at a safe point" in first
+    assert first == called["result"]["structuredContent"]["summary"]
+    save(folder, guarded(document(weekly=60.0)))
+    (called,) = rpc(folder, {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "get_plan_usage", "arguments": {}}})
+    assert "usage guard" not in called["result"]["content"][0]["text"].split("\n")[0]
+
+
+def test_switching_the_guard_off_and_on_starts_a_new_episode(folder):
+    """#41, left over from #40: a hold that ended because the guard was switched off, and that starts again when it is
+    switched back on in the same window, is told again. The app records when the guard was switched on."""
+    save(folder, guarded(document(weekly=78.0)))
+    assert hook(folder, TOOL) is not None and hook(folder, TOOL) is None
+    save(folder, guarded(document(weekly=78.0), enabled_at="2026-10-21T12:30:00+00:00"))
+    assert "wind-down point" in context(hook(folder, TOOL))
+    assert hook(folder, TOOL) is None and told(folder) == ["s1"]
+    save(folder, guarded(document(weekly=78.0), enabled_at="2026-10-21T12:45:00+00:00"))
+    assert hook(folder, TOOL) is not None
+
+
+def test_the_policy_carries_when_the_guard_was_switched_on(tmp_path):
+    on = "2026-10-21T12:30:00+00:00"
+    assert guard.policy_from({"guard_enabled": True, guard.ON_KEY: on}.get)["enabled_at"] == on
+    assert guard.policy_from({"guard_enabled": True, guard.ON_KEY: 5}.get)["enabled_at"] is None
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"guard_enabled": True, guard.ON_KEY: on}), encoding="utf-8")
+    assert guard.policy_from_file(path)["enabled_at"] == on
+    path.write_text(json.dumps({"guard_enabled": True}), encoding="utf-8")        # a file from before: no time yet
+    assert guard.policy_from_file(path)["enabled_at"] is None
+
+
+def test_the_told_list_counts_the_conversation_and_its_agents_apart(folder):
+    """#41: the card said two sessions were told when only a workflow's agents were. The list says, per session, whether
+    its main conversation heard and how many of its agents did."""
+    save(folder, guarded(document(weekly=78.0)))
+    hook(folder, {**TOOL, "agent_id": "a1"})                 # the agents of s1 hear it first
+    hook(folder, {**TOOL, "agent_id": "a2"})
+    hook(folder, {**TOOL, "session_id": "s2"})               # s2's main conversation
+
+    def who() -> dict:
+        verdict = guard.for_reader(status.read(folder / status.STATUS_NAME), NOW, folder)
+        return {entry["session_id"]: (entry["main"], entry["agents"]) for entry in sessions.told(folder, guard.episode(verdict))}
+
+    assert who() == {"s1": (False, 2), "s2": (True, 0)}
+    hook(folder, TOOL)                                       # s1's conversation hears it at its next tool call
+    assert who()["s1"] == (True, 2)
 
 
 def test_a_new_holding_episode_is_told_again(folder):
@@ -659,6 +736,176 @@ def test_a_wait_runs_even_with_no_stdout(monkeypatch):
 
 
 # ── The MCP server ───────────────────────────────────────────────────────────────
+
+# ── The usage guard: an agent's start, and a conversation that waits for its background work (#41) ──────────
+
+AGENT_START = {"session_id": "s1", "hook_event_name": "SubagentStart", "agent_id": "a1", "agent_type": "workflow-subagent"}
+WORKFLOW = {"id": "w1", "type": "workflow", "status": "running", "description": "audit", "name": "audit"}
+STOP = {"session_id": "s1", "hook_event_name": "Stop", "stop_hook_active": False, "last_assistant_message": "LAUNCHED",
+        "background_tasks": [WORKFLOW], "session_crons": []}
+
+
+def who_heard(folder: Path) -> list[tuple[str, bool, int]]:
+    verdict = guard.for_reader(status.read(folder / status.STATUS_NAME), NOW, folder)
+    return [(entry["session_id"], entry["main"], entry["agents"]) for entry in sessions.told(folder, guard.episode(verdict))]
+
+
+def test_an_agent_that_starts_during_a_hold_hears_it_before_its_first_prompt(folder):
+    """#41: a workflow's agents heard the notice at their first tool call, after a model call that could run for
+    minutes. SubagentStart hands it over before the agent's first prompt."""
+    save(folder, guarded(document(weekly=60.0)))
+    assert hook(folder, AGENT_START) is None                                  # armed: nothing to say
+    save(folder, guarded(document(weekly=78.0)))
+    said = hook(folder, AGENT_START)
+    assert said["hookSpecificOutput"]["hookEventName"] == "SubagentStart"
+    text = context(said)
+    assert "wind-down point" in text and cli.AGENT_CANNOT_WAIT in text and "--wait" not in text
+    assert hook(folder, {**TOOL, "agent_id": "a1"}) is None                   # told already: its tool calls say nothing
+    assert who_heard(folder) == [("s1", False, 1)]
+
+
+def test_claude_codes_own_agents_hear_nothing_at_their_start(folder):
+    """Claude Code starts agents of its own with no agent type (prompt suggestions and the like). Nothing of the
+    session reads what they are told, and they must not count as told."""
+    save(folder, guarded(document(weekly=78.0)))
+    assert hook(folder, {**AGENT_START, "agent_type": ""}) is None and told(folder) == []
+
+
+def watch(folder: Path, clock: Clock, event: dict | None = STOP, *,
+          parent_alive: Callable[[], bool] | None = None) -> tuple[int, str]:
+    err = io.BytesIO()
+    stdin = io.BytesIO(json.dumps(event).encode()) if event is not None else None
+    code = cli.run_watch(folder=folder, clock=clock, app_version="2.1.0", stdin=stdin, err=err, sleep=clock.sleep,
+                         epoch=lambda: (clock.now - NOW).total_seconds(), parent_alive=parent_alive)
+    return code, err.getvalue().decode()
+
+
+def test_a_conversation_that_waits_for_its_workflow_is_woken_when_the_guard_holds(folder):
+    """#41: the conversation that started a workflow was idle the whole hold, waiting for it, and nothing reached it.
+    The Stop hook watches while that work runs, and its exit wakes the conversation with the notice."""
+    save(folder, guarded(document(weekly=60.0)))
+    seen: list = []
+
+    def hold_begins(nap: int) -> None:
+        if nap == 1:
+            seen.append(sessions.watching(folder))
+        if nap == 3:
+            save(folder, guarded(document(weekly=78.0)))
+
+    clock = Clock(during=hold_begins)
+    agents = [{"id": f"a{n}", "type": "subagent", "status": "running", "agent_type": "Explore"} for n in (1, 2)]
+    shell = {"id": "b1", "type": "shell", "status": "running", "command": "npm test"}
+    code, said = watch(folder, clock, {**STOP, "background_tasks": [*agents, WORKFLOW, shell]})
+    assert code == cli.WAKE_EXIT and clock.naps == [cli.WATCH_POLL_S] * 3
+    assert said.startswith("Claude Usage Monitor: plan usage has reached the wind-down point")
+    assert "weekly 78% (cap 75%)" in said and "--wait --session s1`" in said
+    assert "as it waits for its background work (1 workflow, 2 agents)" in said            # a shell spends nothing
+    assert [(entry["session_id"], entry["work"]) for entry in seen[0]] == [("s1", {"workflow": 1, "agent": 2})]
+    assert sessions.watching(folder) == [] and who_heard(folder) == [("s1", True, 0)]
+    assert hook(folder, TOOL) is None                                         # its next tool call does not tell it again
+
+
+def test_a_conversation_with_nothing_running_that_spends_the_plan_is_left_alone(folder):
+    """An idle conversation is not disturbed. A Stop with no background work, or only shells, or from a Claude Code
+    that sends no list, ends at once, as does one with no session id or nowhere to write."""
+    save(folder, guarded(document(weekly=78.0)))
+    shell = {"id": "b1", "type": "shell", "status": "running", "command": "npm run dev"}
+    no_list = {key: value for key, value in STOP.items() if key != "background_tasks"}
+    for event in ({**STOP, "background_tasks": []}, {**STOP, "background_tasks": [shell]}, no_list,
+                  {**STOP, "session_id": ""}, None):
+        clock = Clock()
+        assert watch(folder, clock, event) == (0, "") and clock.naps == [], event
+    nowhere = cli.run_watch(folder=folder, clock=Clock(), app_version="2.1.0",
+                            stdin=io.BytesIO(json.dumps(STOP).encode()), err=None)
+    assert nowhere == 0 and told(folder) == [] and sessions.watching(folder) == []
+
+
+def test_a_watch_ends_when_the_guard_is_off(folder):
+    save(folder, guarded(document(weekly=78.0), enabled=False))
+    clock = Clock()
+    assert watch(folder, clock) == (0, "") and clock.naps == []
+    save(folder, guarded(document(weekly=60.0)))
+    clock = Clock(during=lambda nap: save(folder, guarded(document(weekly=60.0), enabled=False)) if nap == 2 else None)
+    assert watch(folder, clock) == (0, "") and len(clock.naps) == 2 and sessions.watching(folder) == []
+
+
+def test_a_conversation_told_already_is_not_woken_again(folder):
+    """It heard at a tool call before it went idle. The watch goes on, for a new hold, until a newer Stop with nothing
+    to watch ends it."""
+    save(folder, guarded(document(weekly=78.0)))
+    assert hook(folder, TOOL) is not None
+    clock = Clock(during=lambda nap: watch(folder, Clock(), {**STOP, "background_tasks": []}) if nap == 4 else None)
+    assert watch(folder, clock) == (0, "") and len(clock.naps) == 4
+
+
+def test_a_newer_stop_of_the_same_conversation_takes_the_watch_over(folder):
+    save(folder, guarded(document(weekly=60.0)))
+    newer = folder / sessions.WATCHING_DIR / "s1.json"
+
+    def taken_over(nap: int) -> None:
+        if nap == 2:                                   # another process watches s1 now, and the hold is its to tell
+            status.write({"pid": 1, "started": None, "session_id": "s1", "since": "x", "work": {"workflow": 1}}, newer)
+            save(folder, guarded(document(weekly=78.0)))
+
+    clock = Clock(during=taken_over)
+    assert watch(folder, clock) == (0, "") and len(clock.naps) == 2
+    assert told(folder) == [] and newer.exists()                              # the newer watch's file stays
+
+
+def test_a_watch_ends_with_the_claude_code_that_started_it(folder):
+    save(folder, guarded(document(weekly=60.0)))
+    clock = Clock()
+    assert watch(folder, clock, parent_alive=lambda: len(clock.naps) < 2) == (0, "") and len(clock.naps) == 2
+    assert sessions.watching(folder) == []
+    assert sessions.parent_check()() is True                                 # the process that started this one runs
+
+
+def test_a_watch_ends_itself_before_claude_codes_timeout_would(folder, monkeypatch):
+    monkeypatch.setattr(cli, "WATCH_MAX_S", 300.0)
+    save(folder, guarded(document(weekly=60.0)))
+    clock = Clock()
+    assert watch(folder, clock) == (0, "") and clock.now == NOW + timedelta(seconds=300)
+
+
+def test_a_watch_that_cannot_record_who_was_told_tells_it_at_a_later_look(folder, monkeypatch):
+    """A conversation woken twice is worse than one told a poll later: the watch speaks only once it is recorded."""
+    save(folder, guarded(document(weekly=78.0)))
+    real, calls = cli._load_memory, []
+    monkeypatch.setattr(cli, "_load_memory", lambda *a: calls.append(1) or (None if len(calls) <= 2 else real(*a)))
+    clock = Clock()
+    code, said = watch(folder, clock)
+    assert code == cli.WAKE_EXIT and len(clock.naps) == 2 and "wind-down point" in said and told(folder) == ["s1"]
+
+
+def test_a_watch_that_fails_wakes_nobody(folder, monkeypatch):
+    def broken(*_a: Any, **_k: Any) -> Any:
+        raise RuntimeError("boom")
+
+    save(folder, guarded(document(weekly=60.0)))
+    clock = Clock(during=lambda nap: monkeypatch.setattr(status, "current", broken) if nap == 1 else None)
+    assert watch(folder, clock) == (0, "") and sessions.watching(folder) == []
+
+
+def test_the_watch_command_line_and_where_it_writes(monkeypatch):
+    """Claude Code shows the woken conversation what an asyncRewake hook wrote on stderr, or on stdout when stderr is
+    empty. A windowed build has either only when Claude Code hands it a pipe."""
+    import usage_monitor.log
+
+    assert main.parse_args(["--watch"]) == main.Command("watch")
+    monkeypatch.setattr(usage_monitor.log, "setup_logging", lambda *_a, **_k: None)
+    calls: list = []
+    monkeypatch.setattr(cli, "run_watch", lambda **kwargs: calls.append(kwargs) or 0)
+    err, out = io.TextIOWrapper(io.BytesIO()), io.TextIOWrapper(io.BytesIO())
+    monkeypatch.setattr(main.sys, "stdin", None)
+    monkeypatch.setattr(main.sys, "stderr", err)
+    monkeypatch.setattr(main.sys, "stdout", out)
+    assert main._agent(main.Command("watch")) == 0 and calls[-1]["err"] is err.buffer
+    monkeypatch.setattr(main.sys, "stderr", None)
+    assert main._agent(main.Command("watch")) == 0 and calls[-1]["err"] is out.buffer
+    monkeypatch.setattr(main.sys, "stdout", None)
+    assert main._agent(main.Command("watch")) == 0 and calls[-1]["err"] is None and calls[-1]["stdin"] is None
+    assert callable(calls[-1]["parent_alive"])
+
 
 def rpc(folder: Path, *messages: Any) -> list:
     stdin = io.BytesIO(b"".join((m if isinstance(m, bytes) else json.dumps(m).encode()) + b"\n" for m in messages))

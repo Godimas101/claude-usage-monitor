@@ -7,7 +7,7 @@ Gates loading screen, the budgets, and the hygiene the rest of the dashboard's s
 minimal fake DOM (no browser) and check the engine itself: the easing, the figure formats, the roller, the typer, the decoder,
 the job loop, reduced motion (the setting and the OS preference, also switched on while something plays), the once-per-session
 boot flags, the stagger clamp and the hover marks (an entry, a card that moves off a resting pointer and back, the cool-down).
-They start node, so they need CUM_UI_TESTS=1 like every test that starts a process.
+They start node, so they need USAGE_MONITOR_UI_TESTS=1 like every test that starts a process.
 
 What the motion looks like in a real browser (frames, boots, performance) is checked by hand with Playwright; see
 docs/UI_ARCHITECTURE.md, "Motion". The hover rule has a probe of its own that drives a real Chromium against the dev server:
@@ -28,8 +28,8 @@ import pytest
 from usage_monitor import paths
 
 WEBUI = paths.resource_dir() / "usage_monitor" / "webui"
-UI_TESTS = os.environ.get("CUM_UI_TESTS") == "1"
-ui_only = pytest.mark.skipif(not UI_TESTS, reason="needs CUM_UI_TESTS=1 (starts a child process)")
+UI_TESTS = os.environ.get("USAGE_MONITOR_UI_TESTS") == "1"
+ui_only = pytest.mark.skipif(not UI_TESTS, reason="needs USAGE_MONITOR_UI_TESTS=1 (starts a child process)")
 # A child process of a test must not open a console window on the desktop of whoever runs the tests.
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -122,19 +122,19 @@ def test_the_motion_files_exist(name: str) -> None:
 
 @pytest.mark.parametrize("name", ["themes/nostromo.js", "themes/night_city.js", "themes/gates.js"])
 def test_a_theme_script_takes_the_engine_as_optional(name: str) -> None:
-    """The source half: every theme script reads the engine as `window.CUM_FX || null` and makes its director only when there is
+    """The source half: every theme script reads the engine as `window.USAGE_MONITOR_FX || null` and makes its director only when there is
     one. That a script then really works without it is test_a_theme_script_runs_without_the_engine, which runs it."""
     code = read(name)
-    assert re.search(r"var FX = window\.CUM_FX \|\| null;", code)
+    assert re.search(r"var FX = window\.USAGE_MONITOR_FX \|\| null;", code)
     assert "FX ? FX.director(" in code
 
 
 @pytest.mark.parametrize("theme_id", THEME_IDS)
 def test_a_theme_script_gives_the_page_its_three_hooks(theme_id: str) -> None:
     code = read(f"themes/{theme_id}.js")
-    assert f"CUM_THEME_FX.{theme_id} = {{ start: start }}" in code
+    assert f"USAGE_MONITOR_THEME_FX.{theme_id} = {{ start: start }}" in code
     for hook, source in (("enter", "dir.enter"), ("cancel", "dir.cancel"), ("arrive", "FX.noticeCard")):
-        assert re.search(rf"CUM_THEME_FX\.{theme_id}\.{hook} = {re.escape(source)};", code), (theme_id, hook)
+        assert re.search(rf"USAGE_MONITOR_THEME_FX\.{theme_id}\.{hook} = {re.escape(source)};", code), (theme_id, hook)
 
 
 def test_the_engine_exports_what_the_theme_scripts_use() -> None:
@@ -190,7 +190,7 @@ def test_nothing_in_the_layer_plays_without_the_run_class_a_placeholder_or_an_ov
     """Entrance motion hangs on main.fx-run (or a landing class); the rest is a placeholder, an overlay or a hover (the one-shot
     ones hang on [data-fx-play], which motion.js sets once per entry of the pointer, never on :hover)."""
     allowed = re.compile(r"\.fx-run|\.fx-land|data-fx-pend|data-fx\]|data-fx-play\]|\.fx-t\b|\.nc-boot|\.nc-b-|\.g-boot|\.g-b-|"
-                         r"\.g-ring|\.nm-boot|:hover|:active|\.is-typing|\.fx-u|\.cum-|\.nm-od-|\.nm-cmp|\.is-")
+                         r"\.g-ring|\.nm-boot|:hover|:active|\.is-typing|\.fx-u|\.mon-|\.nm-od-|\.nm-cmp|\.is-")
     for theme_id in THEME_IDS:
         for rule in CSS[f"themes/{theme_id}.motion.css"]:
             if rule.is_style_rule and re.search(r"(?<![-\w])animation(-name)?\s*:", rule.body):
@@ -426,11 +426,11 @@ def test_a_heat_map_comes_in_as_one_wipe_four_ms_a_column_at_most_400_ms(theme_i
     write apiece left History at 46 to 59 of 90 frames in its first 1.5 s at a 4x CPU slowdown (one wipe keeps 77 or more).
     The wipe goes left to right in a step a column (Gates: on its decelerate curve, fading up), 4 ms a column and 400 ms at most."""
     rules = CSS[f"themes/{theme_id}.motion.css"]
-    cells = [r for r in rules if r.is_style_rule and ".cum-cell" in r.header and re.search(r"(?<![-\w])animation(-name)?\s*:", r.body)]
+    cells = [r for r in rules if r.is_style_rule and ".mon-cell" in r.header and re.search(r"(?<![-\w])animation(-name)?\s*:", r.body)]
     assert not cells, [r.header for r in cells]                              # no cell has a timeline of its own
-    wipes = [r for r in rules if r.is_style_rule and ".cum-calendar" in r.header and ".cum-matrix" in r.header]
+    wipes = [r for r in rules if r.is_style_rule and ".mon-calendar" in r.header and ".mon-matrix" in r.header]
     assert len(wipes) == 1, theme_id
-    assert wipes[0].header.endswith(":is(.cum-calendar, .cum-matrix)")      # the svg itself, and what is in it comes with it
+    assert wipes[0].header.endswith(":is(.mon-calendar, .mon-matrix)")      # the svg itself, and what is in it comes with it
     body, name = wipes[0].body, HEAT_WIPE[theme_id]
     assert f"animation: {name} " in body and "min(var(--fx-cn, 1) * 4ms, 400ms)" in body
     if theme_id != "gates":
@@ -595,7 +595,7 @@ function world(opts) {
   };
   vm.createContext(sandbox);
   vm.runInContext(fs.readFileSync(path.join(webui, "motion.js"), "utf8"), sandbox, { filename: "motion.js" });
-  w.FX = sandbox.CUM_FX;
+  w.FX = sandbox.USAGE_MONITOR_FX;
   w.root = root;
   w.main = main;
   w.sandbox = sandbox;
@@ -837,11 +837,11 @@ function director(w) {
   heat.setAttribute("data-cols", "54");
   const heatCells = [];
   for (let i = 0; i < 6; i++) { const c = new El("rect"); c.setAttribute("data-c", String(Math.floor(i / 2))); heatCells.push(c); }
-  heat._lists[".cum-cell"] = heatCells;
+  heat._lists[".mon-cell"] = heatCells;
   const unsaid = new El("svg");                              // a heat map that does not say (an old chart): a one-step wipe
   const nonsense = new El("svg");
   nonsense.setAttribute("data-cols", "many");
-  w.main._lists[".cum-calendar, .cum-matrix"] = [heat, unsaid, nonsense];
+  w.main._lists[".mon-calendar, .mon-matrix"] = [heat, unsaid, nonsense];
   w.FX.prepare(w.main, {});
   out.heat = {
     columns: [heat, unsaid, nonsense].map((svg) => svg.style.vars["--fx-cn"]),
@@ -1096,10 +1096,10 @@ def theme_scripts() -> dict[str, Any]:
 @pytest.mark.parametrize("theme_id", THEME_IDS)
 def test_a_theme_script_runs_without_the_engine(theme_scripts: dict[str, Any], theme_id: str) -> None:
     """The page is complete and still without motion.js, so a theme script may use the engine only behind `if (FX)`. Run with
-    no window.CUM_FX it has to load, register its start hook and nothing else (the motion hooks exist only with an engine), and
+    no window.USAGE_MONITOR_FX it has to load, register its start hook and nothing else (the motion hooks exist only with an engine), and
     start() (twice, as app.js calls it), the frames and timers it leaves behind, being switched off and on again and a
     reduced-motion preference must not throw. A later unguarded `FX.x()` took the whole theme script down and a test that read
-    the source for `var FX = window.CUM_FX || null;` stayed green."""
+    the source for `var FX = window.USAGE_MONITOR_FX || null;` stayed green."""
     found = theme_scripts[theme_id]
     assert found["engine"] == "undefined", "the scenario must run with no engine"
     assert found["loaded"] is True and found["error"] is None, found["error"]

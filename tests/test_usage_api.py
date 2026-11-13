@@ -348,7 +348,7 @@ def test_read_credentials_block_without_token_is_present_but_tokenless(tmp_path)
     assert info.present is True and token is None
 
 
-@pytest.mark.parametrize("expires", ["soon", True, 1e30, None])
+@pytest.mark.parametrize("expires", ["soon", True, 1e30, None, 0, -5])     # 0: written by some Claude Code builds (#51)
 def test_read_credentials_bad_expiry_is_unknown_not_expired(tmp_path, expires):
     data = json.loads(json.dumps(CREDS))
     data["claudeAiOauth"]["expiresAt"] = expires
@@ -356,6 +356,18 @@ def test_read_credentials_bad_expiry_is_unknown_not_expired(tmp_path, expires):
     path.write_text(json.dumps(data), encoding="utf-8")
     info, token = ua.read_credentials(path)
     assert info.expires_at is None and info.is_expired(T0) is False and token == TOKEN
+
+
+def test_a_sign_in_with_an_expiry_of_zero_is_asked_about_not_called_expired(tmp_path):
+    """Some Claude Code builds wrote expiresAt 0 on a fresh sign-in, with a token that works (#51). Read as 1970, it was
+    STALE without a request, and signing in again did not help. Unknown instead: the server's answer decides."""
+    data = json.loads(json.dumps(CREDS))
+    data["claudeAiOauth"]["expiresAt"] = 0
+    path = tmp_path / ".credentials.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    client, opener = make_client(path, ok(), http_error(401))
+    assert client.fetch(T0).status is ApiStatus.LIVE
+    assert client.fetch(T0 + secs(600)).status is ApiStatus.STALE        # and a token the server refuses is still stale
 
 
 def test_credentials_info_never_carries_the_token(tmp_path):
@@ -452,6 +464,22 @@ def test_401_and_403_are_stale_until_the_credentials_file_changes(tmp_path, code
     write_credentials(path, mtime=BASE_MTIME + 120)  # Claude Code signed in again
     result = client.fetch(T0 + secs(3601))
     assert opener.calls == 2 and result.status is ApiStatus.LIVE and result.fresh is True
+
+
+def test_the_expired_detail_says_to_use_claude_code_not_just_open_it(tmp_path):
+    """An open but idle Claude Code lets the sign-in run out: it renews it only when it sends a request (#52)."""
+    assert ua.EXPIRED_DETAIL == "The Claude sign-in has expired; send Claude Code a message to renew it"
+    client, _ = make_client(write_credentials(tmp_path / ".credentials.json", expires_ms=ms_at(T0 - secs(1))), ok())
+    assert client.fetch(T0).detail == ua.EXPIRED_DETAIL
+
+
+@pytest.mark.parametrize(("code", "advice"), [
+    (401, "send Claude Code a message, and sign in again if it asks"),   # its next request renews it, or asks for a sign-in
+    (403, "sign in to Claude Code again with /login"),                   # a sign-in that works for Claude Code, not for usage
+])
+def test_a_rejected_sign_in_says_what_fixes_its_code(tmp_path, code, advice):
+    client, _ = make_client(write_credentials(tmp_path / ".credentials.json"), http_error(code))
+    assert client.fetch(T0).detail == f"Claude did not accept the sign-in (HTTP {code}); {advice}"
 
 
 def test_expired_token_recovers_once_the_file_is_refreshed(tmp_path):

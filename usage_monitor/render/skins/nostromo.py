@@ -178,7 +178,7 @@ STATE_WORDS: dict[str, str] = {
 # stale_message stays the neutral default for every status not listed here (a missing login has no
 # mockup wording yet, so it keeps the neutral text).
 STALE_MESSAGES: dict[ApiStatus, str] = {
-    ApiStatus.STALE: "AUTH LINK LOST.\nOPEN CLAUDE CODE TO RESTORE.",
+    ApiStatus.STALE: "AUTH LINK LOST.\nUSE CLAUDE CODE TO RESTORE.",
 }
 
 

@@ -94,7 +94,8 @@ def test_an_episode_is_the_limits_over_their_caps_their_windows_and_the_caps():
 def test_the_policy_defaults_come_from_settings():
     assert guard.DEFAULTS == {key: settings_mod.DEFAULTS[key] for key in guard.SETTING_KEYS}
     assert guard.policy_from(settings_mod.DEFAULTS.get) == {
-        "enabled": False, "session_cap": 95, "weekly_cap": 90, "scoped_cap": None, "stagger_s": 120}
+        "enabled": False, "session_cap": 95, "weekly_cap": 90, "scoped_cap": None, "stagger_s": 120,
+        "enabled_at": None}                                      # never switched on since v2.3 (#41)
 
 
 def test_settings_accept_only_sensible_guard_values():
@@ -157,7 +158,8 @@ def test_told_lists_the_sessions_told_of_this_episode(tmp_path):
         "s2": {"at": "x", "guard": {"episode": "session@S", "told_at": "2026-10-28T20:00:00Z"}},
         "s3": {"at": "x", "steps": {}},
     }), encoding="utf-8")
-    assert sessions.told(tmp_path, "weekly@W") == [{"session_id": "s1", "told_at": "2026-10-28T21:05:00Z"}]
+    assert sessions.told(tmp_path, "weekly@W") == [{"session_id": "s1", "told_at": "2026-10-28T21:05:00Z", "main": True, "agents": 0}]
+    # a record with no agent list (from before it was kept) counts its conversation as told (#41)
     assert sessions.told(tmp_path, "") == []
 
 

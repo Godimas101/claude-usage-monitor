@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from usage_monitor.agent import status
+from usage_monitor.agent import guard, status
 from usage_monitor.log import get_logger
 
 log = get_logger(__name__)
@@ -107,9 +107,22 @@ def call_tool(*, folder: Path, clock: Callable[[], datetime], app_version: str) 
         log.exception("get_plan_usage failed")
         return {"content": [{"type": "text", "text": f"Could not read the plan usage ({type(exc).__name__})."}],
                 "isError": True}
+    out["summary"] += _guard_line(doc, clock(), folder)
     body = {key: value for key, value in out.items() if key != "summary"}
     text = f"{out['summary']}\n\n{json.dumps(body, indent=1)}"
     return {"content": [{"type": "text", "text": text}], "structuredContent": out, "isError": False}
+
+
+def _guard_line(doc: Any, now: datetime, folder: Path) -> str:
+    """What the summary adds while the usage guard holds: the caps reached, and when work can resume (#41). A session
+    calls the tool before long work, and reads the summary line first."""
+    verdict = guard.for_reader(doc, now, folder) if doc else None
+    if not verdict or verdict["state"] != guard.HOLDING:
+        return ""
+    over = ", ".join(f"{item['label']} {item['percent']:.0f}% (cap {item['cap']}%)" for item in verdict["over"])
+    resume = status.parse_time(verdict.get("resume_at"))
+    when = f"; work can resume {status.when(resume, now)}" if resume is not None else ""
+    return f" | usage guard holding: {over}. Wrap up at a safe point{when}."
 
 
 def _result(msg_id: Any, result: dict) -> dict:

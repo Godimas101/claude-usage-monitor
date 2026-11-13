@@ -2,7 +2,7 @@
 
 The arithmetic helpers and the decision logic run anywhere on Windows, with the Win32 calls faked
 where needed. The queries that need Explorer and an interactive desktop are skipped unless
-CUM_UI_TESTS=1 (CI has no desktop).
+USAGE_MONITOR_UI_TESTS=1 (CI has no desktop).
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from usage_monitor.ui import win32
 from usage_monitor.ui.platform import Rect
 
 UI = pytest.mark.skipif(
-    os.environ.get("CUM_UI_TESTS") != "1", reason="needs an interactive desktop: set CUM_UI_TESTS=1"
+    os.environ.get("USAGE_MONITOR_UI_TESTS") != "1", reason="needs an interactive desktop: set USAGE_MONITOR_UI_TESTS=1"
 )
 
 HD = Rect(0, 0, 1920, 1080)
@@ -173,8 +173,8 @@ def test_apps_use_light_theme(monkeypatch, stored, expected):
 
 
 def test_read_dword_returns_none_for_a_missing_value():
-    assert plat._read_dword(r"Software\Microsoft\Windows\DWM", "CumNoSuchValue") is None
-    assert plat._read_dword(r"Software\CumNoSuchKey", "AccentColor") is None
+    assert plat._read_dword(r"Software\Microsoft\Windows\DWM", "UsageMonitorNoSuchValue") is None
+    assert plat._read_dword(r"Software\UsageMonitorNoSuchKey", "AccentColor") is None
 
 
 def test_the_registry_readers_return_the_documented_types():

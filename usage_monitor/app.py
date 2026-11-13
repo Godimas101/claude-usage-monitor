@@ -75,6 +75,7 @@ from usage_monitor.ui.widgets import (
     RenderContext,
     TaskbarWidget,
     Tooltip,
+    strip_supported,
 )
 
 log = get_logger(__name__)
@@ -91,6 +92,12 @@ UI_CALL_TIMEOUT_S = 5.0
 GITHUB_PREFIX = "https://github.com/"
 UPDATE_RECHECK_S = 6 * 60 * 60      # the monitor looks for a newer release again this often while it runs
 NOTIFIED_KEY = "notified_version"   # setting: the newest release the monitor has already put a toast up for
+GUARD_ON_KEY = "guard_enabled_at"   # setting: when the usage guard was last switched on (agent/guard.ON_KEY)
+# What the last update ended of Claude Code's calls to the monitor, written by Setup after a silent update (installer.iss,
+# WriteUpdateNote) and said once as a toast when the monitor is back (MonitorApp._announce_update_note).
+UPDATE_NOTE_FILE = "update-note.txt"
+UPDATE_NOTE_TITLE = "Claude Usage Monitor updated"
+UPDATE_NOTE_MAX = 250                   # a balloon's text holds 255 characters
 UPDATE_TOAST_BODY = "Open the tray menu or the dashboard to update"
 
 # Settings that change what the UI shows. Anything else (poll interval, dashboard bounds) is ignored here.
@@ -115,7 +122,7 @@ _CloseHandle.restype = wintypes.BOOL
 
 
 def is_dev_instance(env: Mapping[str, str] | None = None) -> bool:
-    """True when CUM_DEV_INSTANCE=1: a test build that runs beside the installed copy."""
+    """True when USAGE_MONITOR_DEV_INSTANCE=1: a test build that runs beside the installed copy."""
     return (os.environ if env is None else env).get(DEV_ENV) == "1"
 
 
@@ -586,6 +593,7 @@ class MonitorApp:
         self._alerts: AlertEngine | None = None     # built with the settings, in _build
         self._failures: dict[str, int] = {}
         self._torn_down = False
+        self._update_note_done = False             # the note of a silent update was said, or there was none
         self._unsubscribers: list[Callable[[], None]] = []
 
     # ── Lifecycle ──
@@ -897,6 +905,37 @@ class MonitorApp:
         if shown is not False:      # False: the shell had no icon to attach it to (Explorer restarting); try again later
             tracker.mark_announced(info)
 
+    def _announce_update_note(self) -> None:
+        """Say once what the last update ended, then delete Setup's note. UI thread.
+
+        To replace the files, Setup ends the monitor's MCP tool in open Claude Code sessions and their waits on the usage
+        guard. Run by hand, it says so on its last page. Run by the app's update, nobody sees Setup, so it leaves the
+        text in UPDATE_NOTE_FILE for this. Held back like the update toast while nobody would see it, and kept when the
+        shell has no icon to attach it to; only an update writes one, and an update starts the monitor again."""
+        if self._update_note_done or self.tray is None or self._torn_down:
+            return
+        note = paths.app_data_dir() / UPDATE_NOTE_FILE
+        try:
+            text = " ".join(note.read_text(encoding="utf-8-sig", errors="replace").split())   # one line, as a balloon shows it
+        except OSError:                 # none, which is the usual case, or one that cannot be read
+            self._update_note_done = True
+            return
+        if text:
+            if self._toast_held_back():
+                return
+            try:
+                shown = self.tray.notify(UPDATE_NOTE_TITLE, text[:UPDATE_NOTE_MAX])
+            except Exception:  # a bug, not the shell's refusal: do not hit it again at every state
+                log.exception("could not show the update note")
+                shown = True
+            if shown is False:
+                return
+        self._update_note_done = True
+        try:
+            note.unlink()
+        except OSError:
+            log.debug("could not delete the update note", exc_info=True)
+
     def _toast_held_back(self) -> bool:
         """Whether a toast would go unseen right now. UI thread."""
         if self.host is not None and self.host.locked:
@@ -962,9 +1001,12 @@ class MonitorApp:
         self._refresh()
         self._raise_alerts(state)
         self._announce_update()
+        self._announce_update_note()
 
     def _on_setting(self, key: str, _value: Any) -> None:
         """Settings listener, on whichever thread changed the setting."""
+        if key == "guard_enabled" and _value is True:     # a new holding episode starts from it (agent/guard.episode)
+            self.settings.set(GUARD_ON_KEY, self._clock().astimezone(timezone.utc).isoformat(timespec="seconds"))
         if key.startswith("_") or key not in (THEME_KEYS | WIDGET_KEYS | LOOK_KEYS | {"check_updates"}):
             return
         with self._lock:
@@ -1000,6 +1042,7 @@ class MonitorApp:
         self.refresh_now()
         self._refresh()
         self._announce_update()     # a release found while the session was locked is announced to whoever is back
+        self._announce_update_note()
 
     def _on_display(self) -> None:
         """The display layout or the taskbar changed: place the widgets again."""
@@ -1226,14 +1269,17 @@ class MonitorApp:
             if widget is None:
                 return None
             window = widget.window
-            return {"visible": bool(window.visible), "rect": list(window.rect), "dpi": window.dpi}
+            return {"visible": bool(window.visible), "rect": list(window.rect), "dpi": window.dpi,
+                    "parent": window.parent}
 
         theme = self._resolved
+        taskbar = self._plat.taskbar_info()
         return {
             "locked": bool(self.host and self.host.locked),
             "theme": [theme[0].id, theme[1].id] if theme else None,
             "floating": window_info(self.floating),
             "taskbar": window_info(self.taskbar),
+            "taskbar_hostable": bool(taskbar is not None and strip_supported(taskbar)),   # a taskbar the strip can sit in
             "tray": {"added": bool(self.tray and self.tray.added), "icon_px": self.tray.icon_size if self.tray else 0},
             "tooltip_visible": bool(self.tooltip and self.tooltip.visible),
             "frames": self.stats.snapshot(),
@@ -1518,8 +1564,22 @@ class SmokeTest:
             raise RuntimeError("the tray icon was not added")
         if before["update_recheck"] is not True:
             raise RuntimeError("the six-hourly update check is not armed")
+        problem = self._strip_problem(before)
+        if problem:
+            raise RuntimeError(problem)
         self.report["windows"] = before
-        return {"tooltip_shown": shown, "frames_before": before["frames"], "frames_after": after["frames"]}
+        strip = before.get("taskbar")
+        return {"tooltip_shown": shown, "frames_before": before["frames"], "frames_after": after["frames"],
+                "strip_in_taskbar": bool(strip is not None and strip.get("parent") is not None)}
+
+    @staticmethod
+    def _strip_problem(snap: Mapping[str, Any]) -> str | None:
+        """Why the strip is not where it belongs, or None: a taskbar here can hold it (#29), and it floats instead.
+        A refused taskbar floats it until it is asked again a minute later (#32), so a release run must not see that."""
+        strip = snap.get("taskbar")
+        if strip is not None and snap.get("taskbar_hostable") and strip.get("parent") is None:
+            return "the taskbar strip floats over the taskbar instead of sitting in it"
+        return None
 
     def _show_tooltip(self) -> bool:
         """Show the tooltip the way a hover dwell does, then hide it again."""
@@ -1571,6 +1631,9 @@ class SmokeTest:
                 raise RuntimeError(f"the UI did not switch to {theme_id}")
         if seen["taskbar_off"]["taskbar"] is not None or seen["taskbar_on"]["taskbar"] is None:
             raise RuntimeError("the taskbar widget did not follow show_taskbar")
+        problem = self._strip_problem(seen["taskbar_on"])        # the strip it brings back must be in the taskbar too
+        if problem:
+            raise RuntimeError(problem)
         return {label: {"theme": snap["theme"], "taskbar": snap["taskbar"] is not None,
                         "frames": snap["frames"]["rendered"]} for label, snap in seen.items()}
 

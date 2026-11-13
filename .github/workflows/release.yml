@@ -91,7 +91,7 @@ jobs:
         if: steps.exists.outputs.skip == 'false'
         timeout-minutes: 10
         env:
-          CUM_UI_TESTS: '1'
+          USAGE_MONITOR_UI_TESTS: '1'
         run: python -m pytest tests/test_webui.py tests/test_motion.py
 
       - name: Build the exe
@@ -139,10 +139,10 @@ jobs:
         timeout-minutes: 5
         shell: pwsh
         env:
-          CUM_DEV_INSTANCE: '1'
+          USAGE_MONITOR_DEV_INSTANCE: '1'
         run: |
           New-Item -ItemType Directory -Force smoke-data, smoke-claude | Out-Null
-          $env:CUM_APPDATA_DIR = (Resolve-Path smoke-data).Path
+          $env:USAGE_MONITOR_APPDATA_DIR = (Resolve-Path smoke-data).Path
           $env:CLAUDE_CONFIG_DIR = (Resolve-Path smoke-claude).Path
           $p = Start-Process "dist\ClaudeUsageMonitor\ClaudeUsageMonitor.exe" -ArgumentList '--smoke-test', '45', 'smoke.json' -Wait -PassThru
           $report = Get-Content smoke.json -Raw | ConvertFrom-Json

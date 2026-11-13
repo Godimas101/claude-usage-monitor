@@ -17,7 +17,7 @@
  * 4. The boot: a jack-in sequence (a breach-protocol panel, a log that resolves, the RAM filling, one RGB split, access
  *    granted) once per browser session, a click or Esc skips it, never under reduced motion. The page enters as it collapses.
  *
- * app.js calls window.CUM_THEME_FX.night_city.start() after this file loads, and again whenever the theme is
+ * app.js calls window.USAGE_MONITOR_THEME_FX.night_city.start() after this file loads, and again whenever the theme is
  * applied, so start() is safe to call many times. It reads only the text of figures already on the page and never
  * stores or sends anything.
  */
@@ -36,7 +36,7 @@
     '<circle cx="32" cy="32" r="27"/><circle cx="32" cy="32" r="13" stroke-dasharray="3 3"/>' +
     '<path d="M32 3v11M32 50v11M3 32h11M50 32h11"/><path d="M7 15V7h8M57 15V7h-8M7 49v8h8M57 49v8h-8"/></svg>';
 
-  var FX = window.CUM_FX || null;
+  var FX = window.USAGE_MONITOR_FX || null;
   var started = false;
   var memory = {};        // figure key -> the text it showed last, for the page on screen
   var memoryPage = null;
@@ -530,11 +530,11 @@
     later();
   }
 
-  window.CUM_THEME_FX = window.CUM_THEME_FX || {};
-  window.CUM_THEME_FX.night_city = { start: start };
+  window.USAGE_MONITOR_THEME_FX = window.USAGE_MONITOR_THEME_FX || {};
+  window.USAGE_MONITOR_THEME_FX.night_city = { start: start };
   if (dir) {
-    window.CUM_THEME_FX.night_city.enter = dir.enter;
-    window.CUM_THEME_FX.night_city.cancel = dir.cancel;
-    window.CUM_THEME_FX.night_city.arrive = FX.noticeCard;
+    window.USAGE_MONITOR_THEME_FX.night_city.enter = dir.enter;
+    window.USAGE_MONITOR_THEME_FX.night_city.cancel = dir.cancel;
+    window.USAGE_MONITOR_THEME_FX.night_city.arrive = FX.noticeCard;
   }
 })();

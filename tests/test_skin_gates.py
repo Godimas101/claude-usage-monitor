@@ -2,7 +2,7 @@
 
 Everything renders to memory or to pytest's tmp_path, so none of it needs a desktop and all of it runs
 in CI. The two tests that hand frames to real (off-screen) windows and icons are skipped unless
-CUM_UI_TESTS=1.
+USAGE_MONITOR_UI_TESTS=1.
 
 Pixel checks look at shapes (bars, plates, rings, the card), not at text, so they hold with whatever
 font the machine has. Text is checked through the runs the skin queues (positions and widths).
@@ -38,7 +38,7 @@ STATES = dump.STATE_NAMES
 NOW = dump.SAMPLE_NOW
 
 UI = pytest.mark.skipif(
-    os.environ.get("CUM_UI_TESTS") != "1", reason="needs an interactive desktop: set CUM_UI_TESTS=1"
+    os.environ.get("USAGE_MONITOR_UI_TESTS") != "1", reason="needs an interactive desktop: set USAGE_MONITOR_UI_TESTS=1"
 )
 
 
@@ -723,6 +723,7 @@ def test_the_footer_copy_follows_the_state():
         return gates._footer_runs(m)[0][0]
 
     assert lead(dump.sample_model("stale")) == "Hmm, we lost touch."
+    assert gates._footer_runs(dump.sample_model("stale"))[1][0] == " Send Claude Code a message."   # an open one is not enough (#52)
     assert gates._footer_runs(dump.sample_model("offline"))[0][0].startswith("No connection")
     assert gates._footer_runs(dump.sample_model("paused"))[0][0].startswith("Paused")
     assert lead(dump.sample_model("rate_limited")) == "Rate limited."
@@ -823,6 +824,15 @@ def test_footers_fit_the_card():
         gates._footer(ink, pal, m, gates.FOOT_TOP)
         for text, left, right, _ in queued_runs(ink):
             assert gates.LEFT <= left and right <= gates.RIGHT + 0.5, (name, text)
+
+
+def test_the_sign_in_advice_fits_whole_without_an_ellipsis():
+    """The fit above holds even for a cut line. The advice must be read whole (#52)."""
+    pal = Palette.for_variant(theme(), variant("system-dark"))
+    for scale in (1.0, 1.5, 2.0):
+        ink = gates.Ink(gates.CARD_W, gates.CARD_H, scale, gates._fonts(theme()))
+        gates._footer(ink, pal, dump.sample_model("stale"), gates.FOOT_TOP)
+        assert "".join(text for text, *_ in queued_runs(ink)) == "Hmm, we lost touch. Send Claude Code a message.", scale
 
 
 def test_fit_cuts_a_long_text_with_an_ellipsis():
@@ -1059,7 +1069,7 @@ def test_dump_frames_writes_gates_frames_and_a_contact_sheet(tmp_path: Path):
         assert sheet.format == "PNG" and sheet.width > 600
 
 
-# ── Real windows and icons (CUM_UI_TESTS=1) ───────────────────────────────────
+# ── Real windows and icons (USAGE_MONITOR_UI_TESTS=1) ───────────────────────────────────
 
 @UI
 @pytest.mark.skipif(sys.platform != "win32", reason="the Win32 UI layer is Windows only")
@@ -1067,7 +1077,7 @@ def test_gates_frames_show_in_layered_windows():
     from usage_monitor.ui.host import UIHost
     from usage_monitor.ui.layered import LayeredWindow
 
-    host = UIHost(controller_class=f"CUM.Test.Gates.{uuid.uuid4().hex[:8]}")
+    host = UIHost(controller_class=f"UsageMonitor.Test.Gates.{uuid.uuid4().hex[:8]}")
     try:
         offscreen = (-30000, -30000)
         m = dump.sample_model("warning")

@@ -72,29 +72,32 @@ So attach the one `ClaudeUsageMonitorSetup-v<VERSION>.exe` that the workflow bui
 not swap it by hand later. The updater reads `releases/latest`, which skips drafts and pre-releases, so a
 pre-release is offered to nobody.
 
-What the digest proves is that the file is the one GitHub lists for that release, not who published it. Anyone who can
-edit the release can upload another installer, GitHub lists the new digest, and every installed copy runs it. The
-installer is not code-signed. Two things would close the gap: turn on GitHub's **immutable releases** for the
-repository, so a published asset cannot be replaced; and sign the installer and have `update_check.py` verify the
-signature as well as the digest.
+What the digest proves is that the file is the one GitHub lists for that release, not who published it. GitHub's
+**immutable releases** are on for this repository (since v2.3.0), so once a release is published nobody can replace,
+add or delete its assets, or move its tag. Its title and notes can still be edited. A draft is not protected, which is
+why the asset goes on the draft and is checked there (see below). The installer is not code-signed. Signing it, and
+having `update_check.py` verify the signature as well as the digest, would also prove who built it.
 
 ## Before you bump `VERSION`
 
-- [ ] `python -m pytest -q` passes, and so does `CUM_UI_TESTS=1 python -m pytest -q` on your desktop (it adds the
+- [ ] `python -m pytest -q` passes, and so does `USAGE_MONITOR_UI_TESTS=1 python -m pytest -q` on your desktop (it adds the
       window and process tests, including the update helpers under the real `cmd.exe`, the installer script
       compiled by Inno Setup, and the signature check of the WebView2 download). `tests.yml` is green on the
       commit that will reach `main`.
-- [ ] The sandboxed installer runs pass: `CUM_UI_TESTS=1 CUM_INSTALLER_E2E=1 python -m pytest -q tests/test_update_check.py -k sandboxed`.
+- [ ] The sandboxed installer runs pass: `USAGE_MONITOR_UI_TESTS=1 USAGE_MONITOR_INSTALLER_E2E=1 python -m pytest -q tests/test_update_check.py -k sandboxed`.
       They install and uninstall a **renamed** copy of the installer (own AppId, folder, Run value and mutex; the test
       refuses to run if a real name is left in it) and check the Start with Windows entry for each updater and each
       starting state, and that an update with a file held open stops with the old install whole. Your own install is
       read before and after and must be unchanged. They need Inno Setup 6.
+- [ ] Every frame `CHANGED` in `tests/test_frame_golden.py` lists is a change this release means to make. That test
+      checks every widget frame against the last release's, pixel for pixel, and `CHANGED` names the ones that differ
+      on purpose (#32). Compare any you doubt with `python main.py --dump-frames DIR` here and at the last tag.
 - [ ] `CHANGELOG.md` has the user-facing notes under `## [X.Y.Z] — YYYY-MM-DD` (the heading must start with
       `## [X.Y.Z]` or the notes are not found), and `[Unreleased]` is empty above it. `README.md` agrees.
 - [ ] `build.bat` succeeds. It builds the exe and the installer from `VERSION`, checks that the frozen exe
       reports that version (`--print-version`) and prints the installer's SHA-256. It needs Inno Setup 6.3+
-      and `python -m pip install -r requirements.txt pyinstaller`. Set `CUM_DISTPATH`, `CUM_WORKPATH` and
-      `CUM_OUTDIR` to short folders if the checkout is deep (both tools fail past 260 characters). Its toolchain line
+      and `python -m pip install -r requirements.txt pyinstaller`. Set `USAGE_MONITOR_DISTPATH`, `USAGE_MONITOR_WORKPATH` and
+      `USAGE_MONITOR_OUTDIR` to short folders if the checkout is deep (both tools fail past 260 characters). Its toolchain line
       (Python, PyInstaller, Pillow, pywebview) should match what the release workflow's last log shows; if it does
       not, build again with CI's versions before the next two items.
 - [ ] **The pipeline has run on a runner.** Run the workflow by hand with publish left off (a rehearsal), from a
@@ -103,24 +106,30 @@ signature as well as the digest.
       is the one that can fail for a reason of that machine: read its report before blaming the build. The workflow
       reads the WebView2 runtime's files before the smoke test. On a fresh runner they are cold, and a cold runtime
       started the dashboard in up to 32 s (image win25-vs2026/20261030), past the smoke test's 15 s.
-- [ ] The frozen smoke run is clean on your own machine too: with `CUM_DEV_INSTANCE=1`, `CUM_APPDATA_DIR=<scratch folder>` and
+- [ ] The frozen smoke run is clean on your own machine too: with `USAGE_MONITOR_DEV_INSTANCE=1`, `USAGE_MONITOR_APPDATA_DIR=<scratch folder>` and
       `CLAUDE_CONFIG_DIR=<empty folder>` (so your own transcripts stay out of it) run
       `dist\ClaudeUsageMonitor\ClaudeUsageMonitor.exe --smoke-test 45 report.json`. Exit code 0 and `"ok": true`.
-      Close any other dev instance first (`python main.py` with `CUM_DEV_INSTANCE=1`): there is one dev mutex,
-      and while another holds it the report says `the app never started its loop`.
+      Close any other dev instance first (`python main.py` with `USAGE_MONITOR_DEV_INSTANCE=1`): there is one dev mutex,
+      and while another holds it the report says `the app never started its loop`. The run fails when the strip floats
+      over a taskbar that could hold it, so its windows step says `"strip_in_taskbar": true` on a bottom taskbar.
+- [ ] **The strip in the taskbar, by eye.** With the new build running and the strip on, open Start, then Search, then
+      the tray's hidden icons (^). The strip stays in sight and does not blink. Hover a taskbar button until its preview
+      shows: the strip stays too (#29). The smoke run cannot see that Windows lifts the taskbar over it.
 - [ ] On a spare Windows 11 user or a VM, **not over your own install**, run the new `ClaudeUsageMonitorSetup`:
   - the tray icon, widgets and dashboard window appear, and **Start with Windows** is ticked;
   - `reg query HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v ClaudeUsageMonitor` shows the quoted path
     of the exe and nothing else, and the monitor starts at the next sign-in;
-  - running the installer again while the monitor runs makes Setup ask you to close it, and the dashboard
-    window closes with it;
-  - uninstalling removes that Run value and asks before deleting `%APPDATA%\ClaudeUsageMonitor` (No keeps it).
+  - running the installer again while the monitor runs closes the monitor without asking (#53), the dashboard
+    window closes with it, and the last page starts the monitor again;
+  - uninstalling removes that Run value and Windows' startup record for it, takes the hooks and the MCP tool out of
+    Claude Code, and asks before deleting `%APPDATA%\ClaudeUsageMonitor` (No keeps it).
 - [ ] **With Claude Code open.** In a Claude Code session that started after the monitor's MCP tool was registered,
-      `/mcp` shows `claude-usage` as connected. Close the monitor, and run the new installer by hand over that install
-      (your own install is fine for this one). It goes through without an "in use" stop. In that session the tool
-      answers again on its next use, or after `/mcp`. The sandboxed runs (`CUM_UI_TESTS=1` and `CUM_INSTALLER_E2E=1`;
-      the stand-in tests also need the .NET Framework's `csc.exe`) cover the same with stand-in readers, and the
-      uninstall.
+      `/mcp` shows `claude-usage` as connected. With the monitor running, run the new installer by hand over that install
+      (your own install is fine for this one). It closes the monitor without asking, goes through without an "in use"
+      stop, and its last page says it closed the monitor's tool in a Claude Code session. In that session the tool
+      answers again on its next use, or after `/mcp`. The sandboxed runs (`USAGE_MONITOR_UI_TESTS=1` and `USAGE_MONITOR_INSTALLER_E2E=1`;
+      the stand-in tests also need the .NET Framework's `csc.exe`) cover the same with stand-in readers, hooks that
+      keep starting the exe all through an update, and the uninstall.
 - [ ] **Upgrade from v1, the way v1.1.5's updater does it.** That updater cannot be changed and is the one every v1
       user will run, so this is the check that matters most. On the same spare user or VM, install v1.1.5 and make the
       state you want to test: **on** is what v1 wrote (the exe followed by the path of a script, see
@@ -167,6 +176,10 @@ own build; these run on that one.
 ## After you publish
 
 - [ ] `releases/latest` is the new release (`gh release view --json tagName`), with its one asset and `sha256:` digest.
+- [ ] The golden frames are this release's. On the next release's branch, record the new tag's frames (the three
+      commands at the top of `tests/frame_digests.py`: a worktree of the tag, the record, then remove the worktree),
+      empty `CHANGED` in `tests/test_frame_golden.py`, and commit both. Until then that branch is checked against this
+      release's predecessor.
 
 On a machine with the previous version, update through the app. What you look for depends on which version that is.
 
@@ -186,5 +199,6 @@ new version is back within about half a minute. `monitor.log` has `update verifi
 
 ## A bad release
 
-Delete it (`gh release delete vX.Y.Z --cleanup-tag`), fix the cause and release the next version. The updater
-only moves forward, so installs that already updated stay on the bad one until the next release.
+Delete it (`gh release delete vX.Y.Z --cleanup-tag`), fix the cause and release the next version. A published release
+is immutable, so its installer cannot be swapped for a fixed one, and its tag name can never be used again, even after
+the delete. The updater only moves forward, so installs that already updated stay on the bad one until the next release.

@@ -139,6 +139,7 @@ WTSSessionInfoEx = 25
 WTS_SESSIONSTATE_LOCK = 0  # Windows 8 and later; Windows 7 had lock and unlock the other way round
 
 ERROR_ACCESS_DENIED = 5
+ERROR_INVALID_WINDOW_HANDLE = 1400
 ERROR_CLASS_ALREADY_EXISTS = 1410
 
 # Job objects: a process in a job with this limit is terminated when the last handle to the job closes.

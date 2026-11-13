@@ -2,7 +2,7 @@
 /* Runs the dashboard's real scripts (charts.js, app.js) under node and prints what they do as one JSON object.
  *
  * tests/test_webui.py starts this with `node tests/webui_checks.js <webui folder>` and asserts on the result.
- * app.js is loaded in a vm context with a small fake DOM and window.__CUM_TEST__ set, so it hands back its
+ * app.js is loaded in a vm context with a small fake DOM and window.__USAGE_MONITOR_TEST__ set, so it hands back its
  * helpers (see the test hook at the end of app.js) instead of starting the page. Nothing here needs a browser,
  * a window, the network or a timer, and nothing in it reads or prints a user's data: every input is made up.
  */
@@ -45,7 +45,7 @@ function load() {
     getElementById: (id) => elements[id] || null, createElement: (tag) => element(tag),
     createElementNS: (_ns, tag) => svgElement(tag), addEventListener() {},
   };
-  const box = { console, document: doc, __CUM_TEST__: {} };
+  const box = { console, document: doc, __USAGE_MONITOR_TEST__: {} };
   box.window = box;
   box.location = { hash: "" };
   box.localStorage = { getItem: () => null, setItem() {} };
@@ -60,7 +60,7 @@ function load() {
   for (const name of ["charts.js", "app.js"]) {
     vm.runInContext(fs.readFileSync(path.join(webui, name), "utf8"), box, { filename: name });
   }
-  return { api: box.__CUM_TEST__.api, charts: box.CUMCharts, elements, box };
+  return { api: box.__USAGE_MONITOR_TEST__.api, charts: box.MonitorCharts, elements, box };
 }
 
 const out = {};
@@ -103,7 +103,7 @@ out.sessionsTableUntitled = api.sessionsTable([{ title: null, project: "p", proj
 // ── chart labels: cut to the measured width, in the middle, so the end that tells names apart stays ──────────
 function labelsOf(rows, width, opts) {
   const svg = charts.hbars(rows.map((l, i) => ({ label: l, value: 10 - i, text: "$20.31 · 52%" })), Object.assign({ width }, opts || {}));
-  return [...svg.matchAll(/<text class="cum-t" x="0" y="[\d.]+">([^<]*)<\/text>/g)].map((m) => m[1]);
+  return [...svg.matchAll(/<text class="mon-t" x="0" y="[\d.]+">([^<]*)<\/text>/g)].map((m) => m[1]);
 }
 const folders = ["se-infolcd-apex-advanced", "se-infolcd-apex-update", "se-infolcd-apex-server", "SpaceEngineersModSDK", "claude-usage-monitor", "x"];
 out.labels = {};
@@ -117,7 +117,7 @@ charts.refresh();
 out.labelsNarrow = labelsOf(folders, 300);
 // the bar takes what the label column and the value text leave; the value text is measured, not assumed
 const barWidth = () => +charts.hbars([{ label: "a", value: 1, text: "$20.31 · 52%" }], { width: 406, valueWidth: 0 })
-  .match(/<rect class="cum-track" x="[\d.]+" y="[\d.]+" width="([\d.]+)"/)[1];
+  .match(/<rect class="mon-track" x="[\d.]+" y="[\d.]+" width="([\d.]+)"/)[1];
 out.barWidth = { six: barWidth() };           // 12 characters of 6 px: the 84 px default is wider than the text
 pxPerChar = 10;
 out.barWidthStale = barWidth();               // answers are kept until refresh() ...
@@ -296,6 +296,17 @@ out.legacyPrefs = [S.ui.efficiencyWindow, S.ui.costWindow];
 box.localStorage = { getItem: () => JSON.stringify({ efficiencyWindow: "today", nerdsWindow: "week" }), setItem() {} };
 api.loadPrefs();
 out.newPrefsWin = S.ui.efficiencyWindow;
+// choices kept under the key with the shorter prefix (before v2.3) are read once and moved to the new key
+const oldPrefsStore = { "abc-dashboard-prefs": JSON.stringify({ costWindow: "week" }), "something-else": "x" };
+box.localStorage = {
+  get length() { return Object.keys(oldPrefsStore).length; },
+  key(i) { return Object.keys(oldPrefsStore)[i]; },
+  getItem(k) { return Object.prototype.hasOwnProperty.call(oldPrefsStore, k) ? oldPrefsStore[k] : null; },
+  setItem(k, v) { oldPrefsStore[k] = String(v); },
+  removeItem(k) { delete oldPrefsStore[k]; },
+};
+api.loadPrefs();
+out.movedPrefs = [S.ui.costWindow, Object.keys(oldPrefsStore).sort()];
 S.ui.efficiencyWindow = "cycle"; S.ui.costWindow = "cycle";
 box.localStorage = { getItem: () => null, setItem() {} };
 
@@ -420,7 +431,7 @@ out.forecastCard = {
   crossingTip: (/aria-label="(Reaches 100% about [^"]+)"/.exec(crossing.svg) || [])[1] || null,
   crossingFacts: [/Projected end<\/span><b>([^<]+)</.exec(crossing.facts)[1], (/Limit reached<\/span><b>([^<]+)</.exec(crossing.facts) || [])[1] || null],
   stayingLabel: /100% ~/.test(staying.svg), stayingFacts: [/Projected end<\/span><b>([^<]+)</.exec(staying.facts)[1], /Limit reached/.test(staying.facts)],
-  stayingForecastDrawn: /class="cum-fore"/.test(staying.svg), crossingForecastDrawn: /class="cum-fore"/.test(crossing.svg),
+  stayingForecastDrawn: /class="mon-fore"/.test(staying.svg), crossingForecastDrawn: /class="mon-fore"/.test(crossing.svg),
 };
 
 // ── Top sessions: the folder column is as wide as the longest folder name needs ─────────────────────────────
@@ -528,7 +539,7 @@ for (const page of PAGE_LIST) {
   monitorState("no_credentials");
   out.signIn.onPages[page] = topPart(page, "status");
 }
-monitorState("stale", { status_detail: "The Claude sign-in has expired; open Claude Code to renew it" });
+monitorState("stale", { status_detail: "The Claude sign-in has expired; send Claude Code a message to renew it" });
 out.signIn.expired = api.statusBanner();
 monitorState("stale", { status_detail: hostile });
 out.signIn.hostile = api.statusBanner();
@@ -645,7 +656,7 @@ async function failures() {
 }
 
 // ── the usage guard card: its markup, the status block in every state, the setup block, the fields and the clicks ──────────────
-// Every input is made up. The page asks /api/guard, which answers { guard, told, waiting, setup }.
+// Every input is made up. The page asks /api/guard, which answers { guard, told, waiting, watching, setup }.
 const GUARD_T = Date.UTC(2026, 9, 21, 16, 12);
 const isoAt = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
 const POLICY = { enabled: true, session_cap: 95, weekly_cap: 90, scoped_cap: null, stagger_s: 120 };
@@ -653,8 +664,16 @@ const RESETS = isoAt(GUARD_T + 3 * HOUR + 27 * 60000);
 const SESSION_OVER = { name: "session", label: "session", percent: 96, cap: 95, resets_at: RESETS };
 const FABLE_OVER = { name: "Fable weekly", label: "Fable weekly", percent: 91.5, cap: 90, resets_at: RESETS };
 const toldN = (n) => Array.from({ length: n }, (_, i) => ({ session_id: "3f9a1c2e-" + i + "aaa-bbbb", told_at: isoAt(GUARD_T - (30 - i) * 60000) }));
+// a workflow's agents heard it but its conversation did not (#41), and another conversation that did
+const AGENTS_TOLD = [
+  { session_id: "3f9a1c2e-0aaa-bbbb", told_at: isoAt(GUARD_T - 20 * 60000), main: false, agents: 3 },
+  { session_id: "5d2b7e41-1ccc-dddd", told_at: isoAt(GUARD_T - 10 * 60000), main: true, agents: 0 },
+];
 const waiterOf = (id, cwd, pid) => ({ pid: pid || 4242, session_id: id, since: isoAt(GUARD_T - 18 * 60000), cwd });
-const guardAnswer = (guard, told, waiting, setup) => ({ guard, told: told || [], waiting: waiting || [], setup: setup || null });
+const guardAnswer = (guard, told, waiting, setup, watching) => ({ guard, told: told || [], waiting: waiting || [], watching: watching || [], setup: setup || null });
+// a conversation the Stop hook watches while it waits for its background work (#41)
+const watcherOf = (id, work) => ({ pid: 5151, session_id: id, since: isoAt(GUARD_T - 25 * 60000), work });
+const ARMED_GUARD = { state: "armed", over: [], resume_at: null, policy: POLICY };
 const holding = (over, extra) => Object.assign({ state: "holding", over, resume_at: RESETS, policy: POLICY }, extra || {});
 const SETUP_OK = {
   available: true, can_remove: true, reason: null, manual: "docs/AGENT_HOOK.md", exe: "C:/x/ClaudeUsageMonitor.exe", settings_path: "C:/Users/t/.claude/settings.json", errors: [],
@@ -698,22 +717,33 @@ out.guard = {
     armedHooked: liveFor(guardAnswer({ state: "armed", over: [], resume_at: null, policy: POLICY }, [], [], setupWith({ hooks: { state: "installed", installed: 3, total: 3, events: {} } }))),
     holdingPartHooked: liveFor(guardAnswer(holding([SESSION_OVER]), [], [], setupWith({ hooks: { state: "partial", installed: 2, total: 3, events: {} } }))),
     holding: liveFor(guardAnswer(holding([SESSION_OVER, FABLE_OVER]), toldN(2), [waiterOf("77b0aa10-9d3e", "C:\\Demo\\atlas-web")])),
+    holdingAgents: liveFor(guardAnswer(holding([SESSION_OVER]), AGENTS_TOLD)),
+    armedWatching: liveFor(guardAnswer(ARMED_GUARD, [], [], null, [watcherOf("3f9a1c2e-0aaa-bbbb", { workflow: 1, agent: 2 })])),
+    offWatching: liveFor(guardAnswer({ state: "off", over: [], resume_at: null, policy: Object.assign({}, POLICY, { enabled: false }) }, [], [], null,
+      [watcherOf("3f9a1c2e-0aaa-bbbb", { workflow: 1 })])),
+    holdingWatchingMany: liveFor(guardAnswer(holding([SESSION_OVER]), [], [], null,
+      Array.from({ length: 7 }, (_, i) => watcherOf("5d2b7e4" + i + "-1ccc", { agent: i + 1 })))),
+    watchingOdd: liveFor(guardAnswer(ARMED_GUARD, [], [], null, [{ session_id: null, since: null, work: "x" },
+      { session_id: "abc", since: "nonsense", work: { agent: -1, workflow: "2", teammate: 1 } }])),
     holdingBusy: liveFor(guardAnswer(holding([SESSION_OVER]), toldN(1), [waiterOf("77b0aa10-9d3e", "C:\\Demo\\atlas-web")]), { busy: true }),
     holdingNobody: liveFor(guardAnswer(holding([SESSION_OVER]))),
     holdingNoResetTime: liveFor(guardAnswer(holding([SESSION_OVER], { resume_at: null }), toldN(1))),
     holdingAMomentLeft: liveFor(guardAnswer(holding([SESSION_OVER]), toldN(1)), { now: Date.parse(RESETS) - 20000 }),
     holdingMany: liveFor(guardAnswer(holding([SESSION_OVER]), toldN(7), manyWaiting)),
     holdingHostile: liveFor(guardAnswer(holding([{ name: hostile, label: hostile, percent: 96, cap: 95, resets_at: RESETS }]),
-      [{ session_id: hostile, told_at: isoAt(GUARD_T) }], [waiterOf(hostile, "C:\\<b>x</b>\\" + hostile)])),
+      [{ session_id: hostile, told_at: isoAt(GUARD_T) }], [waiterOf(hostile, "C:\\<b>x</b>\\" + hostile)], null,
+      [{ session_id: hostile, since: isoAt(GUARD_T), work: { [hostile]: 1 } }])),
     odd: liveFor({ guard: "x", told: "y", waiting: 3, setup: [] }),
   },
-  clock: { resumes: api.clockText(Date.parse(RESETS)), told: api.clockText(GUARD_T - 30 * 60000), since: api.clockText(GUARD_T - 18 * 60000) },
+  clock: { resumes: api.clockText(Date.parse(RESETS)), told: api.clockText(GUARD_T - 30 * 60000), since: api.clockText(GUARD_T - 18 * 60000),
+    watched: api.clockText(GUARD_T - 25 * 60000) },
   setup: {
     pending: setupFor(null),
     missing: setupFor(SETUP_OK),
     installed: setupFor(setupWith({ hooks: { state: "installed", installed: 3, total: 3, events: {} }, mcp: { state: "registered" } })),
     partial: setupFor(setupWith({ hooks: { state: "partial", installed: 2, total: 3, events: {} }, mcp: { state: "other" } })),
     tooOld: setupFor(setupWith({ claude: { found: true, version: "2.1.94", min_version: "2.1.139", supported: false } })),
+    tooOldOnNoPath: setupFor(setupWith({ claude: { found: true, path: "C:\\Users\\t\\.local\\bin\\claude.exe", command: "& 'C:\\Users\\t\\.local\\bin\\claude.exe'", version: "2.1.94", min_version: "2.1.139", supported: false } })),
     tooOldAt: setupFor(setupWith({ claude: { found: true, path: "C:\\Users\\t\\AppData\\Roaming\\npm\\claude.CMD", version: "2.1.94", min_version: "2.1.139", supported: false } })),
     versionUnknown: setupFor(setupWith({ claude: { found: true, version: null, min_version: "2.1.139", supported: null } })),
     noClaude: setupFor(setupWith({ available: false, reason: "Claude Code was not found on this PC: there is no claude command on the PATH.", claude: { found: false, version: null, min_version: "2.1.139", supported: null } })),
@@ -721,7 +751,7 @@ out.guard = {
     unreadable: setupFor(setupWith({ errors: ["The Claude Code settings file is not valid JSON, so setup left it alone."], hooks: { state: "unknown", installed: 0, total: 3, events: {} } })),
     installing: setupFor(SETUP_OK, null, "install"),
     removing: setupFor(SETUP_OK, null, "remove"),
-    installed_ok: setupFor(SETUP_OK, done({ changed: ["Added the SessionStart hook.", "Registered the claude-usage MCP tool."], backup: "C:\\Users\\t\\.claude\\settings.json.cum-backup-20261028-180509", warnings: ["This card checks only the claude command. Claude Code in VS Code has its own version: in VS Code, check under Extensions that it is 2.1.139 or newer."] })),
+    installed_ok: setupFor(SETUP_OK, done({ changed: ["Added the SessionStart hook.", "Registered the claude-usage MCP tool."], backup: "C:\\Users\\t\\.claude\\settings.json.usage-monitor-backup-20261028-180509", warnings: ["This card checks only the claude command. Claude Code in VS Code has its own version: in VS Code, check under Extensions that it is 2.1.139 or newer."] })),
     nothing: setupFor(SETUP_OK, done({ unchanged: ["The three hooks were already in place."] })),
     removed_ok: setupFor(SETUP_OK, done({ action: "remove", changed: ["Removed the PostToolUse hook."], backup: "C:\\b" })),
     refused: setupFor(SETUP_OK, done({ ok: false, errors: ["Claude Code 2.1.94 is older than 2.1.139, which hooks need, so setup changed nothing. Update it with: claude update"] })),
@@ -906,7 +936,7 @@ async function signInActions() {
     during, check: where(), html: api.statusBanner(),
   };
   // the same for an expired sign-in, in its own words
-  monitorState("stale", { status_detail: "The Claude sign-in has expired; open Claude Code to renew it" });
+  monitorState("stale", { status_detail: "The Claude sign-in has expired; send Claude Code a message to renew it" });
   await run(Object.assign({ "GET /api/state": [200, payload("stale", SIGN_LATER)] }, REFRESHED), () => api.helpAction("check-again"));
   out2.stillExpired = { check: where(), html: api.statusBanner() };
   // one request at a time: clicks while a check is on its way send nothing
@@ -1058,4 +1088,205 @@ async function colourSaves() {
   reset();
 }
 
-failures().then(guardPolling).then(guardActions).then(signInActions).then(colourSaves).then(() => console.log(JSON.stringify(out)), (error) => { console.error(error && error.stack ? error.stack : String(error)); process.exit(1); });
+// the plan price hint: loaded on #settings, the page is drawn before the first state, and a first sign-in or a new plan changes the plan
+// under a page that is open. These are init()'s two steps and then polls, on a fake page that keeps the hint's text as a browser does:
+// parsed out of what the page drew, and changed after that only through the hint's own element.
+async function planHint() {
+  const saved = { hash: box.location.hash, main: elements.main, fetch: box.fetch, clear: box.clearTimeout };
+  const main = element("main");
+  const hint = element("plan-hint");
+  const parsed = (html) => html.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&");
+  let drawn = "";
+  let text = null;
+  let writes = 0;
+  let asMarkup = 0;
+  Object.defineProperty(main, "innerHTML", {
+    get: () => drawn,
+    set: (html) => { drawn = html; const found = /id="plan-hint">([^<]*)</.exec(html); text = found ? parsed(found[1]) : null; },
+  });
+  Object.defineProperty(hint, "textContent", { get: () => text, set: (value) => { writes += 1; text = value; } });
+  Object.defineProperty(hint, "innerHTML", { get: () => "", set: () => { asMarkup += 1; } });
+  main.querySelector = (selector) => (selector === "#plan-hint" ? hint : null);
+  elements.main = main;
+  box.location.hash = "#settings";
+  box.clearTimeout = () => {};
+  let answerWith = null;
+  box.fetch = (url) => (String(url).indexOf("/api/state") >= 0 ? answer(200, answerWith)() : answer(404, { error: "not in this test" })());
+  const stateWith = (plan, settings) => ({ state: { status: "live", plan }, settings: settings || {}, model_names: {} });
+  const planOf = (name, price) => ({ name, monthly_price_usd: price });
+  const seen = () => ({ text, writes });
+  const arrives = async (state) => { answerWith = state; api.poll(true); await settle(); return seen(); };
+
+  reset();
+  S.page = null;
+  api.renderPage();
+  out.planHint = { before: seen() };
+  out.planHint.firstState = await arrives(stateWith(planOf("Max 5x", 100)));
+  out.planHint.sameState = await arrives(stateWith(planOf("Max 5x", 100)));
+  out.planHint.override = await arrives(stateWith(planOf("Max 5x", 100), { plan_price_override: 50 }));   // it names the detected price
+  out.planHint.newPlan = await arrives(stateWith(planOf("Max 20x", 200)));
+  out.planHint.noPrice = await arrives(stateWith(planOf("Unknown plan", null)));
+  out.planHint.signedIn = await arrives(stateWith(planOf("Pro", 20)));
+  out.planHint.noPlan = await arrives(stateWith(undefined));
+  out.planHint.hostile = await arrives(stateWith(planOf(hostile, 20)));
+  S.page = null;                                                                 // what leaving Settings and coming back does
+  api.renderPage();
+  out.planHint.drawnAgain = seen();
+  out.planHint.hostileName = hostile;
+  out.planHint.drawnEscaped = drawn.indexOf(api.esc(hostile)) >= 0 && drawn.indexOf(hostile) < 0;
+  out.planHint.asMarkup = asMarkup;
+
+  box.location.hash = saved.hash;
+  elements.main = saved.main;
+  box.fetch = saved.fetch;
+  box.clearTimeout = saved.clear;
+  S.page = null;
+  S.formKey = null;
+  reset();
+}
+
+// three texts that outlived what they described (#47), each through the page's real paths: the first paint, a poll, a click
+async function staleTexts() {
+  const saved = { hash: box.location.hash, main: elements.main, fetch: box.fetch, clear: box.clearTimeout, query: box.document.querySelector };
+  const main = element("main");
+  const statusLine = element("set-update-status");
+  const installButton = element("install");
+  const startupHint = element("startup-hint");
+  const supportersBox = element("about-supporters");
+  const parts = {
+    "#set-update-status": statusLine, '[data-action="install-update"]': installButton, '[data-action="skip-update"]': element("skip"),
+    "#startup-hint": startupHint, "#about-supporters": supportersBox,
+  };
+  let drawn = "";
+  let startup = null;
+  let startupWrites = 0;
+  Object.defineProperty(main, "innerHTML", {
+    get: () => drawn,
+    set: (html) => { drawn = html; const found = /id="startup-hint">([^<]*)</.exec(html); startup = found ? found[1] : null; },
+  });
+  Object.defineProperty(startupHint, "textContent", { get: () => startup, set: (value) => { startupWrites += 1; startup = value; } });
+  main.querySelector = (selector) => parts[selector] || null;
+  elements.main = main;
+  box.document.querySelector = (selector) => (selector === "#main" ? main : null);
+  box.clearTimeout = () => {};
+  let stateNow = null;
+  let checkResult = null;
+  let heldCheck = null;
+  let supportersReply = null;
+  let asks = 0;
+  box.fetch = (url) => {
+    const path = String(url);
+    if (path.indexOf("/api/supporters") >= 0) { asks += 1; return supportersReply(); }
+    if (path.indexOf("/api/update/check") >= 0) { return heldCheck || answer(200, { ok: true, result: checkResult })(); }
+    if (path.indexOf("/api/update/apply") >= 0) { return answer(200, { result: { mode: "browser" } })(); }
+    if (path.indexOf("/api/update/skip") >= 0) { return answer(200, { ok: true })(); }
+    if (path.indexOf("/api/state") >= 0) { return answer(200, stateNow)(); }
+    return answer(404, { error: "not in this test" })();
+  };
+  const offering = (version, skipped) => ({
+    state: { status: "live" }, settings: {}, model_names: {},
+    update: version ? { available: true, version, skipped: !!skipped, skip_version: skipped ? version : null, info: { version } } : { available: false },
+  });
+  const line = () => ({ line: statusLine.textContent, install: !installButton.hidden });
+  const lands = async (state) => { stateNow = state; api.poll(true); await settle(); return line(); };
+  const clicked = async (action, state, result) => { stateNow = state; checkResult = result; api.settingsClick(click(action)); await settle(); return line(); };
+  const opens = async (hash) => { box.location.hash = hash; S.page = null; api.renderPage(); await settle(); };
+
+  // 1. The line under the update buttons: what a click said lasts only while it is about the release on offer.
+  reset();
+  S.update = { text: "" };
+  S.skipped = "";
+  stateNow = offering(null);
+  await opens("#settings");
+  await lands(offering(null));
+  out.updateLine = {};
+  out.updateLine.upToDate = await clicked("check-update", offering(null), { available: false, version: null, checked: true });
+  out.updateLine.foundLater = await lands(offering("2.3.0"));
+  let finishCheck = null;
+  heldCheck = new Promise((resolve) => { finishCheck = resolve; }).then(() => answer(200, { ok: true, result: { available: true, version: "2.3.0", checked: true } })());
+  api.settingsClick(click("check-update"));
+  out.updateLine.checking = await lands(offering("2.3.0"));
+  finishCheck();
+  heldCheck = null;
+  await settle();
+  out.updateLine.checked = line();
+  out.updateLine.banner = api.updateBanner();
+  heldCheck = Promise.reject(new Error("link lost"));
+  out.updateLine.linkLost = await clicked("check-update", offering("2.3.0"));
+  heldCheck = null;
+  out.updateLine.noGithub = await clicked("check-update", offering("2.3.0"), { available: false, version: null, checked: false });
+  out.updateLine.newerAfterThat = await lands(offering("2.4.0"));
+  out.updateLine.skipped = await clicked("skip-update", offering("2.4.0", true));
+  out.updateLine.newerAfterSkip = await lands(offering("2.5.0"));
+  api.installUpdate();
+  await settle();
+  out.updateLine.installing = line();
+  out.updateLine.newerAfterInstall = await lands(offering("2.6.0"));
+  // the monitor goes on offering a release that was skipped, and Settings is the one place left to install it from
+  await lands(offering("2.6.0", true));
+  S.update = { text: "" };
+  out.updateLine.skippedOnOffer = line();
+  api.installUpdate();
+  await settle();
+  out.updateLine.installSkipped = line();
+  await clicked("skip-update", offering("2.6.0", true));
+  out.updateLine.skipSkipped = line();
+
+  // 2. The note under Start with Windows: a page loaded on #settings is drawn before the state says it is a dev instance.
+  reset();
+  S.update = { text: "" };
+  S.skipped = "";
+  const hinted = () => ({ text: startup, writes: startupWrites });
+  const devState = Object.assign(offering(null), { dev: true });
+  await opens("#settings");
+  out.startupHint = { before: hinted() };
+  await lands(devState);
+  out.startupHint.dev = hinted();
+  await lands(devState);
+  out.startupHint.sameState = hinted();
+  await lands(offering(null));
+  out.startupHint.notDev = hinted();
+  await lands(devState);
+  await opens("#settings");
+  out.startupHint.drawnAgain = hinted();
+
+  // 3. The supporters: a list that failed is asked for at the next visit, not on every state, and one that worked is not asked for again.
+  reset();
+  S.supporters = null;
+  S.supportersRequested = false;
+  const listed = () => ({ asks, unavailable: /unavailable/.test(supportersBox.innerHTML), named: /Ada/.test(supportersBox.innerHTML) });
+  const works = answer(200, { supporters: ["Ada"] });
+  stateNow = offering(null);
+  supportersReply = answer(200, { supporters: [], error: "the list could not be fetched" });
+  await opens("#about");
+  out.supporters = { failed: listed() };
+  await lands(offering(null));
+  out.supporters.sameVisit = listed();
+  supportersReply = works;
+  await opens("#about");
+  out.supporters.nextVisit = listed();
+  await opens("#about");
+  out.supporters.visitAfterThat = listed();
+  S.supporters = null;
+  S.supportersRequested = false;
+  supportersReply = () => Promise.reject(new Error("link lost"));
+  await opens("#about");
+  out.supporters.linkLost = listed();
+  supportersReply = works;
+  await opens("#about");
+  out.supporters.afterLinkLost = listed();
+
+  box.location.hash = saved.hash;
+  elements.main = saved.main;
+  box.fetch = saved.fetch;
+  box.clearTimeout = saved.clear;
+  box.document.querySelector = saved.query;
+  S.page = null;
+  S.formKey = null;
+  S.update = { text: "" };
+  S.skipped = "";
+  S.supporters = null;
+  reset();
+}
+
+failures().then(guardPolling).then(guardActions).then(signInActions).then(colourSaves).then(planHint).then(staleTexts).then(() => console.log(JSON.stringify(out)), (error) => { console.error(error && error.stack ? error.stack : String(error)); process.exit(1); });

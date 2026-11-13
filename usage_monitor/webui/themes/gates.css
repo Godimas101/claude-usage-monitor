@@ -539,42 +539,42 @@ html[data-g-swatches] .nm-variants .nm-btn[aria-pressed="true"] { box-shadow: no
 html[data-g-swatches] .nm-variants .nm-btn[aria-pressed="true"]::before { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--text-bright); }
 
 /* ── charts (charts.js sets the shapes; these are the Gates colours and corners) ───────────────────────── */
-.cum-spark, .cum-stack, .cum-ring, .cum-heat { display: block; }
-.cum-spark { width: 100%; height: 58px; overflow: visible; }
-.cum-stack { width: 100%; height: 8px; border-radius: 4px; }
-.cum-heat { width: 100%; height: auto; }
-.cum-t { font-family: var(--g-font); font-weight: 400; font-size: 12px; letter-spacing: 0; }
-.cum-t.is-strong { font-weight: 600; }
-.cum-columns .cum-t, .cum-calendar .cum-t, .cum-matrix .cum-t, .cum-linechart .cum-t { font-family: var(--g-mono); font-size: 11px; }
-.cum-columns .cum-track, .cum-columns .cum-mark, .cum-columns .cum-hot { rx: 2px; }
-.cum-columns .cum-mark { fill-opacity: .5; }
-.cum-columns .cum-hot { fill: var(--g-fill-accent); }
-.cum-columns .cum-track { opacity: 0; }
-.cum-col:hover .cum-mark, .cum-col:focus .cum-mark { fill: var(--g-fill-accent); fill-opacity: .8; }
-.cum-col:hover .cum-hot, .cum-col:focus .cum-hot { fill: var(--g-fill-accent); }
-.cum-hbars .cum-t { fill: var(--text); font-size: 13px; }
-.cum-hbars .cum-t.is-strong { font-family: var(--g-mono); font-size: 12px; font-weight: 600; }
-.cum-hbars .cum-track, .cum-hbars .cum-mark, .cum-hbars .cum-mark-2 { rx: 3px; height: 6px; transform: translateY(2px); }
-.cum-row:hover .cum-hit, .cum-row:focus .cum-hit { fill: var(--g-hover); }
-.cum-row:hover .cum-mark, .cum-row:focus .cum-mark { fill: var(--g-fill-accent); }
-.cum-row:hover .cum-mark-2, .cum-row:focus .cum-mark-2 { fill: var(--accent-alt); }
-.cum-ring-focus { stroke: var(--g-focus); stroke-width: 2; rx: 4px; }
-.cum-stack .cum-track, .cum-stack .cum-seg { rx: 4px; }
-.cum-line { stroke-width: 2; }
-.cum-fore { stroke-width: 2; opacity: .75; }
-.cum-ideal { stroke: var(--g-text-3); opacity: 1; }
-.cum-grid { stroke: var(--border); stroke-dasharray: 2 4; }
-.cum-grid.is-limit { stroke: var(--alert); opacity: .6; }
-.cum-now { stroke: var(--g-text-3); stroke-dasharray: 3 3; }
-.cum-dot { fill: var(--g-fill-accent); stroke: var(--surface); stroke-width: 1; }
-.cum-dot.is-hollow { fill: var(--surface); stroke: var(--g-fill-accent); stroke-width: 2; }
-.cum-cell { rx: 2px; }
-.cum-cell.cum-l0 { fill: var(--track); }
-.cum-cell.is-today { stroke: var(--g-focus); stroke-width: 1.5; }
-.cum-cell.cum-item:hover, .cum-cell.cum-item:focus, .cum-dot.cum-item:focus, .cum-dot.cum-item:hover { stroke: var(--g-focus); }
-.cum-seg.cum-item:hover, .cum-seg.cum-item:focus { stroke: var(--g-focus); }
-.cum-spark .cum-dot { display: none; }
-.cum-spark .cum-line { stroke-width: 2; }
+.mon-spark, .mon-stack, .mon-ring, .mon-heat { display: block; }
+.mon-spark { width: 100%; height: 58px; overflow: visible; }
+.mon-stack { width: 100%; height: 8px; border-radius: 4px; }
+.mon-heat { width: 100%; height: auto; }
+.mon-t { font-family: var(--g-font); font-weight: 400; font-size: 12px; letter-spacing: 0; }
+.mon-t.is-strong { font-weight: 600; }
+.mon-columns .mon-t, .mon-calendar .mon-t, .mon-matrix .mon-t, .mon-linechart .mon-t { font-family: var(--g-mono); font-size: 11px; }
+.mon-columns .mon-track, .mon-columns .mon-mark, .mon-columns .mon-hot { rx: 2px; }
+.mon-columns .mon-mark { fill-opacity: .5; }
+.mon-columns .mon-hot { fill: var(--g-fill-accent); }
+.mon-columns .mon-track { opacity: 0; }
+.mon-col:hover .mon-mark, .mon-col:focus .mon-mark { fill: var(--g-fill-accent); fill-opacity: .8; }
+.mon-col:hover .mon-hot, .mon-col:focus .mon-hot { fill: var(--g-fill-accent); }
+.mon-hbars .mon-t { fill: var(--text); font-size: 13px; }
+.mon-hbars .mon-t.is-strong { font-family: var(--g-mono); font-size: 12px; font-weight: 600; }
+.mon-hbars .mon-track, .mon-hbars .mon-mark, .mon-hbars .mon-mark-2 { rx: 3px; height: 6px; transform: translateY(2px); }
+.mon-row:hover .mon-hit, .mon-row:focus .mon-hit { fill: var(--g-hover); }
+.mon-row:hover .mon-mark, .mon-row:focus .mon-mark { fill: var(--g-fill-accent); }
+.mon-row:hover .mon-mark-2, .mon-row:focus .mon-mark-2 { fill: var(--accent-alt); }
+.mon-ring-focus { stroke: var(--g-focus); stroke-width: 2; rx: 4px; }
+.mon-stack .mon-track, .mon-stack .mon-seg { rx: 4px; }
+.mon-line { stroke-width: 2; }
+.mon-fore { stroke-width: 2; opacity: .75; }
+.mon-ideal { stroke: var(--g-text-3); opacity: 1; }
+.mon-grid { stroke: var(--border); stroke-dasharray: 2 4; }
+.mon-grid.is-limit { stroke: var(--alert); opacity: .6; }
+.mon-now { stroke: var(--g-text-3); stroke-dasharray: 3 3; }
+.mon-dot { fill: var(--g-fill-accent); stroke: var(--surface); stroke-width: 1; }
+.mon-dot.is-hollow { fill: var(--surface); stroke: var(--g-fill-accent); stroke-width: 2; }
+.mon-cell { rx: 2px; }
+.mon-cell.mon-l0 { fill: var(--track); }
+.mon-cell.is-today { stroke: var(--g-focus); stroke-width: 1.5; }
+.mon-cell.mon-item:hover, .mon-cell.mon-item:focus, .mon-dot.mon-item:focus, .mon-dot.mon-item:hover { stroke: var(--g-focus); }
+.mon-seg.mon-item:hover, .mon-seg.mon-item:focus { stroke: var(--g-focus); }
+.mon-spark .mon-dot { display: none; }
+.mon-spark .mon-line { stroke-width: 2; }
 .nm-line, .nm-hbars, .nm-calendar, .nm-matrix { width: 100%; min-width: 0; }
 .nm-line { margin: 2px 0; }
 
@@ -708,9 +708,9 @@ html[data-g-swatches] .nm-variants .nm-btn[aria-pressed="true"]::before { box-sh
   .nm-alive.is-off { background: Canvas; box-shadow: inset 0 0 0 1.5px CanvasText; }
   html[data-g-swatches] .nm-sw button, html[data-g-swatches] .nm-variants .nm-btn::before { forced-color-adjust: none; }
   .nm-swatches i { forced-color-adjust: none; border-color: CanvasText; }
-  .cum-mark, .cum-mark-2, .cum-line, .cum-fore, .cum-dot, .cum-s-main, .cum-s-alt { forced-color-adjust: none; fill: Highlight; stroke: Highlight; }
-  .cum-line, .cum-fore { fill: none; }
-  .cum-track, .cum-s-dim { forced-color-adjust: none; fill: GrayText; }
+  .mon-mark, .mon-mark-2, .mon-line, .mon-fore, .mon-dot, .mon-s-main, .mon-s-alt { forced-color-adjust: none; fill: Highlight; stroke: Highlight; }
+  .mon-line, .mon-fore { fill: none; }
+  .mon-track, .mon-s-dim { forced-color-adjust: none; fill: GrayText; }
 }
 
 /* reduced motion: nothing moves */

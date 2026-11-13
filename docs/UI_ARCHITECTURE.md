@@ -79,8 +79,11 @@ usage_monitor/
   shell lets it down, and only the taskbar's own children go with it. Layered, because the
   taskbar's XAML content covers a plain GDI child. Raised over its siblings every 500 ms. A new
   taskbar (Explorer restarted), or a strip window that died with the old one, gets a new window at
-  the next re-place; a taskbar that refuses the child (`CreateWindowExW` fails) leaves the strip a
-  top-level window, floating over it, until a re-place finds another taskbar. A child gets
+  the next re-place. A taskbar that refuses the child (`CreateWindowExW` fails) leaves the strip a
+  top-level window, floating over it. When the taskbar is gone (`ERROR_INVALID_WINDOW_HANDLE`, Explorer
+  restarting) it floats until a re-place finds another taskbar; any other refusal (`ERROR_ACCESS_DENIED`,
+  say) is asked again at a re-place `REFUSED_RETRY_S` (1 minute) later, and a refusal again keeps the
+  floating window as it is (#32). `create_window`'s `OSError` carries the code as `winerror`. A child gets
   `WM_DPICHANGED_AFTERPARENT`, never `WM_DPICHANGED`, when the taskbar moves to a monitor of
   another DPI; `LayeredWindow` turns both into `on_dpi_changed`. Windows ties the taskbar's input to
   the thread of its child windows, so the strip is the first thing shutdown destroys: the steps
@@ -260,11 +263,13 @@ Night City's strip tag, whatever the link status is: a paused or loading widget 
 pill beside the shield. Without a reading (no sign-in, still loading) no surface shows the guard: it cannot act on
 nothing.
 
-Sign-in copy. `WidgetModel.stale_message` is the neutral wording ("LOGIN EXPIRED - OPEN CLAUDE CODE");
+Sign-in copy. `WidgetModel.stale_message` is the neutral wording ("LOGIN EXPIRED - USE CLAUDE CODE");
 a skin words the state as its approved mockup does and falls back to the neutral text where it has
-none. Nostromo: the dashed auth box reads "AUTH LINK LOST." / "OPEN CLAUDE CODE TO RESTORE."
-(`STALE_MESSAGES`, by status). Night City: the hazard band reads "RELINK // OPEN CLAUDE CODE"
-(`theme.extras.copy.stale_auth`). Gates: the footer reads "Hmm, we lost touch. Sign in to Claude Code."
+none. Nostromo: the dashed auth box reads "AUTH LINK LOST." / "USE CLAUDE CODE TO RESTORE."
+(`STALE_MESSAGES`, by status). Night City: the hazard band reads "RELINK // USE CLAUDE CODE"
+(`theme.extras.copy.stale_auth`). Gates: the footer reads "Hmm, we lost touch. Send Claude Code a message."
+Each says to use Claude Code, not to open it: Claude Code renews the sign-in only when it sends a request, so
+an open but idle Claude Code lets it run out (#52).
 
 No sign-in at all is a different case (#28): the person may never have used Claude Code (claude.ai and the
 Claude apps share its limits), so the widgets send them to the dashboard, which has the steps, rather than to
@@ -299,7 +304,7 @@ Explorer restart) gets the icon added again and the same balloon sent once more,
 that was lost is never counted as shown (the update announcement is then offered again, not marked as told).
 
 ### Dev isolation
-`CUM_APPDATA_DIR=<dir>` puts settings, DB and log in `<dir>`. `CUM_DEV_INSTANCE=1` uses the
+`USAGE_MONITOR_APPDATA_DIR=<dir>` puts settings, DB and log in `<dir>`. `USAGE_MONITOR_DEV_INSTANCE=1` uses the
 mutex `Global\ClaudeUsageMonitor-dev`, its own controller window class, and tags the tray
 tooltip "(dev)", so a test build runs alongside an installed copy. `main.py --dump-frames <dir>`
 renders every theme × variant × state × scale to PNGs without opening windows;
@@ -313,10 +318,10 @@ six-hourly update re-check timer is armed (`update_recheck`).
   memory (shown in `/api/state`, gone when the process ends, logged as skipped). Only the frozen
   installed build repairs the entry at launch, so a source checkout cannot repoint it.
   `--smoke-test` always runs as a dev instance, whatever the environment says. The API server is
-  a dev server when its `dev` flag is set **or** `CUM_DEV_INSTANCE=1` is in the environment.
+  a dev server when its `dev` flag is set **or** `USAGE_MONITOR_DEV_INSTANCE=1` is in the environment.
 - **Dev server.** `python -m usage_monitor.ui.devserver [--port N] [--scenario
   normal|warning|critical|stale|guard|no_login|limits_only] [--db PATH] [--theme ID[/VARIANT]]` serves the real webui and API
-  from a fake `MonitorState`, with settings in `CUM_APPDATA_DIR` (or a temporary folder). `stale` and `no_login` carry
+  from a fake `MonitorState`, with settings in `USAGE_MONITOR_APPDATA_DIR` (or a temporary folder). `stale` and `no_login` carry
   the data layer's own sign-in texts (`usage_api.EXPIRED_DETAIL`, `usage_api.NO_SIGN_IN_DETAIL`).
   The two scenarios of someone who uses Claude on the web or in the app (#28) have no Claude Code on the PC:
   `no_login` has no sign-in (no limits, no plan), and `limits_only` is signed in with the limits of `normal` and a week
@@ -368,7 +373,7 @@ Settings: `theme_id`, `theme_variant`, `theme_mode` (Gates: light / dark / syste
   family PC): they find the port with `netstat`, read the token and have the whole API. The Host and header checks only
   stop web pages. So `GET /` answers `401` (plain text) unless the query holds exactly one `k` equal to the token,
   compared in constant time, and `ApiServer.url` is `http://127.0.0.1:<port>/?k=<token>`. The dashboard process
-  opens that address (it has the token in `CUM_DASHBOARD_TOKEN`, which only the same user can read), and so does the
+  opens that address (it has the token in `USAGE_MONITOR_DASHBOARD_TOKEN`, which only the same user can read), and so does the
   browser fallback; the dev server prints it. The key stays in the address, so a reload works; `Referrer-Policy:
   no-referrer` keeps it from leaving, and the request log drops the query. `/static/` holds only the app's own files
   and needs no key.
@@ -404,12 +409,12 @@ Settings: `theme_id`, `theme_variant`, `theme_mode` (Gates: light / dark / syste
 | GET | `/api/themes` | themes with variants and tokens; the Gates `system-*` variants show the live Windows accent, as applied |
 | GET | `/api/analytics/<name>` | statistics report: `cost`, `efficiency`, `pacing`, `history`, `sessions` (below) |
 | GET | `/api/export?format=csv\|json` | daily rollups download (below) |
-| GET | `/api/supporters` | supporters list (cached for an hour; failures come back as an empty list plus the reason) |
+| GET | `/api/supporters` | supporters list (cached for an hour; failures come back as an empty list plus the reason, and the About page asks again at its next visit) |
 | POST | `/api/settings` | validated partial settings update (below) |
 | POST | `/api/refresh` | `DataService.refresh_now()` |
 | POST | `/api/dashboard/closed` | `{"pid": n}`: the dashboard process says its window is gone (`dashboard_closed_cb`, wired to `DashboardLauncher.window_closed`); `400` without a pid, `501` where nothing manages the dashboard |
 | POST | `/api/update/check` · `/api/update/apply` · `/api/update/skip` | updater (see "Updates") |
-| GET | `/api/guard` | the usage guard for the Settings card: `{guard, told, waiting, setup}` (below) |
+| GET | `/api/guard` | the usage guard for the Settings card: `{guard, told, waiting, watching, setup}` (below) |
 | POST | `/api/guard/resume` | "Resume now": every running `--wait` ends at once, whatever the limits say |
 | POST | `/api/guard/setup` | `{"action": "install" \| "remove"}`: the one-click setup (below) |
 
@@ -420,11 +425,15 @@ Settings: `theme_id`, `theme_variant`, `theme_mode` (Gates: light / dark / syste
 `setup_cb` maps `status`, `install` and `remove` to callables, by default `agent/setup.py`'s.
 
 - **`GET /api/guard`** answers `guard` (the state's guard block, `{}` before the first cycle), `told` (the
-  sessions told of the current holding episode, with when), `waiting` (the live `--wait` processes, oldest
-  first) and `setup` (`setup.status()`). The status runs `claude --version` and `claude mcp get`, so it is kept
-  for `SETUP_STATUS_TTL_S` (10 minutes) and computed by one caller at a time (`_TimedValue`). A setup click
-  and `POST /api/dashboard/closed` clear it, so each dashboard window and each click look afresh. The card
-  asks every `GUARD_POLL_MS` (3 s) while it is on screen.
+  sessions told of the current holding episode, with when and who: `main`, whether its main conversation heard it,
+  and `agents`, how many of its agents did; #41), `waiting` (the live `--wait` processes, oldest
+  first), `watching` (the live `--watch` processes, oldest first: the conversations that wait for their background
+  work, and that work; #41) and `setup` (`setup.status()`). The status runs `claude --version` and `claude mcp get`, so it is kept
+  for `SETUP_STATUS_TTL_S` (10 minutes) and computed by one look at a time (`_TimedValue`). A setup click
+  and `POST /api/dashboard/closed` clear it, so each dashboard window and each click look afresh. The answer
+  waits for a look at most `SETUP_STATUS_WAIT_S` (0.5 s): past that the look goes on in the background, and
+  `setup` is the last status, or `null` until the first is in, which the card shows as pending (#32). The card
+  asks every `GUARD_POLL_MS` (3 s) while it is on screen, so the setup part fills in at a later ask.
 - **`POST /api/guard/setup`** answers `setup.install()` or `setup.remove()` as it is: `ok: false` with
   `errors` is a refusal in plain words (Claude Code too old, a settings file that is not JSON), shown beside
   the buttons, not an HTTP error. An unknown action is `400`.
@@ -551,6 +560,12 @@ as told. The usage-alert switches (`alerts_enabled`, `alert_on_*`) do not apply 
 do. `notified_version` is only ever raised (under a lock) and is an unknown key to the settings API, so the page can neither read
 nor write it. The same release is offered in the tray menu (*Update to vX*, unless skipped) for as long as it is on offer.
 
+To replace the files, Setup ends the monitor's MCP tool in open Claude Code sessions and their waits on the usage guard
+(installer.iss, `EndedNote`). Run by hand, it says so on its last page. After a silent update, which is how the app updates
+itself, nobody saw Setup, so it leaves the same text in `update-note.txt` in the app data folder (`app.UPDATE_NOTE_FILE`).
+`MonitorApp._announce_update_note` shows it once as a toast, "Claude Usage Monitor updated", at the first state or unlock,
+held back like the update toast and kept when the shell refuses it, and then deletes the file.
+
 ## Dashboard process
 
 `ClaudeUsageMonitor.exe --dashboard --port <n>` (source: `pythonw main.py --dashboard …`).
@@ -658,7 +673,7 @@ default browser instead, and the exit code says so (below).
   to the same standard at 1200x780 and 1000x700, where no row of a taller card hides a jump: its Fast mode card says the same
   explainer sentence in every state (the placeholder, the report with no fast-mode use and the report with some, as a full-width
   tile so its sub-lines do not wrap differently) and its thread tiles are sized for a real figure, and a test in a real web view
-  holds the reports back, lets them land and fails if any card changed height (`test_server.py`, `CUM_UI_TESTS=1`). The Overview's
+  holds the reports back, lets them land and fails if any card changed height (`test_server.py`, `USAGE_MONITOR_UI_TESTS=1`). The Overview's
   cost, efficiency and model cards draw from the cost report like the Cost page does: while it is on its way they are pending,
   and when it fails they say so (`data-state="error"` and the page's `problem` banner) instead of staying pending for good.
   A PC with no Claude Code activity is the exception: nothing is asked for there (below).
@@ -672,13 +687,17 @@ default browser instead, and the exit code says so (below).
   *Update now* posts `/api/update/apply` and the status line says the mode (`installer` or `browser`) or the error; *Release
   notes* opens the github.com page through `open_external` (shown only when there is one); *Skip this version* posts
   `/api/update/skip` and hides the banner at once, rolling back on failure. The status text is tied to the release it was
-  about, so it never shows against a newer one. The dev server fakes no update (its `info` callback returns nothing): to see
+  about, so it never shows against a newer one. The line under the Settings buttons follows the same rule (`updateLine`), and a
+  check's words are tied there through `S.update.offered`, which keeps them out of the banner. The dev server fakes no update (its `info` callback returns nothing): to see
   the banner, answer `/api/state` with an `update` block (a Playwright route does it).
 - **Usage guard card (#27).** The Settings card's two blocks, the live status (`#guard-live`) and the one-click setup
   (`#guard-setup`), are filled by `syncGuard` from `/api/guard`, asked once at a time every `GUARD_POLL_MS` while Settings is
   on screen; a block is rewritten only when its markup changed (`data-sig`), so a poll never drops the focus. The status is
   an OFF, ARMED or HOLDING chip with one line of story, which adds that sessions may not be told while setup reports the
-  hooks missing or partly installed. Install, Remove and Resume now are `disabled` only where they cannot work (no setup
+  hooks missing or partly installed. While holding, the told rows count conversations and agents apart, each session's
+  row says who of it heard, and a NOT TOLD row counts the conversations only their agents heard (#41; an entry without
+  `main` counts as its conversation). Armed or holding, a WATCHING block lists the conversations the Stop hook watches,
+  with since when and their background work (#41). Install, Remove and Resume now are `disabled` only where they cannot work (no setup
   here, nothing waiting; Remove needs `can_remove`, not Claude Code) and only `aria-disabled` while a click is on its way,
   so the focus stays. A blank cap is "not watched"; text a number box cannot hold (`validity.badInput`) is refused under the
   field instead of read as blank.
@@ -710,19 +729,21 @@ default browser instead, and the exit code says so (below).
   same function.
 - Fonts are bundled under `webui/fonts/` (OFL) — no network requests at runtime.
 - **Text is measured, not guessed.** `charts.js` asks the page how wide a run of text is (a probe `<text>`
-  element; answers are cached and `CUMCharts.refresh()` clears them when the font or size changes), so a bar
+  element; answers are cached and `MonitorCharts.refresh()` clears them when the font or size changes), so a bar
   chart's label column and the value text beside its bar fit the real font of any theme. A label that does not
   fit is cut in the middle with an ellipsis (`fitLabel`), so folders that differ at the end still differ.
-- **Test hook.** With `window.__CUM_TEST__` set before the script runs, `app.js` hands its helpers back
-  (`__CUM_TEST__.api`: `esc`, `fmtPct`, `paceOf`, `ratioCells`, `remainHTML`, `sessionsTable`, ...) and returns
+- **Test hook.** With `window.__USAGE_MONITOR_TEST__` set before the script runs, `app.js` hands its helpers back
+  (`__USAGE_MONITOR_TEST__.api`: `esc`, `fmtPct`, `paceOf`, `ratioCells`, `remainHTML`, `sessionsTable`, ...) and returns
   without starting the page. Nothing else sets it. `tests/webui_checks.js` loads `charts.js` and `app.js` in a
   node `vm` context with a fake DOM and prints what they do as JSON; `tests/test_webui.py` asserts on it. Those
-  tests start node, so they need `CUM_UI_TESTS=1`, and `tests.yml` runs them (and `tests/test_motion.py`) once more with it set.
+  tests start node, so they need `USAGE_MONITOR_UI_TESTS=1`, and `tests.yml` runs them (and `tests/test_motion.py`) once more with it set.
 - **Money.** Real money (the extra-usage Spend card) is shown in the account's own currency (`fmtMoney`, an
   `Intl.NumberFormat` with the ISO code the usage API reports; USD where it reports none). API-equivalent cost
   stays dollars. `/api/state.plan` carries the detected plan and price only: `plan_price_override` is a setting,
   applied where a price is used (the reports, and `effectivePlanPrice()` in the page), so setting or clearing it
-  never rewrites state.
+  never rewrites state. The hint beside the override names the detected plan and price, and `syncHints` keeps it
+  to the latest state: loaded on `#settings` the page is drawn before the first state, and a first sign-in or a new
+  plan changes the plan under a page that is open. It writes only when the words change.
 - **The plan multiple** is a row of cells of one plan-month each. Past 24 months a cell stands for N months
   (`ratioScale`) and its caption and aria-label say so ("1 cell = 5 months of Pro plan").
 - **Time remaining.** Every limit card carries `.nm-remain` (`--r` the share of the window left, `.l` the label,
@@ -743,10 +764,10 @@ when, and draw the characters of a figure that types, decodes or rolls in.
 
 | File | What it is |
 |---|---|
-| `webui/motion.js` | The engine, `window.CUM_FX`: one `requestAnimationFrame` loop for every character-level job (`typer`, `decoder`, `roller`), ghost text, the pending and arrival watcher, `FX.director(cfg)`, the boot curtain and the reduced-motion listener |
+| `webui/motion.js` | The engine, `window.USAGE_MONITOR_FX`: one `requestAnimationFrame` loop for every character-level job (`typer`, `decoder`, `roller`), ghost text, the pending and arrival watcher, `FX.director(cfg)`, the boot curtain and the reduced-motion listener |
 | `webui/motion.css` | What every theme shares: the ghost text, the typing cursor, `@property --t`, `.fx-land`, the boot curtain and the reduced-motion guard. It holds no colour and no timing |
 | `webui/themes/<id>.motion.css` | The theme's look: entrance, hover, placeholders, arrival and boot. Every rule is scoped by `html[data-theme="<id>"]`, colours come only from the theme's tokens |
-| `webui/themes/<id>.js` | The theme's director: registers `window.CUM_THEME_FX[id] = { start, enter, cancel, arrive }` and plays the boot |
+| `webui/themes/<id>.js` | The theme's director: registers `window.USAGE_MONITOR_THEME_FX[id] = { start, enter, cancel, arrive }` and plays the boot |
 
 **Hooks (`app.js` calls them; the header comment of `app.js` is the contract).** `start()` runs once the theme's script has
 loaded and again whenever the theme is applied. `enter(main, page)`: the page just drawn into `#main` is due its entrance (a
@@ -755,7 +776,7 @@ place). It is called once the theme's stylesheet and script are in and the windo
 `cancel(main)`: finish what plays, at the final state, before another page or theme replaces the page and when `reduce_motion`
 turns on (not when a card is filled in place). `arrive(card, info)`: a card's numbers arrived or changed in place; `info` is
 `{ page, card, first, from, to, fresh, entering, reduced }` (`from` and `to` are the card's `data-state` before and after).
-For code that is not a theme script, `cum:card-data` bubbles from the card with the same `info` and `cum:page-rendered` fires
+For code that is not a theme script, `mon:card-data` bubbles from the card with the same `info` and `mon:page-rendered` fires
 on `#main` with `{ page, opened, reduced, updated, added }` (the card keys). With `reduce_motion` or `prefers-reduced-motion`
 `enter` and `arrive` are never called (`cancel` still is, since it only finishes what was playing), and the files add no
 animation of their own.
@@ -845,7 +866,7 @@ transition in `motion.css`.
 hygiene `tests/test_webui.py` keeps for the other scripts) and node checks that run `motion.js` on a minimal fake DOM and each
 theme script (`themes/<id>.js`) with no `motion.js` at all (`tests/theme_scripts_checks.js`: the script has to load, start twice,
 survive its timers, a theme switch and reduced motion without throwing, because the page is complete without the engine); the node
-ones need `CUM_UI_TESTS=1`, start node with `CREATE_NO_WINDOW`, and `tests.yml` runs them with `tests/test_webui.py`. The
+ones need `USAGE_MONITOR_UI_TESTS=1`, start node with `CREATE_NO_WINDOW`, and `tests.yml` runs them with `tests/test_webui.py`. The
 hover rule above is pinned from both sides: the static checks fail a `:hover` rule that animates, moves or clips its target
 without `[data-fx-hot]` or `[data-fx-play]`, and the node scenarios drive the hover marks through a fake pointer (one entry, a
 card that moves off a resting pointer and back thirty times, the cool-down, the 4 px hold, the entrance, a quiet page, reduced

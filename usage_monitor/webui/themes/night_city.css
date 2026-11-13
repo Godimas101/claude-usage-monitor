@@ -432,7 +432,7 @@ h1, h2, h3, p, figure, dl, dd { margin: 0; }
 #burn .nm-row2.is-base { align-items: flex-end; }
 #burn .nm-big.m { font-size: clamp(36px, 2.6vw, 52px); }
 #burn .nm-facts { gap: 2px; }
-#burn .cum-spark { flex: 1 1 44px; min-height: 44px; height: 44px; }
+#burn .mon-spark { flex: 1 1 44px; min-height: 44px; height: 44px; }
 
 /* ── other pages ─────────────────────────────────────────────────────────────── */
 .nm-pgrid { flex: none; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 14px; align-items: stretch; }
@@ -651,7 +651,7 @@ h1, h2, h3, p, figure, dl, dd { margin: 0; }
 .nm-table td.r[data-pending] { background-position: right center; background-size: 55% 10px; }
 .nm-odo[data-pending] { opacity: .55; }
 /* The invisible text colour of a placeholder must not take the cut of a bar with it: the segments are a mask of currentcolor. */
-[data-pending] .cum-hbars .cum-track, [data-pending] .cum-hbars .cum-mark, [data-pending] .cum-hbars .cum-mark-2 { color: var(--nc-ink) !important; }
+[data-pending] .mon-hbars .mon-track, [data-pending] .mon-hbars .mon-mark, [data-pending] .mon-hbars .mon-mark-2 { color: var(--nc-ink) !important; }
 /* the numbers on screen are being refreshed and it is taking a while: the card's frame goes to the full line colour */
 .nm-card[data-updating]:not(.is-warn):not(.is-crit):not(.is-real) { --fr: var(--nc-line); }
 
@@ -682,33 +682,33 @@ h1, h2, h3, p, figure, dl, dd { margin: 0; }
 .nm-help .nm-status { min-height: 0; color: var(--nc-fg-hi); }
 
 /* ── charts (charts.js sets the colours through the --chart-* variables on .nm-screen) ──────────────── */
-.cum-spark, .cum-stack, .cum-ring, .cum-heat { display: block; }
-.cum-spark { width: 100%; height: 58px; overflow: visible; }
-.cum-stack { width: 100%; height: 16px; }
-.cum-heat { width: 100%; height: auto; }
-.cum-t { font: 400 11px/1 var(--f-data); letter-spacing: .04em; text-transform: uppercase; }
-.cum-t.is-strong { fill: var(--nc-fg-hi); }
-.cum-cell, .cum-pip, .cum-track, .cum-mark, .cum-mark-2, .cum-hot { shape-rendering: crispEdges; }
-.cum-dot { filter: drop-shadow(0 0 3px var(--nc-glow)); }
-.cum-line { stroke-width: 1.6; filter: drop-shadow(0 0 3px var(--nc-glow)); }
-.cum-ring-focus { stroke-width: 1; }
+.mon-spark, .mon-stack, .mon-ring, .mon-heat { display: block; }
+.mon-spark { width: 100%; height: 58px; overflow: visible; }
+.mon-stack { width: 100%; height: 16px; }
+.mon-heat { width: 100%; height: auto; }
+.mon-t { font: 400 11px/1 var(--f-data); letter-spacing: .04em; text-transform: uppercase; }
+.mon-t.is-strong { fill: var(--nc-fg-hi); }
+.mon-cell, .mon-pip, .mon-track, .mon-mark, .mon-mark-2, .mon-hot { shape-rendering: crispEdges; }
+.mon-dot { filter: drop-shadow(0 0 3px var(--nc-glow)); }
+.mon-line { stroke-width: 1.6; filter: drop-shadow(0 0 3px var(--nc-glow)); }
+.mon-ring-focus { stroke-width: 1; }
 /* the segments of a horizontal bar are cut by a mask: cells of 7 px with a 2 px gap, the track and the fill alike */
-.cum-hbars .cum-track, .cum-hbars .cum-mark, .cum-hbars .cum-mark-2 {
+.mon-hbars .mon-track, .mon-hbars .mon-mark, .mon-hbars .mon-mark-2 {
   -webkit-mask-image: repeating-linear-gradient(90deg, currentcolor 0 7px, transparent 7px 9px);
   mask-image: repeating-linear-gradient(90deg, currentcolor 0 7px, transparent 7px 9px);
 }
 /* the daily columns: a muted salmon, today in the usage colour, the average as a dashed line */
-.cum-columns .cum-mark { fill: color-mix(in srgb, var(--nc-fg) 58%, var(--nc-panel)); }
-.cum-columns .cum-hot { fill: var(--nc-accent); }
-.cum-columns .cum-track { opacity: .12; }
-.cum-columns .cum-now { stroke: var(--nc-ink-2); stroke-dasharray: 4 3; }
-.cum-linechart .cum-now { stroke: var(--nc-sel); stroke-dasharray: 2 3; }
-.cum-grid { stroke-dasharray: 1 4; }
-.cum-grid.is-limit { stroke-dasharray: 6 3; opacity: .85; }
-.cum-dot.is-hollow { fill: none; stroke: var(--nc-bar); }
-.cum-cell.cum-l0 { fill: var(--nc-track); fill-opacity: .55; }
-.cum-cell.cum-l1, .cum-cell.cum-l2, .cum-cell.cum-l3, .cum-cell.cum-l4 { fill: var(--nc-fg); }
-.cum-cell.is-today { stroke: var(--nc-bar); stroke-width: 1.5; }
+.mon-columns .mon-mark { fill: color-mix(in srgb, var(--nc-fg) 58%, var(--nc-panel)); }
+.mon-columns .mon-hot { fill: var(--nc-accent); }
+.mon-columns .mon-track { opacity: .12; }
+.mon-columns .mon-now { stroke: var(--nc-ink-2); stroke-dasharray: 4 3; }
+.mon-linechart .mon-now { stroke: var(--nc-sel); stroke-dasharray: 2 3; }
+.mon-grid { stroke-dasharray: 1 4; }
+.mon-grid.is-limit { stroke-dasharray: 6 3; opacity: .85; }
+.mon-dot.is-hollow { fill: none; stroke: var(--nc-bar); }
+.mon-cell.mon-l0 { fill: var(--nc-track); fill-opacity: .55; }
+.mon-cell.mon-l1, .mon-cell.mon-l2, .mon-cell.mon-l3, .mon-cell.mon-l4 { fill: var(--nc-fg); }
+.mon-cell.is-today { stroke: var(--nc-bar); stroke-width: 1.5; }
 
 /* ── reduced motion: nothing animates, the static frame shows ────────────────── */
 html[data-reduce-motion="1"] *, html[data-reduce-motion="1"] *::before, html[data-reduce-motion="1"] *::after { animation: none !important; transition: none !important; }

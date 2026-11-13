@@ -636,7 +636,7 @@ body { margin: 0; background: #121212; }
     '</div>';
 
   function footerHTML(st, sEl) {
-    if (st.status === 'STALE') return '<b class="t-warn">Hmm, we lost touch.</b> Sign in to Claude Code.';
+    if (st.status === 'STALE') return '<b class="t-warn">Hmm, we lost touch.</b> Send Claude Code a message.';
     if (st.status === 'OFFLINE') return 'No connection. Retrying every minute.';
     if (st.status === 'PAUSED') return 'Paused. Resume to keep usage live.';
     const when = fmtTime(st.sess.reset);

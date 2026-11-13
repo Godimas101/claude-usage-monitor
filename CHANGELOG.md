@@ -4,7 +4,47 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
-- README screenshots: retake from the v2.2.0 build ([#35](https://github.com/Godimas101/claude-usage-monitor/issues/35)) — closed 2026-11-04 by @Godimas101
+## [2.3.0] — 2026-11-12
+
+Claude Usage Monitor 2.3 makes updates safer, lets the usage guard reach every Claude Code conversation, and cleans up after an uninstall.
+
+### Highlights
+- **Safer updates:** Setup closes a running monitor itself, and starts it again when it's done. If Setup stops half way, it puts the old version back, so the app still starts. Claude Code starting the monitor in the middle of an update no longer breaks it.
+- **The usage guard reaches further:** a conversation that waits for its background work, such as a workflow, now hears the guard, and is woken when there is room again. An agent that starts while the guard holds hears it before its first prompt. The guard card lists the conversations it watches. This needs Claude Code 2.1.287 or newer: press **Install** on the card again.
+- **Uninstalling cleans up:** it takes the guard's hooks and the MCP tool out of Claude Code, and says what it could not remove.
+- **Clearer sign-in advice:** an expired sign-in now says to use Claude Code, not just open it. An open but idle Claude Code doesn't renew the sign-in.
+
+### Added
+- The usage guard reaches a conversation that waits for its background work, such as the one that started a workflow. A new Stop hook watches while that work runs, and wakes the conversation with the notice when the guard starts holding. Before, nothing told it until its next prompt or tool call ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).
+- The usage guard card lists the conversations the Stop hook watches, with since when and the background work each waits for ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).
+- An agent that starts while the usage guard holds hears the notice before its first prompt, through a new SubagentStart hook ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).
+
+### Changed
+- The usage guard's setup needs Claude Code 2.1.287 or newer (it was 2.1.139), and adds five hooks. A setup from before shows "partly installed" until you press **Install** again ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).
+- The usage guard no longer hands its notice to an agent's last call, the one that returns its answer, where nothing read it, and that agent no longer counts as told ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).
+- Agents that hear the usage guard's notice are told that only the main conversation can wait, so they finish the step they are on and hand back what they have ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).
+- `get_plan_usage`'s summary line says when the usage guard holds, and when work can resume ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).
+- The usage guard card counts the conversations and the agents told apart, says who of each session heard, and names a conversation that only its agents heard. It used to count a session as told when only a workflow's agents had heard ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).
+- Switching the usage guard off and on again starts a new hold, so every session hears the notice again. The same caps in the same window used to count as the hold they had already heard of ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).
+- Setup and the uninstaller close a running monitor themselves, and Setup starts it again when it's done. They used to stop and ask you to close it. If the monitor doesn't close, they say how to close it by hand ([#53](https://github.com/Godimas101/claude-usage-monitor/issues/53)).
+- The Usage guard's backups of Claude Code's settings file are now named `settings.json.usage-monitor-backup-<date>-<time>`. Copies with the old name keep counting toward the five it keeps.
+
+### Fixed
+- The hint beside **Plan price override** follows your plan. It kept its old text if you signed in or changed plan while Settings was open, and read "no price known" if you reloaded Settings in a browser ([#46](https://github.com/Godimas101/claude-usage-monitor/issues/46)).
+- The Usage guard card finds Claude Code from Anthropic's Windows installer, whose folder isn't on the PATH. It read NOT FOUND, and told you to install what you had just installed ([#43](https://github.com/Godimas101/claude-usage-monitor/issues/43)).
+- The line under the update buttons in Settings no longer contradicts them. It kept the last click's answer, such as "YOU ARE UP TO DATE.", after a newer release was found ([#47](https://github.com/Godimas101/claude-usage-monitor/issues/47)).
+- Claude Code starting the monitor in the middle of an update no longer breaks the update. It does that for each hook and MCP call, and a start at the wrong moment could stop the update with the program half gone ([#37](https://github.com/Godimas101/claude-usage-monitor/issues/37)).
+- If Setup stops half way through an update (Cancel, a full disk, a file it can't write), it puts the old version back, so the app still starts. Before, nothing was left to start until Setup ran again ([#37](https://github.com/Godimas101/claude-usage-monitor/issues/37)).
+- An update no longer stops with "in use" when Claude Code starts the monitor just as Setup moves its files. Setup ends that call too, and says what it closed: on its last page, or in a notification from the monitor after an update from the app ([#37](https://github.com/Godimas101/claude-usage-monitor/issues/37)).
+- Uninstalling takes the usage guard's hooks and the MCP tool out of Claude Code, and says what it could not remove. They stayed behind, starting a program that was gone ([#32](https://github.com/Godimas101/claude-usage-monitor/issues/32)).
+- The uninstaller takes the MCP tool out even when Claude Code's settings file can't be read or written, and says to finish by hand instead of to try again ([#32](https://github.com/Godimas101/claude-usage-monitor/issues/32)).
+- Uninstalling also removes Windows' own startup record for the app. One left set to off would have kept a later install from starting with Windows ([#32](https://github.com/Godimas101/claude-usage-monitor/issues/32)).
+- Setup's and the uninstaller's windows keep answering while they wait, and the uninstall window says what it is waiting for. It could show "Not Responding" while Claude Code was slow ([#32](https://github.com/Godimas101/claude-usage-monitor/issues/32)).
+- A sign-in whose expiry Claude Code wrote as 0 no longer reads as expired. Some Claude Code builds wrote it that way, and the monitor showed STALE although the sign-in worked ([#51](https://github.com/Godimas101/claude-usage-monitor/issues/51)).
+- The advice for an expired sign-in says to use Claude Code, not just open it. An open but idle Claude Code doesn't renew the sign-in, so the widget stayed STALE with Claude Code open. The widgets, the dashboard's help and the README now say to send Claude Code a message. After an HTTP 403, the dashboard's help also says to sign in again with /login ([#52](https://github.com/Godimas101/claude-usage-monitor/issues/52)).
+- The usage guard card shows its live part as soon as the dashboard opens. It used to wait until Claude Code had been started twice to check the setup, which can take several seconds. The setup part now fills in when that check is done ([#32](https://github.com/Godimas101/claude-usage-monitor/issues/32)).
+- When Windows refuses to put the taskbar strip in the taskbar, the strip floats over it and tries again a minute later. It used to float until the app restarted. Only a taskbar that is gone, as when Explorer restarts, waits for a new one ([#32](https://github.com/Godimas101/claude-usage-monitor/issues/32)).
+- About asks for the supporters list again at your next visit if it failed to load. It stayed "unavailable" until the window was closed ([#47](https://github.com/Godimas101/claude-usage-monitor/issues/47)).
 
 ## [2.2.0] — 2026-11-03
 

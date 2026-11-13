@@ -8,9 +8,9 @@ rem   build.bat             build, then wait for a key
 rem   build.bat nopause     build without waiting (scripts)
 rem
 rem Optional environment variables, each defaulting to the folder next to this file:
-rem   CUM_DISTPATH   where PyInstaller writes the bundle        (default: dist)
-rem   CUM_WORKPATH   PyInstaller's work folder                  (default: build)
-rem   CUM_OUTDIR     where the installer is written             (default: installer)
+rem   USAGE_MONITOR_DISTPATH   where PyInstaller writes the bundle        (default: dist)
+rem   USAGE_MONITOR_WORKPATH   PyInstaller's work folder                  (default: build)
+rem   USAGE_MONITOR_OUTDIR     where the installer is written             (default: installer)
 rem Both tools stumble on paths over 260 characters: point these at a short folder if the checkout is deep.
 rem
 rem The build never runs the installer. Release builds come from .github/workflows/release.yml (docs/RELEASING.md).
@@ -18,9 +18,9 @@ rem The build never runs the installer. Release builds come from .github/workflo
 set "DOPAUSE=pause"
 if /i "%~1"=="nopause" set "DOPAUSE=rem"
 
-if not defined CUM_DISTPATH set "CUM_DISTPATH=dist"
-if not defined CUM_WORKPATH set "CUM_WORKPATH=build"
-if not defined CUM_OUTDIR set "CUM_OUTDIR=installer"
+if not defined USAGE_MONITOR_DISTPATH set "USAGE_MONITOR_DISTPATH=dist"
+if not defined USAGE_MONITOR_WORKPATH set "USAGE_MONITOR_WORKPATH=build"
+if not defined USAGE_MONITOR_OUTDIR set "USAGE_MONITOR_OUTDIR=installer"
 
 if not exist VERSION (
     echo ERROR: the VERSION file is missing.
@@ -63,13 +63,13 @@ python -c "import sys, importlib.metadata as m; print('      Toolchain: Python',
 :: -- Step 1: PyInstaller -------------------
 echo.
 echo [1/3] Building the exe with PyInstaller...
-python -m PyInstaller ClaudeUsageMonitor.spec --noconfirm --distpath "%CUM_DISTPATH%" --workpath "%CUM_WORKPATH%"
+python -m PyInstaller ClaudeUsageMonitor.spec --noconfirm --distpath "%USAGE_MONITOR_DISTPATH%" --workpath "%USAGE_MONITOR_WORKPATH%"
 if errorlevel 1 (
     echo ERROR: PyInstaller failed.
     %DOPAUSE%
     exit /b 1
 )
-set "BUNDLE=%CUM_DISTPATH%\ClaudeUsageMonitor"
+set "BUNDLE=%USAGE_MONITOR_DISTPATH%\ClaudeUsageMonitor"
 
 :: -- Step 2: check the bundle --------------
 echo.
@@ -80,7 +80,7 @@ if not exist "%BUNDLE%\ClaudeUsageMonitor.exe" (
     exit /b 1
 )
 rem The frozen exe must read the VERSION it was built with, or the updater would think it is always behind.
-set "VERFILE=%CUM_WORKPATH%\built-version.txt"
+set "VERFILE=%USAGE_MONITOR_WORKPATH%\built-version.txt"
 if exist "%VERFILE%" del "%VERFILE%"
 "%BUNDLE%\ClaudeUsageMonitor.exe" --print-version "%VERFILE%"
 if errorlevel 1 (
@@ -100,14 +100,14 @@ echo       The exe reports %BUILTVER%.
 :: -- Step 3: Inno Setup --------------------
 echo.
 echo [3/3] Building the installer with Inno Setup...
-"%ISCC%" /DAppVer=%APPVER% "/DDistDir=%BUNDLE%" "/O%CUM_OUTDIR%" installer.iss
+"%ISCC%" /DAppVer=%APPVER% "/DDistDir=%BUNDLE%" "/O%USAGE_MONITOR_OUTDIR%" installer.iss
 if errorlevel 1 (
     echo ERROR: Inno Setup failed.
     %DOPAUSE%
     exit /b 1
 )
 
-set "SETUP=%CUM_OUTDIR%\ClaudeUsageMonitorSetup-v%APPVER%.exe"
+set "SETUP=%USAGE_MONITOR_OUTDIR%\ClaudeUsageMonitorSetup-v%APPVER%.exe"
 echo.
 echo ==========================================
 echo  Build complete!

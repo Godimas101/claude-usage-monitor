@@ -76,7 +76,7 @@ html[data-theme="night_city"] .fx-run .nm-table tbody tr { animation: ncx-row 12
 @keyframes ncx-row { from { opacity: 0; transform: translateX(-3px); } }
 
 /* charts: columns rise in five steps with a colour split; a line is drawn in 20 steps with its dots */
-html[data-theme="night_city"] :is(.fx-run, .fx-land) .cum-columns :is(.cum-mark, .cum-hot) {
+html[data-theme="night_city"] :is(.fx-run, .fx-land) .mon-columns :is(.mon-mark, .mon-hot) {
   transform-box: fill-box; transform-origin: 50% 100%;
   animation: ncx-col 300ms steps(5, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 45ms + 160ms + var(--fx-c, 0) * 7ms) backwards;
 }
@@ -85,21 +85,21 @@ html[data-theme="night_city"] :is(.fx-run, .fx-land) .cum-columns :is(.cum-mark,
   70%  { filter: drop-shadow(1px 0 0 var(--nc-sel)) drop-shadow(-1px 0 0 var(--nc-danger)); }
   100% { filter: none; }
 }
-html[data-theme="night_city"] :is(.fx-run, .fx-land) .cum-line { animation: ncx-draw 380ms steps(20, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 45ms + 110ms) backwards; }
+html[data-theme="night_city"] :is(.fx-run, .fx-land) .mon-line { animation: ncx-draw 380ms steps(20, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 45ms + 110ms) backwards; }
 @keyframes ncx-draw {
   from { clip-path: inset(0 100% 0 0); filter: drop-shadow(-2px 0 0 var(--nc-sel)) drop-shadow(2px 0 0 var(--nc-danger)); }
   to   { clip-path: inset(0 0 0 0); filter: drop-shadow(0 0 3px var(--nc-glow)); }
 }
-html[data-theme="night_city"] :is(.fx-run, .fx-land) .cum-dot { animation: ncx-blip 100ms steps(2, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 45ms + 110ms + var(--fx-d, 0) * 330ms / var(--fx-dn, 1)) backwards; }
+html[data-theme="night_city"] :is(.fx-run, .fx-land) .mon-dot { animation: ncx-blip 100ms steps(2, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 45ms + 110ms + var(--fx-d, 0) * 330ms / var(--fx-dn, 1)) backwards; }
 @keyframes ncx-blip { from { opacity: 0; } }
-html[data-theme="night_city"] :is(.fx-run, .fx-land) :is(.cum-grid, .cum-now, .cum-t) { animation: ncx-blip 200ms steps(3, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 45ms + 110ms) backwards; }
-html[data-theme="night_city"] :is(.fx-run, .fx-land) :is(.cum-ideal, .cum-fore) { animation: ncx-blip 200ms steps(3, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 45ms + 390ms) backwards; }
-html[data-theme="night_city"] :is(.fx-run, .fx-land) .cum-seg { transform-box: fill-box; transform-origin: 0 50%; animation: ncx-seg 280ms steps(7, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 45ms + 160ms) backwards; }
+html[data-theme="night_city"] :is(.fx-run, .fx-land) :is(.mon-grid, .mon-now, .mon-t) { animation: ncx-blip 200ms steps(3, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 45ms + 110ms) backwards; }
+html[data-theme="night_city"] :is(.fx-run, .fx-land) :is(.mon-ideal, .mon-fore) { animation: ncx-blip 200ms steps(3, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 45ms + 390ms) backwards; }
+html[data-theme="night_city"] :is(.fx-run, .fx-land) .mon-seg { transform-box: fill-box; transform-origin: 0 50%; animation: ncx-seg 280ms steps(7, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 45ms + 160ms) backwards; }
 @keyframes ncx-seg { from { transform: scaleX(0); } }
-html[data-theme="night_city"] :is(.fx-run, .fx-land) .cum-hbars .cum-row { animation: ncx-blip 200ms steps(3, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 45ms + 100ms + var(--fx-r, 0) * 40ms) backwards; }
+html[data-theme="night_city"] :is(.fx-run, .fx-land) .mon-hbars .mon-row { animation: ncx-blip 200ms steps(3, end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 45ms + 100ms + var(--fx-r, 0) * 40ms) backwards; }
 /* the heat maps come in as one unit, wiped on from the left a column at a time (4 ms a column, at most 400 ms): one animation
    for the whole map, not one per cell */
-html[data-theme="night_city"] :is(.fx-run, .fx-land) :is(.cum-calendar, .cum-matrix) { animation: ncx-reveal min(var(--fx-cn, 1) * 4ms, 400ms) steps(var(--fx-cn, 1), end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 45ms + 100ms) backwards; }
+html[data-theme="night_city"] :is(.fx-run, .fx-land) :is(.mon-calendar, .mon-matrix) { animation: ncx-reveal min(var(--fx-cn, 1) * 4ms, 400ms) steps(var(--fx-cn, 1), end) calc(var(--fx-c0, 40ms) + var(--fx-i, 0) * 45ms + 100ms) backwards; }
 @keyframes ncx-reveal { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
 
 /* ── placeholders: a figure's slot cycles glyph noise (night_city.js, 12 frames a second, only while the window is shown)
@@ -136,7 +136,7 @@ html[data-theme="night_city"] .nm-chart-host[data-fx-pend="chart"]::after {
   transform: translateY(-100%); animation: ncx-chartscan 1.8s steps(18, end) infinite;
 }
 @keyframes ncx-chartscan { from { transform: translateY(-100%); } to { transform: translateY(0); } }
-html[data-theme="night_city"] svg.cum-spark[data-fx-pend="chart"] { opacity: .45; }
+html[data-theme="night_city"] svg.mon-spark[data-fx-pend="chart"] { opacity: .45; }
 
 /* ── hover: two frames of jitter and a tear (190 ms, hard steps), then it settles. Once per entry, and only where a pointer can hover. ── */
 @keyframes ncx-jit {

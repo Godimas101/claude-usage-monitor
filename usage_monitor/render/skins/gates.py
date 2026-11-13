@@ -740,7 +740,7 @@ _LAMP_KIND = {
 
 # status -> (lead, rest, lead colour role). The three the mockup shows are STALE, OFFLINE and PAUSED.
 _STATUS_COPY: dict[ApiStatus, tuple[str, str, str]] = {
-    ApiStatus.STALE: ("Hmm, we lost touch.", " Sign in to Claude Code.", "warn"),
+    ApiStatus.STALE: ("Hmm, we lost touch.", " Send Claude Code a message.", "warn"),
     ApiStatus.OFFLINE: ("", "No connection. Retrying every minute.", "text_3"),
     ApiStatus.PAUSED: ("", "Paused. Resume to keep usage live.", "text_3"),
     ApiStatus.RATE_LIMITED: ("Rate limited.", " Showing the last reading.", "warn"),

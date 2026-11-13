@@ -4,6 +4,8 @@
     main.py --dashboard --port N         the dashboard window (a child process of the monitor)
     main.py --print-version FILE         write the version to FILE and exit (frozen-build check;
                                          exit code 1 when it cannot be written or the build has no VERSION)
+    main.py --remove-setup [FILE]        take this app's hooks and MCP tool out of Claude Code (the uninstaller runs this;
+                                         what could not be done goes to FILE, and the exit code is 1)
     main.py --dump-frames DIR            render every theme, variant, state and scale to PNGs
     main.py --smoke-test SECONDS FILE    run the real app for SECONDS, exercise it, write a report
     main.py --status [--json]            print the plan usage for a Claude session (see docs/AGENT_HOOK.md)
@@ -12,11 +14,13 @@
     main.py --mcp                        an MCP server on stdio with the tool get_plan_usage
     main.py --wait [--session ID]        wait until the usage guard lets work resume (a Claude session's
                                          background command; its exit wakes the session)
+    main.py --watch                      a Claude Code Stop hook run in the background: when the usage guard holds,
+                                         its exit wakes a conversation that waits for its background work
 
 The build is windowed, so there is no console: results go to files, and an unhandled exception is
-written to the log. --status, --hook, --gate, --mcp and --wait answer on stdout, which exists when the caller
-gives the process a pipe, as Claude Code does. Dev isolation: CUM_APPDATA_DIR puts settings, database and log in another
-folder, and CUM_DEV_INSTANCE=1 uses its own single-instance mutex and tags the tray tooltip.
+written to the log. --status, --hook, --gate, --mcp and --wait answer on stdout and --watch on stderr, which
+exist when the caller gives the process pipes, as Claude Code does. Dev isolation: USAGE_MONITOR_APPDATA_DIR puts settings, database and log in another
+folder, and USAGE_MONITOR_DEV_INSTANCE=1 uses its own single-instance mutex and tags the tray tooltip.
 """
 from __future__ import annotations
 
@@ -34,7 +38,7 @@ import version
 
 DASHBOARD_LOG = "dashboard.log"
 AGENT_LOG = "agent.log"             # --status, --hook, --gate and --mcp: many can run at once, beside the app
-AGENT_KINDS = ("status", "hook", "gate", "mcp", "wait")
+AGENT_KINDS = ("status", "hook", "gate", "mcp", "wait", "watch")
 HOOK_KINDS = ("hook", "gate")       # Claude Code hooks: exit 0 whatever happens, never blocking a prompt or a tool
 FAULT_LOG = "faults.log"
 UNKNOWN_VERSION = "0.0.0"           # what version.py reports when it cannot read the VERSION file
@@ -43,8 +47,8 @@ _fault_file: IO[str] | None = None  # faulthandler needs its file open for the l
 
 @dataclass(frozen=True)
 class Command:
-    """What the command line asks for. ``kind`` is "app", "dashboard", "print_version",
-    "dump_frames", "smoke_test", "status", "hook", "gate", "mcp", "wait" or "error" (then ``error`` says why)."""
+    """What the command line asks for. ``kind`` is "app", "dashboard", "print_version", "remove_setup",
+    "dump_frames", "smoke_test", "status", "hook", "gate", "mcp", "wait", "watch" or "error" (then ``error`` says why)."""
 
     kind: str = "app"
     port: int = 0
@@ -100,12 +104,15 @@ def _session_id(args: list[str]) -> str | None:
 
 def parse_args(argv: Sequence[str]) -> Command:
     """Read the command line. Unknown words are ignored (a windowed app must not die on them), and
-    when several modes are given the first of print-version, dashboard, dump-frames, smoke-test,
-    status, hook, gate, wait, mcp wins."""
+    when several modes are given the first of print-version, remove-setup, dashboard, dump-frames,
+    smoke-test, status, hook, gate, wait, watch, mcp wins."""
     args = list(argv)
     if "--print-version" in args:
         words = _values(args, "--print-version", 1)
         return Command("print_version", path=words[0] if words else None)  # v1: no file, nothing to do
+    if "--remove-setup" in args:
+        words = _values(args, "--remove-setup", 1)
+        return Command("remove_setup", path=words[0] if words else None)
     if "--dashboard" in args:
         port, error = _port(args)
         return Command("error", error=error) if error else Command("dashboard", port=port)
@@ -131,6 +138,8 @@ def parse_args(argv: Sequence[str]) -> Command:
         return Command("gate", session_cap=_percent(args, "--session"), weekly_cap=_percent(args, "--weekly"))
     if "--wait" in args:
         return Command("wait", session_id=_session_id(args))
+    if "--watch" in args:
+        return Command("watch")
     if "--mcp" in args:
         return Command("mcp")
     return Command("app")
@@ -157,6 +166,28 @@ def _print_version(path: str | None) -> int:
     except OSError as exc:
         return _fail(f"could not write the version to {path}: {exc.strerror or type(exc).__name__}")
     return 0
+
+
+def _remove_setup(path: str | None) -> int:
+    """For the uninstaller: take this app's hooks and MCP tool out of Claude Code while the exe is still there, or Claude
+    Code goes on starting a program that is gone. What could not be done goes to ``path`` for the uninstaller to show, and
+    the exit code is then 1. The file is written either way: the uninstaller waits for it, and takes no file to mean this
+    never finished. "Claude Code was not found" counts only if there were hooks: without them it is about something this
+    person never set up."""
+    from usage_monitor.agent import setup
+
+    result = setup.remove(only_here=True)
+    warnings = [line for line in result["warnings"] if result["changed"] or not line.startswith(setup.NO_CLAUDE_LEFT)]
+    left = [*result["errors"], *warnings]
+    if path:
+        target = Path(path)
+        temporary = target.with_name(target.name + ".tmp")
+        try:
+            temporary.write_text("\n".join(left), encoding="utf-8-sig")    # the mark: Inno Setup reads it as UTF-8
+            temporary.replace(target)                                      # all of it or none: it is waited for
+        except OSError:
+            pass                                                           # the exit code still says so
+    return 1 if left else 0
 
 
 def _fail(message: str) -> int:
@@ -208,7 +239,7 @@ def _smoke_test(seconds: float, report: str) -> int:
 
 
 def _agent(command: Command) -> int:
-    """--status, --hook, --gate, --mcp and --wait. No UI and no single-instance mutex, so they run beside the app."""
+    """--status, --hook, --gate, --mcp, --wait and --watch. No UI and no single-instance mutex, so they run beside the app."""
     from datetime import datetime, timezone
 
     from usage_monitor import paths
@@ -224,6 +255,13 @@ def _agent(command: Command) -> int:
     if command.kind == "wait":  # its ending wakes the session, so it runs even with nowhere to answer
         return cli.run_wait(session_id=command.session_id, folder=folder, clock=clock,
                             app_version=version.APP_VERSION, out=sys.stdout.buffer if sys.stdout else None)
+    if command.kind == "watch":  # Claude Code wakes the session with its stderr, or its stdout when stderr is empty
+        from usage_monitor.agent import sessions
+
+        stream = sys.stderr if sys.stderr is not None else sys.stdout
+        return cli.run_watch(folder=folder, clock=clock, app_version=version.APP_VERSION,
+                             stdin=sys.stdin.buffer if sys.stdin is not None else None,
+                             err=stream.buffer if stream is not None else None, parent_alive=sessions.parent_check())
     if sys.stdout is None:  # a windowed build started without a pipe has nowhere to answer
         return 0 if command.kind in HOOK_KINDS else 1
     out = sys.stdout.buffer
@@ -248,6 +286,8 @@ def _agent(command: Command) -> int:
 def run_command(command: Command, argv: Sequence[str]) -> int:
     if command.kind == "print_version":
         return _print_version(command.path)
+    if command.kind == "remove_setup":
+        return _remove_setup(command.path)
     if command.kind == "dashboard":
         return _dashboard(argv)
     if command.kind == "dump_frames":

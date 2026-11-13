@@ -2,8 +2,8 @@
  * unchanged state costs a 304), routes on the hash (#overview #limits #cost #efficiency #history #settings
  * #about; #nerds, the old name of Efficiency, still opens it), and renders from the live MonitorState plus the
  * statistics reports (/api/analytics/<name>, /api/export). Settings apply at once through POST /api/settings.
- * Dependencies: charts.js (window.CUMCharts). The theme's own script (themes/<id>.js, which registers
- * window.CUM_THEME_FX[id]) and the motion layer (motion.js) are optional: without them the page is complete and still.
+ * Dependencies: charts.js (window.MonitorCharts). The theme's own script (themes/<id>.js, which registers
+ * window.USAGE_MONITOR_THEME_FX[id]) and the motion layer (motion.js) are optional: without them the page is complete and still.
  * Nothing here stores a token, a message or a file body. The token comes from the page's meta tag.
  *
  * ── Markup contract for theme authors ─────────────────────────────────────────────────────────────
@@ -75,7 +75,7 @@
  * History     .nm-odo-row > .nm-odo-main (.nm-odo > .nm-od-d > .strip > i, the digit shown set by --d;
  *             .nm-od-sep; .nm-odo-facts) + .nm-compare (.nm-cmp-body > .nm-cmp-n .nm-cmp-u .nm-cmp-t; .nm-dots
  *             > button, the comparison picker).
- * Charts      .nm-chart-host[data-chart] holds one SVG from charts.js (cum-* classes, see that file); the
+ * Charts      .nm-chart-host[data-chart] holds one SVG from charts.js (mon-* classes, see that file); the
  *             hosts carry .nm-line .nm-hbars .nm-calendar .nm-matrix .nm-daily so a theme can size them.
  * Data hooks  data-seg / data-value (a segmented button), data-action (a button), data-key (a setting),
  *             data-quiet and data-needs-alerts (the alert form), data-fid (focus returns to this id after a
@@ -91,8 +91,8 @@
  *             in place of its contents, and the other cards are not affected. data-updating is on a card whose numbers are
  *             on screen and are being fetched again, only once that has taken over 600 ms (a quiet cue, never a blank).
  *   Marks     A figure (.nm-big .nm-stat-v .nm-stat-s .nm-mrow .v .nm-kv b .nm-facts spans .nm-pace spans .nm-story table
- *             cells .nm-odo-facts b .nm-cmp-n .nm-toolbar-n), a bar (.nm-cells .nm-ratio) or a chart (.nm-chart-host .cum-spark
- *             .cum-stack .nm-odo) whose value is not in carries data-pending (and aria-hidden). Its text is placeholder text
+ *             cells .nm-odo-facts b .nm-cmp-n .nm-toolbar-n), a bar (.nm-cells .nm-ratio) or a chart (.nm-chart-host .mon-spark
+ *             .mon-stack .nm-odo) whose value is not in carries data-pending (and aria-hidden). Its text is placeholder text
  *             that only sizes the slot; the structural stylesheet makes it transparent and the theme draws what stands in its
  *             place (a block, a cursor, noise). When the value is in: data-final=<its final text> on a figure and data-fill=<0
  *             to 100> on a bar; and data-fresh on the ones that are new or changed in the last paint (a figure showing what
@@ -107,7 +107,7 @@
  * Motion      Everything that moves checks data-reduce-motion="1" on <html> (the reduce_motion setting) and
  *             prefers-reduced-motion. With either, nothing animates, enter and arrive are never called (cancel still is:
  *             it only finishes what was playing) and the comparison does not rotate. The hooks a theme script
- *             (window.CUM_THEME_FX[id]) or the motion layer may implement:
+ *             (window.USAGE_MONITOR_THEME_FX[id]) or the motion layer may implement:
  *               enter(main, page)   the page just drawn into #main is due its entrance: a page was opened (a tab, a link,
  *                                   back or forward), the dashboard started, or the theme changed. Not for a refresh of the
  *                                   same page, a variant or colour change, or a card filled in place. It is called once the
@@ -120,8 +120,8 @@
  *             Classes on #main: fx-run (the theme's entrance is playing; the theme sets and clears it), fx-quiet (the page just
  *             changed under the pointer: hover effects wait until the pointer moves or the wheel turns; the page sets it and
  *             clears it itself). fx-hold, which kept the page hidden until its reports arrived, is retired.
- *             Events, for code that is not a theme script: cum:card-data on the card (bubbles; detail is the info above) and
- *             cum:page-rendered on #main (detail { page, opened, reduced, updated: [card keys], added: [card keys] }).
+ *             Events, for code that is not a theme script: mon:card-data on the card (bubbles; detail is the info above) and
+ *             mon:page-rendered on #main (detail { page, opened, reduced, updated: [card keys], added: [card keys] }).
  */
 (function () {
   "use strict";
@@ -132,7 +132,7 @@
     var meta = document.querySelector('meta[name="monitor-token"]');
     return meta ? meta.getAttribute("content") || "" : "";
   })();
-  var CHARTS = window.CUMCharts;
+  var CHARTS = window.MonitorCharts;
   var PAGES = [
     { key: "overview", label: "OVERVIEW", title: "OVERVIEW", sub: "Session telemetry for the current window. Pace is usage against elapsed time." },
     { key: "limits", label: "LIMITS", title: "LIMITS", sub: "Every limit window, its reset and where it is heading." },
@@ -205,7 +205,7 @@
   var COPY_TITLES = { install: "Copy the install command", start: "Copy the command that starts Claude Code" };
   var SIGNIN_HEAD = "NO CLAUDE SIGN-IN YET";
   var SIGNIN_WHY = "The monitor reads your plan's limits through the sign-in that Claude Code saves on this PC. Signing in to Claude Code once is enough, even if you use Claude on the web or in the Claude app. Claude Code needs a paid plan such as Pro or Max.";
-  var SIGNIN_RENEWS = "Claude Code renews the sign-in each time it runs. If the monitor later says the sign-in has expired, open Claude Code again.";
+  var SIGNIN_RENEWS = "Claude Code renews the sign-in when you use it. If the monitor later says the sign-in has expired, send Claude Code a message.";
   var CHECK_NONE = "Still no sign-in found.";
   var CHECK_STALE = "Still no working sign-in.";
   var CHECK_FAILED = "Could not check just now. Try again.";
@@ -224,7 +224,7 @@
   // Points of the clock within which a limit counts as on pace. The same number as windows.PACE_BAND_POINTS on the
   // Python side (the widgets and the pacing report use it), which tests/test_webui.py checks.
   var PACE_BAND = 10;
-  var PREFS_KEY = "cum-dashboard-prefs";
+  var PREFS_KEY = "usage-monitor-dashboard-prefs";
   // What the page needs to work whatever the theme: the odometer's strips, segmented bars, chart hosts.
   var BASE_CSS = [
     ".nm-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}",
@@ -241,7 +241,7 @@
     // A value that is not known yet keeps its room and shows nothing: the placeholder text under it is only there to size it.
     // A theme draws what stands in its place (a block, a cursor, noise) with a more specific !important rule of its own.
     "[data-pending],[data-pending] *{color:transparent!important;text-shadow:none!important}",
-    "[data-pending] .cum-t{fill:transparent!important}",
+    "[data-pending] .mon-t{fill:transparent!important}",
     "[data-pending] .on,[data-pending] .part{box-shadow:none!important}",
     // A boxed note (the Fast mode card's) that is there before its report and after it: before, it keeps its room and its text
     // is transparent like any placeholder's, and its box is not drawn either.
@@ -660,9 +660,29 @@
 
   // ── Per-viewer preferences (the last window and toggles chosen) ─────────────────
 
+  // Before v2.3 the choices were kept under a key with a shorter, three-letter prefix. Read it once and move it here, so
+  // an update keeps them.
+  function movedPrefs() {
+    var store = window.localStorage;
+    for (var i = 0; i < (store.length || 0); i++) {
+      var key = String(store.key(i));
+      if (key !== PREFS_KEY && /^[a-z]{3}-dashboard-prefs$/.test(key)) {
+        var text = store.getItem(key);
+        store.setItem(PREFS_KEY, text);
+        store.removeItem(key);
+        return text;
+      }
+    }
+    return null;
+  }
+
   function loadPrefs() {
     try {
-      var saved = JSON.parse(window.localStorage.getItem(PREFS_KEY) || "null");
+      var text = window.localStorage.getItem(PREFS_KEY);
+      if (text === null) {
+        text = movedPrefs();
+      }
+      var saved = JSON.parse(text || "null");
       if (!saved || typeof saved !== "object") {
         return;
       }
@@ -1506,7 +1526,7 @@
   var FIGURES = ".nm-big, .nm-stat-v, .nm-stat-s, .nm-mrow .v, .nm-kv b, .nm-facts > span, .nm-pace > span, .nm-pace > b, .nm-pace > .fc, " +
     ".nm-story, .nm-table td.r, .nm-table td.nm-trunc, .nm-odo-facts b, .nm-cmp-n, .nm-toolbar-n";
   var BARS = ".nm-cells, .nm-ratio";
-  var CHARTS_SEL = ".nm-chart-host, .cum-spark, .cum-stack, .nm-odo";
+  var CHARTS_SEL = ".nm-chart-host, .mon-spark, .mon-stack, .nm-odo";
 
   function textOf(el) {
     return String(el.textContent || "").replace(/\s+/g, " ").trim();
@@ -1734,7 +1754,7 @@
   }
 
   /* Tells the theme and the motion layer what a paint did: for every card whose numbers arrived (or changed), the theme's
-   * arrive(card, info) and a cum:card-data event on the card; for the page, a cum:page-rendered event on #main. */
+   * arrive(card, info) and a mon:card-data event on the card; for the page, a mon:page-rendered event on #main. */
   function announce(main, key, opened, ctx) {
     var fx = themeFx();
     var reduced = reduceMotion();
@@ -1744,9 +1764,9 @@
       if (fx && typeof fx.arrive === "function" && !reduced) {
         guarded("arrive", function () { fx.arrive(u.el, info); });
       }
-      dispatch(u.el, "cum:card-data", info);
+      dispatch(u.el, "mon:card-data", info);
     });
-    dispatch(main, "cum:page-rendered", {
+    dispatch(main, "mon:page-rendered", {
       page: key, opened: opened, reduced: reduced,
       updated: ctx.updated.map(function (u) { return u.key; }), added: ctx.added.map(function (a) { return a.key; })
     });
@@ -1756,7 +1776,7 @@
 
   function themeFx() {
     var t = S.lastTheme;
-    return t && window.CUM_THEME_FX ? window.CUM_THEME_FX[t.id] : null;
+    return t && window.USAGE_MONITOR_THEME_FX ? window.USAGE_MONITOR_THEME_FX[t.id] : null;
   }
 
   /* The theme's own stylesheet AND script are in. Changing the link's href does not clear link.sheet (Chromium keeps the old
@@ -3058,8 +3078,8 @@
 
   // ── Settings ────────────────────────────────────────────────────────────────────
 
-  function toggleRow(key, title, desc, attrs) {
-    return '<label class="nm-row-set"><span><span class="t">' + esc(title) + '</span><span class="d">' + esc(desc) +
+  function toggleRow(key, title, desc, attrs, descId) {
+    return '<label class="nm-row-set"><span><span class="t">' + esc(title) + '</span><span class="d"' + (descId ? ' id="' + descId + '"' : "") + ">" + esc(desc) +
       '</span></span><span class="nm-toggle"><input type="checkbox" data-key="' + esc(key) + '" data-kind="bool"' + (attrs || "") + '><span class="box" aria-hidden="true"></span><span class="lbl" data-lbl-for="' +
       esc(key) + '">OFF</span></span></label>';
   }
@@ -3101,8 +3121,6 @@
     if (S.formKey !== "settings") {
       S.formKey = "settings";
       S.sig = "";
-      var plan = planFromState();
-      var detected = plan.price !== null ? plan.name + ", " + fmtPlanPrice(plan.price) + " a month" : "no price known";
       main.innerHTML = pageHead("settings") +
         '<div class="nm-pgrid">' +
         '<section class="nm-card wide" aria-label="Theme"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Theme</h2><span class="nm-meta-t" id="set-theme-meta"></span></div>' +
@@ -3123,13 +3141,13 @@
         '<label class="nm-row-set"><span><span class="t">Billing day</span><span class="d">The day of the month your billing cycle starts. Blank uses the calendar month.</span></span>' +
         '<select class="nm-select" data-key="billing_day" aria-describedby="err-billing_day"><option value="">CALENDAR MONTH</option>' +
         Array.from({ length: 31 }, function (_, i) { return '<option value="' + (i + 1) + '">DAY ' + (i + 1) + "</option>"; }).join("") + "</select></label>" + errLine("billing_day") +
-        '<label class="nm-row-set"><span><span class="t">Plan price override</span><span class="d" id="plan-hint">USD a month. Blank uses the detected price (' + esc(detected) + ").</span></span>" +
+        '<label class="nm-row-set"><span><span class="t">Plan price override</span><span class="d" id="plan-hint">' + esc(planHintText()) + "</span></span>" +
         '<input class="nm-input" type="number" data-key="plan_price_override" min="0.01" max="10000" step="0.01" placeholder="AUTO" inputmode="decimal" aria-describedby="plan-hint err-plan_price_override"></label>' + errLine("plan_price_override") +
         '</div><div class="nm-actions"><button class="nm-btn" type="button" data-action="refresh">Refresh now</button></div></div></section>' +
         alertsCard() +
         guardCard() +
         '<section class="nm-card wide" aria-label="System"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">System</h2><span class="nm-meta-t">start-up and updates</span></div><div class="nm-set">' +
-        toggleRow("launch_on_startup", "Start with Windows", S.data && S.data.dev ? "Dev instance: this is not saved to Windows." : "Run the monitor when you sign in.") +
+        toggleRow("launch_on_startup", "Start with Windows", startupHintText(), "", "startup-hint") +
         toggleRow("check_updates", "Check for updates", "Look for a newer release once in a while.") +
         '</div><div class="nm-actions" id="set-update-actions"><button class="nm-btn" type="button" data-action="check-update">Check for updates now</button>' +
         '<button class="nm-btn" type="button" data-action="install-update" hidden>Install update</button><button class="nm-btn" type="button" data-action="skip-update" hidden>Skip this version</button></div>' +
@@ -3184,10 +3202,33 @@
         el.value = value === null || value === undefined ? "" : String(value);
       }
     });
+    syncHints(main);
     syncThemePicker(main);
     syncAlerts(main);
     syncGuard(main);
     syncUpdate(main);
+  }
+
+  /* The hint beside the override names the detected price, never the override: that is what a blank field goes back to. */
+  function planHintText() {
+    var plan = planFromState();
+    var detected = plan.price !== null ? plan.name + ", " + fmtPlanPrice(plan.price) + " a month" : "no price known";
+    return "USD a month. Blank uses the detected price (" + detected + ").";
+  }
+
+  function startupHintText() {
+    return S.data && S.data.dev ? "Dev instance: this is not saved to Windows." : "Run the monitor when you sign in.";
+  }
+
+  /* Words that follow the state. The page can be drawn before the first state, and a first sign-in or a new plan changes the plan
+   * under a page that is open. Each is written only when it changes. */
+  function syncHints(main) {
+    [["#plan-hint", planHintText()], ["#startup-hint", startupHintText()]].forEach(function (pair) {
+      var hint = $(pair[0], main);
+      if (hint && hint.textContent !== pair[1]) {
+        hint.textContent = pair[1];
+      }
+    });
   }
 
   function alertLevels() {
@@ -3270,6 +3311,7 @@
       policy: guard.policy && typeof guard.policy === "object" && !Array.isArray(guard.policy) ? guard.policy : {},
       told: Array.isArray(answer.told) ? answer.told : [],
       waiting: Array.isArray(answer.waiting) ? answer.waiting : [],
+      watching: Array.isArray(answer.watching) ? answer.watching : [],
       setup: answer.setup && typeof answer.setup === "object" && !Array.isArray(answer.setup) ? answer.setup : null
     };
   }
@@ -3311,8 +3353,39 @@
       '<div class="nm-actions"><button class="nm-btn" type="button" data-fid="guard-resume" disabled>Resume now</button></div>';
   }
 
+  /* Who of a told session heard the notice: its main conversation, and how many of its agents (#41). An entry without
+     these fields counts as its conversation, as the card counted before. */
+  function toldWho(t) {
+    var n = t && typeof t.agents === "number" && isFinite(t.agents) && t.agents > 0 ? Math.round(t.agents) : 0;
+    return { main: !t || t.main !== false, agents: n };
+  }
+
+  function toldCount(mains, agents, sessions) {
+    var parts = [];
+    if (mains) { parts.push(plural(mains, "conversation")); }
+    if (agents) { parts.push(plural(agents, "agent")); }
+    return (parts.length ? parts.join(", ") : plural(sessions, "session")).toUpperCase();
+  }
+
+  function whoWords(w) {
+    if (w.main && w.agents) { return "CONVERSATION + " + plural(w.agents, "agent").toUpperCase(); }
+    if (w.main) { return "CONVERSATION"; }
+    return w.agents ? plural(w.agents, "agent").toUpperCase() + " ONLY" : "SESSION";
+  }
+
+  /* The background work a watched conversation waits for, as words: "1 WORKFLOW, 2 AGENTS" (#41). */
+  function workWords(work) {
+    if (!work || typeof work !== "object" || Array.isArray(work)) {
+      return "";
+    }
+    return Object.keys(work).filter(function (word) {
+      return typeof work[word] === "number" && isFinite(work[word]) && work[word] >= 1;
+    }).map(function (word) { return plural(Math.round(work[word]), word).toUpperCase(); }).join(", ");
+  }
+
   /* Off, Armed or Holding. While holding: which limits are over their caps, when the hold ends, the sessions told of it and the
-   * sessions that wait. "Resume now" is there always and works only while something waits. */
+   * sessions that wait. Armed or holding, the conversations the Stop hook watches (#41). "Resume now" is there always and
+   * works only while something waits. */
   function guardLiveHtml(v, nowMs) {
     if (!v.known) {
       return S.guardLost ? '<p class="nm-error" role="status">The dashboard could not get the guard’s status from the monitor.</p>' : guardLivePlaceholder();
@@ -3344,12 +3417,29 @@
       });
       var left = v.resumeAt === null ? null : v.resumeAt - nowMs;
       rows.push(["RESUMES", left === null ? "NO RESET TIME KNOWN" : clockText(v.resumeAt) + (left > 60000 ? " · IN " + fmtRemain(left) : " · NOW")]);
-      rows.push(["TOLD THIS EPISODE", v.told.length ? plural(v.told.length, "session").toUpperCase() : "NONE YET"]);
-      v.told.slice(0, GUARD_LISTED).forEach(function (t) {
-        rows.push([shortId(t.session_id) || "unknown session", clockText(parseTime(t.told_at))]);
+      var heard = v.told.map(toldWho);
+      var mains = heard.filter(function (w) { return w.main; }).length;
+      var agents = heard.reduce(function (sum, w) { return sum + w.agents; }, 0);
+      var untold = heard.filter(function (w) { return !w.main && w.agents; }).length;
+      rows.push(["TOLD THIS EPISODE", v.told.length ? toldCount(mains, agents, v.told.length) : "NONE YET"]);
+      v.told.slice(0, GUARD_LISTED).forEach(function (t, i) {
+        rows.push([shortId(t.session_id) || "unknown session", clockText(parseTime(t.told_at)) + " · " + whoWords(heard[i])]);
       });
       if (v.told.length > GUARD_LISTED) {
         rows.push(["AND " + (v.told.length - GUARD_LISTED) + " MORE", ""]);
+      }
+      if (untold) {    // it waits for its agents, so it hears at its next prompt or tool call (#41)
+        rows.push(["NOT TOLD", untold === 1 ? "1 CONVERSATION: ITS AGENTS WERE" : plural(untold, "conversation").toUpperCase() + ": THEIR AGENTS WERE"]);
+      }
+    }
+    if (v.state !== "off" && v.watching.length) {   // they wait for their background work: woken when the guard holds (#41)
+      rows.push(["WATCHING", plural(v.watching.length, "conversation").toUpperCase()]);
+      v.watching.slice(0, GUARD_LISTED).forEach(function (w) {
+        var work = workWords(w && w.work);
+        rows.push([shortId(w && w.session_id) || "unknown session", "SINCE " + clockText(parseTime(w && w.since)) + (work ? " · " + work : "")]);
+      });
+      if (v.watching.length > GUARD_LISTED) {
+        rows.push(["AND " + (v.watching.length - GUARD_LISTED) + " MORE", ""]);
       }
     }
     if (v.state === "holding" || v.waiting.length) {
@@ -3431,7 +3521,7 @@
         // Which claude: an old npm copy can come first on the PATH while another one is up to date.
         notes += '<div class="nm-callout is-warn" role="note">Claude Code ' + esc(s.claude.version) +
           (where ? ' (<span class="nm-path">' + esc(where) + "</span>)" : "") + " is older than " + esc(s.claude.min_version) +
-          ", which the hooks need. Update it with <span class=\"nm-path\">claude update</span> first.</div>";
+          ", which the hooks need. Update it with <span class=\"nm-path\">" + esc((s.claude.command || "claude") + " update") + "</span> first.</div>";
       }
       (Array.isArray(s.errors) ? s.errors : []).forEach(function (error) {
         notes += '<p class="nm-error" role="alert">' + esc(error) + "</p>";
@@ -3636,8 +3726,26 @@
     }
     var status = $("#set-update-status", main);
     if (status) {
-      status.textContent = S.update.text || (u && u.available && u.info && u.info.version ? "Version " + u.info.version + " is available." : "");
+      status.textContent = updateLine();
     }
+  }
+
+  /* The release the state offers, "" for none. */
+  function offeredVersion() {
+    var u = S.data && S.data.update ? S.data.update : null;
+    return u && u.available && u.info && u.info.version ? String(u.info.version) : "";
+  }
+
+  /* The line under the update buttons. What a click said stays while nothing is on offer, or while it is about the release that is:
+   * "YOU ARE UP TO DATE." beside an Install button says nothing true. A check keeps `offered`, not `version`, which would also put
+   * its words in the banner. */
+  function updateLine() {
+    var offered = offeredVersion();
+    var about = S.update.version !== undefined ? S.update.version : S.update.offered;
+    if (S.update.text && (!offered || about === offered)) {
+      return S.update.text;
+    }
+    return offered ? "Version " + offered + " is available." : "";
   }
 
   // ── The update banner ───────────────────────────────────────────────────────────
@@ -3737,7 +3845,7 @@
       ];
       body = "<p>" + esc(SIGNIN_WHY) + "</p><ol>" + steps.map(function (step) { return "<li>" + step + "</li>"; }).join("") + "</ol><p>" + esc(SIGNIN_RENEWS) + "</p>";
     } else {
-      body = (s.status_detail ? "<p>" + esc(s.status_detail) + "</p>" : "") + "<p>" + esc("Claude Code renews the sign-in each time it runs. Open Claude Code, or run ") +
+      body = (s.status_detail ? "<p>" + esc(s.status_detail) + "</p>" : "") + "<p>" + esc("Claude Code renews the sign-in when you use it. Send it a message, or run ") +
         codeText("claude") + esc(" in PowerShell, then press Check again.") + "</p><p>" + esc("If PowerShell says ") + codeText("claude") +
         esc(" is not recognized, or the Claude app opens instead, run this:") + "</p>" + commandRow("start");
     }
@@ -3881,6 +3989,10 @@
     if (S.formKey !== "about") {
       S.formKey = "about";
       S.sig = "";
+      if (S.supporters && S.supporters.error) {
+        S.supporters = null;                              // a list that failed is asked for again at this visit, not on every state
+        S.supportersRequested = false;
+      }
       main.innerHTML = pageHead("about") +
         '<div id="about-update" style="display:contents"></div>' +
         '<div class="nm-pgrid">' +
@@ -4198,12 +4310,12 @@
         setStatus("REFRESH FAILED: THE DASHBOARD LOST ITS LINK", true);
       });
     } else if (action === "check-update") {
-      S.update = { text: "CHECKING\u2026" };
+      S.update = { text: "CHECKING\u2026", offered: offeredVersion() };
       api("POST", "/api/update/check").then(function (res) {
-        S.update = { text: checkUpdateText(res) };
+        S.update = { text: checkUpdateText(res), offered: offeredVersion() };
         api("GET", "/api/state").then(function (r) { if (r.ok) { S.data = r.data; S.etag = r.etag; } syncSettings($("#main")); });
       }, function () {
-        S.update = { text: "CHECK FAILED: THE DASHBOARD LOST ITS LINK" };
+        S.update = { text: "CHECK FAILED: THE DASHBOARD LOST ITS LINK", offered: offeredVersion() };
         syncSettings($("#main"));
       });
     } else if (action === "install-update") {
@@ -4222,7 +4334,7 @@
    * One sentence per text: the Gates theme writes sentence case and capitalises only the first letter of a string. */
   function installUpdate() {
     var found = pendingUpdate();
-    var forVersion = found ? found.version : "";                // the banner shows this status only while it is about that release
+    var forVersion = found ? found.version : offeredVersion();  // a skipped release is still on offer here, and the click gets its answer
     S.update = { text: "INSTALLING\u2026", version: forVersion };
     refreshUpdateViews();
     api("POST", "/api/update/apply").then(function (res) {
@@ -4248,7 +4360,7 @@
   /* Skip this version: the banner goes at once, and comes back only for a newer one. */
   function skipUpdate() {
     var found = pendingUpdate();
-    var forVersion = found ? found.version : "";
+    var forVersion = found ? found.version : offeredVersion();
     if (found) {
       S.skipped = found.version;
     }
@@ -4401,7 +4513,7 @@
   }
 
   function startThemeFx(id) {
-    var fx = window.CUM_THEME_FX && window.CUM_THEME_FX[id];
+    var fx = window.USAGE_MONITOR_THEME_FX && window.USAGE_MONITOR_THEME_FX[id];
     if (fx && typeof fx.start === "function" && document.documentElement.getAttribute("data-theme") === id) {
       fx.start();
     }
@@ -4826,11 +4938,11 @@
   }
 
   function installBaseStyle() {
-    if (document.getElementById("cum-app-style")) {
+    if (document.getElementById("mon-app-style")) {
       return;
     }
     var style = document.createElement("style");
-    style.id = "cum-app-style";
+    style.id = "mon-app-style";
     style.textContent = BASE_CSS;
     document.head.insertBefore(style, document.head.firstChild);
   }
@@ -4953,11 +5065,11 @@
     poll();
   }
 
-  /* Test hook. tests/test_webui.py loads this file in node with window.__CUM_TEST__ set and reads the helpers it
+  /* Test hook. tests/test_webui.py loads this file in node with window.__USAGE_MONITOR_TEST__ set and reads the helpers it
    * needs from there; the page is then not started. Nothing in the app sets it (the page allows no inline script),
    * so in the dashboard this is a no-op. */
-  if (window.__CUM_TEST__) {
-    window.__CUM_TEST__.api = {
+  if (window.__USAGE_MONITOR_TEST__) {
+    window.__USAGE_MONITOR_TEST__.api = {
       S: S, PACE_BAND: PACE_BAND, esc: esc, num: num, fmtPct: fmtPct, fmtRate: fmtRate, fmtUsd: fmtUsd, fmtMoney: fmtMoney,
       fmtMult: fmtMult, paceOf: paceOf, ratioCells: ratioCells, ratioNote: ratioNote, ratioScale: ratioScale,
       costNumbers: costNumbers, modelMixCard: modelMixCard, spendCardBody: spendCardBody, sessionsTable: sessionsTable,
@@ -4974,7 +5086,7 @@
       settingsPage: settingsPage, settingsChange: settingsChange, labelFor: labelFor, guardCard: guardCard, guardView: guardView,
       guardLiveHtml: guardLiveHtml, guardSetupHtml: guardSetupHtml, guardResultHtml: guardResultHtml, syncGuard: syncGuard,
       pollGuard: pollGuard, guardTick: guardTick, statusBanner: statusBanner, limitsOnly: limitsOnly, pageStats: pageStats,
-      checkAgain: checkAgain, syncCheck: syncCheck, copyCommand: copyCommand, helpAction: helpAction
+      checkAgain: checkAgain, syncCheck: syncCheck, copyCommand: copyCommand, helpAction: helpAction, renderPage: renderPage, poll: poll
     };
     return;
   }

@@ -1,12 +1,12 @@
 "use strict";
 /* Runs each theme script (webui/themes/<id>.js) the way the page runs it when motion.js is missing: in a vm with no
- * window.CUM_FX, so the script's `var FX = window.CUM_FX || null` is null. It prints what happened as one JSON object.
+ * window.USAGE_MONITOR_FX, so the script's `var FX = window.USAGE_MONITOR_FX || null` is null. It prints what happened as one JSON object.
  *
  * tests/test_motion.py starts this with `node tests/theme_scripts_checks.js <webui folder>` and asserts on the result: the
  * script loads, registers its `start` hook and nothing else (the motion hooks exist only with an engine), and `start()`, a
  * second `start()`, the timers and animation frames it leaves behind, the theme being switched off and on again, and a
  * reduced-motion preference all run without throwing. A later `FX.x()` that is not behind `if (FX)` throws here, which a
- * test that only read the source for `var FX = window.CUM_FX || null;` never saw.
+ * test that only read the source for `var FX = window.USAGE_MONITOR_FX || null;` never saw.
  *
  * The DOM is a small fake: elements keep their attributes, classes and children, the page's own landmarks (#main, #screen, the
  * boot overlay, the nav) are registered by the scenario, and everything a script looks for that is not registered is not found.
@@ -74,7 +74,7 @@ class El {
 }
 
 /* One page: <html data-theme=...>, a manual clock with timers and animation frames, a session store, and the landmarks a
- * scenario asks for. No window.CUM_FX. */
+ * scenario asks for. No window.USAGE_MONITOR_FX. */
 function world(theme, opts) {
   opts = opts || {};
   const w = { now: 0, timers: [], frames: [], timerId: 0, store: Object.assign({}, opts.store), observers: [], listeners: [], thrown: [] };
@@ -155,8 +155,8 @@ function load(w, theme) {
   } catch (e) {
     error = String(e && e.message ? e.message : e);
   }
-  const hooks = (w.sandbox.CUM_THEME_FX && w.sandbox.CUM_THEME_FX[theme]) || null;
-  return { error, hooks, engine: typeof w.sandbox.CUM_FX };
+  const hooks = (w.sandbox.USAGE_MONITOR_THEME_FX && w.sandbox.USAGE_MONITOR_THEME_FX[theme]) || null;
+  return { error, hooks, engine: typeof w.sandbox.USAGE_MONITOR_FX };
 }
 
 function run(theme, opts, scenario) {

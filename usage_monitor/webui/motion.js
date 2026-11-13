@@ -1,6 +1,6 @@
-/* motion.js: the shared engine of the dashboard's motion layer. window.CUM_FX is used by the three theme scripts
+/* motion.js: the shared engine of the dashboard's motion layer. window.USAGE_MONITOR_FX is used by the three theme scripts
  * (themes/<id>.js), which register one director each (FX.director) and expose it to app.js as
- * window.CUM_THEME_FX[id] = { start, enter(main, page), cancel(main), arrive(card, info) }. What moves is CSS (motion.css and
+ * window.USAGE_MONITOR_THEME_FX[id] = { start, enter(main, page), cancel(main), arrive(card, info) }. What moves is CSS (motion.css and
  * themes/<id>.motion.css); this file decides when, and draws the characters (typing, decoding, rolling).
  *
  * The contract with app.js (docs/UI_ARCHITECTURE.md "Motion"):
@@ -29,7 +29,7 @@
 (function () {
   "use strict";
 
-  var FX = window.CUM_FX = window.CUM_FX || {};
+  var FX = window.USAGE_MONITOR_FX = window.USAGE_MONITOR_FX || {};
   var ROOT = document.documentElement;
   var STAGGER_MAX = 8;
   var ROWS_MAX = 12;
@@ -42,7 +42,7 @@
       ".nm-table td.nm-trunc, .nm-odo-facts b, .nm-toolbar-n",
     bar: ".nm-cells, .nm-ratio",
     rail: ".nm-rail, .nm-remain",
-    chart: ".nm-chart-host, svg.cum-spark, svg.cum-stack"
+    chart: ".nm-chart-host, svg.mon-spark, svg.mon-stack"
   };
   var KINDS = ["num", "text", "bar", "rail", "chart"];
 
@@ -399,21 +399,21 @@
 
   /* Column, pip, dot and row order inside the charts below `root`. */
   function indexCharts(root) {
-    all(".cum-columns", root).forEach(function (svg) {
-      all(".cum-col", svg).forEach(function (g, c) {
+    all(".mon-columns", root).forEach(function (svg) {
+      all(".mon-col", svg).forEach(function (g, c) {
         g.style.setProperty("--fx-c", c);
-        all(".cum-pip.cum-mark, .cum-pip.cum-hot", g).forEach(function (r, p) { r.style.setProperty("--fx-p", p); });
+        all(".mon-pip.mon-mark, .mon-pip.mon-hot", g).forEach(function (r, p) { r.style.setProperty("--fx-p", p); });
       });
     });
-    all(".cum-linechart, .cum-spark", root).forEach(function (svg) {
-      var dots = all(".cum-dot", svg);
+    all(".mon-linechart, .mon-spark", root).forEach(function (svg) {
+      var dots = all(".mon-dot", svg);
       dots.forEach(function (d, i) { d.style.setProperty("--fx-d", i); });
       svg.style.setProperty("--fx-dn", Math.max(1, dots.length));
     });
-    all(".cum-hbars", root).forEach(function (svg) {
-      all(".cum-row", svg).forEach(function (g, r) { g.style.setProperty("--fx-r", r); });
+    all(".mon-hbars", root).forEach(function (svg) {
+      all(".mon-row", svg).forEach(function (g, r) { g.style.setProperty("--fx-r", r); });
     });
-    all(".cum-calendar, .cum-matrix", root).forEach(function (svg) {          // a heat map comes in as one unit: its columns set the pace
+    all(".mon-calendar, .mon-matrix", root).forEach(function (svg) {          // a heat map comes in as one unit: its columns set the pace
       svg.style.setProperty("--fx-cn", Math.max(1, parseInt(svg.getAttribute("data-cols"), 10) || 1));
     });
   }
@@ -580,7 +580,7 @@
   };
 
   /* The card (or any element) whose data has just been written into the page: every slot in it that is not a placeholder
-   * any more plays the theme's arrival effect. app.js may call this itself (window.CUM_THEME_FX[id].arrive); the watcher
+   * any more plays the theme's arrival effect. app.js may call this itself (window.USAGE_MONITOR_THEME_FX[id].arrive); the watcher
    * above finds the same arrivals from the data-pending marks alone, and an arrival is only played once. */
   FX.arriveIn = function (root) {
     var roots = root && root.querySelectorAll ? [root] : (root && root.length ? Array.prototype.slice.call(root) : []);

@@ -42,12 +42,12 @@ log = get_logger(__name__)
 CONTROLLER_CLASS = "ClaudeUsageMonitor.Controller"
 CONTROLLER_TITLE = "Claude Usage Monitor Controller"
 
-_DEV_ENV = "CUM_DEV_INSTANCE"
+_DEV_ENV = "USAGE_MONITOR_DEV_INSTANCE"
 _SIGINT_POLL_MS = 250
 
 
 def controller_class_name() -> str:
-    """Window class of the controller. A dev instance (CUM_DEV_INSTANCE=1) gets its own, so a
+    """Window class of the controller. A dev instance (USAGE_MONITOR_DEV_INSTANCE=1) gets its own, so a
     test build never answers the installed copy's "open the dashboard" signal."""
     return CONTROLLER_CLASS + (".dev" if os.environ.get(_DEV_ENV) == "1" else "")
 
@@ -154,7 +154,8 @@ def create_window(
         parent or None, None, win32.GetModuleHandleW(None), None,
     )
     if not hwnd:
-        raise OSError(f"CreateWindowExW({class_name!r}) failed: {win32.error_text()}")
+        code = win32.last_error()     # carried as winerror: the strip tells a taskbar that is gone from one that refused
+        raise OSError(0, f"CreateWindowExW({class_name!r}) failed: {ctypes.FormatError(code).strip()}", None, code)
     _handlers[hwnd] = handler
     return int(hwnd)
 

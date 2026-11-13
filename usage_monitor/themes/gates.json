@@ -578,7 +578,7 @@
         "normal": "Under pace · Resets {time}",
         "warn": "Ahead of pace · Resets {time}",
         "crit": "Nearly out · Resets {time}",
-        "stale": "Hmm, we lost touch. Sign in to Claude Code.",
+        "stale": "Hmm, we lost touch. Send Claude Code a message.",
         "offline": "No connection. Retrying every minute.",
         "paused": "Paused. Resume to keep usage live."
       }

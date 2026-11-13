@@ -53,7 +53,7 @@ from usage_monitor.ui import startup
 
 log = get_logger(__name__)
 
-DEV_ENV = "CUM_DEV_INSTANCE"
+DEV_ENV = "USAGE_MONITOR_DEV_INSTANCE"
 TOKEN_HEADER = "X-Monitor-Token"
 KEY_PARAM = "k"                 # GET /?k=<the per-run token> opens the page; without it the answer is 401
 MAX_BODY_BYTES = 64 * 1024
@@ -79,6 +79,7 @@ UPDATE_OPERATIONS = ("check", "apply", "skip")
 GUARD_SETUP_ACTIONS = ("install", "remove")
 SETUP_STATUS_TTL_S = 600.0      # the setup status starts `claude` twice, so /api/guard keeps it this long; a setup click
                                 # and a closed dashboard window clear it, so each window and each click look afresh
+SETUP_STATUS_WAIT_S = 0.5       # how long /api/guard waits for a look at the setup; past it, the look goes on behind (#32)
 
 _MISSING = object()
 _SECURITY_HEADERS = {
@@ -445,7 +446,8 @@ class _Supporters:
 
 class _TimedValue:
     """One value that is slow to compute, kept for ``ttl`` seconds and computed by one caller at a time (the others
-    wait for that answer). ``clear()`` drops it, and an answer that was still being computed then is not kept."""
+    wait for that answer). ``clear()`` drops it, and an answer that was still being computed then is not kept.
+    ``soon()`` never waits long: it computes in the background and answers with what it has."""
 
     def __init__(self, compute: Callable[[], Any], ttl: float, clock: Callable[[], float]) -> None:
         self._compute = compute
@@ -455,6 +457,7 @@ class _TimedValue:
         self._state_lock = threading.Lock()
         self._entry: tuple[float, Any] | None = None
         self._generation = 0
+        self._looking: threading.Event | None = None    # set when the background look of soon() is done
 
     def get(self) -> Any:
         with self._state_lock:  # a kept answer never waits behind a computation that is running
@@ -471,10 +474,42 @@ class _TimedValue:
                     self._entry = (self._clock() + self._ttl, value)
             return value
 
+    def soon(self, wait: float) -> Any:
+        """The kept value at once. Otherwise a look starts in the background (one at a time; a later call joins it)
+        and this waits up to ``wait`` seconds for it. Past that it answers with the last value, which may be out of
+        date, or None after clear() and before the first answer; a later call has the new one."""
+        with self._state_lock:
+            if self._entry is not None and self._clock() < self._entry[0]:
+                return self._entry[1]
+            last = self._entry[1] if self._entry is not None else None
+            done, start = self._looking, False
+            if done is None:
+                done, start = threading.Event(), True
+                self._looking = done
+        if start:
+            threading.Thread(target=self._look, args=(done,), name="timed-value-look", daemon=True).start()
+        if done.wait(wait):
+            with self._state_lock:
+                if self._entry is not None and self._clock() < self._entry[0]:
+                    return self._entry[1]
+        return last
+
+    def _look(self, done: threading.Event) -> None:
+        try:
+            self.get()
+        except Exception:  # thread boundary: the next soon() looks again
+            log.exception("a background look failed")
+        finally:
+            with self._state_lock:
+                if self._looking is done:
+                    self._looking = None
+            done.set()
+
     def clear(self) -> None:
         with self._state_lock:
             self._generation += 1
             self._entry = None
+            self._looking = None         # the next soon() starts a look of its own; the one running is not kept
 
 
 # ── Statistics: query parameters, report inputs and the cached reader ────────────────
@@ -825,7 +860,7 @@ class ApiServer:
         self._on_settings_applied = on_settings_applied
         self._dashboard_closed_cb = dashboard_closed_cb
         self._version = str(version)
-        # CUM_DEV_INSTANCE=1 makes a dev server whatever the caller says: the environment is how every
+        # USAGE_MONITOR_DEV_INSTANCE=1 makes a dev server whatever the caller says: the environment is how every
         # process of a dev run (and a test shell) is told not to touch the installed copy's state.
         self._dev = bool(dev) or os.environ.get(DEV_ENV) == "1"
         self._requested_port = int(port)
@@ -1089,7 +1124,9 @@ class ApiServer:
 
     def _get_guard(self, req: _Handler) -> None:
         """The usage guard as the Settings card shows it: the guard block of the state (``{}`` before the first
-        cycle), the sessions told of this holding episode, the sessions waiting, and the setup status."""
+        cycle), the sessions told of this holding episode, the sessions waiting, the conversations the Stop hook
+        watches (#41), and the setup status. That one starts claude twice, so the answer does not wait for it past
+        SETUP_STATUS_WAIT_S: until it is in, ``setup`` is the last one or null, and the card asks again (#32)."""
         state = self._state_provider()
         guard = to_jsonable(state.guard) if state is not None and state.guard else {}
         folder = self._guard_folder()
@@ -1097,7 +1134,8 @@ class ApiServer:
             "guard": guard,
             "told": agent_sessions.told(folder, agent_guard.episode(guard)),
             "waiting": agent_sessions.waiting(folder),
-            "setup": self._setup_status.get(),
+            "watching": agent_sessions.watching(folder),
+            "setup": self._setup_status.soon(SETUP_STATUS_WAIT_S),
         })
 
     def _get_analytics(self, req: _Handler, name: str, query: str) -> None:

@@ -200,7 +200,7 @@ def isolated_folders(tmp_path, monkeypatch) -> Path:
     """Keep app data and the Claude config folder inside tmp_path. Returns the config folder."""
     config = tmp_path / "claude"
     config.mkdir()
-    monkeypatch.setenv("CUM_APPDATA_DIR", str(tmp_path / "appdata"))
+    monkeypatch.setenv("USAGE_MONITOR_APPDATA_DIR", str(tmp_path / "appdata"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
     return config
 

@@ -30,7 +30,7 @@ CMD = "C:/Users/Test User/AppData/Local/ClaudeUsageMonitor/ClaudeUsageMonitor.ex
 CLAUDE_CMD = r"C:\Users\Test User\AppData\Roaming\npm\claude.CMD"
 CLAUDE_EXE = r"C:\Users\Test User\.local\bin\claude.exe"
 NOW = datetime(2026, 10, 28, 18, 5, 9)
-BACKUP_NAME = "settings.json.cum-backup-20261028-180509"
+BACKUP_NAME = "settings.json.usage-monitor-backup-20261028-180509"
 GET_TEXT = (
     "claude-usage:\n  Scope: User config (available in all your projects)\n  Status: ✓ Connected\n  Type: stdio\n"
     "  Command: {command}\n  Args: {args}\n  Environment:\n\n"
@@ -54,7 +54,7 @@ class FakeClaude:
     """The claude command, in memory: it answers --version and mcp get / add / remove the way Claude Code does, keeps
     the claude-usage tool, and records every call. ``forced`` makes one kind of call answer something else."""
 
-    def __init__(self, version: str = "2.1.160 (Claude Code)", tool: tuple[str, list[str]] | None = None) -> None:
+    def __init__(self, version: str = "2.1.316 (Claude Code)", tool: tuple[str, list[str]] | None = None) -> None:
         self.version = version
         self.tool = tool                         # (command, args) of the claude-usage tool, or None
         self.calls: list[list[str]] = []
@@ -124,7 +124,7 @@ class Rig:
         return sorted(path.name for path in self.folder.iterdir()) if self.folder.exists() else []
 
 
-def make_rig(tmp_path: Path, *, frozen: bool = True, version: str = "2.1.160 (Claude Code)", tool: Any = None,
+def make_rig(tmp_path: Path, *, frozen: bool = True, version: str = "2.1.316 (Claude Code)", tool: Any = None,
              claude_path: str | None = CLAUDE_EXE, executable: str = EXE, config_dir: bool = False,
              env: dict[str, str] | None = None) -> Rig:
     home = tmp_path / "home"
@@ -141,13 +141,16 @@ def make_rig(tmp_path: Path, *, frozen: bool = True, version: str = "2.1.160 (Cl
 
 
 def ours(command: str = CMD) -> dict:
-    """The three events as setup writes them."""
+    """The five events as setup writes them."""
     return {
         "SessionStart": [{"hooks": [{"type": "command", "command": command, "args": ["--hook", "--always"],
                                      "timeout": 30}]}],
         "UserPromptSubmit": [{"hooks": [{"type": "command", "command": command, "args": ["--hook"], "timeout": 10}]}],
         "PostToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": command, "args": ["--hook"],
                                                     "timeout": 10}]}],
+        "SubagentStart": [{"hooks": [{"type": "command", "command": command, "args": ["--hook"], "timeout": 10}]}],
+        "Stop": [{"hooks": [{"type": "command", "command": command, "args": ["--watch"], "timeout": 86400,
+                             "async": True, "asyncRewake": True}]}],
     }
 
 
@@ -170,7 +173,7 @@ def rich_settings() -> dict:
 
 # ── A fresh file ────────────────────────────────────────────────────────────────────
 
-def test_a_fresh_install_writes_the_three_hooks_and_registers_the_tool(tmp_path: Path) -> None:
+def test_a_fresh_install_writes_the_five_hooks_and_registers_the_tool(tmp_path: Path) -> None:
     rig = make_rig(tmp_path)
     result = setup.install(rig.ctx)
     assert result["ok"] is True and result["errors"] == [] and result["action"] == "install"
@@ -178,7 +181,8 @@ def test_a_fresh_install_writes_the_three_hooks_and_registers_the_tool(tmp_path:
     assert rig.files() == ["settings.json"]                                  # no backup: there was nothing to keep
     assert result["backup"] is None and result["settings_path"] == str(rig.settings)
     assert result["changed"] == ["Added the SessionStart hook.", "Added the UserPromptSubmit hook.",
-                                 "Added the PostToolUse hook.", "Registered the claude-usage MCP tool."]
+                                 "Added the PostToolUse hook.", "Added the SubagentStart hook.", "Added the Stop hook.",
+                                 "Registered the claude-usage MCP tool."]
     assert setup.VSCODE_WARNING in result["warnings"] and result["manual"] is None
     assert rig.claude.calls == [
         [CLAUDE_EXE, "--version"],
@@ -225,6 +229,8 @@ def test_install_keeps_every_other_key_and_hook_and_backs_the_file_up_first(tmp_
     expected["hooks"]["SessionStart"] = ours()["SessionStart"]
     expected["hooks"]["UserPromptSubmit"] = ours()["UserPromptSubmit"]
     expected["hooks"]["PostToolUse"] = [THEIR_FORMATTER, *ours()["PostToolUse"]]
+    expected["hooks"]["SubagentStart"] = ours()["SubagentStart"]
+    expected["hooks"]["Stop"] = [THEIR_STOP, *ours()["Stop"]]                 # beside their Stop hook, which stays
     assert after == expected
     assert after["hooks"]["PreToolUse"] == [GATE_ENTRY]                      # the user's own --gate entry is not ours to touch
     assert list(after) == ["model", "permissions", "env", "hooks"]           # order kept, hooks last where it was
@@ -295,7 +301,7 @@ def test_running_install_twice_changes_nothing(tmp_path: Path) -> None:
     rig.claude.calls.clear()
     again = setup.install(rig.ctx)
     assert again["ok"] is True and again["changed"] == [] and again["backup"] is None
-    assert again["unchanged"] == ["The three hooks were already in place.",
+    assert again["unchanged"] == ["The hooks were already in place.",
                                   "The claude-usage MCP tool was already registered."]
     assert rig.settings.read_bytes() == before and rig.settings.stat().st_mtime_ns == stamp   # not even rewritten
     assert rig.files() == files                                              # and no second backup
@@ -320,9 +326,10 @@ def test_remove_takes_out_what_install_put_in_and_leaves_everything_else(tmp_pat
     assert result["ok"] is True and result["action"] == "remove"
     assert rig.load() == rich_settings()                                    # the file as the user had it, hooks of theirs and all
     assert result["changed"] == ["Removed the SessionStart hook.", "Removed the UserPromptSubmit hook.",
-                                 "Removed the PostToolUse hook.", "Removed the claude-usage MCP tool."]
+                                 "Removed the PostToolUse hook.", "Removed the SubagentStart hook.", "Removed the Stop hook.",
+                                 "Removed the claude-usage MCP tool."]
     assert rig.claude.tool is None and rig.claude.kinds() == ["get", "remove"]
-    assert Path(result["backup"]).exists() and Path(result["backup"]).name.startswith("settings.json.cum-backup-")
+    assert Path(result["backup"]).exists() and Path(result["backup"]).name.startswith("settings.json.usage-monitor-backup-")
 
 
 def test_remove_drops_an_event_list_and_the_hooks_object_that_it_empties(tmp_path: Path) -> None:
@@ -490,7 +497,7 @@ def test_a_settings_file_that_cannot_be_read_is_refused_and_the_status_says_so(t
 
 def test_an_event_setup_does_not_write_has_no_entry() -> None:
     with pytest.raises(KeyError):
-        setup.wanted_group("Stop", EXE)
+        setup.wanted_group("PreToolUse", EXE)                                # the --gate's event: manual, the user's own
 
 
 def test_a_byte_order_mark_from_an_editor_is_not_a_problem(tmp_path: Path) -> None:
@@ -501,8 +508,9 @@ def test_a_byte_order_mark_from_an_editor_is_not_a_problem(tmp_path: Path) -> No
 
 
 @pytest.mark.parametrize(("version", "accepted"), [
-    ("2.1.94 (Claude Code)", False), ("2.1.138 (Claude Code)", False), ("1.9.999", False), ("2.0.200", False),
-    ("2.1.139 (Claude Code)", True), ("2.1.140", True), ("2.2.0 (Claude Code)", True), ("3.0.0", True),
+    ("2.1.94 (Claude Code)", False), ("2.1.139 (Claude Code)", False), ("1.9.999", False), ("2.0.300", False),
+    ("2.1.286 (Claude Code)", False), ("2.1.287 (Claude Code)", True), ("2.1.300", True), ("2.2.0 (Claude Code)", True),
+    ("3.0.0", True),
 ])
 def test_an_old_claude_code_is_refused_with_nothing_written(tmp_path: Path, version: str, accepted: bool) -> None:
     rig = make_rig(tmp_path, version=version)
@@ -511,7 +519,7 @@ def test_an_old_claude_code_is_refused_with_nothing_written(tmp_path: Path, vers
     assert result["ok"] is accepted
     if accepted:
         return
-    assert "is older than 2.1.139" in result["errors"][0] and version.split()[0] in result["errors"][0]
+    assert "is older than 2.1.287" in result["errors"][0] and version.split()[0] in result["errors"][0]
     assert "claude update" in result["errors"][0]
     assert rig.settings.read_bytes() == original and rig.files() == ["settings.json"]
     assert rig.claude.kinds() == ["version"]                                 # nothing beyond the version was asked or done
@@ -602,7 +610,7 @@ def test_a_cmd_shim_with_a_risky_path_gets_the_hooks_but_not_the_tool(tmp_path: 
                                 f"'{risky}' --mcp")
     assert any("cmd.exe" in warning for warning in result["warnings"])
     assert result["changed"] == ["Added the SessionStart hook.", "Added the UserPromptSubmit hook.",
-                                 "Added the PostToolUse hook."]
+                                 "Added the PostToolUse hook.", "Added the SubagentStart hook.", "Added the Stop hook."]
 
 
 def test_a_cmd_shim_with_an_ordinary_path_still_gets_the_tool(tmp_path: Path) -> None:
@@ -651,12 +659,14 @@ def test_a_tool_that_is_there_but_did_not_say_what_it_starts_is_a_warning(tmp_pa
 def test_hooks_of_this_app_at_an_old_path_are_replaced_and_removed(tmp_path: Path) -> None:
     rig = make_rig(tmp_path)
     old = "C:/Program Files/Old Place/ClaudeUsageMonitor.exe"
-    rig.write({"hooks": {**ours(old), "Stop": [{"hooks": [{"type": "command", "command": old, "args": ["--hook"]}]}]}})
+    elsewhere = {"Notification": [{"hooks": [{"type": "command", "command": old, "args": ["--hook"]}]}]}  # not an event of setup
+    rig.write({"hooks": {**ours(old), **elsewhere}})
     assert setup.status(rig.ctx)["hooks"]["events"] == dict.fromkeys(setup.EVENTS, "different")  # not "installed"
     assert setup.install(rig.ctx)["ok"] is True
     assert rig.load()["hooks"]["PostToolUse"] == ours()["PostToolUse"]                         # one set, the new path
+    assert rig.load()["hooks"]["Stop"] == ours()["Stop"]
     assert setup.remove(rig.ctx)["ok"] is True
-    assert rig.load() == {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": old, "args": ["--hook"]}]}]}}
+    assert rig.load() == {"hooks": elsewhere}
 
 
 def test_a_hook_written_as_one_command_line_is_recognised(tmp_path: Path) -> None:
@@ -682,6 +692,193 @@ def test_claude_installed_after_the_monitor_started_is_found_on_the_path_windows
     assert setup.find_command("claude") == (r"C:\fresh\claude.exe" if sys.platform == "win32" else None)
 
 
+windows_only = pytest.mark.skipif(sys.platform != "win32", reason="the folder of Anthropic's Windows installer")
+
+
+@pytest.fixture
+def installer_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Where Anthropic's Windows installer puts claude.exe, inside tmp_path. Both PATHs hold an empty folder, so a real
+    claude on this machine stays out of the test."""
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "user"))
+    monkeypatch.setattr(setup, "_registry_path", lambda: str(empty))
+    return tmp_path / "user" / ".local" / "bin"
+
+
+def claude_in(folder: Path) -> Path:
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "claude.exe").write_bytes(b"")
+    return folder / "claude.exe"
+
+
+@windows_only
+def test_claude_from_anthropics_installer_is_found_though_its_folder_is_on_no_path(installer_folder: Path) -> None:
+    """That installer leaves the PATH alone, so someone who had just followed the sign-in help read NOT FOUND, and was told
+    to install what they had just installed (#43)."""
+    copy = claude_in(installer_folder)
+    assert Path(setup.find_command("claude")) == copy
+
+
+@windows_only
+def test_a_claude_on_the_path_wins_over_the_one_in_the_installers_folder(tmp_path: Path, installer_folder: Path,
+                                                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    claude_in(installer_folder)
+    chosen = claude_in(tmp_path / "chosen")
+    monkeypatch.setattr(setup, "_registry_path", lambda: str(chosen.parent))
+    assert Path(setup.find_command("claude")) == chosen
+
+
+@windows_only
+def test_a_pc_with_no_claude_code_at_all_still_says_so(tmp_path: Path, installer_folder: Path) -> None:
+    ctx = dataclasses.replace(make_rig(tmp_path / "rig").ctx, which=setup.find_command)
+    assert setup.find_command("claude") is None
+    snapshot = setup.status(ctx)
+    assert snapshot["available"] is False and snapshot["reason"] == setup.NO_CLAUDE_REASON
+
+
+@windows_only
+def test_the_card_finds_the_installers_copy_and_install_works_through_it(tmp_path: Path, installer_folder: Path) -> None:
+    copy = claude_in(installer_folder)
+    rig = make_rig(tmp_path / "rig")
+    ctx = dataclasses.replace(rig.ctx, which=setup.find_command)
+    snapshot = setup.status(ctx)
+    assert snapshot["available"] is True and Path(snapshot["claude"]["path"]) == copy
+    assert setup.install(ctx)["ok"] is True
+    assert rig.claude.tool == (EXE, ["--mcp"]) and {Path(call[0]) for call in rig.claude.calls} == {copy}
+
+
+def test_a_claude_on_no_path_is_named_by_its_path_in_every_command_shown(tmp_path: Path) -> None:
+    """Typed as claude, these fail with "not recognized" on the very PC #43 is for, so they name the copy that was found."""
+    typed = "& '" + CLAUDE_EXE + "'"
+
+    def on_no_path(rig: Rig) -> setup.Context:
+        return dataclasses.replace(rig.ctx, on_path=lambda name: None)
+
+    rig = make_rig(tmp_path / "add")
+    assert setup.status(on_no_path(rig))["claude"]["command"] == typed
+    rig.claude.forced["add"] = Ran(1, "", "something went wrong\n")
+    assert setup.install(on_no_path(rig))["manual"].startswith(typed + " mcp add ")
+    too_old = setup.install(on_no_path(make_rig(tmp_path / "old", version="2.1.94 (Claude Code)")))
+    assert f"Update it with: {typed} update" in too_old["errors"][0]
+    no_version = setup.install(on_no_path(make_rig(tmp_path / "unknown", version="no version here")))
+    assert f"check with: {typed} --version" in no_version["errors"][0]
+    stuck = make_rig(tmp_path / "stuck", tool=(EXE, ["--mcp"]))
+    stuck.claude.forced["remove"] = Ran(1, "", "no\n")
+    assert f"by hand with: {typed} mcp remove claude-usage -s user" in setup.remove(on_no_path(stuck))["errors"][0]
+    other = make_rig(tmp_path / "other", tool=(r"C:\other.exe", ["--mcp"]))
+    other.claude.forced["remove"] = Ran(1, "", "no\n")
+    assert f"Remove it with: {typed} mcp remove claude-usage -s user" in setup.install(on_no_path(other))["errors"][0]
+
+
+def test_a_claude_a_path_has_is_named_as_claude_and_a_quote_in_a_path_is_doubled(tmp_path: Path) -> None:
+    assert setup.status(make_rig(tmp_path / "plain").ctx)["claude"]["command"] == "claude"
+    rig = make_rig(tmp_path / "quote", claude_path=r"C:\Users\O'Neil\.local\bin\claude.exe")
+    ctx = dataclasses.replace(rig.ctx, on_path=lambda name: None)
+    assert setup.status(ctx)["claude"]["command"] == r"& 'C:\Users\O''Neil\.local\bin\claude.exe'"
+
+
+@windows_only
+def test_the_installers_folder_is_found_but_is_no_path(installer_folder: Path) -> None:
+    claude_in(installer_folder)
+    assert setup.find_command("claude") is not None and setup.on_a_path("claude") is None
+
+
+def test_an_uninstall_leaves_the_hooks_of_a_copy_that_stays_and_takes_out_stale_ones(tmp_path: Path) -> None:
+    """Hooks are told by the exe's file name, so the card's Remove takes any copy's. An uninstall removes one copy from the PC,
+    so hooks that start another copy still on it must go on working, and only a path with nothing there is stale."""
+    rig = make_rig(tmp_path)
+    other = tmp_path / "Other Place" / "ClaudeUsageMonitor.exe"
+    other.parent.mkdir()
+    other.write_bytes(b"")
+    rig.write({"hooks": ours(other.as_posix())})
+    assert setup.remove(rig.ctx, only_here=True)["ok"] is True and rig.load() == {"hooks": ours(other.as_posix())}
+    setup.remove(rig.ctx)                               # the card's Remove takes them: the app stays, so it can set them up again
+    assert "hooks" not in rig.load()
+    rig.write({"hooks": ours("C:/Program Files/Nothing Here/ClaudeUsageMonitor.exe")})
+    setup.remove(rig.ctx, only_here=True)
+    assert "hooks" not in rig.load()
+    rig.write({"hooks": ours()})
+    setup.remove(rig.ctx, only_here=True)
+    assert "hooks" not in rig.load()
+
+
+def test_an_uninstall_does_not_take_a_hook_with_no_path_for_a_copy_that_stays(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The uninstaller starts the exe in the install folder, so a bare name is found right there: this copy, which is leaving."""
+    rig = make_rig(tmp_path)
+    folder = tmp_path / "Install"
+    folder.mkdir()
+    (folder / "ClaudeUsageMonitor.exe").write_bytes(b"")
+    monkeypatch.chdir(folder)
+    rig.write({"hooks": ours("ClaudeUsageMonitor.exe")})
+    setup.remove(rig.ctx, only_here=True)
+    assert "hooks" not in rig.load()
+
+
+def test_an_uninstall_says_when_a_gate_hook_stays(tmp_path: Path) -> None:
+    """It is the user's own, so it stays, and after an uninstall it starts a program that is gone. The card's Remove leaves the
+    app installed, so the hook still works and there is nothing to say."""
+    rig = make_rig(tmp_path)
+    gate = {"PreToolUse": [{"matcher": "Agent|Workflow", "hooks": [{"type": "command", "command": CMD, "args": ["--gate"]}]}]}
+    rig.write({"hooks": {**ours(), **gate}})
+    result = setup.remove(rig.ctx, only_here=True)
+    assert setup.GATE_LEFT in result["warnings"] and rig.load() == {"hooks": gate}
+    rig.write({"hooks": {**ours(), **gate}})
+    assert setup.GATE_LEFT not in setup.remove(rig.ctx)["warnings"]
+    rig.write({"hooks": ours()})
+    assert setup.GATE_LEFT not in setup.remove(rig.ctx, only_here=True)["warnings"]
+
+
+def test_an_uninstall_takes_the_tool_out_even_when_the_settings_file_cannot_be_read(tmp_path: Path) -> None:
+    """The card stops at a settings file it cannot read, to be put right and Remove pressed again. After an uninstall there
+    is nothing to press: the MCP tool lives in another file and goes anyway, and the advice is to finish by hand."""
+    rig = make_rig(tmp_path, tool=(EXE, ["--mcp"]))
+    rig.write("{ not json")
+    result = setup.remove(rig.ctx, only_here=True)
+    assert rig.claude.tool is None and "Removed the claude-usage MCP tool." in result["changed"]
+    assert result["errors"] == ["The Claude Code settings file is not valid JSON, so setup left it alone. " + setup.BY_HAND_IF_THERE]
+    (tmp_path / "card").mkdir()
+    card = make_rig(tmp_path / "card", tool=(EXE, ["--mcp"]))
+    card.write("{ not json")
+    result = setup.remove(card.ctx)
+    assert card.claude.tool is not None and result["errors"] == [
+        "The Claude Code settings file is not valid JSON, so setup left it alone. Fix it or move it aside, then try again."]
+
+
+def test_an_uninstall_that_cannot_write_the_settings_says_to_delete_the_hooks_by_hand(tmp_path: Path,
+                                                                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    rig = make_rig(tmp_path, tool=(EXE, ["--mcp"]))
+    rig.write({"hooks": ours()})
+
+    def refuse(src: Any, dst: Any) -> None:
+        raise PermissionError(13, "Access is denied")
+
+    monkeypatch.setattr(setup.os, "replace", refuse)
+    result = setup.remove(rig.ctx, only_here=True)
+    assert result["errors"] == ["Could not write the Claude Code settings file (Access is denied), so the hooks were not removed. "
+                                + setup.BY_HAND]
+    assert rig.claude.tool is None
+
+
+def test_an_uninstall_that_finds_the_settings_changed_does_not_say_try_again(tmp_path: Path,
+                                                                            monkeypatch: pytest.MonkeyPatch) -> None:
+    rig = make_rig(tmp_path, tool=(EXE, ["--mcp"]))
+    rig.write({"hooks": ours()})
+    real_read = setup.read_settings
+
+    def read_then_claude_code_saves(path: Path) -> Any:
+        answer = real_read(path)
+        path.write_text(json.dumps({"hooks": ours(), "model": "opus"}), encoding="utf-8")    # Claude Code saves its settings
+        return answer
+
+    monkeypatch.setattr(setup, "read_settings", read_then_claude_code_saves)
+    result = setup.remove(rig.ctx, only_here=True)
+    assert result["errors"] == ["The Claude Code settings file changed while setup was working, so setup left it alone. "
+                                "The hooks were not removed. " + setup.BY_HAND]
+    assert rig.claude.tool is None
+
+
 def test_a_tool_without_the_mcp_argument_is_not_ours(tmp_path: Path) -> None:
     rig = make_rig(tmp_path, tool=(EXE, []))                                 # "added wrongly": empty Args
     setup.install(rig.ctx)
@@ -694,7 +891,7 @@ def test_when_claude_will_not_register_the_tool_the_hooks_stay_and_the_command_i
     result = setup.install(rig.ctx)
     assert result["ok"] is False and "exit code 1: something went wrong" in result["errors"][0]
     assert "The hooks are in place" in result["errors"][0] and result["manual"].startswith("claude mcp add ")
-    assert len(result["changed"]) == 3 and rig.load() == {"hooks": ours()}
+    assert len(result["changed"]) == 5 and rig.load() == {"hooks": ours()}
 
 
 def test_when_claude_will_not_remove_a_foreign_tool_nothing_is_added(tmp_path: Path) -> None:
@@ -762,15 +959,17 @@ def test_the_status_before_and_after_a_click(tmp_path: Path) -> None:
     assert before == {
         "available": True, "can_remove": True, "reason": None, "manual": "docs/AGENT_HOOK.md", "exe": CMD,
         "settings_path": str(rig.settings), "errors": [],
-        "hooks": {"state": "missing", "installed": 0, "total": 3,
-                  "events": {"SessionStart": "missing", "UserPromptSubmit": "missing", "PostToolUse": "missing"}},
+        "hooks": {"state": "missing", "installed": 0, "total": 5,
+                  "events": {"SessionStart": "missing", "UserPromptSubmit": "missing", "PostToolUse": "missing",
+                             "SubagentStart": "missing", "Stop": "missing"}},
         "mcp": {"state": "missing"},
-        "claude": {"found": True, "path": CLAUDE_EXE, "version": "2.1.160", "min_version": "2.1.139", "supported": True},
+        "claude": {"found": True, "path": CLAUDE_EXE, "version": "2.1.316", "min_version": "2.1.287", "supported": True,
+                   "command": "claude"},
     }
     assert rig.files() == [] and rig.claude.kinds() == ["version", "get"]       # looking changes nothing and runs nothing else
     setup.install(rig.ctx)
     after = setup.status(rig.ctx)
-    assert after["hooks"]["state"] == "installed" and after["hooks"]["installed"] == 3
+    assert after["hooks"]["state"] == "installed" and after["hooks"]["installed"] == 5
     assert set(after["hooks"]["events"].values()) == {"installed"} and after["mcp"] == {"state": "registered"}
 
 
@@ -781,8 +980,9 @@ def test_the_status_tells_partly_installed_and_different_apart(tmp_path: Path) -
     some["UserPromptSubmit"][0]["hooks"][0]["args"] = ["--hook", "--threshold", "80"]
     rig.write({"hooks": some})
     hooks = setup.status(rig.ctx)["hooks"]
-    assert hooks["state"] == "partial" and hooks["installed"] == 1
-    assert hooks["events"] == {"SessionStart": "installed", "UserPromptSubmit": "different", "PostToolUse": "missing"}
+    assert hooks["state"] == "partial" and hooks["installed"] == 3
+    assert hooks["events"] == {"SessionStart": "installed", "UserPromptSubmit": "different", "PostToolUse": "missing",
+                               "SubagentStart": "installed", "Stop": "installed"}
     assert setup.hooks_summary({"a": "different", "b": "different", "c": "different"})["state"] == "partial"
 
 
@@ -859,20 +1059,50 @@ def test_the_folder_of_the_settings_file_is_made_when_claude_never_made_it(tmp_p
     assert rig.settings.is_file()
 
 
-def test_the_hooks_are_the_three_the_guard_needs() -> None:
+def test_the_hooks_are_the_five_the_guard_needs() -> None:
+    from usage_monitor.agent import cli
+
+    background = {"async": True, "asyncRewake": True}
     assert setup.HOOKS == (
-        ("SessionStart", None, ("--hook", "--always"), 30),
-        ("UserPromptSubmit", None, ("--hook",), 10),
-        ("PostToolUse", "*", ("--hook",), 10),
+        ("SessionStart", None, ("--hook", "--always"), 30, {}),
+        ("UserPromptSubmit", None, ("--hook",), 10, {}),
+        ("PostToolUse", "*", ("--hook",), 10, {}),
+        ("SubagentStart", None, ("--hook",), 10, {}),
+        ("Stop", None, ("--watch",), 86400, background),
     )
-    assert all("--gate" not in args for _event, _matcher, args, _timeout in setup.HOOKS)    # --gate stays opt-in and manual
+    assert all("--gate" not in args for _event, _matcher, args, _timeout, _extra in setup.HOOKS)  # --gate stays manual
+    assert cli.WATCH_TIMEOUT_S == 86400 and cli.WATCH_MAX_S + cli.WATCH_POLL_S < 86400    # a watch ends itself first
+
+
+def test_the_stop_watch_is_installed_only_when_it_runs_in_the_background(tmp_path: Path) -> None:
+    """Claude Code holds up the end of every turn for a Stop hook it does not run in the background, and --watch can
+    watch for a day. Setup's entry counts as installed only with both flags (async too, for a Claude Code that does not
+    know asyncRewake), and Install puts them back."""
+    rig = make_rig(tmp_path)
+    for missing in ("async", "asyncRewake"):
+        hooks = ours()
+        del hooks["Stop"][0]["hooks"][0][missing]
+        rig.write({"hooks": hooks})
+        assert setup.status(rig.ctx)["hooks"]["events"]["Stop"] == "different", missing
+        assert setup.install(rig.ctx)["changed"][0] == "Updated the Stop hook." and rig.load() == {"hooks": ours()}
+
+
+def test_an_install_from_before_v2_3_is_partly_installed_and_install_adds_the_two_new_hooks(tmp_path: Path) -> None:
+    rig = make_rig(tmp_path)
+    rig.write({"hooks": {event: groups for event, groups in ours().items() if event not in ("SubagentStart", "Stop")}})
+    hooks = setup.status(rig.ctx)["hooks"]
+    assert (hooks["state"], hooks["installed"], hooks["total"]) == ("partial", 3, 5)
+    result = setup.install(rig.ctx)
+    assert result["changed"][:2] == ["Added the SubagentStart hook.", "Added the Stop hook."]
+    assert rig.load() == {"hooks": ours()}
 
 
 def test_the_pure_merges_do_not_modify_the_document_they_are_given() -> None:
     doc = rich_settings()
     snapshot = json.dumps(doc)
     merged, changed = setup.merge_install(doc, EXE)
-    assert json.dumps(doc) == snapshot and changed == ["SessionStart", "UserPromptSubmit", "PostToolUse"]
+    assert json.dumps(doc) == snapshot and changed == ["SessionStart", "UserPromptSubmit", "PostToolUse", "SubagentStart",
+                                                       "Stop"]
     again, none = setup.merge_install(merged, EXE)
     assert none == [] and again == merged
     cleaned, removed = setup.merge_remove(merged, EXE)
@@ -942,8 +1172,8 @@ def test_at_the_timeout_the_runner_ends_the_whole_process_tree(monkeypatch: pyte
     assert ended[-1] == "kill" and (sys.platform != "win32" or ended[0] == ["/T", "/F", "/PID", "4242"])
 
 
-@pytest.mark.skipif(os.environ.get("CUM_UI_TESTS") != "1" or sys.platform != "win32",
-                    reason="starts processes: set CUM_UI_TESTS=1")
+@pytest.mark.skipif(os.environ.get("USAGE_MONITOR_UI_TESTS") != "1" or sys.platform != "win32",
+                    reason="starts processes: set USAGE_MONITOR_UI_TESTS=1")
 def test_a_cmd_shim_whose_child_holds_the_pipes_still_times_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     shim = tmp_path / "claude.cmd"           # as npm's shim runs node.exe, this runs a child that keeps the pipes open
     shim.write_text("@ping -n 30 127.0.0.1 >nul\r\n", encoding="ascii")
@@ -1033,3 +1263,25 @@ def test_a_linked_settings_file_stays_linked(tmp_path: Path) -> None:
     assert setup.install(rig.ctx)["ok"] is True
     assert rig.settings.is_symlink()
     assert json.loads(real.read_text(encoding="utf-8")) == {"model": "opus", "hooks": ours()}
+
+
+def test_backups_from_before_v2_3_count_toward_the_five_and_age_out(tmp_path: Path) -> None:
+    """Copies made before v2.3 have the app's initials as their prefix. They are the user's backups too: they count
+    toward KEEP_BACKUPS, and the oldest go first, whichever name they have. Any other prefix is not ours, three letters
+    or not: the v2.3 review found that a user's own settings.json.old-backup-<stamp> was pruned with them."""
+    legacy = "".join(word[0] for word in "claude usage monitor".split())     # built here, never written out
+    rig = make_rig(tmp_path)
+    rig.write({"theme": "dark"})
+    for day in range(1, 7):
+        old = rig.folder / f"settings.json.{legacy}-backup-202610{day:02d}-120000"
+        old.write_text("{}", encoding="utf-8")
+        os.utime(old, (1_700_000_000 + day, 1_700_000_000 + day))
+    others = ("settings.json.notes-backup-20261001-120000", "settings.json.old-backup-20261001-120000")
+    for name in others:
+        (rig.folder / name).write_text("not ours", encoding="utf-8")
+        os.utime(rig.folder / name, (1_700_000_000, 1_700_000_000))          # older than ours, so first to go if counted
+    setup.backup_settings(rig.settings, NOW)
+    kept = [name for name in rig.files() if "-backup-" in name]
+    assert BACKUP_NAME in kept and all(name in kept for name in others)                     # another tool's files stay
+    assert sorted(name for name in kept if f".{legacy}-" in name) == [
+        f"settings.json.{legacy}-backup-202610{day:02d}-120000" for day in (3, 4, 5, 6)]

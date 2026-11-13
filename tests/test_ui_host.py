@@ -2,7 +2,7 @@
 
 The pure helpers (callback arity, premultiplied pixels, clipping, icon choice, menu planning,
 lparam arithmetic) run anywhere on Windows. Everything that creates a real window, menu, icon or
-tray icon is skipped unless CUM_UI_TESTS=1, because CI has no interactive desktop. Those tests
+tray icon is skipped unless USAGE_MONITOR_UI_TESTS=1, because CI has no interactive desktop. Those tests
 use off-screen windows and a tray tooltip ending in "(dev)"; none opens a dashboard or touches
 real settings.
 """
@@ -15,8 +15,10 @@ import signal
 import sys
 import threading
 import time
+import types
 import uuid
 from ctypes import wintypes
+from typing import Any
 
 import pytest
 from PIL import Image
@@ -41,7 +43,7 @@ from usage_monitor.ui.platform import Rect
 from usage_monitor.ui.tray import TrayIcon, clip, create_hicon, pick_image
 
 UI = pytest.mark.skipif(
-    os.environ.get("CUM_UI_TESTS") != "1", reason="needs an interactive desktop: set CUM_UI_TESTS=1"
+    os.environ.get("USAGE_MONITOR_UI_TESTS") != "1", reason="needs an interactive desktop: set USAGE_MONITOR_UI_TESTS=1"
 )
 
 OFFSCREEN = (-30000, -30000)
@@ -50,7 +52,7 @@ OFFSCREEN = (-30000, -30000)
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def new_host() -> UIHost:
-    return UIHost(controller_class=f"CUM.Test.Controller.{uuid.uuid4().hex[:8]}")
+    return UIHost(controller_class=f"UsageMonitor.Test.Controller.{uuid.uuid4().hex[:8]}")
 
 
 @pytest.fixture
@@ -301,12 +303,12 @@ def test_popup_flags_open_away_from_the_screen_edge():
 # ── controller window naming ─────────────────────────────────────────────────
 
 def test_a_dev_instance_gets_its_own_controller_class(monkeypatch):
-    monkeypatch.delenv("CUM_DEV_INSTANCE", raising=False)
+    monkeypatch.delenv("USAGE_MONITOR_DEV_INSTANCE", raising=False)
     normal = controller_class_name()
-    monkeypatch.setenv("CUM_DEV_INSTANCE", "1")
+    monkeypatch.setenv("USAGE_MONITOR_DEV_INSTANCE", "1")
     dev = controller_class_name()
     assert dev != normal and dev.startswith(normal)
-    monkeypatch.setenv("CUM_DEV_INSTANCE", "0")
+    monkeypatch.setenv("USAGE_MONITOR_DEV_INSTANCE", "0")
     assert controller_class_name() == normal
 
 
@@ -626,8 +628,8 @@ def test_a_second_launch_can_signal_the_running_instance(host):
     assert signal_running_instance(class_name=cls) is True
     assert pump(until=lambda: seen)
     assert seen == ["open"]
-    assert find_controller("CUM.NoSuchController") == 0
-    assert signal_running_instance(class_name="CUM.NoSuchController") is False
+    assert find_controller("UsageMonitor.NoSuchController") == 0
+    assert signal_running_instance(class_name="UsageMonitor.NoSuchController") is False
 
 
 @UI
@@ -1180,7 +1182,7 @@ def icon_set(color):
 
 @pytest.fixture
 def tray(host):
-    icon = TrayIcon(host, "CUM test (dev)", None, None)
+    icon = TrayIcon(host, "Usage Monitor test (dev)", None, None)
     try:
         yield icon
     finally:
@@ -1248,7 +1250,7 @@ def test_tray_icon_is_added_updated_and_removed(host, tray):
     user = user_objects()
     for i in range(30):
         tray.set_images(icon_set((i * 8, 160, 0, 255)))
-        tray.set_tooltip(f"CUM test (dev) {i}")
+        tray.set_tooltip(f"Usage Monitor test (dev) {i}")
     assert user_objects() == user  # every replaced HICON was destroyed
     tray.remove()
     assert not tray.added and tray._hicon is None
@@ -1431,7 +1433,7 @@ class _NotificationArea:
 
 def _toast_tray(monkeypatch, area):
     monkeypatch.setattr(win32, "Shell_NotifyIconW", area)
-    icon = TrayIcon(_ToastHost(), "CUM test (dev)", None, None)
+    icon = TrayIcon(_ToastHost(), "Usage Monitor test (dev)", None, None)
     assert icon.added and area.has_icon
     return icon
 
@@ -1474,7 +1476,7 @@ def shell_message(host, event, x=0, y=0, icon_id=1):
 @UI
 def test_a_left_click_calls_back_once_even_when_the_shell_sends_two_messages(host, monkeypatch):
     clicks = []
-    icon = TrayIcon(host, "CUM test (dev)", lambda x, y: clicks.append((x, y)), None)
+    icon = TrayIcon(host, "Usage Monitor test (dev)", lambda x, y: clicks.append((x, y)), None)
     try:
         assert icon.ensure_added() and icon._version4
         shell_message(host, win32.WM_LBUTTONUP, 640, 1410)
@@ -1490,7 +1492,7 @@ def test_a_left_click_calls_back_once_even_when_the_shell_sends_two_messages(hos
 @UI
 def test_the_menu_callback_gets_the_click_position_with_signs(host):
     seen = []
-    icon = TrayIcon(host, "CUM test (dev)", None, lambda x, y: seen.append((x, y)))
+    icon = TrayIcon(host, "Usage Monitor test (dev)", None, lambda x, y: seen.append((x, y)))
     try:
         assert icon.ensure_added() and icon._version4
         shell_message(host, win32.WM_CONTEXTMENU, -50, 1200)
@@ -1503,7 +1505,7 @@ def test_the_menu_callback_gets_the_click_position_with_signs(host):
 @UI
 def test_messages_for_another_icon_or_other_events_are_ignored(host):
     seen = []
-    icon = TrayIcon(host, "CUM test (dev)", lambda: seen.append("click"), lambda: seen.append("menu"))
+    icon = TrayIcon(host, "Usage Monitor test (dev)", lambda: seen.append("click"), lambda: seen.append("menu"))
     icon.on_notify_click = lambda: seen.append("toast")
     try:
         assert icon.ensure_added() and icon._version4
@@ -1521,7 +1523,7 @@ def test_messages_for_another_icon_or_other_events_are_ignored(host):
 @UI
 def test_a_shell_without_version_4_uses_the_legacy_messages(host):
     seen = []
-    icon = TrayIcon(host, "CUM test (dev)", lambda: seen.append("click"), lambda x, y: seen.append("menu"))
+    icon = TrayIcon(host, "Usage Monitor test (dev)", lambda: seen.append("click"), lambda x, y: seen.append("menu"))
     try:
         assert icon.ensure_added()
         icon._version4 = False  # as if NIM_SETVERSION had been refused
@@ -1536,7 +1538,140 @@ def test_a_shell_without_version_4_uses_the_legacy_messages(host):
 @UI
 def test_the_host_removes_the_tray_icon_when_it_shuts_down():
     host = new_host()
-    icon = TrayIcon(host, "CUM test (dev)", None, None)
+    icon = TrayIcon(host, "Usage Monitor test (dev)", None, None)
     assert icon.ensure_added()
     host.close()
     assert not icon.added and icon._removed
+
+def test_a_window_windows_refuses_raises_an_oserror_that_carries_the_win32_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The strip tells a taskbar that is gone (ERROR_INVALID_WINDOW_HANDLE) from one that refused for another reason (#32)."""
+    from usage_monitor.ui import host as host_mod
+
+    def refuse(*_args: object) -> None:
+        ctypes.set_last_error(win32.ERROR_ACCESS_DENIED)
+        return None
+
+    monkeypatch.setattr(host_mod.win32, "CreateWindowExW", refuse)
+    with pytest.raises(OSError) as caught:
+        host_mod.create_window("UsageMonitorTest.Refused", 0, object())
+    assert caught.value.winerror == win32.ERROR_ACCESS_DENIED
+    assert str(caught.value).startswith("[WinError 5] CreateWindowExW('UsageMonitorTest.Refused') failed: ")
+    assert str(caught.value).count("WinError") == 1
+
+
+# ── LayeredWindow, recorded: what it asks of Windows, with no real window (#32) ─────────────────────────────
+# The real-window tests above need USAGE_MONITOR_UI_TESTS and parent the child to a popup; the app tests fake the taskbar
+# handle, which CreateWindowExW rejects, so they only see the fallback. These record the calls a taskbar child and a
+# top-level window make, and run everywhere.
+
+TASKBAR = 4242                                  # a parent handle, and where its client area starts on screen
+TASKBAR_ORIGIN = (100, 1000)
+
+
+@pytest.fixture
+def recorded(monkeypatch: pytest.MonkeyPatch) -> Any:
+    from usage_monitor.ui import layered as layered_mod
+
+    rec = types.SimpleNamespace(created=[], converted=[], drawn=[], placed=[], peek=[])
+
+    def create(class_name: str, ex_style: int, handler: Any, *, title: str = "", style: int = win32.WS_POPUP,
+               parent: int | None = None) -> int:
+        hwnd = 9000 + len(rec.created)
+        rec.created.append({"hwnd": hwnd, "class": class_name, "ex_style": ex_style, "style": style, "parent": parent})
+        return hwnd
+
+    def screen_to_client(hwnd: int, point_ref: Any) -> int:
+        point = point_ref._obj
+        rec.converted.append((hwnd, point.x, point.y))
+        if hwnd == TASKBAR:
+            point.x, point.y = point.x - TASKBAR_ORIGIN[0], point.y - TASKBAR_ORIGIN[1]
+        return 1
+
+    def update_layered(hwnd: int, _dst: Any, position: Any, size: Any, _src: Any, _origin: Any, _key: int, _blend: Any,
+                       flags: int) -> int:
+        rec.drawn.append((hwnd, position._obj.x, position._obj.y, size._obj.cx, size._obj.cy, flags))
+        return 1
+
+    def set_window_pos(hwnd: int, after: Any, x: int, y: int, _cx: int, _cy: int, flags: int) -> int:
+        rec.placed.append((hwnd, after, x, y, flags))
+        return 1
+
+    def dwm_set(hwnd: int, attribute: int, value: Any, _size: int) -> int:
+        rec.peek.append((hwnd, attribute, bool(value._obj.value)))
+        return 0
+
+    monkeypatch.setattr(layered_mod, "create_window", create)
+    monkeypatch.setattr(layered_mod, "register_window_class", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(win32, "ScreenToClient", screen_to_client)
+    monkeypatch.setattr(win32, "UpdateLayeredWindow", update_layered)
+    monkeypatch.setattr(win32, "SetWindowPos", set_window_pos)
+    monkeypatch.setattr(win32, "DwmSetWindowAttribute", dwm_set)
+    monkeypatch.setattr(win32, "DestroyWindow", lambda _hwnd: 1)
+    rec.host = types.SimpleNamespace(on_ui_thread=lambda: True, post=lambda fn: fn(), add_cleanup=lambda fn: (lambda: None))
+    return rec
+
+
+def test_recorded_a_taskbar_child_is_made_with_the_child_styles_and_left_to_peek(recorded: Any) -> None:
+    child = LayeredWindow(recorded.host, draggable=False, parent=TASKBAR)
+    (made,) = recorded.created
+    assert made["parent"] == TASKBAR and child.parent == TASKBAR
+    assert made["style"] == win32.WS_CHILD | win32.WS_CLIPSIBLINGS                     # a child, clipped by its siblings
+    assert made["ex_style"] == win32.WS_EX_LAYERED | win32.WS_EX_NOACTIVATE | win32.WS_EX_NOPARENTNOTIFY
+    assert not made["ex_style"] & (win32.WS_EX_TOPMOST | win32.WS_EX_TOOLWINDOW)       # neither means anything for a child
+    assert recorded.peek == []                                                          # it is part of the taskbar
+    child.destroy()
+
+
+def test_recorded_a_taskbar_child_is_drawn_and_moved_in_the_taskbars_coordinates(recorded: Any) -> None:
+    child = LayeredWindow(recorded.host, draggable=False, parent=TASKBAR)
+    assert child.update(Image.new("RGBA", (264, 48), (0, 0, 0, 255)), 2946, 1392)
+    assert recorded.converted == [(TASKBAR, 2946, 1392)]                                # screen in ...
+    assert recorded.drawn == [(child.hwnd, 2946 - 100, 1392 - 1000, 264, 48, win32.ULW_ALPHA)]   # ... the parent's out
+    child.move(2950, 1392)
+    assert recorded.converted[-1] == (TASKBAR, 2950, 1392)
+    hwnd, after, x, y, flags = recorded.placed[-1]
+    assert (hwnd, after, x, y) == (child.hwnd, None, 2950 - 100, 1392 - 1000) and flags & win32.SWP_NOZORDER
+    child.destroy()
+
+
+def test_recorded_a_top_level_window_is_drawn_and_moved_in_screen_coordinates(recorded: Any) -> None:
+    popup = LayeredWindow(recorded.host, draggable=True)
+    assert popup.update(Image.new("RGBA", (10, 10), (0, 0, 0, 255)), 300, 200)
+    popup.move(310, 205)
+    assert recorded.converted == []                                                     # nothing to convert to
+    assert recorded.drawn == [(popup.hwnd, 300, 200, 10, 10, win32.ULW_ALPHA)] and recorded.placed[-1][2:4] == (310, 205)
+    popup.destroy()
+
+
+def test_recorded_a_child_is_raised_among_its_siblings_and_a_popup_over_the_topmost_windows(recorded: Any) -> None:
+    child = LayeredWindow(recorded.host, draggable=False, parent=TASKBAR)
+    popup = LayeredWindow(recorded.host, draggable=True)
+    plain = LayeredWindow(recorded.host, draggable=False, topmost=False)
+    for window in (child, popup, plain):
+        window.bring_to_top()
+    raised = {hwnd: (after, flags) for hwnd, after, _x, _y, flags in recorded.placed}
+    assert raised[child.hwnd][0] == win32.HWND_TOP                                     # HWND_TOPMOST is no order for a child
+    assert raised[popup.hwnd][0] == win32.HWND_TOPMOST
+    assert raised[plain.hwnd][0] == win32.HWND_TOP
+    for _after, flags in raised.values():
+        assert flags & win32.SWP_NOMOVE and flags & win32.SWP_NOSIZE and flags & win32.SWP_NOACTIVATE
+    for window in (child, popup, plain):
+        window.destroy()
+
+
+def test_recorded_the_floating_widget_and_the_tooltip_are_kept_out_of_peek(recorded: Any) -> None:
+    """Peeking at a window from its taskbar preview hides every other top-level window; these two stay (#29)."""
+    import inspect
+
+    from usage_monitor.ui import widgets as widgets_mod
+
+    for cls in (widgets_mod.FloatingWidget, widgets_mod.Tooltip):
+        assert inspect.signature(cls.__init__).parameters["window_factory"].default is LayeredWindow
+    floating = widgets_mod.FloatingWidget._new_window(
+        types.SimpleNamespace(_window_factory=LayeredWindow, _host=recorded.host), True)
+    tooltip = widgets_mod.Tooltip(recorded.host)._ensure_window()
+    assert [made["parent"] for made in recorded.created] == [None, None]                # both top-level
+    assert recorded.peek == [(floating.hwnd, win32.DWMWA_EXCLUDED_FROM_PEEK, True),
+                             (tooltip.hwnd, win32.DWMWA_EXCLUDED_FROM_PEEK, True)]
+    floating.destroy()
+    tooltip.destroy()

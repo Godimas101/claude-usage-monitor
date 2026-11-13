@@ -5,14 +5,14 @@ No browser, no window, no server and no network: the files are read as text and 
 Python side they depend on (the statistics routes, the settings whitelist, the window names) and
 against the rules the page has to keep (no inline handlers, no literal colours, no external addresses,
 every figure explained, motion honoured). The one test that starts a process (node --check) is skipped
-unless CUM_UI_TESTS=1, like every test that starts a process.
+unless USAGE_MONITOR_UI_TESTS=1, like every test that starts a process.
 
 The scripts themselves run under node, in tests/webui_checks.js: charts.js and app.js are loaded into a vm
-context with a small fake DOM and window.__CUM_TEST__ set, so app.js hands back its helpers (the test hook at its
+context with a small fake DOM and window.__USAGE_MONITOR_TEST__ set, so app.js hands back its helpers (the test hook at its
 end) and the tests below assert on what they return: escaping, the percent formats, the pace band, the model mix,
 the currency of real money, the plan multiple, the health rows, the plan price, the card layout of every page before
 any number has arrived, the update banner, the forecast line, the sign-in help and the pages of a PC with no Claude Code.
-A syntax error, a lost x100 or an unescaped title fails there. Those tests start node, so they need CUM_UI_TESTS=1 like every test that starts a
+A syntax error, a lost x100 or an unescaped title fails there. Those tests start node, so they need USAGE_MONITOR_UI_TESTS=1 like every test that starts a
 process; .github/workflows/tests.yml sets it for this file (and a test below checks that it does).
 
 What these cannot show is how the page looks and behaves; that is checked by loading it in a browser
@@ -41,8 +41,8 @@ from usage_monitor.ui import dashboard, server
 WEBUI = paths.resource_dir() / "usage_monitor" / "webui"
 CHECKS_JS = Path(__file__).resolve().parent / "webui_checks.js"
 WORKFLOW = paths.resource_dir() / ".github" / "workflows" / "tests.yml"
-UI_TESTS = os.environ.get("CUM_UI_TESTS") == "1"
-ui_only = pytest.mark.skipif(not UI_TESTS, reason="needs CUM_UI_TESTS=1 (starts a child process)")
+UI_TESTS = os.environ.get("USAGE_MONITOR_UI_TESTS") == "1"
+ui_only = pytest.mark.skipif(not UI_TESTS, reason="needs USAGE_MONITOR_UI_TESTS=1 (starts a child process)")
 # A child process of a test must not open a console window on the desktop of whoever runs the tests.
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -321,7 +321,7 @@ def test_storage_is_only_for_preferences_and_always_guarded() -> None:
 # ── Charts ────────────────────────────────────────────────────────────────────────
 
 def test_charts_js_offers_every_chart_the_pages_need() -> None:
-    exported = re.search(r"root\.CUMCharts = \{(.*?)\};", CHARTS, re.S).group(1)
+    exported = re.search(r"root\.MonitorCharts = \{(.*?)\};", CHARTS, re.S).group(1)
     for name in ("sparkline", "line", "columns", "hbars", "stackedBar", "calendar", "matrix", "bind",
                  "niceStep", "levels", "refresh", "pips"):
         assert re.search(rf"\b{name}\b", exported), name
@@ -332,7 +332,7 @@ def test_charts_js_offers_every_chart_the_pages_need() -> None:
 
 def test_chart_items_are_keyboard_and_screen_reader_stops() -> None:
     item = function_body(CHARTS, "item")
-    for needle in ("cum-item", "tabindex", 'role="img"', "aria-label", "data-i"):
+    for needle in ("mon-item", "tabindex", 'role="img"', "aria-label", "data-i"):
         assert needle in item, needle
     navigate = function_body(CHARTS, "navigate")
     for key in ("ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"):
@@ -380,7 +380,7 @@ def test_every_theme_stops_its_motion_for_reduced_motion(theme_id: str) -> None:
 def test_every_theme_ships_the_files_the_server_offers_for_it(theme_id: str) -> None:
     """/api/state lists a theme's css and js only when the file exists; the script registers its start hook."""
     assert (WEBUI / "themes" / f"{theme_id}.css").is_file() and (WEBUI / "themes" / f"{theme_id}.js").is_file()
-    assert f"CUM_THEME_FX.{theme_id} = {{ start: start }}" in THEME_JS[theme_id]
+    assert f"USAGE_MONITOR_THEME_FX.{theme_id} = {{ start: start }}" in THEME_JS[theme_id]
 
 
 # ── Nostromo ──────────────────────────────────────────────────────────────────────
@@ -529,7 +529,7 @@ def test_the_time_left_bar_keeps_both_texts_readable_over_the_fill_and_the_track
     assert colour.contrast_ratio(signal, track) >= 4.5, "the label and the time over the track"
 
 
-# ── JavaScript (child processes: only with CUM_UI_TESTS=1) ────────────────────────
+# ── JavaScript (child processes: only with USAGE_MONITOR_UI_TESTS=1) ────────────────────────
 
 # Loads charts.js in node (no DOM needed to build a string) and looks for text or marks drawn outside the
 # chart's own width, and for text drawn over text. Text is taken as 7.9 px a character, as charts.js itself does.
@@ -537,7 +537,7 @@ CHART_BOUNDS_JS = r"""
 const fs = require('fs'), vm = require('vm');
 const box = {}; box.window = box; vm.createContext(box);
 vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), box);
-const C = box.CUMCharts, CHAR = 7.9, problems = [];
+const C = box.MonitorCharts, CHAR = 7.9, problems = [];
 function check(name, svg) {
   const W = +svg.match(/viewBox="0 0 ([\d.]+) /)[1], texts = [];
   for (const m of svg.matchAll(/<text class="([^"]*)" x="([-\d.]+)" y="([-\d.]+)">([^<]*)<\/text>/g)) {
@@ -821,6 +821,78 @@ def test_the_price_override_wins_where_a_price_is_used_and_the_detected_price_st
 
 
 @ui_only
+def test_the_plan_price_hint_says_what_the_latest_state_says(checks: dict[str, Any]) -> None:
+    """The hint was built once, with the page. Loaded on #settings that is before the first state, and a first sign-in or a new
+    plan changes the plan under a page that is open, so it kept the text of that moment until Settings was left (#46)."""
+    hint = checks["planHint"]
+
+    def said(detected: str, writes: int) -> dict[str, Any]:
+        return {"text": f"USD a month. Blank uses the detected price ({detected}).", "writes": writes}
+
+    assert hint["before"] == said("no price known", 0)
+    assert hint["firstState"] == said("Max 5x, $100 a month", 1)
+    assert hint["sameState"] == said("Max 5x, $100 a month", 1)         # a poll that changes nothing writes nothing
+    assert hint["override"] == said("Max 5x, $100 a month", 1)          # the override is not the detected price
+    assert hint["newPlan"] == said("Max 20x, $200 a month", 2)
+    assert hint["noPrice"] == said("no price known", 3)
+    assert hint["signedIn"] == said("Pro, $20 a month", 4)
+    assert hint["noPlan"] == said("no price known", 5)
+    hostile = hint["hostileName"]
+    assert "<img" in hostile and hint["hostile"] == said(f"{hostile}, $20 a month", 6)    # a plan name is text, on update
+    assert hint["drawnAgain"] == said(f"{hostile}, $20 a month", 6)     # the page draws the same words, so nothing is written over them
+    assert hint["drawnEscaped"] is True and hint["asMarkup"] == 0       # and on first paint
+
+
+@ui_only
+def test_the_settings_update_line_is_about_the_release_on_offer(checks: dict[str, Any]) -> None:
+    """Nothing cleared what the last click said, so a release found later stood beside "YOU ARE UP TO DATE." or the skip of an
+    older one until the window closed (#47). The banner already kept its text to one release."""
+    line = checks["updateLine"]
+
+    def offered(version: str) -> dict[str, Any]:
+        return {"line": f"Version {version} is available.", "install": True}
+
+    assert line["upToDate"] == {"line": "YOU ARE UP TO DATE.", "install": False}
+    assert line["foundLater"] == offered("2.3.0")
+    assert line["checking"] == {"line": "CHECKING\u2026", "install": True}            # a state on the way changes nothing
+    assert line["checked"] == {"line": "AN UPDATE IS AVAILABLE.", "install": True}
+    assert 'role="status"></p>' in line["banner"]                                      # a check's words stay out of the banner
+    assert line["linkLost"] == {"line": "CHECK FAILED: THE DASHBOARD LOST ITS LINK", "install": True}
+    assert line["noGithub"] == {"line": "COULD NOT REACH GITHUB; TRY AGAIN LATER.", "install": True}
+    assert line["newerAfterThat"] == offered("2.4.0")
+    assert line["skipped"] == {"line": "THIS VERSION WILL BE SKIPPED.", "install": True}
+    assert line["newerAfterSkip"] == offered("2.5.0")
+    assert line["installing"] == {"line": "OPENED THE RELEASE PAGE IN YOUR BROWSER.", "install": True}
+    assert line["newerAfterInstall"] == offered("2.6.0")
+    assert line["installSkipped"] == {"line": "OPENED THE RELEASE PAGE IN YOUR BROWSER.", "install": True}   # a click on a skipped
+    assert line["skipSkipped"] == {"line": "THIS VERSION WILL BE SKIPPED.", "install": True}                 # release gets its answer
+
+
+@ui_only
+def test_the_start_with_windows_note_follows_the_state(checks: dict[str, Any]) -> None:
+    """A dev instance loaded on #settings is drawn before the state says it is one, so the note said what a real install does (#47)."""
+    hint = checks["startupHint"]
+    normal, dev = "Run the monitor when you sign in.", "Dev instance: this is not saved to Windows."
+    assert hint["before"] == {"text": normal, "writes": 0}
+    assert hint["dev"] == {"text": dev, "writes": 1}
+    assert hint["sameState"] == {"text": dev, "writes": 1}
+    assert hint["notDev"] == {"text": normal, "writes": 2}
+    assert hint["drawnAgain"] == {"text": dev, "writes": 3}                              # the page draws the same words itself
+
+
+@ui_only
+def test_a_supporters_list_that_failed_is_asked_for_at_the_next_visit(checks: dict[str, Any]) -> None:
+    """One failed ask stayed "unavailable" until the window closed, though the monitor only holds a failure for five minutes (#47)."""
+    list_ = checks["supporters"]
+    assert list_["failed"] == {"asks": 1, "unavailable": True, "named": False}
+    assert list_["sameVisit"] == {"asks": 1, "unavailable": True, "named": False}        # a new state asks nothing
+    assert list_["nextVisit"] == {"asks": 2, "unavailable": False, "named": True}
+    assert list_["visitAfterThat"] == {"asks": 2, "unavailable": False, "named": True}   # one that worked is not asked for again
+    assert list_["linkLost"] == {"asks": 3, "unavailable": True, "named": False}
+    assert list_["afterLinkLost"] == {"asks": 4, "unavailable": False, "named": True}
+
+
+@ui_only
 def test_the_time_left_in_a_window_is_a_bar_the_themes_may_draw(checks: dict[str, Any]) -> None:
     """Edgerun's approved limit card has a TIME REMAINING bar where the other themes have the RESETS and IN facts."""
     def bar(html: str) -> tuple[dict[str, str | None], list[str]]:
@@ -860,6 +932,7 @@ def test_an_old_nerds_link_and_a_choice_saved_under_the_old_name_still_work(chec
     assert checks["alias"] == "efficiency" and checks["aliasNew"] == "efficiency"
     assert checks["aliasUnknown"] == "overview"
     assert checks["legacyPrefs"] == ["week", "month"]               # the window saved as nerdsWindow, and the cost window
+    assert checks["movedPrefs"] == ["week", ["something-else", "usage-monitor-dashboard-prefs"]]   # kept before v2.3
     assert checks["newPrefsWin"] == "today"                         # the new name wins when both are saved
 
 
@@ -992,9 +1065,9 @@ def test_every_theme_draws_its_placeholders_and_the_updating_cue(theme_id: str) 
 # ── The hook contract for the motion layer ────────────────────────────────────────
 
 def test_the_header_documents_the_hooks_the_motion_layer_may_implement() -> None:
-    for needle in ("enter(main, page)", "cancel(main)", "arrive(card, info)", "cum:card-data", "cum:page-rendered",
+    for needle in ("enter(main, page)", "cancel(main)", "arrive(card, info)", "mon:card-data", "mon:page-rendered",
                    "fx-run", "fx-quiet", "data-pending", "data-final", "data-fill", "data-fresh", "data-state=pending | ready | error",
-                   "data-updating", "window.CUM_THEME_FX[id]", "fx-hold, which kept the page hidden"):
+                   "data-updating", "window.USAGE_MONITOR_THEME_FX[id]", "fx-hold, which kept the page hidden"):
         assert needle in APP_DOC, needle
     assert "Pending: a page is never empty" in APP_DOC
 
@@ -1004,7 +1077,7 @@ def test_the_page_calls_the_hooks_and_does_not_wait_for_the_reports() -> None:
     for name in ("themeFx", "themeReady", "wantEnter", "playEnterIfDue", "cancelFx", "announce"):
         assert f"function {name}(" in code, name
     assert 'fx.enter(main, key)' in code and 'fx.arrive(u.el, info)' in code and 'fx.cancel(main)' in code
-    assert '"cum:card-data"' in code and '"cum:page-rendered"' in code
+    assert '"mon:card-data"' in code and '"mon:page-rendered"' in code
     assert 'classList.add("fx-hold")' not in code and "pageReady" not in code          # the entrance is not held back by the reports
     assert 'classList.add("fx-quiet")' in code and 'classList.remove("fx-quiet")' in code
     body = function_body(APP_CODE, "playEnterIfDue")
@@ -1426,12 +1499,39 @@ def test_the_guard_status_says_off_armed_or_holding(checks: dict[str, Any]) -> N
 
 
 @ui_only
+def test_the_card_lists_the_conversations_the_stop_hook_watches(checks: dict[str, Any]) -> None:
+    """#41: a conversation that waits for its workflow is watched, and woken when the guard holds. The card says which
+    are watched, since when and for what work, but not while the guard is off: the watches end with it."""
+    live, clock = checks["guard"]["live"], checks["guard"]["clock"]
+    assert kv(live["armedWatching"]) == [("WATCHING", "1 CONVERSATION"),
+                                          ("3f9a1c2e", "SINCE " + clock["watched"] + " · 1 WORKFLOW, 2 AGENTS")]
+    assert kv(live["offWatching"]) == []
+    many = kv(live["holdingWatchingMany"])
+    at = [label for label, _value in many].index("WATCHING")
+    assert many[at] == ("WATCHING", "7 CONVERSATIONS") and many[at + 1] == ("5d2b7e40", "SINCE " + clock["watched"] + " · 1 AGENT")
+    assert many[at + 6] == ("AND 2 MORE", "")
+    odd = kv(live["watchingOdd"])                                            # what came back is not trusted
+    assert odd[0] == ("WATCHING", "2 CONVERSATIONS") and odd[1][0] == "unknown session" and " · " not in odd[1][1]
+    assert odd[2][0] == "abc" and odd[2][1].endswith(" · 1 TEAMMATE")
+
+
+@ui_only
+def test_the_card_counts_conversations_and_agents_apart_and_names_a_conversation_not_told(checks: dict[str, Any]) -> None:
+    """#41: the card said two sessions were told when only a workflow's agents had heard, and its conversation had not."""
+    rows = kv(checks["guard"]["live"]["holdingAgents"])
+    assert rows[2] == ("TOLD THIS EPISODE", "1 CONVERSATION, 3 AGENTS")
+    assert rows[3][0] == "3f9a1c2e" and rows[3][1].endswith(" · 3 AGENTS ONLY")
+    assert rows[4][0] == "5d2b7e41" and rows[4][1].endswith(" · CONVERSATION")
+    assert rows[5] == ("NOT TOLD", "1 CONVERSATION: ITS AGENTS WERE")
+
+
+@ui_only
 def test_while_holding_it_names_what_is_over_when_it_ends_who_was_told_and_who_waits(checks: dict[str, Any]) -> None:
     rows, clock = kv(checks["guard"]["live"]["holding"]), checks["guard"]["clock"]
     assert rows[:2] == [("SESSION", "96% OF A 95% CAP"), ("FABLE WEEKLY", "91.5% OF A 90% CAP")]      # percent against cap, as the limit is named
     assert rows[2] == ("RESUMES", f"{clock['resumes']} · IN 3 H 27 M")                                 # local time and a countdown
-    assert rows[3] == ("TOLD THIS EPISODE", "2 SESSIONS")
-    assert rows[4] == ("3f9a1c2e", clock["told"]) and rows[5][0] == "3f9a1c2e" and rows[5][1] != rows[4][1]   # short ids, and when
+    assert rows[3] == ("TOLD THIS EPISODE", "2 CONVERSATIONS")                            # a list from before #41 counted conversations
+    assert rows[4] == ("3f9a1c2e", clock["told"] + " · CONVERSATION") and rows[5][0] == "3f9a1c2e" and rows[5][1] != rows[4][1]
     assert rows[6] == ("WAITING", "1 SESSION") and rows[7] == ("atlas-web · 77b0aa10", f"SINCE {clock['since']}")   # the folder, and since when
     assert 'title="C:\\Demo\\atlas-web"' in checks["guard"]["live"]["holding"]                          # the whole path is one hover away
     assert len(rows) == 8
@@ -1470,7 +1570,7 @@ def test_the_hold_says_so_when_it_does_not_know_when_it_ends_and_when_it_is_abou
 def test_a_long_list_of_sessions_is_cut_and_counted(checks: dict[str, Any]) -> None:
     rows = kv(checks["guard"]["live"]["holdingMany"])
     labels = [label for label, _value in rows]
-    assert rows[labels.index("TOLD THIS EPISODE")][1] == "7 SESSIONS" and rows[labels.index("WAITING")][1] == "7 SESSIONS"
+    assert rows[labels.index("TOLD THIS EPISODE")][1] == "7 CONVERSATIONS" and rows[labels.index("WAITING")][1] == "7 SESSIONS"
     # the limit, when it ends, the told header and its five and a "more" row, the waiting header and its five and a "more" row
     assert labels.count("AND 2 MORE") == 2 and len(rows) == 1 + 1 + 1 + 5 + 1 + 1 + 5 + 1
     assert [row for row in rows if row[0] == "AND 2 MORE"] == [("AND 2 MORE", "")] * 2
@@ -1533,6 +1633,8 @@ def test_install_and_remove_are_there_when_setup_can_run_and_the_cost_is_always_
     for name in ("installing", "removing"):                                                   # one click on its way
         assert buttons(setup[name]) == {"install": "busy", "remove": "busy"}, name
     assert '(<span class="nm-path">C:\\Users\\t\\AppData\\Roaming\\npm\\claude.CMD</span>) is older than 2.1.139' in setup["tooOldAt"]
+    assert 'Update it with <span class="nm-path">claude update</span>' in setup["tooOld"]
+    assert 'Update it with <span class="nm-path">&amp; &#39;C:\\Users\\t\\.local\\bin\\claude.exe&#39; update</span>' in setup["tooOldOnNoPath"]   # #43
     for name, html in setup.items():
         assert f'<p class="nm-lede">{GUARD_COST}</p>' in html, name                              # what it costs is said whatever the state
         install = "Installing…" if name == "installing" else "Install"                          # the label of a click on its way says so
@@ -1559,7 +1661,7 @@ def test_a_click_shows_what_changed_the_backup_the_warnings_and_the_errors_each_
     setup = checks["guard"]["setup"]
     done = setup["installed_ok"]
     assert '<div class="nm-callout" role="status"><b>Installed.</b> Added the SessionStart hook. Registered the claude-usage MCP tool.<br>' in done
-    assert 'Backup: <span class="nm-path">C:\\Users\\t\\.claude\\settings.json.cum-backup-20261028-180509</span>' in done
+    assert 'Backup: <span class="nm-path">C:\\Users\\t\\.claude\\settings.json.usage-monitor-backup-20261028-180509</span>' in done
     assert '<div class="nm-callout is-warn" role="note">This card checks only the claude command. Claude Code in VS Code has its own version: in VS Code, check under Extensions that it is 2.1.139 or newer.</div>' in done
     assert "<b>Removed.</b> Removed the PostToolUse hook." in setup["removed_ok"]
     assert "<b>Nothing to change.</b> The three hooks were already in place." in setup["nothing"]
@@ -1669,8 +1771,9 @@ SIGNIN_STEPS = ["Open PowerShell: press Start and type PowerShell.", "Install Cl
                 "Come back here and press Check again."]
 SIGNIN_PATH_NOTE = "If it warns that a folder is not in your PATH, carry on. The next step does not need it."      # under the second step's command
 SIGNIN_SIGN_IN = "Then sign in with your Claude account in the browser that opens."      # the end of the third step, under its command
-SIGNIN_RENEWS = "Claude Code renews the sign-in each time it runs. If the monitor later says the sign-in has expired, open Claude Code again."
-SIGNIN_EXPIRED = "Claude Code renews the sign-in each time it runs. Open Claude Code, or run claude in PowerShell, then press Check again."
+# "when you use it", not "each time it runs": an open but idle Claude Code lets the sign-in run out (#52)
+SIGNIN_RENEWS = "Claude Code renews the sign-in when you use it. If the monitor later says the sign-in has expired, send Claude Code a message."
+SIGNIN_EXPIRED = "Claude Code renews the sign-in when you use it. Send it a message, or run claude in PowerShell, then press Check again."
 # an older Claude app took the name "claude" on some PCs, so typing it opens the app (Anthropic's install troubleshooting page)
 SIGNIN_NOT_FOUND = "If PowerShell says claude is not recognized, or the Claude app opens instead, run this:"
 COPY_TITLES = {"install": "Copy the install command", "start": "Copy the command that starts Claude Code"}
@@ -1708,7 +1811,7 @@ def test_the_help_and_the_no_activity_pages_say_what_they_were_given_to_say() ->
     links = re.search(r"var LINKS = \{(.*?)\};", APP_CODE, re.S).group(1)
     assert f'readme: "{README_WEB_AND_APP}"' in links
     body = function_body(APP_CODE, "signInHelp")
-    for step in (SIGNIN_STEPS[0], SIGNIN_STEPS[3], "Claude Code renews the sign-in each time it runs. Open Claude Code, or run "):
+    for step in (SIGNIN_STEPS[0], SIGNIN_STEPS[3], "Claude Code renews the sign-in when you use it. Send it a message, or run "):
         assert f'esc("{step}")' in body, step
     assert f'esc("{SIGNIN_STEPS[1]}") + commandRow("install") + esc("{SIGNIN_PATH_NOTE}")' in body  # the installer's note must not stop anyone
     assert f'esc("{SIGNIN_STEPS[2]}") + commandRow("start") + esc("{SIGNIN_SIGN_IN}")' in body      # no "new window": the PATH does not matter
@@ -1857,7 +1960,7 @@ def test_with_no_sign_in_the_help_says_what_to_do_in_the_words_it_was_given(chec
 def test_an_expired_sign_in_keeps_the_monitors_reason_and_adds_the_one_thing_to_do(checks: dict[str, Any]) -> None:
     html = checks["signIn"]["expired"]
     assert html.startswith('<div class="nm-msg nm-help" role="region" aria-label="Claude sign-in"><b>AUTH LOST</b>')       # the banner's own heading
-    assert paragraphs(html) == ["The Claude sign-in has expired; open Claude Code to renew it", SIGNIN_EXPIRED, SIGNIN_NOT_FOUND]
+    assert paragraphs(html) == ["The Claude sign-in has expired; send Claude Code a message to renew it", SIGNIN_EXPIRED, SIGNIN_NOT_FOUND]
     page = Markup(html)
     assert page.find("ol") == [] and page.find("a") == []                              # no steps to start from nothing, no manual to read
     # no install command to copy; the command that starts Claude Code where claude is not found (#42)
@@ -2071,14 +2174,14 @@ def test_the_forecast_line_marks_when_it_crosses_100_percent_and_agrees_with_the
 
 def test_ci_runs_the_script_tests_with_node() -> None:
     """Plain `python -m pytest` skips every test that starts a process, node included, so a syntax error in
-    app.js passed CI. The workflow runs this file once more with CUM_UI_TESTS=1."""
+    app.js passed CI. The workflow runs this file once more with USAGE_MONITOR_UI_TESTS=1."""
     text = WORKFLOW.read_text(encoding="utf-8")
-    assert "CUM_UI_TESTS" in text and "tests/test_webui.py" in text and "setup-node" in text
+    assert "USAGE_MONITOR_UI_TESTS" in text and "tests/test_webui.py" in text and "setup-node" in text
     assert "tests/test_motion.py" in text                                          # motion.js is run under node there too
 
 
 def test_the_test_hook_is_inert_unless_a_test_sets_it() -> None:
     code = strip_comments(APP_CODE)
-    assert code.count("__CUM_TEST__") == 2                                         # the guard and the hand-over
-    hook = code[code.index("if (window.__CUM_TEST__)"):]
+    assert code.count("__USAGE_MONITOR_TEST__") == 2                                         # the guard and the hand-over
+    hook = code[code.index("if (window.__USAGE_MONITOR_TEST__)"):]
     assert hook.index("return;") < hook.index("init();")                           # the page is not started under test

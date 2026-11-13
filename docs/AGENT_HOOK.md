@@ -17,7 +17,7 @@ and none of them shows the sign-in token.
 | MCP tool `get_plan_usage` | Claude calls it when it wants the numbers, for example between workflow phases | `claude mcp add` (below) |
 | `--hook` | Adds a one-line summary to Claude's context at session start, and when a limit passes a threshold | `hooks` in `settings.json` |
 | `--gate` | Refuses new agents and workflows once the session or weekly limit reaches a cap you set | `hooks` in `settings.json` |
-| The usage guard (v2.2) | Tells working sessions to wrap up when usage reaches a cap you set, and wakes the ones that wait when the limits allow work again | Settings → Usage guard: switch on **Arm the guard**, then press **Install** |
+| The usage guard (v2.2) | Tells working sessions to wrap up when usage reaches a cap you set, wakes a conversation that waits for its workflow to tell it too (v2.3), and wakes the ones that wait when the limits allow work again | Settings → Usage guard: switch on **Arm the guard**, then press **Install** |
 | `--status [--json]` | Prints the summary line, or the full reading as JSON, for scripts | a terminal or a script |
 
 By default the app installs to `%LOCALAPPDATA%\ClaudeUsageMonitor\ClaudeUsageMonitor.exe`, and the commands
@@ -47,7 +47,9 @@ path that does not exist, means it was added wrongly: remove it with
 `claude mcp remove claude-usage -s user` and run the add command again. In a Claude Code window that
 was already open, `/mcp` reconnects it.
 
-The tool, `get_plan_usage`, takes no arguments and returns a summary line and the reading as JSON:
+The tool, `get_plan_usage`, takes no arguments and returns a summary line and the reading as JSON. While the
+usage guard holds, the summary line ends with what it holds at and when work can resume, such as
+`| usage guard holding: weekly 96% (cap 95%). Wrap up at a safe point; work can resume in 1d 2h (Wed 16:00).`:
 
 ```
 Claude plan usage (Max 5x, reading from 2m ago): session 30%, resets in 1h 50m (14:30), safe at this rate | weekly 80%, resets in 4d 3h (Wed 16:00), 39 pts ahead of an even pace, at its average pace so far 100% is reached in 17h 10m (Sun 05:49) | Fable weekly 0%, resets in 4d 3h (Wed 16:00), 41 pts under an even pace | burn 1.2k output tokens/min (fast).
@@ -59,7 +61,9 @@ the week has gone is 39 points ahead of it.
 For unattended runs, allow the tool so that it never stops at a permission prompt: add
 `"mcp__claude-usage__get_plan_usage"` to `permissions.allow` in your settings. Installing a monitor
 update ends the server. A session starts it again the next time it uses the tool; if one does not,
-reconnect it with `/mcp`, or start a new session.
+reconnect it with `/mcp`, or start a new session. Setup says when it ended one: on its last page, or,
+after an update from the app, in a notification from the monitor once it is back. For the moments Setup is swapping the files there is
+no exe to start, so a hook or a tool call fails at once. Claude Code carries on, and the next one works.
 
 ## Hooks
 
@@ -69,10 +73,11 @@ it from PowerShell, run `notepad "$env:USERPROFILE\.claude\settings.json"`. Each
 the exe directly with its arguments (the `args` form), so no shell is involved and the spaces in the
 path need no quoting.
 
-The `args` form needs **Claude Code 2.1.139 or newer** (check with `claude --version`, update with
-`claude update`). An older build ignores `args` and starts the bare exe, which opens the dashboard on
-every hook call. The VS Code extension and the `claude` in your terminal can be different versions,
-and both read this file, so check both.
+These entries need **Claude Code 2.1.287 or newer** (check with `claude --version`, update with
+`claude update`). A build older than 2.1.139 ignores `args` and starts the bare exe, which opens the
+dashboard on every hook call. One older than 2.1.287 wakes Claude over and over when the Stop entry's
+program is missing, as after the app is deleted by hand. The VS Code extension and the `claude` in your
+terminal can be different versions, and both read this file, so check both.
 
 JSON can't look up your folder, so each `command` needs the exe's full path. This PowerShell line
 prints it, with the forward slashes JSON wants:
@@ -81,7 +86,7 @@ prints it, with the forward slashes JSON wants:
 "$env:LOCALAPPDATA\ClaudeUsageMonitor\ClaudeUsageMonitor.exe".Replace('\','/')
 ```
 
-Paste what it prints over `PASTE-THE-PATH-HERE` in each entry (four places). A placeholder left in
+Paste what it prints over `PASTE-THE-PATH-HERE` in each entry (six places). A placeholder left in
 place makes the hook fail with an error you can see, rather than run the wrong thing.
 
 ```json
@@ -124,6 +129,32 @@ place makes the hook fail with an error you can see, rather than run the wrong t
         ]
       }
     ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PASTE-THE-PATH-HERE",
+            "args": ["--hook"],
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PASTE-THE-PATH-HERE",
+            "args": ["--watch"],
+            "timeout": 86400,
+            "async": true,
+            "asyncRewake": true
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Agent|Workflow",
@@ -142,7 +173,7 @@ place makes the hook fail with an error you can see, rather than run the wrong t
 ```
 
 Use any of them on its own. If you already have a `"hooks"` block, add these events to it. The usage
-guard's **Install** button adds the first three for you (below), exactly as shown.
+guard's **Install** button adds the first five for you (below), exactly as shown.
 
 **`--hook`** adds the summary line to Claude's context.
 - With `--always` (the SessionStart entry), it does so every time. SessionStart also runs after
@@ -153,8 +184,24 @@ guard's **Install** button adds the first three for you (below), exactly as show
 - On PostToolUse (after every tool call) it adds nothing unless the usage guard holds or a limit
   passes the threshold. It starts the exe each time, which adds about a quarter of a second per tool
   call.
+- On SubagentStart (when an agent starts) it adds nothing unless the usage guard holds. Then it tells
+  the agent before its first prompt.
 - It always exits 0, so it can never block a prompt or a tool.
-- On UserPromptSubmit and PostToolUse it only reads the file and never calls the network.
+- On UserPromptSubmit, PostToolUse and SubagentStart it only reads the file and never calls the network.
+
+**`--watch`** is the Stop entry, for the usage guard. Claude Code runs it in the background each time
+a conversation finishes its turn.
+- It ends at once unless work that spends the plan runs in the background: a workflow, agents,
+  teammates or a cloud session. A shell or a monitor does not count.
+- Otherwise it looks at the reading every 30 seconds while the conversation waits. When the guard
+  starts holding, it wakes the conversation with the notice.
+- It ends when the conversation's next turn ends (the next Stop takes over), when the guard is off,
+  when Claude Code closes, or after 24 hours.
+- The usage guard card lists the conversations it watches, under WATCHING, with the work each waits for.
+- It exits with code 2 only to wake the conversation: that is how a Claude Code `asyncRewake` hook
+  wakes Claude. It blocks nothing, as the turn has already ended.
+- Keep `async` and `asyncRewake` in the entry. Without them, Claude Code waits for it at the end of
+  every turn.
 
 **`--gate`** runs before every `Agent` or `Workflow` call.
 - When the session or weekly limit is at or past its cap (defaults 95 and 90), the call is denied,
@@ -180,24 +227,29 @@ model-limited week such as Fable (off by default). Then press **Install** on the
   reading shows the cap reached. The app fetches every 15 minutes by default (Settings → Data &
   plan), so the notice can come that much later. It is told which limits are over their caps, that
   nothing is blocked, to wrap up at a safe point, and when work can resume. Idle sessions are not
-  disturbed.
-- Each subagent hears it once too, at its own next tool call. That includes the agents of a workflow.
-  Only the main conversation is offered the wait command.
-- The guard's hooks run only when a session gets a prompt, makes a tool call or starts. Nothing
-  reaches a session in between:
-  - A conversation that waits for a workflow or a background agent is idle. Nothing tells it while
-    it waits. It hears the notice only at its next prompt or tool call.
+  disturbed, unless they wait for background work (below).
+- Each agent hears it once too: before its first prompt if it starts during the hold, or else at its
+  own next tool call. That includes the agents of a workflow.
+  Only the main conversation is offered the wait command, and agents are told so: they finish the
+  step they are on and hand back what they have.
+- The guard's hooks run when a session starts, gets a prompt, makes a tool call, starts an agent or
+  finishes its turn. In between:
+  - A conversation that waits for a workflow or a background agent is idle, so its own hooks don't
+    run. The Stop entry (`--watch`) watches for it, and wakes it with the notice when the guard
+    starts holding. An idle conversation with nothing running in the background is not woken.
   - An agent in the middle of a long model call is not reached until that call ends. It hears the
     notice after its next tool call. If its last step is its answer, it never does.
-  - "Told" means the notice was handed over, not that it was read. A workflow agent handed it on the
-    call that returns its result never reads it. The card counts a session as told when the notice
-    reached its main conversation or any of its agents.
+  - "Told" means the notice was handed over, not that it was read. The call that returns an agent's
+    result (`StructuredOutput`) gets no notice, as nothing reads what follows it, and does not count
+    the agent as told. The card lists each session told with who heard it: its main conversation,
+    its agents, or both. It counts conversations and agents apart. A conversation whose agents
+    heard it, while it has not, shows under NOT TOLD. It hears at its own next prompt or tool call.
 - The notice goes into Claude's context. Claude Code does not show it in the chat.
 - The guard pauses nothing. A workflow or a background agent carries on until it wraps up, or until
   you stop it.
 - Each session hears it once per holding episode. A new window over a cap is a new episode, and so
-  is a changed cap. Switching the guard off and on again in the same window, with the same caps, is
-  not. A session that starts, resumes or is compacted while the guard holds hears it again.
+  is a changed cap, and so is switching the guard off and on again: every session hears it again. A
+  session that starts, resumes or is compacted while the guard holds hears it again too.
 - The floating widget shows the guard holding, with the time left until work can resume (in Gates,
   while the numbers are live). The taskbar strip shows only a hold mark; the hover card and the tray
   icon's tooltip give the time.
@@ -239,23 +291,27 @@ PowerShell does not wait for a windowed program unless its output goes through a
   With no reading at all, it keeps waiting.
 - Updating the app ends the waits that are running, since they are the app's own
   program. Their sessions wake without the "the wait is over" line, so Claude should check the plan
-  usage, and run `--wait` again if the guard still holds.
+  usage, and run `--wait` again if the guard still holds. It ends the Stop entry's watches too: they
+  wake nobody, and a conversation is watched again from the end of its next turn.
 
 **What Install does:**
-- It checks Claude Code first: the `claude` command must be on the PATH, at 2.1.139 or newer. It
-  looks on the PATH as Windows holds it now, so a folder added to the PATH while the monitor runs
-  is found. Anthropic's Windows installer doesn't add its folder itself: see
-  [Verify your PATH](https://code.claude.com/docs/en/troubleshoot-install#verify-your-path). With
+- It checks Claude Code first: it needs a `claude` command at 2.1.287 or newer. It looks on the
+  PATH, then on the PATH as Windows holds it now, so a folder added to the PATH while the monitor
+  runs is found. Last it looks in `%USERPROFILE%\.local\bin`, where Anthropic's Windows installer
+  puts it without adding that folder to the PATH: see
+  [Verify your PATH](https://code.claude.com/docs/en/troubleshoot-install#verify-your-path). Any
+  command the card shows you then starts that copy by its full path. With
   an older one it changes nothing, names the `claude` it found, and tells you to run
   `claude update`.
 - It backs up your Claude Code user settings (`%USERPROFILE%\.claude\settings.json`, or the folder in
-  `CLAUDE_CONFIG_DIR`) to `settings.json.cum-backup-<date>-<time>` beside the file, and keeps the five
-  newest of those backups. The file is saved again in a standard layout (a two-space indent); every
+  `CLAUDE_CONFIG_DIR`) to `settings.json.usage-monitor-backup-<date>-<time>` beside the file, and keeps the five
+  newest of those backups. Copies from before v2.3 have a shorter name and count toward the five too. The file is saved again in a standard layout (a two-space indent); every
   value in it stays as it was.
-- It adds the SessionStart, UserPromptSubmit and PostToolUse entries shown under [Hooks](#hooks). An
-  entry of this app's already in one of those events, such as a `--hook` you added by hand for v2.1 or
-  one that still points at an older install folder, is replaced, and the backup keeps it. Your other
-  hooks stay as they are, including a `--gate` you added yourself.
+- It adds the SessionStart, UserPromptSubmit, PostToolUse, SubagentStart and Stop entries shown under
+  [Hooks](#hooks). An entry of this app's already in one of those events, such as a `--hook` you added
+  by hand for v2.1 or one that still points at an older install folder, is replaced, and the backup
+  keeps it. Your other hooks stay as they are, including a `--gate` you added yourself. A setup from
+  before v2.3 has three of the five: the card says partly installed until you press Install again.
 - It registers the `get_plan_usage` MCP tool with `claude mcp add`. A `claude-usage` tool that starts
   another program is replaced, and the card says what it started. When `claude` is an npm install and
   the app's path has a character that cmd.exe would misread, the card gives you the command to run
@@ -266,15 +322,17 @@ PowerShell does not wait for a windowed program unless its output goes through a
 - Sessions that are already open pick up the hooks by themselves: Claude Code watches its settings
   file. The `get_plan_usage` tool is there in the sessions that start after Install.
 
-**Remove** takes out this app's entries in those three events, including ones you added by hand or
+**Remove** takes out this app's entries in those five events, including ones you added by hand or
 that point at an older install folder (a `--gate` stays), and the MCP tool when it starts this app.
 When it removes a hook, it backs up the file first too. It needs no
-Claude Code; with no `claude` on the PATH, the card gives the command that removes the tool.
+Claude Code; with no `claude` found, the card gives the command that removes the tool.
 
-**Before you uninstall the app, press Remove.** The uninstaller does not edit Claude Code's settings,
-so the hooks and the MCP tool would stay behind, starting a program that is no longer there.
+**Uninstalling takes them out too.** The uninstaller does what Remove does, before the files go, and says
+what it could not take out. That is the uninstaller of 2.3 or newer: left in, the hooks and the MCP tool
+would go on starting a program that is no longer there. It leaves a `--gate` hook, and says so, and it
+leaves hooks that start another copy of the monitor still on this PC.
 
-The VS Code extension has its own Claude Code version, and needs 2.1.139 or newer too. The card checks
+The VS Code extension has its own Claude Code version, and needs 2.1.287 or newer too. The card checks
 only the `claude` command, so check the extension yourself: in VS Code, under Extensions. Setup works only
 in the installed app: a copy run from source, or a dev instance, never edits your Claude Code settings,
 so set those up by hand from this page.
@@ -350,6 +408,9 @@ These modes only read the reading. They keep these small files in the app data f
 - `hook-seen.lock`, an empty file that lets one hook at a time update `hook-seen.json`.
 - `waiting\<process ID>.json`, one per running `--wait`: its session ID, when it started and its
   folder. It is removed when the wait ends.
+- `watching\<session ID>.json`, one per conversation the Stop entry (`--watch`) watches: when it
+  started, and how many workflows, agents and the like ran in the background. It is removed when the
+  watch ends.
 - `wait-released`, the time the last `--wait` was let go, so the next one keeps the stagger.
 - `resume-now`, an empty file the app writes when Resume now is pressed; its date tells the running
   waits to end.

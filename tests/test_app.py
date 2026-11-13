@@ -3,7 +3,7 @@
 Most of it runs on fakes: a fake host with hand-fired timers, fake layered windows, a fake platform
 (monitors, taskbar, fullscreen) and a fake skin, so placement, wiring, shutdown order and the
 animation timers are checked without a desktop. Tests that create real windows, tray icons or
-processes are skipped unless CUM_UI_TESTS=1 (CI has no interactive desktop). Those park every
+processes are skipped unless USAGE_MONITOR_UI_TESTS=1 (CI has no interactive desktop). Those park every
 widget off-screen, tag the tray tooltip "(dev)", use a fake data service and never open the
 dashboard or touch the real settings, mutex or controller window.
 """
@@ -81,7 +81,7 @@ from usage_monitor.ui.widgets import (
 )
 
 UI = pytest.mark.skipif(
-    os.environ.get("CUM_UI_TESTS") != "1", reason="needs an interactive desktop: set CUM_UI_TESTS=1",
+    os.environ.get("USAGE_MONITOR_UI_TESTS") != "1", reason="needs an interactive desktop: set USAGE_MONITOR_UI_TESTS=1",
 )
 NOW = datetime(2026, 10, 21, 20, 12, tzinfo=timezone.utc)
 
@@ -92,8 +92,8 @@ NOW = datetime(2026, 10, 21, 20, 12, tzinfo=timezone.utc)
 def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Nothing here may reach the real app data, the real mutex or the installed copy's window."""
     app_dir = tmp_path / "app"
-    monkeypatch.setenv("CUM_APPDATA_DIR", str(app_dir))
-    monkeypatch.setenv("CUM_DEV_INSTANCE", "1")   # the dev controller class: never the installed copy's window
+    monkeypatch.setenv("USAGE_MONITOR_APPDATA_DIR", str(app_dir))
+    monkeypatch.setenv("USAGE_MONITOR_DEV_INSTANCE", "1")   # the dev controller class: never the installed copy's window
     monkeypatch.setenv("APPDATA", str(tmp_path / "roaming"))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
@@ -400,6 +400,8 @@ class Rig:
     (["--dashboard", "--port", "5000"], "dashboard"),
     (["--dashboard"], "dashboard"),
     (["--print-version", "v.txt"], "print_version"),
+    (["--remove-setup", "left.txt"], "remove_setup"),
+    (["--remove-setup"], "remove_setup"),
     (["--print-version"], "print_version"),
     (["--dump-frames", "out"], "dump_frames"),
     (["--smoke-test", "45", "report.json"], "smoke_test"),
@@ -444,6 +446,55 @@ def test_parse_args_mode_precedence():
     assert entry.parse_args(["--dump-frames", "d", "--print-version", "v"]).kind == "print_version"
     assert entry.parse_args(["--smoke-test", "5", "r", "--dashboard", "--port", "9"]).kind == "dashboard"
     assert entry.parse_args(["--smoke-test", "5", "r", "--dump-frames", "d"]).kind == "dump_frames"
+
+
+def run_remove_setup(monkeypatch, tmp_path, result):
+    """--remove-setup with setup.remove() answering ``result``. Returns (exit code, the report file)."""
+    from usage_monitor.agent import setup
+
+    report = tmp_path / "left.txt"
+    asked = {}
+    monkeypatch.setattr(setup, "remove", lambda **options: asked.update(options) or result)
+    code = entry.main(["--remove-setup", str(report)])
+    assert asked == {"only_here": True}                 # another copy on this PC keeps its hooks
+    return code, report
+
+
+def test_remove_setup_hands_over_an_empty_report_when_all_of_it_went(monkeypatch, tmp_path):
+    """The uninstaller waits for the file, so it is written either way."""
+    code, report = run_remove_setup(monkeypatch, tmp_path, {"changed": ["Removed the SessionStart hook."], "warnings": [], "errors": []})
+    assert code == 0 and report.read_text(encoding="utf-8-sig") == ""
+
+
+def test_remove_setup_tells_the_uninstaller_what_is_left(monkeypatch, tmp_path):
+    """Non-ASCII in the file: a user name in a path. The byte order mark makes Inno Setup read it as UTF-8."""
+    code, report = run_remove_setup(monkeypatch, tmp_path, {"changed": ["Removed the SessionStart hook."],
+                                                            "warnings": ["The MCP tool was left alone."], "errors": [r"C:\Users\Çağla could not be written."]})
+    assert code == 1
+    assert report.read_bytes().startswith(b"\xef\xbb\xbf")
+    assert report.read_text(encoding="utf-8-sig").splitlines() == [r"C:\Users\Çağla could not be written.", "The MCP tool was left alone."]
+
+
+def test_remove_setup_says_nothing_to_someone_who_never_set_it_up(monkeypatch, tmp_path):
+    """No hooks, and no Claude Code to ask about the tool: there is nothing to tell them about something they never had."""
+    from usage_monitor.agent import setup
+
+    code, report = run_remove_setup(monkeypatch, tmp_path, {"changed": [], "warnings": [setup.NO_CLAUDE_LEFT + " Remove it by hand."], "errors": []})
+    assert code == 0 and report.read_text(encoding="utf-8-sig") == ""
+
+
+def test_remove_setup_passes_on_a_warning_that_is_not_about_a_missing_claude(monkeypatch, tmp_path):
+    """No hooks, but a tool registered by hand that claude would not say anything about: that one is worth saying."""
+    code, report = run_remove_setup(monkeypatch, tmp_path, {"changed": [], "warnings": ["Could not tell whether the tool is registered."], "errors": []})
+    assert code == 1 and report.read_text(encoding="utf-8-sig") == "Could not tell whether the tool is registered."
+
+
+def test_remove_setup_with_nowhere_to_write_still_says_something_is_left(monkeypatch, tmp_path):
+    from usage_monitor.agent import setup
+
+    monkeypatch.setattr(setup, "remove", lambda **options: {"changed": [], "warnings": [], "errors": ["It could not be read."]})
+    assert entry.main(["--remove-setup"]) == 1
+    assert entry.main(["--remove-setup", str(tmp_path / "no" / "such" / "folder" / "left.txt")]) == 1
 
 
 def test_main_print_version_writes_the_bundled_version(tmp_path):
@@ -585,16 +636,16 @@ def test_the_mutex_names():
     assert mutex_name(True) == "Global\\ClaudeUsageMonitor-dev"
 
 
-@pytest.mark.parametrize("env, expected", [({}, False), ({"CUM_DEV_INSTANCE": "1"}, True),
-                                           ({"CUM_DEV_INSTANCE": "0"}, False), ({"CUM_DEV_INSTANCE": "true"}, False),
-                                           ({"CUM_DEV_INSTANCE": ""}, False)])
-def test_only_cum_dev_instance_1_is_a_dev_instance(env, expected):
+@pytest.mark.parametrize("env, expected", [({}, False), ({"USAGE_MONITOR_DEV_INSTANCE": "1"}, True),
+                                           ({"USAGE_MONITOR_DEV_INSTANCE": "0"}, False), ({"USAGE_MONITOR_DEV_INSTANCE": "true"}, False),
+                                           ({"USAGE_MONITOR_DEV_INSTANCE": ""}, False)])
+def test_only_usage_monitor_dev_instance_1_is_a_dev_instance(env, expected):
     assert is_dev_instance(env) is expected
 
 
 def test_a_dev_app_uses_the_dev_mutex_and_a_normal_one_does_not(monkeypatch):
-    assert MonitorApp()._mutex == "Global\\ClaudeUsageMonitor-dev"             # the fixture sets CUM_DEV_INSTANCE=1
-    monkeypatch.delenv("CUM_DEV_INSTANCE")
+    assert MonitorApp()._mutex == "Global\\ClaudeUsageMonitor-dev"             # the fixture sets USAGE_MONITOR_DEV_INSTANCE=1
+    monkeypatch.delenv("USAGE_MONITOR_DEV_INSTANCE")
     assert MonitorApp()._mutex == "Global\\ClaudeUsageMonitor"
     assert MonitorApp(dev=True)._mutex == "Global\\ClaudeUsageMonitor-dev"
     assert MonitorApp(mutex="Local\\custom")._mutex == "Local\\custom"
@@ -626,7 +677,7 @@ def test_the_smoke_test_is_always_a_dev_instance(monkeypatch, tmp_path):
 
 
 def test_the_second_holder_of_a_mutex_is_refused_until_the_first_lets_go():
-    name = f"Local\\CUM-test-{uuid.uuid4().hex}"
+    name = f"Local\\UsageMonitor-test-{uuid.uuid4().hex}"
     first, second = SingleInstance(name), SingleInstance(name)
     assert first.acquire() is True
     assert second.acquire() is False
@@ -637,7 +688,7 @@ def test_the_second_holder_of_a_mutex_is_refused_until_the_first_lets_go():
 
 
 def test_a_second_launch_signals_the_first_and_exits_without_starting(monkeypatch):
-    name = f"Local\\CUM-test-{uuid.uuid4().hex}"
+    name = f"Local\\UsageMonitor-test-{uuid.uuid4().hex}"
     holder = SingleInstance(name)
     assert holder.acquire()
     signalled: list[bool] = []
@@ -672,7 +723,7 @@ def start_until_the_ui(monkeypatch, settings_obj: Settings) -> MonitorApp:
     monkeypatch.setattr(app_mod, "UIHost", no_host)
     monkeypatch.setattr(app_mod.startup, "repair_if_enabled",
                         lambda: pytest.fail("a dev instance must not touch the Run entry"))
-    app = MonitorApp(settings=settings_obj, mutex=f"Local\\CUM-test-{uuid.uuid4().hex}")
+    app = MonitorApp(settings=settings_obj, mutex=f"Local\\UsageMonitor-test-{uuid.uuid4().hex}")
     with pytest.raises(StopAfterMigration):
         app.run()
     return app
@@ -714,7 +765,7 @@ def test_the_installed_build_repairs_its_startup_entry_and_a_dev_build_does_not(
     monkeypatch.setattr(app_mod, "UIHost", lambda: (_ for _ in ()).throw(StopAfterMigration()))
     for dev in (False, True):
         s = Settings(tmp_path / f"s{dev}.json", save_delay_s=0.0)
-        app = MonitorApp(dev=dev, settings=s, mutex=f"Local\\CUM-test-{uuid.uuid4().hex}")
+        app = MonitorApp(dev=dev, settings=s, mutex=f"Local\\UsageMonitor-test-{uuid.uuid4().hex}")
         with pytest.raises(StopAfterMigration):
             app.run()
         s.close()
@@ -755,7 +806,7 @@ def test_a_source_run_leaves_an_installed_copys_startup_entry_alone(monkeypatch,
     entry = RunEntry(monkeypatch, INSTALLED_ENTRY)
     monkeypatch.delattr(sys, "frozen", raising=False)
     s = Settings(tmp_path / "s.json", save_delay_s=0.0)
-    MonitorApp(dev=False, settings=s, mutex=f"Local\\CUM-test-{uuid.uuid4().hex}")._repair_startup()
+    MonitorApp(dev=False, settings=s, mutex=f"Local\\UsageMonitor-test-{uuid.uuid4().hex}")._repair_startup()
     s.close()
     assert (entry.reads, entry.writes, entry.deletes) == (0, [], 0)
     assert entry.value == INSTALLED_ENTRY
@@ -765,9 +816,9 @@ def test_the_frozen_build_repairs_a_moved_startup_entry_and_the_dev_build_never_
     entry = RunEntry(monkeypatch, INSTALLED_ENTRY)
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     s = Settings(tmp_path / "s.json", save_delay_s=0.0)
-    MonitorApp(dev=True, settings=s, mutex=f"Local\\CUM-test-{uuid.uuid4().hex}")._repair_startup()
+    MonitorApp(dev=True, settings=s, mutex=f"Local\\UsageMonitor-test-{uuid.uuid4().hex}")._repair_startup()
     assert (entry.reads, entry.writes) == (0, [])                        # dev: not even a look
-    MonitorApp(dev=False, settings=s, mutex=f"Local\\CUM-test-{uuid.uuid4().hex}")._repair_startup()
+    MonitorApp(dev=False, settings=s, mutex=f"Local\\UsageMonitor-test-{uuid.uuid4().hex}")._repair_startup()
     s.close()
     assert entry.writes == [app_mod.startup.command_line(frozen=True)]    # the installed build points it at itself
 
@@ -779,7 +830,7 @@ def test_a_registry_error_while_repairing_the_startup_entry_does_not_stop_the_ap
     monkeypatch.setattr(app_mod.startup, "repair_if_enabled", refuse)
     monkeypatch.setattr(app_mod, "UIHost", lambda: (_ for _ in ()).throw(StopAfterMigration()))
     s = Settings(tmp_path / "s.json", save_delay_s=0.0)
-    app = MonitorApp(dev=False, settings=s, mutex=f"Local\\CUM-test-{uuid.uuid4().hex}")
+    app = MonitorApp(dev=False, settings=s, mutex=f"Local\\UsageMonitor-test-{uuid.uuid4().hex}")
     with pytest.raises(StopAfterMigration):                                      # got past the repair to the UI
         app.run()
     s.close()
@@ -904,22 +955,64 @@ def test_a_strip_made_before_the_taskbar_existed_moves_onto_it():
     assert windows.windows[-1].visible
 
 
-def test_a_taskbar_that_refuses_the_strip_leaves_it_floating_until_a_live_one_turns_up():
-    host, plat, windows = FakeHost(), FakePlatform(), WindowFactory()
+def test_a_taskbar_that_is_gone_leaves_the_strip_floating_until_a_live_one_turns_up():
+    from usage_monitor.ui import widgets as widgets_mod
+
+    host, plat, windows, now = FakeHost(), FakePlatform(), WindowFactory(), [1000.0]
     dead = plat.info.hwnd
 
     def refusing(host_: Any, *, draggable: bool, topmost: bool = True, parent: int | None = None) -> FakeWindow:
         if parent == dead:  # Explorer died between the lookup and the window
-            raise OSError("CreateWindowExW('ClaudeUsageMonitor.Layered') failed: [WinError 1400] Invalid window handle.")
+            raise OSError(0, "CreateWindowExW('ClaudeUsageMonitor.Layered') failed: Invalid window handle.", None,
+                          win32.ERROR_INVALID_WINDOW_HANDLE)
         return windows(host_, draggable=draggable, topmost=topmost, parent=parent)
 
-    widget = TaskbarWidget(host, on_open=lambda: None, on_menu=lambda x, y: None, platform=plat, window_factory=refusing)
+    widget = TaskbarWidget(host, on_open=lambda: None, on_menu=lambda x, y: None, platform=plat, window_factory=refusing,
+                           clock=lambda: now[0])
     assert windows.windows[0].parent is None
     widget.render(context())
-    assert len(windows.windows) == 1 and windows.windows[0].visible   # the dead taskbar is not asked again
+    now[0] += widgets_mod.REFUSED_RETRY_S * 10
+    widget.render(context())
+    assert len(windows.windows) == 1 and windows.windows[0].visible   # the dead taskbar is never asked again
     plat.info = dataclasses.replace(plat.info, hwnd=dead + 1)           # Explorer is back
     widget.render(context())
     assert windows.windows[0].destroyed and windows.windows[-1].parent == dead + 1
+
+
+def test_a_live_taskbar_that_refuses_the_strip_is_asked_again_a_minute_later_not_at_every_re_place(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """A refusal other than ERROR_INVALID_WINDOW_HANDLE (here ERROR_ACCESS_DENIED) used to keep the strip floating until
+    the app restarted (#32). It is asked again REFUSED_RETRY_S later: a refusal again leaves the floating strip as it is,
+    and the warning is logged once, so a taskbar that always refuses costs one try a minute."""
+    from usage_monitor.ui import widgets as widgets_mod
+
+    host, plat, windows, now, tries, warnings = FakeHost(), FakePlatform(), WindowFactory(), [1000.0], [0], []
+    monkeypatch.setattr(widgets_mod.log, "warning", lambda message, *args, **kwargs: warnings.append(message))
+
+    def refusing_twice(host_: Any, *, draggable: bool, topmost: bool = True, parent: int | None = None) -> FakeWindow:
+        if parent is not None:
+            tries[0] += 1
+            if tries[0] <= 2:
+                raise OSError(0, "CreateWindowExW('ClaudeUsageMonitor.Layered') failed: Access is denied.", None,
+                              win32.ERROR_ACCESS_DENIED)
+        return windows(host_, draggable=draggable, topmost=topmost, parent=parent)
+
+    widget = TaskbarWidget(host, on_open=lambda: None, on_menu=lambda x, y: None, platform=plat,
+                           window_factory=refusing_twice, clock=lambda: now[0])
+    floating = windows.windows[0]
+    assert floating.parent is None and tries[0] == 1
+    for _ in range(5):                                                  # the re-places of the next minute do not ask
+        widget.render(context())
+        now[0] += widgets_mod.REFUSED_RETRY_S / 6
+    assert tries[0] == 1 and windows.windows == [floating] and floating.visible
+    now[0] += widgets_mod.REFUSED_RETRY_S / 6
+    widget.render(context())                                            # a minute on: asked again, refused again
+    assert tries[0] == 2 and windows.windows == [floating] and not floating.destroyed and floating.visible
+    now[0] += widgets_mod.REFUSED_RETRY_S
+    widget.render(context())                                            # and the next time it takes the child
+    assert tries[0] == 3 and floating.destroyed
+    assert windows.windows[-1].parent == plat.info.hwnd and windows.windows[-1].visible
+    assert len([message for message in warnings if "refused" in message]) == 1
 
 
 def test_a_top_taskbar_is_supported():
@@ -2616,6 +2709,61 @@ def publish(wired, state) -> list[tuple[str, str]]:
     return wired.tray.notices[before:]
 
 
+# ── What a silent update ended (installer.iss writes the note) ──
+
+def update_note() -> Path:
+    return app_mod.paths.app_data_dir() / app_mod.UPDATE_NOTE_FILE
+
+
+NOTE = ("Setup closed the monitor's tool in a Claude Code session.\r\nIf that session shows an error, type /mcp there or "
+        "restart it.")
+SAID = "Setup closed the monitor's tool in a Claude Code session. If that session shows an error, type /mcp there or restart it."
+
+
+def test_the_note_of_a_silent_update_is_said_once_and_then_deleted(wired):
+    """To replace the files, Setup ends the monitor's MCP tool in open Claude Code sessions and their waits on the usage
+    guard. After an update from the app nobody saw Setup, so the monitor says it once when it is back."""
+    note = update_note()
+    note.write_text(NOTE, encoding="ascii")
+    assert (app_mod.UPDATE_NOTE_TITLE, SAID) in publish(wired, usage_state(10))
+    assert not note.exists()
+    note.write_text("Not looked for again: only an update writes one, and it starts the monitor again.", encoding="ascii")
+    assert app_mod.UPDATE_NOTE_TITLE not in [title for title, _ in publish(wired, usage_state(11))]
+
+
+def test_an_empty_update_note_says_nothing_and_goes(wired):
+    note = update_note()
+    note.write_text("  \r\n", encoding="ascii")
+    assert app_mod.UPDATE_NOTE_TITLE not in [title for title, _ in publish(wired, usage_state(10))]
+    assert not note.exists()
+
+
+def test_an_update_note_waits_for_someone_to_see_it(wired, monkeypatch):
+    """Held back like the update toast (a locked session, a fullscreen app, quiet hours), and kept when the shell has no
+    icon to attach it to."""
+    note = update_note()
+    note.write_text(NOTE, encoding="ascii")
+    notify = wired.tray.notify
+    monkeypatch.setattr(wired.app, "_toast_held_back", lambda: True)
+    assert publish(wired, usage_state(10)) == [] and note.exists()
+    monkeypatch.setattr(wired.app, "_toast_held_back", lambda: False)
+    monkeypatch.setattr(wired.tray, "notify", lambda title, body: False)
+    assert publish(wired, usage_state(11)) == [] and note.exists()
+    monkeypatch.setattr(wired.tray, "notify", notify)        # not undo(): that would also drop the isolated app data folder
+    assert (app_mod.UPDATE_NOTE_TITLE, SAID) in publish(wired, usage_state(12)) and not note.exists()
+
+
+def test_switching_the_guard_on_records_when(wired):
+    """The readers start a new holding episode from it (#41). Switching the guard off leaves it as it was."""
+    from usage_monitor.agent import guard
+
+    wired.settings.set("guard_enabled", True)
+    assert wired.settings.get(guard.ON_KEY) == NOW.astimezone(timezone.utc).isoformat(timespec="seconds")
+    wired.settings.set(guard.ON_KEY, "before")
+    wired.settings.set("guard_enabled", False)
+    assert wired.settings.get(guard.ON_KEY) == "before"
+
+
 def test_the_app_checks_alerts_with_the_alert_engine_built_on_its_settings(wired):
     assert isinstance(wired.app._alerts, AlertEngine)
     wired.settings.set("alert_thresholds", [40])
@@ -3025,6 +3173,18 @@ def test_a_release_found_while_the_session_was_locked_is_announced_at_unlock(mon
     assert built.tray.notices == [TOAST]
 
 
+def test_an_update_note_held_back_while_locked_is_said_at_unlock(wired):
+    """An update from the app often finishes with nobody at the PC: the note waits, and the unlock itself is the cue."""
+    note = update_note()
+    note.write_text(NOTE, encoding="ascii")
+    wired.host.locked = True
+    wired.host.emit("session", True)
+    assert publish(wired, usage_state(10)) == [] and note.exists()
+    wired.host.locked = False
+    wired.host.emit("session", False)
+    assert wired.tray.notices[-1:] == [(app_mod.UPDATE_NOTE_TITLE, SAID)] and not note.exists()
+
+
 def test_a_failure_to_tell_whether_a_toast_would_be_seen_does_not_cost_it(monkeypatch, settings):
     built = build_app(monkeypatch, settings, update_check_fn=FakeChecker(None))
 
@@ -3249,6 +3409,8 @@ def test_describe_summarises_the_live_ui(wired):
     info = wired.app.describe()
     assert info["theme"] == ["nostromo", "amber"]
     assert info["floating"]["visible"] and info["taskbar"]["visible"]
+    assert info["taskbar"]["parent"] == wired.plat.info.hwnd and info["floating"]["parent"] is None   # the strip is a child (#29)
+    assert info["taskbar_hostable"] is True                                  # and this taskbar can hold it (#32)
     assert info["tray"] == {"added": True, "icon_px": 16}
     assert info["update_recheck"] is True                                    # the six-hourly update check is armed
     assert info["frames"]["rendered"]["floating"] >= 1 and info["frames"]["failed"] == 0
@@ -3463,6 +3625,47 @@ def test_the_smoke_windows_step_wants_the_update_recheck_armed(tmp_path):
         smoke._step_windows()
 
 
+def test_the_smoke_test_fails_when_the_strip_floats_over_a_taskbar_that_could_hold_it(tmp_path):
+    """The windows step checked only that the floating widget showed. A build whose strip never became a child of the
+    taskbar (#29) passed. Now it fails, unless no taskbar here can hold the strip (#32)."""
+    def stub(parent: int | None, hostable: bool) -> types.SimpleNamespace:
+        info = {"floating": {"visible": True, "parent": None}, "taskbar": {"visible": True, "parent": parent},
+                "taskbar_hostable": hostable, "tray": {"added": True}, "frames": {}, "update_recheck": True}
+        widget = types.SimpleNamespace(show_tooltip=lambda: None, hide_tooltip=lambda: None)
+        return types.SimpleNamespace(call_on_ui=lambda fn: fn(), describe=lambda: info, floating=widget, taskbar=widget,
+                                     tooltip=types.SimpleNamespace(visible=True))
+
+    smoke = SmokeTest(45, tmp_path / "r.json")
+    smoke._app = stub(65552, True)
+    assert smoke._step_windows()["strip_in_taskbar"] is True
+    smoke._app = stub(None, False)                                           # no taskbar here can hold it: floating is right
+    assert smoke._step_windows()["strip_in_taskbar"] is False
+    smoke._app = stub(None, True)
+    with pytest.raises(RuntimeError, match="strip floats over the taskbar instead of sitting in it"):
+        smoke._step_windows()
+    assert SmokeTest._strip_problem({"taskbar": None, "taskbar_hostable": True}) is None          # the strip is off
+    assert SmokeTest._strip_problem({"taskbar": {"parent": None}, "taskbar_hostable": True}) is not None
+
+
+def test_the_smoke_live_settings_step_checks_the_strip_it_turns_on(monkeypatch, tmp_path):
+    """The step turns the strip off and on again: the strip it brings back must be in the taskbar too (#32)."""
+    themes = {1: "night_city", 2: "gates"}
+
+    def run(parent: int | None) -> dict[str, Any]:
+        smoke, posted = SmokeTest(45, tmp_path / "r.json"), []
+        monkeypatch.setattr(smoke, "_get_json", lambda path: {"settings": {}, "theme": {}})
+        monkeypatch.setattr(smoke, "_post", lambda path, change: posted.append(change))
+        monkeypatch.setattr(smoke, "_ui", lambda: {
+            "theme": [themes.get(len(posted), "nostromo"), "x"], "taskbar_hostable": True, "frames": {"rendered": {}},
+            "taskbar": None if len(posted) == 4 else {"visible": True, "parent": parent}})   # the 4th change turns it off
+        return smoke._step_live_settings()
+
+    monkeypatch.setattr(app_mod.time, "sleep", lambda _s: None)
+    assert run(65552)["taskbar_on"]["taskbar"] is True
+    with pytest.raises(RuntimeError, match="strip floats over the taskbar instead of sitting in it"):
+        run(None)
+
+
 def test_the_smoke_shape_check_names_what_is_missing():
     check = SmokeTest._shape_problem
     assert check("/r", b'{"a": 1, "b": 2}', ("a", "b")) is None
@@ -3479,7 +3682,7 @@ def test_the_analytics_step_runs_after_the_dashboard_step_in_a_full_smoke_run():
     assert source.index('"dashboard"') < source.index('"analytics"')
 
 
-# ── Real windows (CUM_UI_TESTS=1) ─────────────────────────────────────────────
+# ── Real windows (USAGE_MONITOR_UI_TESTS=1) ─────────────────────────────────────────────
 
 OFF = -30000
 
@@ -3529,7 +3732,7 @@ class AppRunner:
         self.service = service or FakeService(self.events, sample_state("normal3", datetime.now(timezone.utc)))
         self.app = MonitorApp(
             settings=settings, service_factory=lambda s: self.service, update_check_fn=lambda repo, cur, cb, on_error=None: cb(None),
-            platform_api=OffscreenPlatform(), mutex=mutex or f"Local\\CUM-test-{uuid.uuid4().hex}",
+            platform_api=OffscreenPlatform(), mutex=mutex or f"Local\\UsageMonitor-test-{uuid.uuid4().hex}",
             animate_when_locked=True,
         )
         self.exit_code: list[int] = []
@@ -3630,7 +3833,7 @@ def test_a_steady_stream_of_data_leaks_no_window_objects(tmp_path):
 
 @UI
 def test_a_second_launch_opens_the_running_instances_dashboard(tmp_path, monkeypatch):
-    name = f"Local\\CUM-test-{uuid.uuid4().hex}"
+    name = f"Local\\UsageMonitor-test-{uuid.uuid4().hex}"
     settings = Settings(tmp_path / "settings.json", save_delay_s=0.0)
     runner = AppRunner(settings, mutex=name).start()
     opened: list[str] = []
@@ -3650,7 +3853,7 @@ def test_real_layered_windows_carry_the_widgets_frames(tmp_path):
     from usage_monitor.render.skins import get_skin
     from usage_monitor.ui.host import UIHost
 
-    host = UIHost(controller_class=f"CUM.Test.Controller.{uuid.uuid4().hex[:8]}")
+    host = UIHost(controller_class=f"UsageMonitor.Test.Controller.{uuid.uuid4().hex[:8]}")
     pieces: list[Any] = []
     try:
         fake_plat = OffscreenPlatform()
