@@ -6,6 +6,14 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ## [2.3.0] — 2026-11-12
 
+Claude Usage Monitor 2.3 makes updates safer, lets the usage guard reach every Claude Code conversation, and cleans up after an uninstall.
+
+### Highlights
+- **Safer updates:** Setup closes a running monitor itself, and starts it again when it's done. If Setup stops half way, it puts the old version back, so the app still starts. Claude Code starting the monitor in the middle of an update no longer breaks it.
+- **The usage guard reaches further:** a conversation that waits for its background work, such as a workflow, now hears the guard, and is woken when there is room again. An agent that starts while the guard holds hears it before its first prompt. The guard card lists the conversations it watches. This needs Claude Code 2.1.287 or newer: press **Install** on the card again.
+- **Uninstalling cleans up:** it takes the guard's hooks and the MCP tool out of Claude Code, and says what it could not remove.
+- **Clearer sign-in advice:** an expired sign-in now says to use Claude Code, not just open it. An open but idle Claude Code doesn't renew the sign-in.
+
 ### Added
 - The usage guard reaches a conversation that waits for its background work, such as the one that started a workflow. A new Stop hook watches while that work runs, and wakes the conversation with the notice when the guard starts holding. Before, nothing told it until its next prompt or tool call ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).
 - The usage guard card lists the conversations the Stop hook watches, with since when and the background work each waits for ([#41](https://github.com/Godimas101/claude-usage-monitor/issues/41)).
