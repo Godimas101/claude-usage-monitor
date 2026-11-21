@@ -90,6 +90,22 @@ def started(tmp_path: Path) -> Iterator[Callable[..., ApiServer]]:
         settings.close()
 
 
+def test_the_dev_server_can_show_any_catalog_language_or_the_pseudo_locale(started: Callable[..., ApiServer]) -> None:
+    """--lang (#89): a catalog language, offered or not, or the pseudo-locale, as USAGE_MONITOR_LANG would."""
+    for lang in ("fr", "pseudo"):
+        server = started(lang=lang)
+        status, _headers, body = get(server, server.url[server.url.index("/", len("http://")):])    # the page and its key
+        assert status == 200 and f'<html lang="{lang}"'.encode() in body
+    assert json.loads(get(started(), "/api/state")[2])["locale"]["language"] == "en"
+
+
+def test_the_dev_server_refuses_a_language_it_has_no_catalog_for(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="no such language"):
+        devserver.make_server("normal", 0, settings_dir=tmp_path / "dev", lang="de")
+    with pytest.raises(SystemExit):
+        devserver.main(["--lang", "de"], wait=lambda: None)
+
+
 def usage_db(path: Path, requests: int = 3) -> Path:
     """A real usage database with a few requests, standing in for a copy of the owner's usage.db."""
     with Store(path) as store:

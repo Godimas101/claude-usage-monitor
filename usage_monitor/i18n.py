@@ -21,6 +21,7 @@ import os
 import re
 import sys
 import threading
+import unicodedata
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,6 +40,19 @@ OFFERED: tuple[str, ...] = ("en",)
 # offered language anywhere in Windows' list instead (#86's other choice).
 WALK_DISPLAY_LANGUAGES = False
 SETTING_VALUES: tuple[str, ...] = ("system", *LANGUAGES)
+# The app's own pseudo-locale (#89): en.json with accented look-alikes, longer and bracketed, so English left over, a
+# missing glyph and a cut end all show. For dev instances, frame dumps and tests only; never offered, never a setting.
+PSEUDO = "pseudo"
+DEV_LANGUAGES: tuple[str, ...] = (*LANGUAGES, PSEUDO)       # what a dev instance's USAGE_MONITOR_LANG may show
+# The CLDR plural categories each catalog's plural entries use, exactly (the pseudo-locale takes English's).
+PLURAL_CATEGORIES: Mapping[str, tuple[str, ...]] = {
+    "en": ("one", "other"), "tr": ("one", "other"), "fr": ("one", "many", "other"), "es": ("one", "many", "other"),
+}
+# The commands the app shows. A catalog string never holds one: commands are placeholders, inserted as they are (#87).
+COMMANDS: tuple[str, ...] = ("claude", "claude update", "/login", "/mcp")
+# pywebview's own rule for a Save dialog's filter labels (webview/util.py, parse_file_type), which raises on anything
+# else: letters, digits and spaces, then " (*.ext)". Catalog keys ending in ".filter" are such labels.
+FILE_FILTER = re.compile(r"^([\w ]+)\((\*(?:\.(?:\w+|\*))*(?:;\*(?:\.(?:\w+|\*))*)*)\)$")
 # Each language named in itself, the way the Language setting lists them (never translated).
 NAMES: Mapping[str, str] = {"en": "English", "fr": "Français", "es": "Español", "tr": "Türkçe"}
 # The format each language uses when Windows' regional format is of another language (#86's default).
@@ -49,6 +63,10 @@ DEV_INSTANCE_ENV = "USAGE_MONITOR_DEV_INSTANCE"
 DEV_LANG_ENV = "USAGE_MONITOR_LANG"   # a dev instance only: shows a catalog language that is not offered yet
 
 _PLACEHOLDER = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+_PLACEHOLDER_SPLIT = re.compile(r"(\{[A-Za-z_][A-Za-z0-9_]*\})")
+_KEY = re.compile(r"[a-z0-9]+(?:[._][a-z0-9]+)+")
+_MARKUP = re.compile(r"<[A-Za-z/!?]|&(?:[A-Za-z][A-Za-z0-9]*|#[0-9]+|#[xX][0-9A-Fa-f]+);")
+_COMMAND = re.compile("|".join(r"(?<![\w/])" + re.escape(command) + r"(?![\w])" for command in COMMANDS))
 _TAG = re.compile(r"^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$")
 
 
@@ -82,9 +100,10 @@ def resolve_system(preferred: Sequence[str], offered: Sequence[str] | None = Non
 
 def resolve(setting: Any, preferred: Sequence[str], offered: Sequence[str] | None = None, *,
             dev_override: str | None = None, walk: bool | None = None) -> str:
-    """The app's language. A dev instance's override wins (any catalog language, offered or not); then an explicit
-    setting, if offered; anything else (``system``, an unknown value, a language not offered) follows Windows."""
-    if dev_override in LANGUAGES:
+    """The app's language. A dev instance's override wins (any catalog language, offered or not, or the pseudo-locale);
+    then an explicit setting, if offered; anything else (``system``, an unknown value, a language not offered) follows
+    Windows."""
+    if dev_override in DEV_LANGUAGES:
         return str(dev_override)
     offered = OFFERED if offered is None else offered
     if isinstance(setting, str) and setting in offered:
@@ -106,8 +125,8 @@ def format_tag(language: str, regional: str | None) -> str:
 def clock_hours(language: str, short_time: str | None) -> int:
     """12 or 24. English keeps today's 12-hour clock (#86's default); French, Spanish and Turkish follow Windows' own
     short-time pattern (``H`` is a 24-hour hour, ``h`` a 12-hour one), so the strip matches the taskbar clock beside
-    it, and fall back to their own 24-hour clock."""
-    if language == DEFAULT:
+    it, and fall back to their own 24-hour clock. The pseudo-locale keeps English's until L6 (#91) gives it one."""
+    if language in (DEFAULT, PSEUDO):
         return 12
     if short_time:
         pattern = re.sub(r"'[^']*'", "", short_time)            # quoted literal text is not a field
@@ -481,9 +500,35 @@ class Catalog:
         return dict(self._own)
 
 
+_PSEUDO_LETTERS = str.maketrans({
+    "a": "á", "c": "ç", "e": "é", "g": "ğ", "i": "ı", "n": "ñ", "o": "ö", "s": "ş", "u": "ü", "y": "ý",
+    "A": "Á", "C": "Ç", "E": "É", "G": "Ğ", "I": "İ", "N": "Ñ", "O": "Ö", "S": "Ş", "U": "Ü", "Y": "Ý",
+})
+_PSEUDO_PAD = "ıİğşéñ"
+
+
+def pseudo_text(text: str) -> str:
+    """``text`` in the pseudo-locale (#89): accented look-alikes (the Turkish İ ı ğ ş among them), about 40% longer,
+    and bracketed, so English left over, a missing glyph and a cut end all show. Placeholders stay as written."""
+    parts = _PLACEHOLDER_SPLIT.split(text)
+    letters = sum(len(part) for part in parts[::2])
+    pad = "".join(_PSEUDO_PAD[i % len(_PSEUDO_PAD)] for i in range(math.ceil(letters * 0.4)))
+    body = "".join(part if i % 2 else part.translate(_PSEUDO_LETTERS) for i, part in enumerate(parts))
+    return "[" + body + (" " + pad if pad else "") + "]"
+
+
+def pseudo_catalog(english: Mapping[str, Any]) -> dict[str, Any]:
+    """en.json in the pseudo-locale: every string, and every plural form, through ``pseudo_text``."""
+    return {key: ({form: pseudo_text(str(text)) for form, text in value.items()} if isinstance(value, dict)
+                  else pseudo_text(str(value)))
+            for key, value in english.items()}
+
+
 def load_catalog(language: str, directory: Path = CATALOG_DIR) -> Catalog:
-    """The catalog for ``language`` (any catalog language), English behind it."""
+    """The catalog for ``language`` (any catalog language, or the pseudo-locale), English behind it."""
     english = _read_catalog(directory / f"{DEFAULT}.json")
+    if language == PSEUDO:
+        return Catalog(PSEUDO, pseudo_catalog(english), english)
     own = english if language == DEFAULT else _read_catalog(directory / f"{language}.json")
     return Catalog(language if language in LANGUAGES else DEFAULT, own, english)
 
@@ -501,3 +546,91 @@ def page_script(language: str, directory: Path = CATALOG_DIR) -> str:
     body = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     # "</" can never end the script early: the JSON's own slashes are escaped where they could.
     return "window.MonitorI18n = " + body.replace("</", "<\\/") + ";\n"
+
+
+# ── The catalog check (#89) ───────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class CatalogReport:
+    """What the check found in one catalog: ``errors`` always fail it; ``missing`` (keys en.json has and it lacks)
+    fails only a language that is offered, and is a to-do list for one that is not."""
+
+    language: str
+    errors: tuple[str, ...]
+    missing: tuple[str, ...]
+
+    def failed(self, offered: Sequence[str] | None = None) -> bool:
+        offered = OFFERED if offered is None else offered
+        return bool(self.errors) or (self.language in offered and bool(self.missing))
+
+
+def _text_errors(key: str, text: Any) -> list[str]:
+    if not isinstance(text, str):
+        return [f"{key}: not text"]
+    errors = []
+    if unicodedata.normalize("NFC", text) != text:
+        errors.append(f"{key}: not NFC (the skins draw one character at a time)")
+    if _MARKUP.search(text):
+        errors.append(f"{key}: holds a tag or an entity (strings are plain text)")
+    if _COMMAND.search(text):
+        errors.append(f"{key}: holds a command (commands are placeholders)")
+    if any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) for name in re.findall(r"\{([^}]*)\}", text)):
+        errors.append(f"{key}: a placeholder that is not a plain {{name}}")
+    if key.endswith(".filter") and not FILE_FILTER.match(text):
+        errors.append(f"{key}: not a Save-dialog filter pywebview takes (letters, digits, spaces, then (*.ext))")
+    return errors
+
+
+def _forms(value: Any) -> list[Any]:
+    return list(value.values()) if isinstance(value, dict) else [value]
+
+
+def _placeholders(value: Any) -> set[str]:
+    return {name for form in _forms(value) if isinstance(form, str) for name in _PLACEHOLDER.findall(form)}
+
+
+def check_catalog(language: str, directory: Path = CATALOG_DIR) -> CatalogReport:
+    """The catalog check (#89) for one catalog language: no key en.json lacks; keys are dotted names; strings are plain
+    NFC text with plain {name} placeholders, no command and the same placeholders as English; plural entries use
+    exactly the language's CLDR categories; Save-dialog filter labels pass pywebview's rule. The keys it lacks are
+    listed apart (``CatalogReport.missing``)."""
+    english = _read_catalog(directory / f"{DEFAULT}.json")
+    own = english if language == DEFAULT else _read_catalog(directory / f"{language}.json")
+    categories = set(PLURAL_CATEGORIES.get(language, PLURAL_CATEGORIES[DEFAULT]))
+    errors: list[str] = [f"{key}: not in en.json" for key in sorted(set(own) - set(english))]
+    for key in sorted(own):
+        value = own[key]
+        if not _KEY.fullmatch(key):
+            errors.append(f"{key}: not a dotted name")
+        if isinstance(value, dict):
+            if set(value) != categories:
+                errors.append(f"{key}: plural forms {sorted(value)}, not {sorted(categories)}")
+        for form in _forms(value):
+            errors.extend(_text_errors(key, form))
+        if key in english and language != DEFAULT:
+            if isinstance(value, dict) != isinstance(english[key], dict):
+                errors.append(f"{key}: plural in one catalog and not in the other")
+            elif _placeholders(value) != _placeholders(english[key]):
+                errors.append(f"{key}: placeholders {sorted(_placeholders(value))}, English has "
+                              f"{sorted(_placeholders(english[key]))}")
+    missing = tuple(key for key in sorted(english) if key not in own)
+    return CatalogReport(language=language, errors=tuple(dict.fromkeys(errors)), missing=missing)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """``python -m usage_monitor.i18n``: the catalog check for every catalog language. Exit 1 when one fails."""
+    failed = False
+    for language in LANGUAGES:
+        report = check_catalog(language)
+        state = "offered" if language in OFFERED else "not offered"
+        print(f"{language} ({state}): {len(report.errors)} errors, {len(report.missing)} keys missing")
+        for error in report.errors:
+            print(f"  error: {error}")
+        if report.missing and language not in OFFERED:
+            print(f"  to do: {', '.join(report.missing)}")
+        failed = failed or report.failed()
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":  # pragma: no cover - python -m usage_monitor.i18n
+    raise SystemExit(main())

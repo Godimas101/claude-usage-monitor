@@ -52,7 +52,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from usage_monitor import paths, themes
+from usage_monitor import i18n, paths, themes
 from usage_monitor.agent import guard as agent_guard
 from usage_monitor.agent import sessions as agent_sessions
 from usage_monitor.agent import setup as agent_setup
@@ -615,7 +615,7 @@ def theme_settings(spec: str) -> dict[str, str]:
 
 
 def make_server(scenario: str, port: int, settings_dir: Path | None = None, *, db: Path | str | None = None,
-                theme: str | None = None, warm: bool = False,
+                theme: str | None = None, lang: str | None = None, warm: bool = False,
                 clock: Callable[[], datetime] | None = None) -> tuple[ApiServer, Settings]:
     """A configured ApiServer for ``scenario``. Not started; the caller runs start()/stop().
 
@@ -624,7 +624,11 @@ def make_server(scenario: str, port: int, settings_dir: Path | None = None, *, d
     "ID" or "ID/VARIANT". ValueError for a theme that does not exist. ``clock`` returns the current time
     as an aware datetime; it dates the fake state, the invented year and every report, so a test can pin
     them all to one instant (the default is the real clock, rounded down to the minute for the fake state).
+    ``lang`` shows a catalog language, offered or not, or the pseudo-locale, as a dev instance's USAGE_MONITOR_LANG
+    does (#89); ValueError for anything else. Without it the process's own environment decides.
     """
+    if lang is not None and lang not in i18n.DEV_LANGUAGES:
+        raise ValueError(f"no such language: {lang!r} (one of {', '.join(i18n.DEV_LANGUAGES)})")
     folder = settings_dir or Path(os.environ.get("USAGE_MONITOR_APPDATA_DIR") or tempfile.mkdtemp(prefix="usage-monitor-dev-"))
     settings = Settings(folder / "devserver-settings.json", save_delay_s=0.2)
     now = clock or _quantised_now
@@ -676,6 +680,9 @@ def make_server(scenario: str, port: int, settings_dir: Path | None = None, *, d
         wall_clock=clock,
         guard_dir=guard_folder,
         setup_cb=dev_setup(folder),
+        locale_provider=None if lang is None else i18n.LocaleSource(
+            lambda: settings.get("language", "system"),
+            env={**os.environ, i18n.DEV_INSTANCE_ENV: "1", i18n.DEV_LANG_ENV: lang}),
     )
     try:
         if theme:
@@ -700,16 +707,18 @@ def main(argv: list[str] | None = None, *, wait: Callable[[], Any] | None = None
                              "(default: a synthetic history in memory)")
     parser.add_argument("--theme", metavar="ID[/VARIANT]",
                         help="theme to start in, e.g. night_city/edgerun or gates/blue-light")
+    parser.add_argument("--lang", choices=i18n.DEV_LANGUAGES,
+                        help="show this language, offered or not, or the pseudo-locale (#89)")
     args = parser.parse_args(argv)
     if args.db is not None and not args.db.is_file():
         parser.error(f"--db: no such file: {args.db}")
     try:
-        server, settings = make_server(args.scenario, args.port, db=args.db, theme=args.theme, warm=True)
+        server, settings = make_server(args.scenario, args.port, db=args.db, theme=args.theme, lang=args.lang, warm=True)
     except ValueError as exc:
         parser.error(f"--theme: {exc}")
     try:
         server.start()
-        print(f"devserver scenario={args.scenario} url={server.url} "
+        print(f"devserver scenario={args.scenario}{' lang=' + args.lang if args.lang else ''} url={server.url} "
               f"data={args.db if args.db is not None else 'synthetic'}", flush=True)
         (wait or threading.Event().wait)()
     except KeyboardInterrupt:

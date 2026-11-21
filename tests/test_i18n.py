@@ -233,6 +233,94 @@ def test_the_shipped_catalogs_are_plain_text_and_english_holds_every_key() -> No
                 assert all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) for name in re.findall(r"\{([^}]*)\}", text))
 
 
+# ── The pseudo-locale (#89) ───────────────────────────────────────────────────
+
+def test_the_pseudo_locale_shows_left_over_english_missing_glyphs_and_cut_ends() -> None:
+    assert i18n.pseudo_text("Resume {n} of {total} sessions") == "[Réşümé {n} öf {total} şéşşıöñş ıİğşéñıİ]"
+    text = i18n.pseudo_text("The dashboard needs JavaScript.")
+    assert text.startswith("[") and text.endswith("]")                     # a cut end shows
+    assert len(text) >= 1.4 * len("The dashboard needs JavaScript.")      # about 40% longer
+    assert set("İığşéñ") <= set(text)                                     # the letters some faces lack
+    assert unicodedata.normalize("NFC", text) == text
+    assert i18n.pseudo_text("") == "[]"
+
+
+def test_the_pseudo_catalog_is_made_from_english_with_its_plural_forms(tmp_path: Path) -> None:
+    root = write_catalogs(tmp_path / "i18n", en={"k": "Key {x}", "p": {"one": "{count} item", "other": "{count} items"}})
+    catalog = i18n.load_catalog(i18n.PSEUDO, root)
+    assert catalog.language == "pseudo" and catalog.lookup("k") == i18n.Found(i18n.pseudo_text("Key {x}"), "pseudo")
+    assert catalog.plural("p", 2) == "[2 ıtémş ıİğ]"                     # the placeholder filled after the change
+    assert catalog.plural("p", 1).language == "pseudo"
+    payload = json.loads(i18n.page_script(i18n.PSEUDO, root)[len("window.MonitorI18n = "):-2].replace("<\\/", "</"))
+    assert payload["language"] == "pseudo" and payload["strings"] == i18n.pseudo_catalog(payload["fallback"])
+
+
+def test_only_a_dev_instance_can_show_the_pseudo_locale() -> None:
+    assert i18n.PSEUDO not in i18n.SETTING_VALUES and i18n.PSEUDO not in i18n.OFFERED
+    assert i18n.resolve("pseudo", ["en-US"], ALL) == "en"                    # never a setting
+    dev = {i18n.DEV_INSTANCE_ENV: "1", i18n.DEV_LANG_ENV: "pseudo"}
+    locale = i18n.build_locale("system", FakeWindows(["fr-FR"], "fr-FR", "HH:mm"), env=dev, offered=ALL)
+    assert (locale.language, locale.format, locale.clock, locale.setting) == ("pseudo", "en-US", 12, "system")
+    assert i18n.build_locale("system", FakeWindows(["en-US"]), env={i18n.DEV_LANG_ENV: "pseudo"}).language == "en"
+
+
+# ── The catalog check (#89) ───────────────────────────────────────────────────
+
+def test_the_shipped_catalogs_pass_the_check() -> None:
+    english = set(json.loads((i18n.CATALOG_DIR / "en.json").read_text(encoding="utf-8"))) - {"_comment"}
+    for language in i18n.LANGUAGES:
+        report = i18n.check_catalog(language)
+        assert report.errors == () and not report.failed(), (language, report.errors)
+        assert set(report.missing) <= english
+    assert i18n.check_catalog("en").missing == ()
+
+
+def test_the_check_finds_each_kind_of_fault(tmp_path: Path) -> None:
+    root = write_catalogs(
+        tmp_path / "i18n",
+        en={"a.text": "Hello {name}", "a.count": {"one": "{count} item", "other": "{count} items"},
+            "a.gone": "Gone", "export.csv.filter": "CSV file (*.csv)"},
+        fr={"a.text": "Bonjour {nom}", "a.count": {"one": "{count} élément", "other": "{count} éléments"},
+            "b.extra": "x", "export.csv.filter": "Fichier d’export CSV (*.csv)", "a.gone": "Parti <b>"},
+        es={"a.text": "Hola {name}", "a.count": {"one": "{count} elemento", "many": "{count} de elementos",
+                                                  "other": "{count} elementos"},
+            "a.gone": "Ejecute claude update", "export.csv.filter": "Archivo CSV (*.csv)"},
+        tr={"a.text": "Merhaba {name}", "a.gone": "Kafé", "export.csv.filter": "CSV dosyası (*.csv)"},
+    )
+    fr = i18n.check_catalog("fr", root)
+    assert "b.extra: not in en.json" in fr.errors
+    assert any(e.startswith("a.text: placeholders ['nom']") for e in fr.errors)
+    assert any(e.startswith("a.count: plural forms ['one', 'other'], not ['many', 'one', 'other']") for e in fr.errors)
+    assert any(e.startswith("export.csv.filter: not a Save-dialog filter") for e in fr.errors)
+    assert any(e.startswith("a.gone: holds a tag") for e in fr.errors)
+    es = i18n.check_catalog("es", root)
+    assert es.errors == ("a.gone: holds a command (commands are placeholders)",)
+    tr = i18n.check_catalog("tr", root)
+    assert tr.errors == ("a.gone: not NFC (the skins draw one character at a time)",) and tr.missing == ("a.count",)
+    assert tr.failed()                                                    # an error fails it, offered or not
+    clean = i18n.CatalogReport("tr", errors=(), missing=tr.missing)
+    assert not clean.failed() and clean.failed(offered=("en", "tr"))      # a missing key fails only an offered one
+
+
+def test_the_filter_rule_is_pywebviews_own() -> None:
+    """The check holds Save-dialog labels to pywebview's rule; this holds the rule to pywebview."""
+    util = pytest.importorskip("webview.util")
+    for label in ("Fichier CSV (*.csv)", "Fichier d’export CSV (*.csv)", "All files (*.*)", "Données JSON (*.json)",
+                  "CSV (*.csv;*.txt)", "CSV file (csv)", "Archivo CSV (*.csv) ", "Türkçe dosya (*.json)"):
+        try:
+            util.parse_file_type(label)
+            takes = True
+        except ValueError:
+            takes = False
+        assert bool(i18n.FILE_FILTER.match(label)) is takes, label
+
+
+def test_the_check_runs_from_the_command_line(capsys: pytest.CaptureFixture[str]) -> None:
+    assert i18n.main([]) == 0
+    out = capsys.readouterr().out
+    assert "en (offered): 0 errors, 0 keys missing" in out and "fr (not offered): 0 errors" in out
+
+
 def test_the_page_script_holds_the_language_and_english_behind_it(tmp_path: Path) -> None:
     root = write_catalogs(tmp_path / "i18n", en={"k": "Key", "x": "</script><b>"}, fr={"k": "Clé"})
     script = i18n.page_script("fr", root)

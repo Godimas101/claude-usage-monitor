@@ -1202,7 +1202,7 @@ class ApiServer:
         catalog = re.fullmatch(r"i18n/([a-z]+)\.js", relative)
         if catalog is not None:
             # The catalog as a script (#87), built from its JSON so each catalog exists once; script-src stays 'self'.
-            if catalog.group(1) not in i18n.LANGUAGES:
+            if catalog.group(1) not in i18n.DEV_LANGUAGES:
                 raise _HttpError(404, "not found", plain=True)
             body = i18n.page_script(catalog.group(1), self._webui_root / "i18n").encode("utf-8")
             self._send(req, 200, body, _CONTENT_TYPES[".js"], {"Cache-Control": "no-store" if self._dev else "no-cache"})

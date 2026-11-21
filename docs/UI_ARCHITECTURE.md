@@ -330,7 +330,7 @@ six-hourly update re-check timer is armed (`update_recheck`).
   `--smoke-test` always runs as a dev instance, whatever the environment says. The API server is
   a dev server when its `dev` flag is set **or** `USAGE_MONITOR_DEV_INSTANCE=1` is in the environment.
 - **Dev server.** `python -m usage_monitor.ui.devserver [--port N] [--scenario
-  normal|warning|critical|stale|refused|guard|no_login|limits_only] [--db PATH] [--theme ID[/VARIANT]]` serves the real webui
+  normal|warning|critical|stale|refused|guard|no_login|limits_only] [--db PATH] [--theme ID[/VARIANT]] [--lang ID]` serves the real webui
   and API from a fake `MonitorState`, with settings in `USAGE_MONITOR_APPDATA_DIR` (or a temporary folder). `stale` and `no_login`
   carry the data layer's own sign-in texts (`usage_api.EXPIRED_DETAIL`, `usage_api.NO_SIGN_IN_DETAIL`). `refused` is a sign-in
   the usage API turned down with HTTP 403 (`signin_refused` 403, #55): its help asks for `/login`, not for a message.
@@ -438,6 +438,16 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   eighth of the golden frames, drawn on a French Windows (fr-CA format, 24-hour clock) with French offered and a dev
   instance asking for French, give the same digests as drawn plain (`tests/test_i18n.py` checks both). When the
   widgets are worded (#93), their language comes in as an argument.
+- **Test tools (#89).** The pseudo-locale (`i18n.PSEUDO`, `pseudo`) is `en.json` made longer (about 40%), accented
+  (`İ ı ğ ş é ñ` among the look-alikes) and bracketed (`i18n.pseudo_text`), so English left over, a missing glyph
+  and a cut end all show. A dev instance shows it with `USAGE_MONITOR_LANG=pseudo`, and the dev server with
+  `--lang pseudo` (or any catalog language, offered or not); it is never offered and never a setting, and it keeps
+  English's formats and clock until #91 gives it its own. `python -m usage_monitor.i18n` runs the catalog check
+  (`i18n.check_catalog`) on every catalog language. It fails on a key `en.json` lacks, a key that is not a dotted name,
+  text that is not plain NFC, a placeholder that is not a plain `{name}` or differs from English's, a command
+  (`i18n.COMMANDS`) inside a string, plural forms other than the language's CLDR categories, and a Save-dialog filter
+  label (a key ending in `.filter`) that pywebview's rule (`i18n.FILE_FILTER`) refuses. The keys a language lacks fail
+  it only once it is offered; until then they are its to-do list.
 - **Stays English:** the agent modes and `state.json`, the logs, the export's columns, and the dashboard window title
   "Claude Usage Monitor" (the installer and the app find the window by it).
 

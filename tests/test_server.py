@@ -580,6 +580,19 @@ def test_the_catalog_script_is_built_from_the_json(make_server: Any, localized: 
     assert request(server, "GET", "/static/i18n/en.json")[0] == 200      # the JSON itself is a plain static file
 
 
+def test_a_dev_instance_can_show_the_pseudo_locale(make_server: Any, localized: Path,
+                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    """#89: USAGE_MONITOR_LANG=pseudo in a dev instance; its catalog script is made from en.json."""
+    monkeypatch.setenv(i18n.DEV_INSTANCE_ENV, "1")
+    monkeypatch.setenv(i18n.DEV_LANG_ENV, "pseudo")
+    server, _ = make_server()
+    page = request(server, "GET", "/")[2].decode("utf-8")
+    assert '<html lang="pseudo"' in page and '<script src="/static/i18n/pseudo.js"></script>' in page
+    assert '<p data-i18n="shell.noscript" style="x">[Ñéédş &lt;JáváŞçrıpt&gt; &amp; möré.' in page   # its own: no mark
+    script = request(server, "GET", "/static/i18n/pseudo.js")
+    assert script[0] == 200 and '"language":"pseudo"' in script[2].decode("utf-8")
+
+
 def test_the_state_carries_the_locale(make_server: Any, localized: Path) -> None:
     server, _ = make_server(locale_provider=french)
     state = json.loads(request(server, "GET", "/api/state")[2])
