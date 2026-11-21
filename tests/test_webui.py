@@ -2454,6 +2454,7 @@ def test_ci_runs_the_script_tests_with_node() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
     assert "USAGE_MONITOR_UI_TESTS" in text and "tests/test_webui.py" in text and "setup-node" in text
     assert "tests/test_motion.py" in text                                          # motion.js is run under node there too
+    assert "tests/test_english_left.py" in text                     # and app.js against the dev server, in the pseudo-locale
 
 
 def test_the_test_hook_is_inert_unless_a_test_sets_it() -> None:

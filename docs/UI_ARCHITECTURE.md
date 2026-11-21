@@ -447,7 +447,16 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   text that is not plain NFC, a placeholder that is not a plain `{name}` or differs from English's, a command
   (`i18n.COMMANDS`) inside a string, plural forms other than the language's CLDR categories, and a Save-dialog filter
   label (a key ending in `.filter`) that pywebview's rule (`i18n.FILE_FILTER`) refuses. The keys a language lacks fail
-  it only once it is offered; until then they are its to-do list.
+  it only once it is offered; until then they are its to-do list. Width budgets (`tests/budgets.py`) list the widgets'
+  fixed boxes with their room, in logical px in each skin's own fonts at every frame scale (a box that shrinks its text
+  is measured at its smallest size), and the money tiles, the tray tooltip and the toasts in characters. Each language's
+  longest figures (`100 %`, `%100`, `16 h 12`, `5,96 $ US`) go in too. `tests/test_budgets.py` fails an offered
+  language past a box that has no fallback, and `python tests/budgets.py --lang <id>` reports any language. The "no
+  English left" scan (`tests/english_left.py`) lists the English the frame dump, the tray tooltip and a dashboard run
+  (`tests/english_scan.js`, every dev-server scenario) show under the pseudo-locale. It leaves out numbers, what the
+  page marks as data (`translate="no"`, or a `lang` other than the page's), the names the skins draw, the product name
+  and #86's brand marks. `tests/test_english_left.py` holds the result to `tests/fixtures/english_left.json`, which
+  each extraction ticket (#93 to #101) shrinks by recording again (`python tests/english_left.py --record`).
 - **Stays English:** the agent modes and `state.json`, the logs, the export's columns, and the dashboard window title
   "Claude Usage Monitor" (the installer and the app find the window by it).
 
@@ -846,7 +855,8 @@ default browser instead, and the exit code says so (below).
   (`__USAGE_MONITOR_TEST__.api`: `esc`, `fmtPct`, `paceOf`, `ratioCells`, `remainHTML`, `sessionsTable`, ...) and returns
   without starting the page. Nothing else sets it. `tests/webui_checks.js` loads `charts.js` and `app.js` in a
   node `vm` context with a fake DOM and prints what they do as JSON; `tests/test_webui.py` asserts on it. Those
-  tests start node, so they need `USAGE_MONITOR_UI_TESTS=1`, and `tests.yml` runs them (and `tests/test_motion.py`) once more with it set.
+  tests start node, so they need `USAGE_MONITOR_UI_TESTS=1`, and `tests.yml` runs them (and `tests/test_motion.py` and
+  `tests/test_english_left.py`) once more with it set.
 - **Money.** Real money (the extra-usage Spend card) is shown in the account's own currency (`fmtMoney`, an
   `Intl.NumberFormat` with the ISO code the usage API reports; USD where it reports none). API-equivalent cost
   stays dollars. `/api/state.plan` carries the detected plan and price only: `plan_price_override` is a setting,

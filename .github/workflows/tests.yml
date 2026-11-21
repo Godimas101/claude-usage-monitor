@@ -24,11 +24,12 @@ jobs:
         run: python -m pytest
       # The dashboard scripts are tested by running them under node (tests/webui_checks.js, and motion.js on a fake DOM in
       # tests/test_motion.py). Those tests start a process, so the plain run skips them; without this step a broken
-      # app.js passed CI.
+      # app.js passed CI. The dashboard half of the "no English left" scan (tests/test_english_left.py) runs app.js under
+      # node against the dev server, so it is run here too.
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
       - name: Run the dashboard script tests
         env:
           USAGE_MONITOR_UI_TESTS: '1'
-        run: python -m pytest tests/test_webui.py tests/test_motion.py
+        run: python -m pytest tests/test_webui.py tests/test_motion.py tests/test_english_left.py

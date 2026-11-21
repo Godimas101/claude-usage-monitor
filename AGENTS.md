@@ -102,7 +102,7 @@ python main.py            (console: Ctrl+C quits, errors print)     or    launch
 
 ## Tests
 
-- `python -m pytest` — offline and fast; what CI (`tests.yml`, Windows, Python 3.12) runs.
+- `python -m pytest` — offline and fast; what CI (`tests.yml`, Windows, Python 3.14) runs.
 - `USAGE_MONITOR_UI_TESTS=1 python -m pytest` — adds the tests that create real windows, tray icons or
   processes. They need an interactive desktop, park widgets off-screen and use a fake data service.
   A new test that opens a window, a tray icon or a process must be gated the same way.
@@ -113,6 +113,9 @@ python main.py            (console: Ctrl+C quits, errors print)     or    launch
   start node, so they are gated with `USAGE_MONITOR_UI_TESTS=1`; `tests.yml` runs both files once more with it set, so CI covers them.
   A check that reads a script's source for a phrase proves the phrase is there, not that the script works: where the claim
   is behaviour, run the script.
+- **No new English outside the catalog.** `tests/test_english_left.py` holds the English the widgets and the dashboard
+  show under the pseudo-locale to `tests/fixtures/english_left.json`. Text moved into the catalog is struck by
+  `python tests/english_left.py --record` (it needs node); new English text goes through the catalog instead.
 - **Hover effects play once per entry of the pointer.** A hover rule that animates, moves or clips its own target must not
   hang on `:hover` alone (it restarts itself under a pointer resting at the target's edge); it hangs on `[data-fx-play]`
   (a one-shot) or `[data-fx-hot]` (a state), which `motion.js` sets from `pointerenter`. After touching a hover rule or that
