@@ -21,10 +21,7 @@ RECORD = Path(__file__).parent / "fixtures" / "frame_digests.json"
 REPO = Path(__file__).resolve().parent.parent
 
 # The frames this release draws differently on purpose, and why: patterns over "theme/variant/state".
-CHANGED: dict[str, str] = {
-    "*/*/stale": "#52: an expired sign-in says to use Claude Code (LOGIN EXPIRED - USE CLAUDE CODE)",
-    "*/*/stale3": "#52: the same, with three rows",
-}
+CHANGED: dict[str, str] = {}
 
 
 @pytest.fixture(scope="module")
