@@ -23,6 +23,7 @@ Privacy, everywhere: never print, store or log message text, prompts, file conte
 | `usage_monitor/render/` | Pillow renderers: view model, drawing engine, one skin per theme |
 | `usage_monitor/themes/` | Theme tokens (`<id>.json`) and their loader |
 | `usage_monitor/agent/` | Plan-usage awareness for Claude sessions (#24): `state.json`, `--status`, `--hook`, `--gate`, the MCP server, and the usage guard (#27): `guard.py`, `sessions.py`, `--wait`, `--watch`, and `setup.py` (its one-click setup). Setup: [`docs/AGENT_HOOK.md`](docs/AGENT_HOOK.md) |
+| `usage_monitor/i18n.py` | The app's language (#87): Windows' display language when offered, else English; the catalogs (`webui/i18n/<lang>.json`), formats and plural forms. No UI imports. See `docs/UI_ARCHITECTURE.md`, "Languages" |
 | `usage_monitor/webui/` | Dashboard HTML/CSS/JS, the motion layer (`motion.js`, `motion.css`, `themes/<id>.motion.css`) and the bundled OFL fonts (the Pillow skins read them too) |
 | `update_check.py`, `version.py` | GitHub release check and self-update; version read from `VERSION` |
 | `tests/` | pytest, offline, synthetic fixtures only |

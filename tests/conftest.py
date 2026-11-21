@@ -1,4 +1,5 @@
-"""Test-wide setup. Today that is one thing: the run-time guard against a console window (tests/console_guard.py).
+"""Test-wide setup: the run-time guard against a console window (tests/console_guard.py), and a test run that never
+reads this PC's language (#87).
 
 Every child process a test starts, or the code under test starts, carries creationflags=CREATE_NO_WINDOW. This installs the
 check on ``subprocess.Popen`` for the whole run and fails the test that was running when a start was refused, even when the
@@ -11,6 +12,7 @@ from collections.abc import Iterator
 import pytest
 
 import console_guard
+from usage_monitor import i18n
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -19,6 +21,15 @@ def pytest_configure(config: pytest.Config) -> None:
 
 def pytest_unconfigure(config: pytest.Config) -> None:
     console_guard.uninstall()
+
+
+@pytest.fixture(autouse=True)
+def no_windows_language(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every test runs as if Windows said nothing about its language, whatever this PC is set to (#87): the app, the
+    server and the dashboard come up in English unless a test gives them a reader. A dev shell's USAGE_MONITOR_LANG
+    is dropped too. The one test of the real Windows calls builds its reader itself."""
+    monkeypatch.delenv(i18n.DEV_LANG_ENV, raising=False)
+    monkeypatch.setattr(i18n, "windows_reader", i18n.NoWindows)
 
 
 @pytest.fixture(autouse=True)

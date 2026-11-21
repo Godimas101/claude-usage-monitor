@@ -38,6 +38,7 @@ from typing import Any
 
 import pytest
 
+from usage_monitor import i18n
 from usage_monitor.agent import guard as agent_guard
 from usage_monitor.agent import sessions as agent_sessions
 from usage_monitor.agent import setup as agent_setup
@@ -45,7 +46,7 @@ from usage_monitor.data import analytics
 from usage_monitor.data import models as m
 from usage_monitor.data.pricing import Pricing
 from usage_monitor.data.store import Store
-from usage_monitor.settings import Settings
+from usage_monitor.settings import DEFAULTS as SETTINGS_DEFAULTS, Settings
 from usage_monitor.ui import dashboard, devserver, server as server_mod, startup
 from usage_monitor.ui.server import ApiServer, to_jsonable
 
@@ -444,6 +445,183 @@ def test_the_dashboards_choices_survive_a_restart_on_a_new_port(webui: Path, tmp
             second.stop()
         if second_store is not None:
             second_store.close()
+
+
+# ── Languages (#87) ──────────────────────────────────────────────────────────────
+
+LOCALIZED_SHELL = (
+    '<!doctype html><html lang="en" data-theme="nostromo"><head><meta name="monitor-token" content="">'
+    '<meta name="monitor-prefs" content=""><meta name="monitor-locale" content=""></head><body>'
+    '<p data-i18n="shell.noscript" style="x">The dashboard needs JavaScript.</p><b data-i18n="shell.missing">Kept</b>'
+    '<i title="a > b" data-i18n="k">Key</i><s lang="en" data-i18n="shell.noscript">x</s><u data-i18n="k"><em>m</em></u>'
+    '<button data-i18n-title="k" title="Key" data-i18n-aria-label="k">B</button><img data-i18n-alt="k" src="x.png" />'
+    '<dfn title=\'c > d\' data-i18n="k">Key</dfn><q data-i18n=\'k\'>single</q><em data-i18n="Shell.Bad">bad</em>'
+    '<var data-i18n-label="k">v</var>'
+    '<script src="/static/i18n/en.js"></script><script src="/static/charts.js"></script></body></html>')
+
+
+@pytest.fixture
+def localized(webui: Path) -> Path:
+    (webui / "index.html").write_text(LOCALIZED_SHELL, encoding="utf-8")
+    (webui / "i18n").mkdir()
+    (webui / "i18n" / "en.json").write_text(json.dumps({"shell.noscript": "Needs <JavaScript> & more.", "k": "Key"}),
+                                             encoding="utf-8")
+    (webui / "i18n" / "fr.json").write_text(json.dumps({"k": "Clé"}, ensure_ascii=False), encoding="utf-8")
+    return webui
+
+
+def french() -> i18n.Locale:
+    return i18n.Locale(setting="fr", language="fr", system="en", format="fr-CA", clock=24, offered=("en", "fr"))
+
+
+def test_the_page_is_served_in_the_monitors_language(make_server: Any, localized: Path,
+                                                     caplog: pytest.LogCaptureFixture) -> None:
+    """<html lang>, the locale meta and the catalog script are written before the first paint, and the shell's own
+    words come from the catalog. French lacks the key here, so the English text is marked lang="en"."""
+    server, _ = make_server(locale_provider=french)
+    with caplog.at_level(logging.WARNING):
+        page = request(server, "GET", "/")[2].decode("utf-8")
+    assert '<html lang="fr" data-theme="nostromo"' in page              # the theme adds its own attributes after
+    meta = re.search(r'<meta name="monitor-locale" content="([^"]*)">', page).group(1)
+    assert json.loads(html.unescape(meta)) == french().as_json()
+    assert '<script src="/static/i18n/fr.js"></script><script src="/static/charts.js"></script>' in page
+    assert '<p data-i18n="shell.noscript" style="x" lang="en">Needs &lt;JavaScript&gt; &amp; more.</p>' in page
+    assert '<b data-i18n="shell.missing">Kept</b>' in page             # a key no catalog has: left as written
+    assert '<i title="a > b" data-i18n="k">Clé</i>' in page             # a ">" inside a quoted attribute
+    assert '<s lang="en" data-i18n="shell.noscript">Needs' in page      # its own lang is kept, not doubled
+    assert '<u data-i18n="k"><em>m</em></u>' in page                    # holds markup: as written, and logged
+    assert '<button data-i18n-title="k" title="Clé" data-i18n-aria-label="k" aria-label="Clé">B</button>' in page
+    assert '<img data-i18n-alt="k" src="x.png" alt="Clé" />' in page
+    assert "<dfn title='c > d' data-i18n=\"k\">Clé</dfn>" in page          # a ">" inside single quotes too
+    assert "<q data-i18n='k'>single</q>" in page and '<var data-i18n-label="k">v</var>' in page   # unread: as written
+    assert '<em data-i18n="Shell.Bad">bad</em>' in page                 # a key that is no dotted name: in no catalog
+    logged = [r.getMessage() for r in caplog.records]
+    assert sum("holds markup" in m for m in logged) == 1 and any("'shell.missing' is in no catalog" in m for m in logged)
+    assert any("'Shell.Bad' is in no catalog" in m for m in logged)
+    assert any("has 2 data-i18n marks the server cannot read" in m for m in logged)
+
+
+def test_the_page_is_in_english_by_default(make_server: Any, localized: Path) -> None:
+    server, _ = make_server()
+    page = request(server, "GET", "/")[2].decode("utf-8")
+    assert '<html lang="en"' in page and '<script src="/static/i18n/en.js"></script>' in page
+    meta = re.search(r'<meta name="monitor-locale" content="([^"]*)">', page).group(1)
+    assert json.loads(html.unescape(meta)) == i18n.ENGLISH.as_json()      # the fixture's meta is empty: this was written
+    assert '<p data-i18n="shell.noscript" style="x">Needs &lt;JavaScript&gt; &amp; more.</p>' in page
+
+
+def no_themes() -> Any:
+    raise RuntimeError("the themes package is broken")
+
+
+def test_the_page_is_localized_even_when_the_theme_cannot_be_resolved(make_server: Any, localized: Path,
+                                                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    """#87: all of it is written even when _themed_shell gives up, in any language."""
+    monkeypatch.setattr(server_mod, "_themes", no_themes)
+    server, _ = make_server(locale_provider=french)
+    page = request(server, "GET", "/")[2].decode("utf-8")
+    assert '<html lang="fr" data-theme="nostromo">' in page               # localized, and not themed (no data-variant)
+    meta = re.search(r'<meta name="monitor-locale" content="([^"]*)">', page).group(1)
+    assert json.loads(html.unescape(meta)) == french().as_json()
+    assert '<script src="/static/i18n/fr.js"></script>' in page
+    assert '<p data-i18n="shell.noscript" style="x" lang="en">Needs &lt;JavaScript&gt; &amp; more.</p>' in page
+
+
+def test_the_real_shell_is_served_in_french(make_server: Any, caplog: pytest.LogCaptureFixture) -> None:
+    """The shipped index.html and catalogs, with French chosen: the page is French, every mark in the shell is filled,
+    and a word French lacks shows its English text marked as English."""
+    server, _ = make_server(webui_dir=i18n.CATALOG_DIR.parent, locale_provider=french)
+    with caplog.at_level(logging.WARNING):
+        page = request(server, "GET", "/")[2].decode("utf-8")
+    assert [r.getMessage() for r in caplog.records if "index.html" in r.getMessage()] == []
+    assert page.count('<html lang="fr"') == 1 and page.count('<script src="/static/i18n/fr.js"></script>') == 1
+    english = i18n.load_catalog("en").text("shell.noscript")
+    assert re.search(r'<p data-i18n="shell\.noscript"[^>]*\slang="en">' + re.escape(html.escape(english, quote=False)) + "</p>",
+                     page)
+    script = request(server, "GET", "/static/i18n/fr.js")[2].decode("utf-8")
+    payload = json.loads(script[len("window.MonitorI18n = "):-2].replace("<\\/", "</"))
+    assert payload["language"] == "fr" and payload["fallback"] == i18n.load_catalog("en").english()
+
+
+def test_in_english_the_shipped_shell_is_served_as_it_is(make_server: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """English looks as it did before #87: with no theme to apply, the page is index.html with only its three metas
+    filled."""
+    monkeypatch.setattr(server_mod, "_themes", no_themes)
+    server, _ = make_server(webui_dir=i18n.CATALOG_DIR.parent)
+    page = request(server, "GET", "/")[2].decode("utf-8")
+    assert re.search(r'<meta name="monitor-locale" content="[^"]+">', page)
+    shipped = (i18n.CATALOG_DIR.parent / "index.html").read_text(encoding="utf-8")
+    assert re.sub(r'(<meta name="monitor-(?:token|prefs|locale)" content=")[^"]*(")', r"\1\2", page) == shipped
+
+
+def test_once_french_is_offered_the_setting_makes_the_page_french(make_server: Any, localized: Path,
+                                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    """From the setting to the page, through the server's own source: what #107 turns on."""
+    monkeypatch.setattr(i18n, "OFFERED", ("en", "fr"))
+    server, _ = make_server()
+    assert '<html lang="en"' in request(server, "GET", "/")[2].decode("utf-8")
+    assert post_json(server, "/api/settings", {"language": "fr"})[0] == 200
+    locale = json.loads(request(server, "GET", "/api/state")[2])["locale"]
+    assert (locale["setting"], locale["language"], locale["format"], locale["clock"], locale["offered"]) == (
+        "fr", "fr", "fr-FR", 24, ["en", "fr"])
+    page = request(server, "GET", "/")[2].decode("utf-8")
+    assert '<html lang="fr"' in page and '/static/i18n/fr.js' in page
+
+
+def test_the_catalog_script_is_built_from_the_json(make_server: Any, localized: Path) -> None:
+    server, _ = make_server()
+    status, headers, body = request(server, "GET", "/static/i18n/fr.js")
+    assert status == 200 and headers["content-type"].startswith("text/javascript")
+    text = body.decode("utf-8")
+    assert text.startswith("window.MonitorI18n = ")
+    payload = json.loads(text[len("window.MonitorI18n = "):-2].replace("<\\/", "</"))
+    assert payload["language"] == "fr" and payload["strings"] == {"k": "Clé"} and payload["fallback"]["k"] == "Key"
+    assert request(server, "GET", "/static/i18n/de.js")[0] == 404        # not a catalog language
+    assert request(server, "GET", "/static/i18n/en.json")[0] == 200      # the JSON itself is a plain static file
+
+
+def test_the_state_carries_the_locale(make_server: Any, localized: Path) -> None:
+    server, _ = make_server(locale_provider=french)
+    state = json.loads(request(server, "GET", "/api/state")[2])
+    assert state["locale"] == french().as_json()
+
+
+def test_the_language_setting_follows_through_to_the_page(make_server: Any, localized: Path) -> None:
+    """With the default source, the setting and a dev instance's USAGE_MONITOR_LANG decide. A language that is not
+    offered yet reads as system."""
+    server, _ = make_server()
+    assert post_json(server, "/api/settings", {"language": "fr"})[0] == 200
+    state = json.loads(request(server, "GET", "/api/state")[2])
+    assert state["settings"]["language"] == "fr"                                         # kept for the release that offers it
+    assert state["locale"]["setting"] == "system" and state["locale"]["language"] == "en"   # French is not offered yet
+
+
+def test_a_dev_instance_can_show_a_language_that_is_not_offered(make_server: Any, localized: Path,
+                                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("USAGE_MONITOR_DEV_INSTANCE", "1")
+    monkeypatch.setenv("USAGE_MONITOR_LANG", "fr")
+    server, _ = make_server()
+    assert '<html lang="fr"' in request(server, "GET", "/")[2].decode("utf-8")
+    assert json.loads(request(server, "GET", "/api/state")[2])["locale"]["language"] == "fr"
+
+
+@pytest.mark.parametrize("value", ["system", "en", "fr", "es", "tr"])
+def test_the_language_setting_takes_the_catalog_languages(make_server: Any, value: str) -> None:
+    server, _ = make_server()
+    status, reply = post_json(server, "/api/settings", {"language": value})
+    assert status == 200 and reply["settings"]["language"] == value
+
+
+@pytest.mark.parametrize("value", ["de", "FR", "", None, 1, ["fr"]])
+def test_the_language_setting_refuses_anything_else(make_server: Any, value: Any) -> None:
+    server, _ = make_server()
+    assert post_json(server, "/api/settings", {"language": value})[0] == 400
+
+
+def test_the_language_setting_defaults_to_system(make_server: Any) -> None:
+    server, _ = make_server()
+    assert json.loads(request(server, "GET", "/api/state")[2])["settings"]["language"] == "system"
+    assert SETTINGS_DEFAULTS["language"] == server_mod.SETTING_SPECS["language"].default == "system"
 
 
 @pytest.mark.parametrize("query", [
@@ -2298,6 +2476,7 @@ def test_the_alert_settings_are_stored_and_reported(make_server: Any, settings: 
     *[(key, [None, 1, 50, 95, 100, 0, 101, -1, 1.5, 95.0, True, False, "95", [95], {}])
       for key in ("guard_session_cap", "guard_weekly_cap", "guard_scoped_cap")],
     ("guard_resume_stagger_s", [0, 1, 120, 600, 601, -1, 1.5, 120.0, True, False, "120", None, [120]]),
+    ("language", ["system", "en", "fr", "es", "tr", "de", "FR", "", None, 1, ["fr"]]),
 ])
 def test_the_server_and_settings_agree_on_what_these_keys_accept(tmp_path: Path, key: str,
                                                                  values: list[Any]) -> None:

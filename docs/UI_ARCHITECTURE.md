@@ -29,6 +29,7 @@ ClaudeUsageMonitor (main process)
 ```
 usage_monitor/
   app.py                  MonitorApp: wires settings, DataService, UI host, server; run()/quit()
+  i18n.py                 the app's language and formats (#87): detection, the locale, catalogs, plural forms
   ui/
     win32.py              typed ctypes bindings (every function has argtypes/restype) + constants
     host.py               UIHost: window classes, controller window, message loop, timers,
@@ -59,7 +60,9 @@ usage_monitor/
                           layer), themes/<theme>.css, <theme>.motion.css and <theme>.js (the theme's look,
                           its motion and its scripted flavour),
                           fonts/<family>/*.ttf + OFL.txt — bundled fonts, used by BOTH the
-                          dashboard (@font-face via /static/fonts) and the Pillow skins
+                          dashboard (@font-face via /static/fonts) and the Pillow skins,
+                          i18n/<lang>.json — the catalogs of text (#87), read by the page and by
+                          Python (the server today, the widgets from #93)
 ```
 
 ## UI thread behaviour
@@ -357,6 +360,87 @@ six-hourly update re-check timer is armed (`update_recheck`).
   that returns the current time; the synthetic history, the fake state and the API's report clock all read
   it, so a test pins the date (the command line uses the time quantised to the minute).
 
+## Languages (#87)
+
+Chris's rule (2026-11-21, epic #49): English by default, plus French, Spanish and Turkish. The app follows the Windows
+display language when it is one the app offers, and falls back to English. `usage_monitor/i18n.py` (no UI imports)
+holds the rule; the localization tickets (#86 to #109) fill the catalogs and move each surface's text into them.
+
+- **Offered.** `i18n.OFFERED` is the list Windows' language or the setting may pick. A language joins it only in its
+  sign-off change (#107), with the installer's `[Languages]` line (#103). Until then it holds English alone, so a
+  half-done catalog is never shown. A dev instance can show any catalog language with `USAGE_MONITOR_LANG=<id>`
+  (honoured only with `USAGE_MONITOR_DEV_INSTANCE=1`). The resolver, the locale source and the server read `OFFERED`
+  and `WALK_DISPLAY_LANGUAGES` when they use them, so the change (or a test) that sets them reaches all three; only the
+  `i18n.ENGLISH` constant takes the list at import.
+- **Detection.** Only the first entry of `GetUserPreferredUILanguages(MUI_LANGUAGE_NAME)` counts (fallback
+  `GetUserDefaultUILanguage`, named by `LCIDToLocaleName`). Setup is to detect the same Windows UI language once it
+  offers more than English (`LanguageDetectionMethod=uilanguage`, #103). `WALK_DISPLAY_LANGUAGES = True` would take
+  the first offered language anywhere in the list instead (#86's other choice). Never `locale.getlocale()` or
+  `getdefaultlocale()`, which report the regional format, not a language. The app makes its reader
+  (`i18n.LazyWindows`) and reads Windows on first use, when the log is set up, and reads the display languages only
+  once: a change signs the user out. A call that fails (an error code or an exception), or a reader that raises, reads
+  as nothing, so the app runs in English. `Win32Language` logs the first failure of each call as a warning;
+  `LocaleSource` logs a reader that raises each time.
+- **The setting.** `language` is `system` (the default), `en`, `fr`, `es` or `tr`, checked by both `settings.py` and the
+  server's `SETTING_SPECS`. A language that is not offered yet is stored, so the release that offers it picks the
+  choice up. Until then it reads as `system`, and the locale reports it as `system`; the `settings` block of
+  `/api/state` still shows the stored value.
+- **The locale.** `i18n.Locale`: the setting as read, the language in use, the language `system` resolves to, the
+  format tag, the clock and the offered list. English keeps today's en-US formats and 12-hour clock. French, Spanish
+  and Turkish take Windows' regional format when it is of the same language (fr-CA, es-MX), else fr-FR, es-ES, tr-TR,
+  and Windows' own 12/24-hour clock (`LOCALE_SSHORTTIME`). `MonitorApp.locale` (an `i18n.LocaleSource`) reads Windows;
+  WM_SETTINGCHANGE "intl" makes it read the regional format and the clock again. The server takes it as
+  `locale_provider`; without one (tests, the dev server) the setting and `USAGE_MONITOR_LANG` decide, with no Windows.
+  No test depends on this PC's language: an autouse fixture in `tests/conftest.py` gives every test a reader that
+  knows nothing and drops `USAGE_MONITOR_LANG`. One smoke test reads the real Windows calls and checks only their
+  shape.
+- **Catalogs.** `webui/i18n/<lang>.json`, shared by Python and the page. `en.json` is the source of truth: a key missing
+  from another catalog shows its English text, and the lookup says it came from English (`Catalog.text()` and
+  `plural()` return an `i18n.Text`, a `str` that knows its `.language`), so the caller marks it `lang="en"` and cases it
+  by English rules. Keys are stable dotted names; placeholders are `{named}`; plural entries are objects keyed by the
+  language's CLDR categories (en and tr: one, other; fr and es: one, many, other), and an English entry behind another
+  language follows English rules. Strings are plain text: no tags, no entities. Commands and paths are placeholders,
+  inserted after any case change, with `tCode()` (a block) or `tPath()` (in a sentence): `lang="en"`, `translate="no"`
+  and `.nm-path`'s `text-transform: none`. Names (models, plans, folders, sessions, tools, Claude Code) go in `tName()`:
+  `lang="en"` and `translate="no"` only, so the theme's capitals still reach them with the plain mapping.
+- **The page.** `_send_index` writes `<html lang>`, the `monitor-locale` meta (the locale as JSON) and the catalog's
+  `<script src="/static/i18n/<lang>.js">` before `charts.js`, and fills the shell's own words, all before the theme,
+  which can give up on a page it cannot resolve. A marked element holds text only: `data-i18n="<key>"` replaces its
+  text, and `data-i18n-title`, `-aria-label`, `-placeholder` and `-alt` set that attribute; marks are written with
+  double quotes. English text filled into an element on another language's page gets `lang="en"`, unless the element
+  names a language already; an attribute filled with English is not marked. A key no catalog has, a mark the server
+  cannot read, and a marked element that holds markup stay as written and are logged. In English the page is
+  `index.html` with its metas filled (and the theme's attributes on `<html>`). The server builds the catalog script
+  from the JSON (`window.MonitorI18n = {language, strings, fallback}`), so each catalog exists once and
+  `script-src 'self'` still holds. `app.js` reads the locale from the meta (`LOCALE`) and the catalog (`I18N`), never
+  `navigator.language`, and words text with `t()`, `tHtml()` and `tPlural()`. `tHtml()` escapes everything except a
+  value made with `markup()`, which only `app.js` can make (it is known by a prototype nothing from outside has).
+  `tPlural()` uses the page's own copy of the CLDR rules (`pluralCategory()`), so a WebView with other ICU data cannot
+  disagree with the app. A key is a literal string in its call and the values are an object literal written there, so
+  `test_webui.py` checks each call against `en.json`. No page script (`app.js`, `charts.js`, `motion.js`, the themes')
+  may format in the browser's own locale (`toLocale*()` or `Intl.*()` without a locale) or read `navigator.language`;
+  `test_webui.py` checks them all.
+- **A new locale.** When `/api/state`'s `locale` has another language, format or clock than the page, the page
+  reloads. It never does when it could not read its own locale. Before reloading it leaves a mark in `window.name`,
+  which belongs to the window and ends with it (`app.js` keeps nothing in browser storage, #54), and a page that
+  arrives in the marked locale clears it. So only a reload that failed to bring the page into its locale holds back
+  the next one for that locale, and a server that kept serving another locale cannot loop the page. The Language
+  setting shows once a second language is offered, or when a dev instance shows one that is not: "System default (…)"
+  naming what it resolves to, then each language named in itself. Its Apply button saves the choice, and the state
+  that follows brings the reload; until then the list keeps the pick.
+- **Case** (the rule the dashboard tickets, #98 to #101, carry out). Dashboard strings are to be stored in natural
+  case: Nostromo's and Night City's capitals will come from CSS `text-transform` under `lang`, or
+  `toLocaleUpperCase(lang)` for SVG text; Gates will show strings as stored, and its own wordings (the `VOCAB` link
+  states, "Tokens / min", "Updated {age} ago") get theme keys. Today `app.js` still writes many labels in capitals, and
+  `gates.js` re-cases them through `VOCAB` and `PHRASES`.
+- **Rendering never reads Windows.** The widgets, the frame dump and the golden frames take no language yet and draw
+  English. Nothing under `render/` (or `tests/frame_digests.py`) may reach `LocaleSource` or the Windows calls, and one
+  eighth of the golden frames, drawn on a French Windows (fr-CA format, 24-hour clock) with French offered and a dev
+  instance asking for French, give the same digests as drawn plain (`tests/test_i18n.py` checks both). When the
+  widgets are worded (#93), their language comes in as an argument.
+- **Stays English:** the agent modes and `state.json`, the logs, the export's columns, and the dashboard window title
+  "Claude Usage Monitor" (the installer and the app find the window by it).
+
 ## Themes
 
 `themes/<id>.json` follows the token schema in `design/mockups/` (id, name, tagline, fonts,
@@ -417,7 +501,8 @@ Settings: `theme_id`, `theme_variant`, `theme_mode` (Gates: light / dark / syste
 |---|---|---|
 | GET | `/?k=<token>` | `index.html` with the token, the active theme and the saved dashboard choices injected (below); `401` without the key |
 | GET | `/static/<path>` | webui assets (fonts cached; HTML/JS/CSS `no-store` in dev) |
-| GET | `/api/state` | MonitorState + settings subset + theme + `update` block + version (ETag) |
+| GET | `/static/i18n/<lang>.js` | a catalog as the page loads it, built from `i18n/<lang>.json` (#87; "Languages") |
+| GET | `/api/state` | MonitorState + settings subset + theme + `update` block + version + `locale` (ETag) |
 | GET | `/api/themes` | themes with variants and tokens; the Gates `system-*` variants show the live Windows accent, as applied |
 | GET | `/api/analytics/<name>` | statistics report: `cost`, `efficiency`, `pacing`, `history`, `sessions` (below) |
 | GET | `/api/export?format=csv\|json` | daily rollups download (below) |
@@ -514,6 +599,7 @@ object is a `400` and nothing in the request is applied. The answer is `{"ok": t
 | `alert_thresholds` | 1 to 5 different whole numbers from 1 to 100 |
 | `alert_quiet_hours` | `null`, or `{"start": "HH:MM", "end": "HH:MM"}` in local 24-hour time (may wrap midnight) |
 | `dashboard_bounds` | `null`, or `{"x", "y", "w", "h"}` whole numbers (width 320 to 8000, height 240 to 8000) |
+| `language` | `system` (default), `en`, `fr`, `es` or `tr`. A language that is not offered yet is stored but reads as `system` (#87) |
 | `dashboard_prefs` | `null`, or an object with any of the dashboard's choices: `costWindow` and `efficiencyWindow` (`session`, `today`, `week`, `month`, `cycle` or `all`), `folderMode` (`folder` or `launch`), `calMetric` (`cost` or `tokens`), `matrixMetric` (`cost` or `requests`). The page sends only the choice that changed: an object is merged into the held choices (a stored entry the page does not know is dropped), so two windows never undo each other's; `null` clears them all |
 | `guard_enabled` | boolean (default off) |
 | `guard_session_cap`, `guard_weekly_cap`, `guard_scoped_cap` | `null` (that limit is not watched), or a whole number 1 to 100 (defaults 95, 90 and `null`) |

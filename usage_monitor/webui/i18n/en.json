@@ -1,0 +1,8 @@
+{
+  "_comment": "The source of truth for the app's text (#87). Keys are stable dotted names, never the English text; placeholders are {named}; plural entries are objects keyed by CLDR category. Plain text only: no HTML, no entities. See docs/UI_ARCHITECTURE.md, \"Languages\".",
+  "shell.noscript": "The dashboard needs JavaScript.",
+  "settings.language.label": "Language",
+  "settings.language.help": "System default follows the Windows display language when the monitor offers it, else English. Apply reloads the dashboard.",
+  "settings.language.system": "System default ({language})",
+  "settings.language.apply": "Apply"
+}

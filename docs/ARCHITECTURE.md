@@ -10,6 +10,7 @@ usage_monitor/            the application package
   paths.py                every filesystem location (app data, Claude dirs, bundled resources)
   log.py                  rotating file log in %APPDATA%\ClaudeUsageMonitor\monitor.log
   settings.py             persisted settings: defaults, v1 migration, debounced atomic save
+  i18n.py                 the app's language and formats (#87): detection, catalogs, plural forms. No UI imports
   data/                   ── data layer (Phase 1). No UI imports, ever.
     models.py             shared dataclasses — THE contract between modules
     pricing.py + pricing.json

@@ -18,6 +18,19 @@ const vm = require("vm");
 
 const webui = process.argv[2];
 
+// The catalog the server builds from en.json (#87; i18n.page_script). Every page here gets it, as in the app, unless a
+// check gives another one, or none.
+const EN_CATALOG = (() => {
+  const data = JSON.parse(fs.readFileSync(path.join(webui, "i18n", "en.json"), "utf8"));
+  const fallback = {};
+  for (const key of Object.keys(data)) {
+    if (!key.startsWith("_")) {
+      fallback[key] = data[key];
+    }
+  }
+  return { language: "en", strings: {}, fallback };
+})();
+
 class El {
   constructor(tag) {
     this.tagName = String(tag).toUpperCase();
@@ -110,6 +123,7 @@ function world(theme, opts) {
     MutationObserver: class { constructor(cb) { this.cb = cb; this.watching = null; w.observers.push(this); } observe(target) { this.watching = target; } disconnect() { this.watching = null; } },
     fetch: () => Promise.resolve({ ok: false }),
     sessionStorage: { getItem: (k) => (k in w.store ? w.store[k] : null), setItem: (k, v) => { w.store[k] = String(v); } },
+    MonitorI18n: EN_CATALOG,                       // the catalog the page loads before any theme script (#87)
     addEventListener() {},
   };
   sandbox.window = sandbox;

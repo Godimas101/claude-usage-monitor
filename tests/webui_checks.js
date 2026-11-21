@@ -37,7 +37,20 @@ function svgElement(tag) {
   return el;
 }
 
-function load(query) {
+// The catalog the server builds from en.json (#87; i18n.page_script). Every page here gets it, as in the app, unless a
+// check gives another one, or none.
+const EN_CATALOG = (() => {
+  const data = JSON.parse(fs.readFileSync(path.join(webui, "i18n", "en.json"), "utf8"));
+  const fallback = {};
+  for (const key of Object.keys(data)) {
+    if (!key.startsWith("_")) {
+      fallback[key] = data[key];
+    }
+  }
+  return { language: "en", strings: {}, fallback };
+})();
+
+function load(query, globals) {
   const elements = {};
   const doc = {
     readyState: "complete", visibilityState: "visible", documentElement: element("html"), head: element("head"),
@@ -55,6 +68,8 @@ function load(query) {
   box.setTimeout = () => 0;
   box.addEventListener = () => {};
   box.fetch = () => { throw new Error("no network in the script tests"); };
+  box.MonitorI18n = EN_CATALOG;                    // what /static/i18n/en.js sets before app.js runs (#87)
+  Object.assign(box, globals || {});               // what the page's other scripts set first: another catalog, or none
   vm.createContext(box);
   for (const name of ["charts.js", "app.js"]) {
     vm.runInContext(fs.readFileSync(path.join(webui, name), "utf8"), box, { filename: name });
@@ -69,6 +84,123 @@ const NOW = Date.UTC(2026, 9, 21, 16, 12);
 
 function reset() {
   S.data = null; S.stats = {}; S.settings = {}; S.linkOk = null;
+}
+
+// ── languages (#87): the catalog, the locale the monitor chose, the Language row, a reload on a change ──────
+{
+  const catalog = {
+    language: "fr",
+    strings: { "k.own": "Clé {name}", "k.plural": { one: "{count} session", many: "{count} de sessions", other: "{count} sessions" } },
+    fallback: {
+      "k.own": "Key {name}", "k.en": "Session <b> & {x}", "k.plural": { one: "{count} session", other: "{count} sessions" },
+      "k.enplural": { one: "{count} session", other: "{count} sessions" },
+      "settings.language.label": "Language", "settings.language.help": "Help", "settings.language.system": "System default ({language})",
+      "settings.language.apply": "Apply",
+    },
+  };
+  const localeMeta = (content) => (sel) => (sel === 'meta[name="monitor-locale"]' ? { getAttribute: (k) => (k === "content" ? content : null) } : null);
+  const french = { setting: "fr", language: "fr", system: "tr", format: "fr-CA", clock: 24, offered: ["en", "fr", "tr"] };
+  const holder = { select: null };
+  const frenchQuery = (sel) => (sel === "#set-language" ? holder.select : localeMeta(JSON.stringify(french))(sel));
+  const loaded = load(frenchQuery, { MonitorI18n: catalog });
+  const fr = loaded.api;
+  out.i18n = {
+    own: fr.t("k.own", { name: "x" }), ownLang: fr.tLang("k.own"),
+    english: fr.t("k.en", { x: 1 }), englishLang: fr.tLang("k.en"),
+    missing: fr.t("no.such.key"), unfilled: fr.t("k.own"),
+    html: fr.tHtml("k.en", { x: "<i>" }), htmlMarkup: fr.tHtml("k.own", { name: fr.markup("<code>claude</code>") }),
+    htmlForged: fr.tHtml("k.own", { name: { html: "<b>x</b>" } }),       // data shaped like markup is still data
+    code: fr.tCode("claude --resume <id>").html, path: fr.tPath("C:\\Users\\t & co").html, name: fr.tName("Opus <4>").html,
+    pluralZero: fr.tPlural("k.plural", 0), pluralTwo: fr.tPlural("k.plural", 2), pluralMillion: fr.tPlural("k.plural", 1000000),
+    pluralFallbackZero: fr.tPlural("k.enplural", 0),                       // English text, English rules: 0 is other
+    row: fr.languageRow(), locale: fr.LOCALE, known: fr.LOCALE_KNOWN, names: fr.LANGUAGE_NAMES,
+  };
+  // What counts as a change of locale: the language, the format and the clock, nothing else.
+  out.i18nChanged = [
+    fr.localeChanged({ ...french }), fr.localeChanged(null), fr.localeChanged({}),
+    fr.localeChanged({ ...french, language: "en" }), fr.localeChanged({ ...french, format: "fr-FR" }),
+    fr.localeChanged({ ...french, clock: 12 }), fr.localeChanged({ ...french, setting: "system", system: "en", offered: ["en"] }),
+  ];
+  // The list keeps a pick that is not applied yet, and follows a stored change.
+  {
+    const attrs = { "data-synced": "fr" };
+    const select = {
+      value: "tr", options: [{ value: "system" }, { value: "en" }, { value: "fr" }, { value: "tr" }],
+      getAttribute: (k) => (k in attrs ? attrs[k] : null), setAttribute: (k, v) => { attrs[k] = String(v); },
+    };
+    const main = { querySelector: (sel) => (sel === "#set-language" ? select : null) };
+    fr.S.data = { locale: { ...french } };
+    fr.syncLanguage(main);
+    const kept = select.value;
+    fr.S.data = { locale: { ...french, setting: "system" } };
+    fr.syncLanguage(main);
+    out.i18nSync = { kept, followed: select.value, synced: attrs["data-synced"] };
+  }
+  // Apply saves the pick; the next state brings the reload.
+  {
+    const sent = [];
+    loaded.box.fetch = (url, opts) => {
+      sent.push({ url, method: opts.method, body: JSON.parse(opts.body) });
+      return new Promise(() => {});
+    };
+    holder.select = { value: "tr" };
+    fr.applyLanguage();
+    out.i18nApply = sent.splice(0);
+    holder.select = { value: "es" };                       // and through the button's click, as the dashboard does it
+    fr.settingsClick({ target: { closest: () => ({ hasAttribute: () => false, getAttribute: (n) => (n === "data-action" ? "language-apply" : null) }) } });
+    out.i18nApplyClick = sent.splice(0);
+  }
+  // What a new state does first, on a page that knows its locale: nothing for its own locale or none, a reload for another.
+  {
+    const page = load(localeMeta(JSON.stringify(french)), { MonitorI18n: catalog });
+    let count = 0;
+    page.box.location.reload = () => { count += 1; };
+    out.i18nLocaleReload = [{ locale: { ...french } }, {}, { locale: null }, { locale: { ...french, clock: 12 } }].map((data) => {
+      page.api.S.data = data;
+      return [page.api.localeReload(), count];
+    });
+  }
+  // A change of locale reloads the page once.
+  const reloads = [];
+  loaded.box.location.reload = () => reloads.push("reload");
+  fr.S.data = { locale: { ...french, language: "en", format: "en-US", clock: 12 }, settings: {}, theme: null };
+  fr.onState();
+  fr.onState();
+  out.i18nReloads = reloads.length;
+  // Never twice in a row for the same locale in a window (its name carries the mark over the reload); never on a page
+  // that did not know its own locale.
+  const reloadIn = (meta, name) => {
+    const page = load(localeMeta(meta), { MonitorI18n: catalog, name });
+    let count = 0;
+    page.box.location.reload = () => { count += 1; };
+    const answered = page.api.reloadForLocale({ language: "en", format: "en-US", clock: 12 });
+    return { answered, count, name: page.box.name };
+  };
+  const first = reloadIn(JSON.stringify(french), "");
+  out.i18nMarks = [first, reloadIn(JSON.stringify(french), first.name),
+                   reloadIn(JSON.stringify(french), "usage-monitor-locale-reload:fr|fr-FR|24")];
+  out.i18nUnknownPage = [reloadIn("{not json", ""), reloadIn("", ""), reloadIn(JSON.stringify({ format: "x" }), "")];
+  // A page that arrives in the locale it was reloaded for clears the mark; one that did not keeps it.
+  out.i18nArrived = load(localeMeta(JSON.stringify(french)), { MonitorI18n: catalog, name: "usage-monitor-locale-reload:fr|fr-CA|24" }).box.name;
+  out.i18nNotArrived = load(localeMeta(JSON.stringify(french)), { MonitorI18n: catalog, name: "usage-monitor-locale-reload:en|en-US|12" }).box.name;
+  // A dev instance showing a language that is not offered lists it too.
+  out.i18nDevRow = load(localeMeta(JSON.stringify({ setting: "system", language: "fr", system: "en", format: "fr-FR", clock: 24,
+                                                     offered: ["en"] })), { MonitorI18n: catalog }).api.languageRow();
+  const badMeta = load(localeMeta("{not json")).api;
+  out.i18nBadMeta = badMeta.LOCALE;
+  out.i18nBadMetaKnown = badMeta.LOCALE_KNOWN;
+}
+out.i18nEnglishRow = api.languageRow();
+out.i18nDefaultLocale = api.LOCALE;
+out.i18nDefaultCatalog = api.t("settings.language.label");
+out.i18nEnglishHtml = api.tHtml("settings.language.label");
+out.i18nNoCatalog = load(null, { MonitorI18n: undefined }).api.t("settings.language.label");
+// The page's plural rules, for test_webui.py to hold against i18n.plural_category.
+out.i18nPlurals = [];
+for (const language of ["en", "fr", "es", "tr"]) {
+  for (const n of [0, 1, 1.5, 2, 5, -1, -2, 0.5, 1000000, 2000000, 1000001, Infinity, -Infinity, NaN]) {
+    out.i18nPlurals.push([language, String(n), api.pluralCategory(language, n)]);
+  }
 }
 
 // ── escaping: titles, folder names and labels come from the user's own files ─────────────────────────────

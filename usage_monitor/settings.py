@@ -22,7 +22,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from usage_monitor import paths
+from usage_monitor import i18n, paths
 from usage_monitor.log import get_logger
 
 log = get_logger(__name__)
@@ -59,6 +59,8 @@ DEFAULTS: dict[str, Any] = {
     "guard_weekly_cap": 90,
     "guard_scoped_cap": None,
     "guard_resume_stagger_s": 120,
+    # The app's language (#87): "system" follows Windows' display language when it is offered, else English.
+    "language": "system",
 }
 
 _MISSING = object()
@@ -139,6 +141,11 @@ def _is_stagger(v: Any) -> bool:
     return _is_int(v) and 0 <= v <= 600
 
 
+def _is_language(v: Any) -> bool:
+    """``system`` or a catalog language. One that is not offered yet is kept, and reads as ``system`` (#87)."""
+    return isinstance(v, str) and v in i18n.SETTING_VALUES
+
+
 def _is_quiet_hours(v: Any) -> bool:
     if v is None:
         return True
@@ -173,6 +180,7 @@ _RULES: dict[str, Callable[[Any], bool]] = {
     "guard_weekly_cap": _is_cap,
     "guard_scoped_cap": _is_cap,
     "guard_resume_stagger_s": _is_stagger,
+    "language": _is_language,
 }
 
 

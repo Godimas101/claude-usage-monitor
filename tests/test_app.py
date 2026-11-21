@@ -37,7 +37,7 @@ if sys.platform != "win32":
 import main as entry
 import usage_monitor.app as app_mod
 import version
-from usage_monitor import themes
+from usage_monitor import i18n, themes
 from usage_monitor.data.alerts import AlertEngine
 from usage_monitor.data.store import Store
 from usage_monitor.settings import DEFAULTS as SETTINGS_DEFAULTS
@@ -3882,3 +3882,85 @@ def test_real_layered_windows_carry_the_widgets_frames(tmp_path):
         for piece in pieces:
             piece.destroy()
         host.close()
+
+
+# ── Languages (#87) ──────────────────────────────────────────────────────────────
+
+class _Windows:
+    """What Windows says about languages, and how often the app asked."""
+
+    def __init__(self, preferred: list[str], regional: str | None = None) -> None:
+        self.preferred, self.regional, self.calls = preferred, regional, []
+
+    def display_languages(self) -> list[str]:
+        self.calls.append("display_languages")
+        return list(self.preferred)
+
+    def regional_format(self) -> str | None:
+        self.calls.append("regional_format")
+        return self.regional
+
+    def short_time(self) -> str | None:
+        return None
+
+
+def test_the_app_resolves_its_language_from_the_setting_and_windows(settings, monkeypatch):
+    """English is the only language offered today, so a French Windows still gets English; a dev instance's
+    USAGE_MONITOR_LANG shows the French catalog anyway."""
+    windows = _Windows(["fr-CA"], "fr-CA")
+    app = MonitorApp(settings=settings, language_reader=windows)
+    app.settings = settings
+    assert app.locale().language == "en" and app.locale().format == "en-US"
+    monkeypatch.setenv("USAGE_MONITOR_LANG", "fr")                     # the fixture makes this a dev instance
+    app = MonitorApp(settings=settings, language_reader=windows)
+    app.settings = settings
+    assert app.locale().language == "fr" and app.locale().format == "fr-CA"
+    assert windows.calls.count("display_languages") == 2                   # once per app, never per frame
+
+
+def test_a_language_change_reaches_the_widgets(settings):
+    app = MonitorApp(settings=settings, language_reader=_Windows(["en-US"]))
+    refreshed: list[str] = []
+    app._refresh = lambda: refreshed.append("widgets")
+    app._on_setting("language", "fr")
+    assert "language" in app._dirty and app_mod.LANGUAGE_KEYS == {"language"}
+    app._apply_settings()
+    assert refreshed == ["widgets"] and not app._dirty
+
+
+def test_the_language_setting_flows_into_the_apps_locale(settings, monkeypatch):
+    """What #107 turns on: a language once offered is chosen by the setting, in Windows' format of that language."""
+    monkeypatch.setattr(i18n, "OFFERED", ("en", "es"))
+    app = MonitorApp(settings=settings, language_reader=_Windows(["fr-FR"], "es-MX"))
+    app.settings = settings
+    assert app.locale().language == "en"                                  # French is not offered
+    settings.set("language", "es")
+    locale = app.locale()
+    assert (locale.setting, locale.language, locale.format) == ("es", "es", "es-MX")
+
+
+def test_the_app_reads_windows_only_once_it_runs(settings, monkeypatch):
+    """The reader is made on first use, after run() has set up the log, not when the app is built."""
+    made: list[str] = []
+    monkeypatch.setattr(i18n, "windows_reader", lambda: (made.append("reader"), i18n.NoWindows())[1])
+    app = MonitorApp(settings=settings)
+    assert made == []
+    app.settings = settings
+    assert app.locale().language == "en" and made == ["reader"]
+
+
+def test_the_server_and_the_app_share_one_locale(wired):
+    """The page, the state and (with #93) the widgets all read the app's one source."""
+    assert wired.app.server.kwargs["locale_provider"] is wired.app.locale
+
+
+def test_a_regional_format_change_reads_the_formats_again(settings):
+    windows = _Windows(["en-US"], "en-CA")
+    app = MonitorApp(settings=settings, language_reader=windows)
+    refreshed: list[str] = []
+    app._refresh = lambda: refreshed.append("widgets")
+    app._on_windows_setting("intl")
+    assert windows.calls.count("regional_format") == 2 and refreshed == ["widgets"]
+    app._on_windows_setting("ImmersiveColorSet")
+    assert windows.calls.count("regional_format") == 2                     # only "intl" is about formats
+

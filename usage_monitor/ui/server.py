@@ -47,6 +47,7 @@ from usage_monitor.data.pricing import Pricing
 from usage_monitor.data.store import SCHEMA_VERSION, Store, StoreError
 from usage_monitor.data.usage_api import plan_from
 from usage_monitor.log import get_logger
+from usage_monitor import i18n
 from usage_monitor.settings import DEFAULTS as SETTINGS_DEFAULTS
 from usage_monitor.settings import Settings, parse_clock
 from usage_monitor.ui import startup
@@ -138,6 +139,16 @@ def _nullable(check: Callable[[Any], bool]) -> Callable[[Any], bool]:
 
 
 _SLUG = re.compile(r"[a-z0-9][a-z0-9_-]{0,39}")
+# The shell's language marks (#87; _localized_shell). An opening tag's attributes may hold ">" inside quotes of either
+# kind. A mark's key is taken whatever it holds, so a bad one reaches the catalog lookup and is logged there; _I18N_ANY
+# finds the marks written any other way (not double-quoted, or an attribute the server does not fill).
+_TAG_ATTRS = r"""(?:[^>"']|"[^"]*"|'[^']*')*"""
+_I18N_TEXT = re.compile(r'(<(\w+)\b' + _TAG_ATTRS + r'?\sdata-i18n="([^"]*)"' + _TAG_ATTRS + r'>)([^<]*)(?=</\2>)')
+_I18N_MARK = re.compile(r'\sdata-i18n="([^"]*)"')
+_I18N_ATTRIBUTE = re.compile(r'\sdata-i18n-(title|aria-label|placeholder|alt)="([^"]*)"')
+_I18N_ANY = re.compile(r'\sdata-i18n(?:-[\w-]*)?\s*=')
+_OPENING_TAG = re.compile(r'<\w+\b' + _TAG_ATTRS + '>')
+_LANG_ATTRIBUTE = re.compile(r'\slang\s*=')
 # The update block of /api/state (see _update_view). Both values come off the network via the release check, so
 # only a plain version and a plain github.com address are passed on to the page.
 _SAFE_VERSION = re.compile(r"[0-9A-Za-z][0-9A-Za-z._+-]{0,39}")
@@ -250,6 +261,8 @@ SETTING_SPECS: dict[str, _Spec] = {
     "alert_quiet_hours": _Spec(_nullable(_is_quiet_hours), None),
     "dashboard_bounds": _Spec(_nullable(_is_bounds), None),
     "dashboard_prefs": _Spec(_nullable(_is_dashboard_prefs), None),
+    # The app's language (#87): "system" follows Windows; a language that is not offered yet reads as "system".
+    "language": _Spec(_one_of(*i18n.SETTING_VALUES), "system"),
     # The usage guard (#27). A cap of null leaves that limit unwatched; the rules are Settings' own.
     "guard_enabled": _Spec(_is_bool, False),
     "guard_session_cap": _Spec(_nullable(_is_percent), 95),
@@ -350,6 +363,24 @@ _SHELL_SCHEME_META = re.compile(r'(<meta name="color-scheme" content=")[^"]*(")'
 _SHELL_THEME_LINK = re.compile(r'<link id="theme-css"[^>]*>')
 _CSS_VAR_NAME = re.compile(r"--[a-z0-9-]+")
 _CSS_VAR_VALUE = re.compile(r"[^;{}<>\\\r\n]*")     # cannot end its declaration or leave the attribute
+
+
+def _localized_attributes(tag: str, catalog: i18n.Catalog) -> str:
+    """One opening tag of the shell with its ``data-i18n-<attribute>`` marks filled from ``catalog`` (#87)."""
+    for attribute, key in _I18N_ATTRIBUTE.findall(tag):
+        found = catalog.lookup(key)
+        if found is None or not isinstance(found.value, str):
+            log.warning("index.html %s %r is in no catalog", attribute, key)
+            continue
+        value = html.escape(found.value, quote=True)
+        existing = re.compile(r'(\s' + re.escape(attribute) + r'=")[^"]*(")')
+        if existing.search(tag):
+            tag = existing.sub(lambda m: m.group(1) + value + m.group(2), tag, count=1)
+        elif tag.endswith("/>"):
+            tag = tag[:-2].rstrip() + f' {attribute}="{value}" />'
+        else:
+            tag = tag[:-1] + f' {attribute}="{value}">'
+    return tag
 
 
 def _themed_shell(text: str, view: Mapping[str, Any] | None) -> str:
@@ -882,6 +913,7 @@ class ApiServer:
         wall_clock: Callable[[], datetime] | None = None,
         guard_dir: Path | None = None,
         setup_cb: Mapping[str, Callable[[], Any]] | None = None,
+        locale_provider: Callable[[], i18n.Locale] | None = None,
     ) -> None:
         self._state_provider = state_provider
         self._settings = settings
@@ -906,6 +938,9 @@ class ApiServer:
         self._guard_dir = guard_dir
         self._setup_cb = dict(setup_cb) if setup_cb is not None else self._default_setup_cb()
         self._setup_status = _TimedValue(self._setup_status_now, SETUP_STATUS_TTL_S, monotonic)
+        # The app's language and formats (#87). The monitor passes its own source, which reads Windows; without one
+        # (tests, the dev server) the language setting and a dev instance's USAGE_MONITOR_LANG decide, with no Windows.
+        self._locale = locale_provider or i18n.LocaleSource(lambda: self._current("language"))
         self._lock = threading.Lock()
         self._httpd: _Httpd | None = None
         self._thread: threading.Thread | None = None
@@ -1105,11 +1140,73 @@ class ApiServer:
                               lambda m: m.group(1) + html.escape(prefs_text) + m.group(2), text, count=1)
         if count != 1:
             log.warning("index.html has no monitor-prefs meta tag")
+        text = self._localized_shell(text)
         text = _themed_shell(text, self._theme_view())
         self._send(req, 200, text.encode("utf-8"), "text/html; charset=utf-8",
                    {"Content-Security-Policy": _CSP})
 
+    def _localized_shell(self, text: str) -> str:
+        """The page in the app's language (#87): ``<html lang>``, the ``monitor-locale`` meta, the catalog script and the
+        shell's own words, so the first paint is in that language. Written before the theme, which can give up on a page
+        it cannot resolve.
+
+        A marked element holds text only. ``data-i18n="<key>"`` replaces its text; ``data-i18n-title``,
+        ``-aria-label``, ``-placeholder`` and ``-alt`` set that attribute. A word whose catalog lacks the key keeps its
+        English text, marked ``lang="en"`` unless the element names its language already (an attribute cannot be
+        marked on its own). A key no catalog has, a mark written any other way (not double-quoted, or an attribute
+        the server does not fill), and a marked element that holds markup stay as written and are logged."""
+        locale = self._locale()
+        catalog = i18n.load_catalog(locale.language, self._webui_root / "i18n")
+        text, count = re.subn(r'(<html\b[^>]*\blang=")[^"]*(")', lambda m: m.group(1) + locale.language + m.group(2),
+                              text, count=1)
+        if count != 1:
+            log.warning("index.html has no <html lang>")
+        locale_text = json.dumps(locale.as_json(), separators=(",", ":"))
+        text, count = re.subn(r'(<meta name="monitor-locale" content=")[^"]*(")',
+                              lambda m: m.group(1) + html.escape(locale_text) + m.group(2), text, count=1)
+        if count != 1:
+            log.warning("index.html has no monitor-locale meta tag")
+        text, count = re.subn(r'(<script src="/static/i18n/)[a-z]+(\.js"></script>)',
+                              lambda m: m.group(1) + catalog.language + m.group(2), text, count=1)
+        if count != 1:
+            log.warning("index.html has no catalog script")
+
+        marked = _I18N_MARK.findall(text)
+        unread = len(_I18N_ANY.findall(text)) - len(marked) - len(_I18N_ATTRIBUTE.findall(text))
+        if unread:
+            log.warning("index.html has %d data-i18n marks the server cannot read (not double-quoted, or an attribute "
+                        "it does not fill); they stay as written", unread)
+        filled: list[str] = []
+
+        def word(m: re.Match[str]) -> str:
+            key = m.group(3)
+            filled.append(key)
+            found = catalog.lookup(key)
+            if found is None or not isinstance(found.value, str):
+                log.warning("index.html word %r is in no catalog", key)
+                return m.group(0)
+            opening = m.group(1)
+            if found.language != catalog.language and not _LANG_ATTRIBUTE.search(opening):
+                opening = opening[:-1] + ' lang="en">'
+            return opening + html.escape(found.value, quote=False)
+
+        text = _I18N_TEXT.sub(word, text)
+        for key in marked:
+            if key in filled:
+                filled.remove(key)
+            else:
+                log.warning("index.html word %r is on an element that holds markup; it stays as written", key)
+        return _OPENING_TAG.sub(lambda m: _localized_attributes(m.group(0), catalog), text)
+
     def _send_static(self, req: _Handler, relative: str) -> None:
+        catalog = re.fullmatch(r"i18n/([a-z]+)\.js", relative)
+        if catalog is not None:
+            # The catalog as a script (#87), built from its JSON so each catalog exists once; script-src stays 'self'.
+            if catalog.group(1) not in i18n.LANGUAGES:
+                raise _HttpError(404, "not found", plain=True)
+            body = i18n.page_script(catalog.group(1), self._webui_root / "i18n").encode("utf-8")
+            self._send(req, 200, body, _CONTENT_TYPES[".js"], {"Cache-Control": "no-store" if self._dev else "no-cache"})
+            return
         target = self._static_file(relative)
         suffix = target.suffix.lower()
         if self._dev:
@@ -1146,6 +1243,7 @@ class ApiServer:
             "version": self._version,
             "update": self._update_view(),
             "dev": self._dev,
+            "locale": self._locale().as_json(),
         }
         body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         etag = '"' + hashlib.sha256(body).hexdigest()[:32] + '"'

@@ -32,7 +32,7 @@ from typing import Any
 
 import pytest
 
-from usage_monitor import paths, themes
+from usage_monitor import i18n, paths, themes
 from usage_monitor.data import analytics, windows
 from usage_monitor.render import model as widget_model
 from usage_monitor.themes import colour
@@ -266,9 +266,13 @@ def test_no_inline_handlers_or_dynamic_code(name: str) -> None:
 
 def test_index_html_is_the_shell_the_server_and_the_scripts_expect() -> None:
     assert INDEX.count('<meta name="monitor-token" content="">') == 1     # the server fills this in
+    assert INDEX.count('<meta name="monitor-locale" content="">') == 1    # and this, the language (#87)
+    assert INDEX.count('<html lang="en"') == 1                                # and the page's language
     scripts = re.findall(r'<script src="([^"]+)"', INDEX)
-    assert scripts[-2:] == ["/static/charts.js", "/static/app.js"]          # app.js last: it starts the page
-    assert set(scripts[:-2]) <= {"/static/motion.js"}                       # and only the motion layer before them
+    # app.js last: it starts the page. The catalog before charts.js (the server names its language), so the first paint
+    # has the text; only the motion layer before that.
+    assert scripts[-3:] == ["/static/i18n/en.js", "/static/charts.js", "/static/app.js"]
+    assert set(scripts[:-3]) <= {"/static/motion.js"}
     assert not re.search(r"<script(?![^>]*\bsrc=)", INDEX), "an inline script (the CSP forbids it)"
     for needle in ('id="theme-css"', 'id="main"', 'id="menu"', 'id="variants"', 'id="refresh"', 'id="boot"'):
         assert needle in INDEX, needle
@@ -960,6 +964,236 @@ def test_the_dashboards_choices_come_from_the_page_and_are_saved_in_the_monitors
     assert checks["prefsFromMeta"] == {"costWindow": "week", "efficiencyWindow": "cycle", "folderMode": "folder",
                                        "calMetric": "tokens", "matrixMetric": "cost"}
     assert checks["savedPrefsBadMeta"] is None and checks["savedPrefsEmptyMeta"] is None
+
+
+def page_scripts() -> dict[str, str]:
+    """Every script the dashboard runs: app.js, charts.js, the motion layer and each theme's own."""
+    return {"app.js": APP_CODE, "charts.js": CHARTS, "motion.js": read("motion.js"),
+            **{f"themes/{theme_id}.js": source for theme_id, source in THEME_JS.items()}}
+
+
+PAGE_SCRIPTS = page_scripts()
+
+
+def test_the_page_never_reads_the_browsers_language() -> None:
+    """The monitor decides the language (#87): navigator.language can disagree with the setting and with Windows."""
+    for name, source in PAGE_SCRIPTS.items():
+        assert "navigator.language" not in strip_comments(source), name          # navigator.languages too
+    assert re.search(r"var LANGUAGE_NAMES = \{ en: \"English\", fr: \"Français\", es: \"Español\", tr: \"Türkçe\" \};", APP_CODE)
+
+
+@ui_only
+def test_the_page_takes_its_text_from_the_catalog_and_marks_english(checks: dict[str, Any]) -> None:
+    """#87: the page's own strings first, English behind them; English on a French page is marked lang="en", so it is
+    cased by English rules. Values are escaped unless they are markup the page built."""
+    i = checks["i18n"]
+    assert (i["own"], i["ownLang"]) == ("Clé x", "fr")
+    assert (i["english"], i["englishLang"]) == ("Session <b> & 1", "en")
+    assert i["missing"] == "no.such.key" and i["unfilled"] == "Clé {name}"
+    assert i["html"] == '<span lang="en">Session &lt;b&gt; &amp; &lt;i&gt;</span>'
+    assert i["htmlMarkup"] == "Clé <code>claude</code>"
+    assert i["htmlForged"] == "Clé [object Object]"                   # only markup() passes; data never does
+    assert i["code"] == '<code class="nm-path" lang="en" translate="no">claude --resume &lt;id&gt;</code>'
+    assert i["path"] == '<span class="nm-path" lang="en" translate="no">C:\\Users\\t &amp; co</span>'
+    assert i["name"] == '<span lang="en" translate="no">Opus &lt;4&gt;</span>'
+    assert (i["pluralZero"], i["pluralTwo"], i["pluralMillion"]) == ("0 session", "2 sessions", "1000000 de sessions")
+    assert i["pluralFallbackZero"] == "0 sessions"                         # English text follows English rules
+    assert i["locale"]["format"] == "fr-CA" and i["known"] is True and i["names"] == dict(i18n.NAMES)
+    assert checks["i18nDefaultCatalog"] == "Language"                       # the real en.json, as the app serves it
+    assert checks["i18nEnglishHtml"] == "Language"                         # an English page wraps nothing in lang="en"
+    assert checks["i18nNoCatalog"] == "settings.language.label"            # no catalog loaded: the key, easy to see
+
+
+@ui_only
+def test_the_page_and_the_app_choose_the_same_plural_forms(checks: dict[str, Any]) -> None:
+    """The page has its own copy of the CLDR rules, so a WebView with other ICU data cannot disagree with the app."""
+    assert len(checks["i18nPlurals"]) == 56
+    for language, count, category in checks["i18nPlurals"]:
+        assert i18n.plural_category(language, float(count)) == category, (language, count)
+
+
+def split_top(text: str) -> list[str]:
+    """``text`` split at its top-level commas: a comma inside brackets or a string literal does not count."""
+    parts, depth, quote, current, i = [], 0, "", "", 0
+    while i < len(text):
+        ch = text[i]
+        current += ch
+        if quote:
+            if ch == "\\" and i + 1 < len(text):
+                current += text[i + 1]
+                i += 1
+            elif ch == quote:
+                quote = ""
+        elif ch in "\"'`":
+            quote = ch
+        elif ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            parts.append(current[:-1])
+            current = ""
+        i += 1
+    parts.append(current)
+    return [part.strip() for part in parts]
+
+
+def call_tail(code: str, start: int) -> str:
+    """The rest of a call's argument list, from ``start`` up to its own ")"."""
+    depth, quote, i = 0, "", start
+    while i < len(code):
+        ch = code[i]
+        if quote:
+            if ch == "\\":
+                i += 1
+            elif ch == quote:
+                quote = ""
+        elif ch in "\"'`":
+            quote = ch
+        elif ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            if depth == 0:
+                return code[start:i]
+            depth -= 1
+        i += 1
+    raise AssertionError(f"a call with no end at {start}")
+
+
+def literal_names(text: str) -> set[str] | None:
+    """The property names of an object literal written in the call (``{ a: 1, b }``); None for anything else."""
+    text = text.strip()
+    if not (text.startswith("{") and text.endswith("}")):
+        return None
+    names = set()
+    for part in split_top(text[1:-1]):
+        if part:
+            m = re.match(r"([A-Za-z_$][\w$]*)\s*(?::|$)", part)
+            if m is None:
+                return None                                   # a quoted, computed or spread name
+            names.add(m.group(1))
+    return names
+
+
+def i18n_calls(code: str) -> list[tuple[str, str, set[str] | None]]:
+    """Every t, tHtml, tLang and tPlural call with a literal key: (function, key, the placeholders it fills). The
+    placeholders are None when the scan cannot read them: a key built from parts, values not written in the call as an
+    object literal, or arguments the function does not take."""
+    calls = []
+    for m in re.finditer(r'(?<![\w.$])(t|tHtml|tLang|tPlural)\("([^"]+)"', code):
+        name, key = m.group(1), m.group(2)
+        first, *rest = split_top(call_tail(code, m.end()))
+        given: set[str] | None
+        if first:                                             # "a." + part: not one key
+            given = None
+        elif name == "tLang":
+            given = set() if not rest else None
+        elif name == "tPlural":
+            names = literal_names(rest[1]) if len(rest) == 2 else set() if len(rest) == 1 else None
+            given = None if names is None else names | {"count"}
+        else:
+            given = set() if not rest else literal_names(rest[0]) if len(rest) == 1 else None
+        calls.append((name, key, given))
+    return calls
+
+
+def test_the_key_scan_reads_every_shape_of_call() -> None:
+    """The scan below, on the call shapes the dashboard tickets (#98 to #101) will add."""
+    samples = [
+        ('t("a.b")', ("t", "a.b", set())),
+        ('t("a.b", { x: 1, y: f(2, 3) })', ("t", "a.b", {"x", "y"})),
+        ('tHtml("k", { cmd: tCode(c), path: tPath(p), })', ("tHtml", "k", {"cmd", "path"})),
+        ('tHtml("k", { n })', ("tHtml", "k", {"n"})),
+        ('tPlural("p", n, { a: [1, 2], b: "x, y" })', ("tPlural", "p", {"count", "a", "b"})),
+        ('tPlural("p", count)', ("tPlural", "p", {"count"})),
+        ('tLang("k")', ("tLang", "k", set())),
+        ('t("x.fn", pick(a, b))', ("t", "x.fn", None)),
+        ('t("x.v", values)', ("t", "x.v", None)),
+        ('t("x." + part)', ("t", "x.", None)),
+        ('tHtml("q", { "quoted": 1 })', ("tHtml", "q", None)),
+    ]
+    for code, expected in samples:
+        assert i18n_calls(code) == [expected], code
+
+
+def test_every_key_the_page_and_the_shell_use_is_in_english_with_its_placeholders() -> None:
+    """en.json is the source of truth (#87): each key app.js or index.html asks for is there, and a call names exactly
+    the placeholders its text has. Keys are literal strings and values are object literals written in the call, so
+    this scan (and a translator's tools) can read them."""
+    english = json.loads((WEBUI / "i18n" / "en.json").read_text(encoding="utf-8"))
+    code = strip_comments(APP_CODE)
+    assert not re.findall(r'(?<![\w.$])(?<!function )(?:t|tHtml|tLang|tPlural)\((?!")', code), "a key that is not a literal"
+    calls = i18n_calls(code)
+    shell = re.findall(r'\sdata-i18n(?:-[a-z-]+)?="([^"]+)"', INDEX)
+    assert calls and shell
+    for key in [key for _, key, _ in calls] + shell:
+        assert key in english, key
+    for name, key, given in calls:
+        assert given is not None, (name, key, "values the scan cannot read")
+        if name == "tLang":
+            continue                                          # it asks only which language the text comes from
+        forms = list(english[key].values()) if isinstance(english[key], dict) else [english[key]]
+        wanted = set().union(*(re.findall(r"\{([A-Za-z_]\w*)\}", form) for form in forms))
+        assert given == wanted, (key, given, wanted)
+
+
+def test_the_page_formats_in_the_monitors_locale_only() -> None:
+    """#87: no page script may take the browser's own locale. A later change formats with LOCALE.format; none may leave
+    the locale out (or pass [] or undefined), which would follow the WebView's language instead."""
+    for name, source in PAGE_SCRIPTS.items():
+        code = strip_comments(source)
+        assert not re.search(r"\.toLocale(?:Upper|Lower)?(?:Case|String|DateString|TimeString)?\(\s*(?:\)|\[\]|undefined|null)", code), name
+        assert not re.search(r"\bIntl\.\w+\(\s*(?:\)|\[\]|undefined|null)", code), name
+
+
+def test_the_language_row_is_wired_into_the_settings_page() -> None:
+    """#87: the row is on the Settings page, follows the stored choice, and its button saves it; a new state checks the
+    locale before anything else."""
+    assert "languageRow()" in function_body(APP_CODE, "settingsPage")
+    assert "syncLanguage(main);" in function_body(APP_CODE, "syncSettings")
+    assert re.search(r'action === "language-apply"\) \{\s*applyLanguage\(\);', function_body(APP_CODE, "settingsClick"))
+    assert re.match(r"\{\s*if \(localeReload\(\)\) \{", function_body(APP_CODE, "onState"))
+
+
+@ui_only
+def test_the_language_row_shows_once_a_second_language_is_offered(checks: dict[str, Any]) -> None:
+    row = checks["i18n"]["row"]
+    assert ('<select class="nm-select" id="set-language" aria-labelledby="language-t" aria-describedby="language-d"'
+            ' data-synced="fr">') in row                                              # no data-key: Apply saves it
+    assert 'data-key="language"' not in row
+    assert '<option value="system" lang="en">System default (Türkçe)</option>' in row  # names what system resolves to
+    assert ('<option value="en" lang="en">English</option><option value="fr" lang="fr" selected>Français</option>'
+            '<option value="tr" lang="tr">Türkçe</option>') in row                    # each named in itself
+    assert '<span lang="en">Language</span>' in row                                   # English on a French page
+    assert '<button class="nm-btn" type="button" data-action="language-apply"><span lang="en">Apply</span></button>' in row
+    assert checks["i18nEnglishRow"] == ""                                              # English alone: nothing to choose
+    assert '<option value="fr" lang="fr">Français</option>' in checks["i18nDevRow"]    # a dev instance's language
+
+
+@ui_only
+def test_the_language_list_keeps_a_pick_until_it_is_applied(checks: dict[str, Any]) -> None:
+    assert checks["i18nSync"] == {"kept": "tr", "followed": "system", "synced": "system"}
+    assert checks["i18nApply"] == [{"url": "/api/settings", "method": "POST", "body": {"language": "tr"}}]
+    assert checks["i18nApplyClick"] == [{"url": "/api/settings", "method": "POST", "body": {"language": "es"}}]
+
+
+@ui_only
+def test_a_language_change_reloads_the_page_once(checks: dict[str, Any]) -> None:
+    """The language, the format or the clock: a reload, once. Never on a page that did not know its own locale, and
+    never twice in a row for the same locale in a window, so a server that kept serving another locale could not loop
+    the page."""
+    assert checks["i18nChanged"] == [False, False, False, True, True, True, False]
+    assert checks["i18nLocaleReload"] == [[False, 0], [False, 0], [False, 0], [True, 1]]   # own locale, none, null, new
+    assert checks["i18nReloads"] == 1
+    mark = "usage-monitor-locale-reload:en|en-US|12"
+    assert checks["i18nMarks"] == [{"answered": True, "count": 1, "name": mark},          # the first time: a reload
+                                   {"answered": False, "count": 0, "name": mark},         # the same again: no loop
+                                   {"answered": True, "count": 1, "name": mark}]          # after another locale: again
+    assert checks["i18nUnknownPage"] == [{"answered": False, "count": 0, "name": ""}] * 3
+    assert checks["i18nArrived"] == ""                                      # it came in the marked locale: done
+    assert checks["i18nNotArrived"] == "usage-monitor-locale-reload:en|en-US|12"
+    english = {**i18n.ENGLISH.as_json(), "offered": ["en"]}                 # the page's own fallback, whatever is offered
+    assert checks["i18nDefaultLocale"] == english == checks["i18nBadMeta"] and checks["i18nBadMetaKnown"] is False
 
 
 @ui_only
@@ -1658,9 +1892,11 @@ def test_install_and_remove_are_there_when_setup_can_run_and_the_cost_is_always_
     assert buttons(setup["noClaude"]) == {"install": "disabled", "remove": ""}                 # Remove needs no Claude Code
     for name in ("installing", "removing"):                                                   # one click on its way
         assert buttons(setup[name]) == {"install": "busy", "remove": "busy"}, name
-    assert '(<span class="nm-path">C:\\Users\\t\\AppData\\Roaming\\npm\\claude.CMD</span>) is older than 2.1.139' in setup["tooOldAt"]
-    assert 'Update it with <span class="nm-path">claude update</span>' in setup["tooOld"]
-    assert 'Update it with <span class="nm-path">&amp; &#39;C:\\Users\\t\\.local\\bin\\claude.exe&#39; update</span>' in setup["tooOldOnNoPath"]   # #43
+    assert ('(<span class="nm-path" lang="en" translate="no">C:\\Users\\t\\AppData\\Roaming\\npm\\claude.CMD</span>) is older than 2.1.139'
+            in setup["tooOldAt"])
+    assert 'Update it with <span class="nm-path" lang="en" translate="no">claude update</span>' in setup["tooOld"]
+    assert ('Update it with <span class="nm-path" lang="en" translate="no">&amp; &#39;C:\\Users\\t\\.local\\bin\\claude.exe&#39; update</span>'
+            in setup["tooOldOnNoPath"])   # #43
     for name, html in setup.items():
         assert f'<p class="nm-lede">{GUARD_COST}</p>' in html, name                              # what it costs is said whatever the state
         install = "Installing…" if name == "installing" else "Install"                          # the label of a click on its way says so
@@ -1687,14 +1923,14 @@ def test_a_click_shows_what_changed_the_backup_the_warnings_and_the_errors_each_
     setup = checks["guard"]["setup"]
     done = setup["installed_ok"]
     assert '<div class="nm-callout" role="status"><b>Installed.</b> Added the SessionStart hook. Registered the claude-usage MCP tool.<br>' in done
-    assert 'Backup: <span class="nm-path">C:\\Users\\t\\.claude\\settings.json.usage-monitor-backup-20261028-180509</span>' in done
+    assert 'Backup: <span class="nm-path" lang="en" translate="no">C:\\Users\\t\\.claude\\settings.json.usage-monitor-backup-20261028-180509</span>' in done
     assert '<div class="nm-callout is-warn" role="note">This card checks only the claude command. Claude Code in VS Code has its own version: in VS Code, check under Extensions that it is 2.1.139 or newer.</div>' in done
     assert "<b>Removed.</b> Removed the PostToolUse hook." in setup["removed_ok"]
     assert "<b>Nothing to change.</b> The three hooks were already in place." in setup["nothing"]
     refused = setup["refused"]
     assert '<p class="nm-error" role="alert">Claude Code 2.1.94 is older than 2.1.139' in refused and "nm-callout" not in refused   # no empty box above it
     by_hand = setup["byHand"]
-    assert "To do it by hand, run: <span class=\"nm-path\">claude mcp add --transport stdio --scope user claude-usage" in by_hand
+    assert "To do it by hand, run: <span class=\"nm-path\" lang=\"en\" translate=\"no\">claude mcp add --transport stdio --scope user claude-usage" in by_hand
     assert "<b>Installed.</b> Added the SessionStart hook." in by_hand and '<div class="nm-callout is-warn" role="note">The MCP tool was not registered.' in by_hand
 
 
@@ -1824,7 +2060,7 @@ def paragraphs(html: str) -> list[str]:
 
 
 def commands(html: str) -> list[str]:
-    return [unescape(c) for c in re.findall(r'<code class="nm-path">(.*?)</code>', html)]
+    return [unescape(c) for c in re.findall(r'<code class="nm-path" lang="en" translate="no">(.*?)</code>', html)]
 
 
 def test_the_help_and_the_no_activity_pages_say_what_they_were_given_to_say() -> None:
@@ -1966,8 +2202,8 @@ def test_with_no_sign_in_the_help_says_what_to_do_in_the_words_it_was_given(chec
     assert steps == [SIGNIN_STEPS[0], SIGNIN_STEPS[1] + INSTALL_COMMAND + "Copy" + SIGNIN_PATH_NOTE,
                      SIGNIN_STEPS[2] + START_COMMAND + "Copy" + SIGNIN_SIGN_IN, SIGNIN_STEPS[3]]
     assert commands(html) == [INSTALL_COMMAND, START_COMMAND]                             # each command as code, the way it is typed
-    assert '<div class="nm-cmd" data-command="install"><code class="nm-path">irm https://claude.ai/install.ps1 | iex</code><button class="nm-btn"' in html
-    assert (r'<div class="nm-cmd" data-command="start"><code class="nm-path">&amp; &quot;$env:USERPROFILE\.local\bin\claude.exe&quot;</code>'
+    assert '<div class="nm-cmd" data-command="install"><code class="nm-path" lang="en" translate="no">irm https://claude.ai/install.ps1 | iex</code><button class="nm-btn"' in html
+    assert (r'<div class="nm-cmd" data-command="start"><code class="nm-path" lang="en" translate="no">&amp; &quot;$env:USERPROFILE\.local\bin\claude.exe&quot;</code>'
             '<button class="nm-btn"') in html
     buttons = page.find("button")
     assert [(attrs["data-action"], attrs.get("data-command")) for attrs in buttons] == [

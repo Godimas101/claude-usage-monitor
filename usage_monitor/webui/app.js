@@ -56,7 +56,7 @@
  *             td.lead a row label, tr.is-today a highlighted row, .nm-trunc truncates).
  * Controls    .nm-seg > button[.on][aria-pressed] (segmented), .nm-btn (.solid), .nm-toggle > input + .box +
  *             .lbl, .nm-select, .nm-input (.is-time; aria-invalid), .nm-set > .nm-row-set (.is-stack; .t title,
- *             .d description), .nm-actions, .nm-status (.is-err), .nm-path (a file path, never changed case),
+ *             .d description), .nm-actions, .nm-status (.is-err), .nm-path (a command or a path: lang="en" translate="no", never changed case),
  *             .nm-err (inline validation, role=alert), .nm-levels, .nm-chips > .nm-tchip > b + button,
  *             .nm-addlevel, .nm-quiet, .nm-quiet-to, .nm-themes > .nm-theme (+ .nm-swatches), .nm-variants,
  *             .nm-mode-k, .nm-links, .nm-supp (a list of names), .nm-tier, .nm-authors. A switched-off group
@@ -144,6 +144,31 @@
       return null;
     }
   })();
+  // The app's language and formats (#87), as the monitor decided them. The server puts them in the page, as it does the
+  // token. The page never reads navigator.language: it can disagree with the Language setting and with Windows.
+  var LOCALE_META = (function () {
+    var meta = document.querySelector('meta[name="monitor-locale"]');
+    var text = meta ? meta.getAttribute("content") || "" : "";
+    try {
+      var parsed = text ? JSON.parse(text) : null;
+      return parsed && typeof parsed === "object" && typeof parsed.language === "string" ? parsed : null;
+    } catch (e) {
+      return null;
+    }
+  })();
+  // Whether the server said which locale it served the page in. A page that cannot tell (no meta, or one it cannot read)
+  // never reloads for a locale: it would not know that it already shows the right one.
+  var LOCALE_KNOWN = LOCALE_META !== null;
+  var LOCALE = LOCALE_META || { setting: "system", language: "en", system: "en", format: "en-US", clock: 12, offered: ["en"] };
+  var LOCALE_RELOAD_MARK = "usage-monitor-locale-reload:";
+  // A reload that brought the page into the locale it was for is done: its mark goes (reloadForLocale).
+  if (LOCALE_KNOWN && window.name === localeMark(LOCALE)) {
+    window.name = "";
+  }
+  // The catalog, from /static/i18n/<lang>.js (loaded before this file): the language's own strings, English behind them.
+  var I18N = window.MonitorI18n || { language: "en", strings: {}, fallback: {} };
+  // Each language named in itself, as the Language setting lists them (the same names as i18n.NAMES).
+  var LANGUAGE_NAMES = { en: "English", fr: "Français", es: "Español", tr: "Türkçe" };
   var CHARTS = window.MonitorCharts;
   var PAGES = [
     { key: "overview", label: "OVERVIEW", title: "OVERVIEW", sub: "Session telemetry for the current window. Pace is usage against elapsed time." },
@@ -374,6 +399,116 @@
 
   function $(selector, root) {
     return (root || document).querySelector(selector);
+  }
+
+  // ── Text (#87) ───────────────────────────────────────────────────────────────────
+  // Catalog strings are plain text with {named} placeholders. t() gives text for textContent; tHtml() gives escaped
+  // HTML, inserting a value as is only when it is markup() this file built (tCode, tPath, tName, a link). Nothing from
+  // outside can pass for markup: it is known by a prototype only this file holds.
+
+  /* A catalog entry and the language it came from: the page's own, or English when its catalog lacks the key. */
+  function lookupText(key) {
+    var own = I18N.strings || {};
+    if (I18N.language !== "en" && Object.prototype.hasOwnProperty.call(own, key)) {
+      return { value: own[key], lang: I18N.language };
+    }
+    var english = I18N.fallback || {};
+    return Object.prototype.hasOwnProperty.call(english, key) ? { value: english[key], lang: "en" } : null;
+  }
+
+  function fillText(text, values) {
+    return String(text).replace(/\{([A-Za-z_][A-Za-z0-9_]*)\}/g, function (whole, name) {
+      return values && Object.prototype.hasOwnProperty.call(values, name) ? String(values[name]) : whole;
+    });
+  }
+
+  var MARKUP = {};
+
+  /* HTML this file built, for a tHtml() placeholder. */
+  function markup(html) {
+    var built = Object.create(MARKUP);
+    built.html = String(html);
+    return built;
+  }
+
+  function isMarkup(value) {
+    return value !== null && typeof value === "object" && Object.getPrototypeOf(value) === MARKUP;
+  }
+
+  /* A command, for a block of its own: never translated, and never cased or broken by a language's rules. */
+  function tCode(text) {
+    return markup('<code class="nm-path" lang="en" translate="no">' + esc(text) + "</code>");
+  }
+
+  /* A command or a path inside a sentence, as tCode. */
+  function tPath(text) {
+    return markup('<span class="nm-path" lang="en" translate="no">' + esc(text) + "</span>");
+  }
+
+  /* A name as given (a model, a plan, a folder, a session, a tool, Claude Code): never translated, cased by English
+   * rules, though still in the theme's capitals. */
+  function tName(text) {
+    return markup('<span lang="en" translate="no">' + esc(text) + "</span>");
+  }
+
+  /* The CLDR plural category of count in language: i18n.plural_category's rules, so the page and the app agree whatever
+   * the WebView's own ICU says. en and tr have one and other; fr and es have one, many and other; French counts 0, 1
+   * and 1.5 as one. A count that is not a finite number is other. */
+  function pluralCategory(language, count) {
+    if (typeof count !== "number" || !isFinite(count)) {
+      return "other";
+    }
+    var n = Math.abs(count);
+    var whole = Math.floor(n);
+    var many = n === whole && whole !== 0 && whole % 1000000 === 0;
+    if (language === "fr") {
+      return whole === 0 || whole === 1 ? "one" : many ? "many" : "other";
+    }
+    if (language === "es") {
+      return n === 1 ? "one" : many ? "many" : "other";
+    }
+    return n === 1 ? "one" : "other";
+  }
+
+  /* The text for key with its placeholders filled; the key itself when no catalog has it (a bug, and easy to see). */
+  function t(key, values) {
+    var found = lookupText(key);
+    return found && typeof found.value === "string" ? fillText(found.value, values) : key;
+  }
+
+  /* The language t(key) comes from. An element showing English on another language's page gets lang="en". */
+  function tLang(key) {
+    var found = lookupText(key);
+    return found ? found.lang : "en";
+  }
+
+  /* Escaped HTML for key. English text on another language's page is wrapped in lang="en", so it is cased by English
+   * rules (a Turkish page would otherwise turn SESSION into SESSİON). */
+  function tHtml(key, values) {
+    var found = lookupText(key);
+    var text = found && typeof found.value === "string" ? found.value : key;
+    var out = esc(text).replace(/\{([A-Za-z_][A-Za-z0-9_]*)\}/g, function (whole, name) {
+      if (!values || !Object.prototype.hasOwnProperty.call(values, name)) {
+        return whole;
+      }
+      var value = values[name];
+      return isMarkup(value) ? value.html : esc(value);
+    });
+    return found && found.lang !== I18N.language ? '<span lang="en">' + out + "</span>" : out;
+  }
+
+  /* The plural entry for count, chosen by the CLDR rules of the language the entry came from; {count} is filled too. */
+  function tPlural(key, count, values) {
+    var found = lookupText(key);
+    if (!found || !found.value || typeof found.value !== "object") {
+      return key;
+    }
+    var category = pluralCategory(found.lang, count);
+    var all = { count: count };
+    Object.keys(values || {}).forEach(function (name) {
+      all[name] = values[name];
+    });
+    return fillText(found.value[category] || found.value.other || "", all);
   }
 
   function esc(value) {
@@ -3088,6 +3223,38 @@
       }).join("") + "</select></label>";
   }
 
+  /* The Language setting (#87). Shown once a second language is offered: with English alone there is nothing to choose
+   * (a dev instance that shows a language not offered yet lists that one too). "System default" names what it resolves
+   * to; each language is named in itself, with its own lang. The list is applied with its button, not when it changes:
+   * the dashboard reloads in the new language, which would get in the way of someone moving through the list. */
+  function languageRow() {
+    var languages = (LOCALE.offered || []).filter(function (language) {
+      return Object.prototype.hasOwnProperty.call(LANGUAGE_NAMES, language);
+    });
+    if (languages.indexOf(LOCALE.language) < 0 && Object.prototype.hasOwnProperty.call(LANGUAGE_NAMES, LOCALE.language)) {
+      languages.push(LOCALE.language);
+    }
+    if (languages.length < 2) {
+      return "";
+    }
+    var system = LANGUAGE_NAMES[LOCALE.system] || LANGUAGE_NAMES.en;
+    var chosen = typeof LOCALE.setting === "string" ? LOCALE.setting : "system";
+    function option(value, label, lang) {
+      return '<option value="' + esc(value) + '" lang="' + esc(lang) + '"' + (value === chosen ? " selected" : "") + ">" +
+        esc(label) + "</option>";
+    }
+    return '<div class="nm-row-set"><span><span class="t" id="language-t">' + tHtml("settings.language.label") +
+      '</span><span class="d" id="language-d">' + tHtml("settings.language.help") + "</span></span>" +
+      '<span class="nm-quiet"><select class="nm-select" id="set-language" aria-labelledby="language-t" aria-describedby="language-d"' +
+      ' data-synced="' + esc(chosen) + '">' +
+      option("system", t("settings.language.system", { language: system }), tLang("settings.language.system")) +
+      languages.map(function (language) {
+        return option(language, LANGUAGE_NAMES[language], language);
+      }).join("") +
+      '</select><button class="nm-btn" type="button" data-action="language-apply">' + tHtml("settings.language.apply") +
+      "</button></span></div>";
+  }
+
   function errLine(key) {
     return '<p class="nm-err" id="err-' + key + '" role="alert" hidden></p>';
   }
@@ -3123,6 +3290,7 @@
         '<section class="nm-card wide" aria-label="Theme"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Theme</h2><span class="nm-meta-t" id="set-theme-meta"></span></div>' +
         '<div class="nm-themes" id="set-themes"></div><div id="set-mode" class="nm-actions" hidden></div><div class="nm-variants" id="set-accents"></div></div></section>' +
         '<section class="nm-card" aria-label="Widgets and display"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Widgets &amp; display</h2><span class="nm-meta-t">floating and taskbar</span></div><div class="nm-set">' +
+        languageRow() +
         toggleRow("show_floating", "Floating widget", "Show the always-on-top widget on the desktop.") +
         toggleRow("show_taskbar", "Taskbar strip", "Show the strip beside the clock.") +
         toggleRow("float_transparent_bg", "Transparent widget", "No plate behind the floating widget.") +
@@ -3204,6 +3372,25 @@
     syncAlerts(main);
     syncGuard(main);
     syncUpdate(main);
+    syncLanguage(main);
+  }
+
+  /* The Language list follows the stored choice as the monitor reads it (#87; a language that is not offered yet reads
+   * as System default), but only when that changes: a pick not applied yet is never undone by the next state. */
+  function syncLanguage(main) {
+    var select = $("#set-language", main);
+    var locale = S.data && S.data.locale;
+    if (!select || !locale) {
+      return;
+    }
+    var value = typeof locale.setting === "string" ? locale.setting : "system";
+    if (select.getAttribute("data-synced") === value) {
+      return;
+    }
+    select.setAttribute("data-synced", value);
+    if (Array.prototype.some.call(select.options, function (o) { return o.value === value; })) {
+      select.value = value;
+    }
   }
 
   /* The hint beside the override names the detected price, never the override: that is what a blank field goes back to. */
@@ -3486,11 +3673,11 @@
     var head = r.ok ? (changed.length ? (r.action === "remove" ? "Removed." : "Installed.") : "Nothing to change.") : changed.length ? "Partly done." : "";
     var summary = (head ? "<b>" + esc(head) + "</b> " : "") + esc(said);
     if (r.backup) {
-      summary += (summary ? "<br>" : "") + 'Backup: <span class="nm-path">' + esc(r.backup) + "</span>";
+      summary += (summary ? "<br>" : "") + "Backup: " + tPath(r.backup).html;
     }
     var notes = (Array.isArray(r.warnings) ? r.warnings : []).map(esc);
     if (r.manual) {
-      notes.push('To do it by hand, run: <span class="nm-path">' + esc(r.manual) + "</span>");
+      notes.push("To do it by hand, run: " + tPath(r.manual).html);
     }
     return (summary ? '<div class="nm-callout" role="status">' + summary + "</div>" : "") +
       (notes.length ? '<div class="nm-callout is-warn" role="note">' + notes.join("<br>") + "</div>" : "") +
@@ -3517,8 +3704,8 @@
       } else if (s.claude && s.claude.supported === false) {
         // Which claude: an old npm copy can come first on the PATH while another one is up to date.
         notes += '<div class="nm-callout is-warn" role="note">Claude Code ' + esc(s.claude.version) +
-          (where ? ' (<span class="nm-path">' + esc(where) + "</span>)" : "") + " is older than " + esc(s.claude.min_version) +
-          ", which the hooks need. Update it with <span class=\"nm-path\">" + esc((s.claude.command || "claude") + " update") + "</span> first.</div>";
+          (where ? " (" + tPath(where).html + ")" : "") + " is older than " + esc(s.claude.min_version) +
+          ", which the hooks need. Update it with " + tPath((s.claude.command || "claude") + " update").html + " first.</div>";
       }
       (Array.isArray(s.errors) ? s.errors : []).forEach(function (error) {
         notes += '<p class="nm-error" role="alert">' + esc(error) + "</p>";
@@ -3806,7 +3993,7 @@
 
   /* A command the user types: it keeps its case in every theme. */
   function codeText(text) {
-    return '<code class="nm-path">' + esc(text) + "</code>";
+    return tCode(text).html;
   }
 
   /* The copy button of one command (a key of COMMANDS). Only the button that was pressed gives the answer. */
@@ -4327,10 +4514,20 @@
       installUpdate();
     } else if (action === "skip-update") {
       skipUpdate();
+    } else if (action === "language-apply") {
+      applyLanguage();
     } else if (action === "guard-resume") {
       guardResume();
     } else if (action === "guard-install" || action === "guard-remove") {
       guardSetup(action === "guard-install" ? "install" : "remove");
+    }
+  }
+
+  /* Apply the Language choice (#87). The next state carries the new locale, and onState reloads the page into it. */
+  function applyLanguage() {
+    var select = $("#set-language");
+    if (select) {
+      saveSettings({ language: select.value }, "LANGUAGE");
     }
   }
 
@@ -4403,7 +4600,7 @@
   /* The status line: the words in capitals, a file name or path exactly as it is. */
   function exportStatusHtml() {
     var x = S.exportStatus;
-    return esc(x.text) + (x.path ? ' <span class="nm-path">' + esc(x.path) + "</span>" : "");
+    return esc(x.text) + (x.path ? " " + tPath(x.path).html : "");
   }
 
   function setExportStatus(text, isError, path) {
@@ -4835,7 +5032,49 @@
     });
   }
 
+  /* Whether the monitor would now serve the page in another locale than this one's (#87): the Language setting changed, or
+   * Windows' regional format or clock did. Only what the page shows counts. */
+  function localeChanged(locale) {
+    return !!locale && typeof locale.language === "string" &&
+      (locale.language !== LOCALE.language || locale.format !== LOCALE.format || locale.clock !== LOCALE.clock);
+  }
+
+  /* The mark a reload into locale leaves in the window's name. */
+  function localeMark(locale) {
+    return LOCALE_RELOAD_MARK + [locale.language, locale.format, locale.clock].join("|");
+  }
+
+  /* Reload into the monitor's new locale. Never when this page did not know its own. The window's name carries a mark over
+   * the reload (it belongs to this window and ends with it; app.js keeps nothing in browser storage, #54), and a page that
+   * arrives in the marked locale clears it. So only a reload that failed to bring the page into its locale holds back the
+   * next one for that locale, and a server that kept serving another locale could not loop the page. */
+  function reloadForLocale(locale) {
+    if (!LOCALE_KNOWN) {
+      return false;
+    }
+    if (S.reloading) {
+      return true;
+    }
+    var mark = localeMark(locale);
+    if (window.name === mark) {
+      return false;
+    }
+    window.name = mark;
+    S.reloading = true;
+    window.location.reload();
+    return true;
+  }
+
+  /* What a new state does first: reload into the monitor's new locale, if it has one. */
+  function localeReload() {
+    var locale = S.data && S.data.locale;
+    return localeChanged(locale) && reloadForLocale(locale);
+  }
+
   function onState() {
+    if (localeReload()) {
+      return;                                            // the page comes back in the monitor's new locale
+    }
     var s = st();
     if (s && s.updated_at && s.updated_at !== S.lastUpdatedAt) {
       S.lastUpdatedAt = s.updated_at;
@@ -5085,7 +5324,11 @@
       updateBanner: updateBanner, themeSwatches: themeSwatches, accentLabel: accentLabel, renderVariants: renderVariants,
       syncThemePicker: syncThemePicker, chooseAccent: chooseAccent, currentPage: currentPage, skelCost: skelCost,
       skelEfficiency: skelEfficiency, skelHistory: skelHistory, errorSwap: errorSwap, tagCard: tagCard, cardPart: cardPart,
-      playEnterIfDue: playEnterIfDue, wantEnter: wantEnter, loadPrefs: loadPrefs, savePrefs: savePrefs, onSegment: onSegment,
+      playEnterIfDue: playEnterIfDue, wantEnter: wantEnter, loadPrefs: loadPrefs, savePrefs: savePrefs, onSegment: onSegment, t: t, tLang: tLang, tHtml: tHtml, tPlural: tPlural,
+      LOCALE: LOCALE, I18N: I18N, LANGUAGE_NAMES: LANGUAGE_NAMES, languageRow: languageRow, onState: onState,
+      LOCALE_KNOWN: LOCALE_KNOWN, markup: markup, tCode: tCode, tPath: tPath, tName: tName, pluralCategory: pluralCategory,
+      localeChanged: localeChanged, reloadForLocale: reloadForLocale, syncLanguage: syncLanguage, applyLanguage: applyLanguage,
+      localeReload: localeReload, localeMark: localeMark,
       PREF_CHOICES: PREF_CHOICES, SAVED_PREFS: SAVED_PREFS, PAGE_KEYS: PAGE_KEYS, clockText: clockText,
       errorText: errorText, failedText: failedText, checkUpdateText: checkUpdateText, settingsClick: settingsClick,
       updateAction: updateAction, installUpdate: installUpdate, skipUpdate: skipUpdate, aboutPage: aboutPage,

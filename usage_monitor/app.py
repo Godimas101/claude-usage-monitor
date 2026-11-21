@@ -50,7 +50,7 @@ from typing import Any
 
 import update_check
 import version
-from usage_monitor import paths, themes
+from usage_monitor import i18n, paths, themes
 from usage_monitor.agent import sessions as agent_sessions
 from usage_monitor.data.alerts import AlertEngine
 from usage_monitor.data.models import ApiStatus, MonitorState
@@ -103,6 +103,8 @@ UPDATE_TOAST_BODY = "Open the tray menu or the dashboard to update"
 # Settings that change what the UI shows. Anything else (poll interval, dashboard bounds) is ignored here.
 THEME_KEYS = frozenset({"theme", "theme_id", "theme_variant", "theme_mode"})
 WIDGET_KEYS = frozenset({"show_floating", "show_taskbar"})
+# The app's language (#87): the widgets, strip and tooltip follow it at once, the menus at their next open.
+LANGUAGE_KEYS = frozenset({"language"})
 LOOK_KEYS = frozenset({
     "float_transparent_bg", "float_text_fx", "taskbar_transparent_bg", "taskbar_text_fx",
     "show_scoped_rows", "reduce_motion", "hide_floating_in_fullscreen", "position",
@@ -549,8 +551,13 @@ class MonitorApp:
         mutex: str | None = None,
         smoke: SmokeTest | None = None,
         animate_when_locked: bool = False,
+        language_reader: i18n.WindowsLanguage | None = None,
     ) -> None:
         self.dev = is_dev_instance() if dev is None else dev
+        # The app's language and formats (#87): the language setting, then Windows (read through language_reader).
+        self.locale = i18n.LocaleSource(
+            lambda: setting(self.settings, "language") if self.settings is not None else "system",
+            windows=language_reader if language_reader is not None else i18n.LazyWindows())
         self._settings_arg = settings
         pause = pause_check or platform_api.should_pause    # locked or screensaver: the data service waits
         # The data service also writes the status file Claude sessions read (#24).
@@ -661,6 +668,7 @@ class MonitorApp:
             dev=self.dev,
             analytics_store=analytics_store,
             pricing_provider=lambda: service_pricing(self.service),
+            locale_provider=self.locale,
         )
         self.server.start()
         self.launcher = DashboardLauncher(self.server, settings)
@@ -1007,7 +1015,7 @@ class MonitorApp:
         """Settings listener, on whichever thread changed the setting."""
         if key == "guard_enabled" and _value is True:     # a new holding episode starts from it (agent/guard.episode)
             self.settings.set(GUARD_ON_KEY, self._clock().astimezone(timezone.utc).isoformat(timespec="seconds"))
-        if key.startswith("_") or key not in (THEME_KEYS | WIDGET_KEYS | LOOK_KEYS | {"check_updates"}):
+        if key.startswith("_") or key not in (THEME_KEYS | WIDGET_KEYS | LOOK_KEYS | LANGUAGE_KEYS | {"check_updates"}):
             return
         with self._lock:
             self._dirty.add(key)
@@ -1055,6 +1063,8 @@ class MonitorApp:
             return
         if area == "ImmersiveColorSet":
             self._resolved = None
+        if area == "intl":                                  # the regional format or the clock changed (#87)
+            self.locale.refresh()
         self._refresh()
 
     # ── Widgets ──
