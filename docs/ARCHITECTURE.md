@@ -263,9 +263,12 @@ class UsageClient:
     def __init__(self, credentials_path: Path | None = None, *, timeout: float = 10, opener=None, user_agent: str = ...): ...
     def fetch(self, now: datetime) -> FetchResult      # never raises; honours backoff
     status: ApiStatus; last_snapshot: UsageSnapshot | None; last_ok_at: datetime | None; next_allowed_at: datetime | None
+    refused: int | None                                # the 401/403 behind a STALE status, else None (#55)
 ```
 - Expired token (`expiresAt` past) → `STALE` without calling the API. 401/403 → `STALE`;
-  don't retry until `.credentials.json` changes (mtime). 429 → `RATE_LIMITED`, honour
+  don't retry until `.credentials.json` changes (mtime). The code stays in `refused` (and `FetchResult.refused`) while the
+  status is `STALE`, even after the refused token runs out, and `DataService` copies it into `MonitorState.signin_refused`,
+  so a 403, which only a new sign-in fixes, is not worded as an expired sign-in (#55). 429 → `RATE_LIMITED`, honour
   `Retry-After`, else exponential backoff 60 s → 15 min. Network / 5xx → `OFFLINE`,
   backoff 30 s → 15 min. 200 → `LIVE`, backoff reset.
 - Never writes to `.credentials.json`. A readable file is authoritative (missing sign-in →

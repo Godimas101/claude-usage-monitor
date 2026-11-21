@@ -465,6 +465,9 @@ class DataService:
             updated_at=now,
             guard=agent_guard.evaluate(agent_guard.limits_doc(self._live_usage(now)),
                                        agent_guard.policy_from(self._settings.get), now),
+            # the refusal behind a STALE that came from the fetch; a status set here (PAUSED, say) carries none (#55)
+            signin_refused=(fetch.refused if fetch is not None and status is ApiStatus.STALE and status is fetch.status
+                            else None),
         )
 
     # ── Helpers ──

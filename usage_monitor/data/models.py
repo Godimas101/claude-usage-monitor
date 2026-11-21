@@ -360,3 +360,4 @@ class MonitorState:
     ingest: IngestProgress
     updated_at: datetime
     guard: dict = field(default_factory=dict)  # agent/guard.py evaluate(): state, over, resume_at, policy
+    signin_refused: int | None = None   # 401 or 403 when the usage API turned the sign-in down; set only while STALE (#55)

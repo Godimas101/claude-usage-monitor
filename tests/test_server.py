@@ -218,7 +218,8 @@ def webui(tmp_path: Path) -> Path:
     (root / "themes").mkdir(parents=True)
     (root / "fonts").mkdir()
     (root / "index.html").write_text(
-        '<!doctype html><html><head><meta name="monitor-token" content=""></head><body>ok</body></html>',
+        '<!doctype html><html><head><meta name="monitor-token" content=""><meta name="monitor-prefs" content=""></head>'
+        '<body>ok</body></html>',
         encoding="utf-8")
     (root / "app.js").write_text("console.log('app');", encoding="utf-8")
     (root / "themes" / "nostromo.css").write_text("body{}", encoding="utf-8")
@@ -368,6 +369,81 @@ def test_the_url_the_server_hands_out_opens_the_page(make_server: Any) -> None:
     quoted = urllib.parse.quote(server.token, safe="")
     assert request(server, "GET", f"/?k={quoted}")[0] == 200            # a percent-encoded key is the same key
     assert request(server, "GET", f"/?x=1&k={server.token}&y=2")[0] == 200
+
+
+def test_the_page_carries_the_dashboards_saved_choices(make_server: Any) -> None:
+    """#54: the choices go into the page as the token does, so its first paint already uses them."""
+    server, _ = make_server()
+    assert '<meta name="monitor-prefs" content="">' in request(server, "GET", "/")[2].decode("utf-8")      # none saved yet
+    choices = {"costWindow": "week", "folderMode": "launch"}
+    status, reply = post_json(server, "/api/settings", {"dashboard_prefs": choices})
+    assert status == 200 and reply["settings"]["dashboard_prefs"] == choices
+    page = request(server, "GET", "/")[2].decode("utf-8")
+    assert '<meta name="monitor-prefs" content="{&quot;costWindow&quot;:&quot;week&quot;,&quot;folderMode&quot;:&quot;launch&quot;}">' in page
+    assert f'<meta name="monitor-token" content="{server.token}">' in page                            # the token is still in
+
+
+def test_a_stored_set_of_choices_that_is_not_valid_is_left_out_of_the_page(make_server: Any, settings: Settings) -> None:
+    settings.set("dashboard_prefs", {"costWindow": "<script>alert(1)</script>"})       # a hand edit of the settings file
+    server, _ = make_server()
+    page = request(server, "GET", "/")[2].decode("utf-8")
+    assert '<meta name="monitor-prefs" content="">' in page and "alert(1)" not in page
+
+
+def test_only_the_stored_choices_the_page_knows_go_into_it(make_server: Any, settings: Settings) -> None:
+    """A hand edit, or a file from another version, may hold names or values the page does not know: each is left out on
+    its own, and the rest still reach the page."""
+    settings.set("dashboard_prefs", {"costWindow": "week", "calMetric": "<script>", "nerdsWindow": "today"})
+    server, _ = make_server()
+    page = request(server, "GET", "/")[2].decode("utf-8")
+    assert '<meta name="monitor-prefs" content="{&quot;costWindow&quot;:&quot;week&quot;}">' in page
+    assert "script" not in page.split('name="monitor-prefs"')[1].split(">")[0]
+
+
+def test_a_saved_choice_is_merged_into_the_held_ones(make_server: Any, settings: Settings) -> None:
+    """#54: a window sends only the choice that changed, so two windows never undo each other's. null clears them all."""
+    settings.set("dashboard_prefs", {"costWindow": "week", "calMetric": "bogus"})      # a stray entry is dropped on the way
+    server, _ = make_server()
+    status, reply = post_json(server, "/api/settings", {"dashboard_prefs": {"folderMode": "launch"}})
+    assert status == 200 and reply["settings"]["dashboard_prefs"] == {"costWindow": "week", "folderMode": "launch"}
+    status, reply = post_json(server, "/api/settings", {"dashboard_prefs": {"costWindow": "month"}})
+    assert reply["settings"]["dashboard_prefs"] == {"costWindow": "month", "folderMode": "launch"}
+    assert post_json(server, "/api/settings", {"dashboard_prefs": {"costWindow": "year"}})[0] == 400   # nothing is applied
+    assert settings.get("dashboard_prefs") == {"costWindow": "month", "folderMode": "launch"}
+    status, reply = post_json(server, "/api/settings", {"dashboard_prefs": None})
+    assert status == 200 and reply["settings"]["dashboard_prefs"] is None
+
+
+def test_the_dashboards_choices_survive_a_restart_on_a_new_port(webui: Path, tmp_path: Path) -> None:
+    """#54: the page's own storage does not last (pywebview's private mode; the browser fallback's port is new on every run),
+    so the choices live in the settings file.
+    The second run starts while the first still holds its port, so the two ports differ for certain."""
+    path = tmp_path / "restart" / "settings.json"
+
+    def run(store: Settings) -> ApiServer:
+        server = ApiServer(state_provider=sample_state, settings=store, refresh_cb=None, update_cb={},
+                           version="2.0.0-test", dev=False, webui_dir=webui)
+        server.start()
+        return server
+
+    first_store = Settings(path, save_delay_s=0.0)
+    first = run(first_store)
+    second_store: Settings | None = None
+    second: ApiServer | None = None
+    try:
+        assert post_json(first, "/api/settings", {"dashboard_prefs": {"efficiencyWindow": "month"}})[0] == 200
+        first_store.close()                                                                # the first run ends: its file is written
+        second_store = Settings(path, save_delay_s=0.0)                                    # the next run reads the file afresh
+        second = run(second_store)
+        assert second.port != first.port
+        assert '{&quot;efficiencyWindow&quot;:&quot;month&quot;}' in request(second, "GET", "/")[2].decode("utf-8")
+        assert json.loads(request(second, "GET", "/api/state")[2])["settings"]["dashboard_prefs"] == {"efficiencyWindow": "month"}
+    finally:
+        first.stop()
+        if second is not None:
+            second.stop()
+        if second_store is not None:
+            second_store.close()
 
 
 @pytest.mark.parametrize("query", [
@@ -801,6 +877,7 @@ def test_settings_view_has_defaults_for_unset_keys(make_server: Any, themes_modu
     assert settings_view["show_scoped_rows"] == "auto"
     assert settings_view["billing_day"] is None
     assert settings_view["dashboard_bounds"] is None
+    assert settings_view["dashboard_prefs"] is None
     assert set(settings_view) == set(server_mod.SETTING_SPECS)
 
 
@@ -873,6 +950,11 @@ ACCEPTED: list[dict[str, Any]] = [
     {"alert_quiet_hours": None},
     {"dashboard_bounds": {"x": -1200, "y": 40, "w": 1200, "h": 780}},
     {"dashboard_bounds": None},
+    {"dashboard_prefs": {"costWindow": "week", "efficiencyWindow": "all", "folderMode": "launch", "calMetric": "tokens",
+                         "matrixMetric": "requests"}},
+    {"dashboard_prefs": {"costWindow": "session"}},
+    {"dashboard_prefs": {}},
+    {"dashboard_prefs": None},
     {"theme_id": "gates", "theme_variant": "blue-light", "theme_mode": "light"},
     {"theme_id": "gates", "theme_variant": "blue", "theme_mode": "system"},
     {"theme_id": "night_city", "theme_variant": "cyan"},
@@ -936,6 +1018,11 @@ REJECTED: list[tuple[str, bytes]] = [
     ("bounds extra key", b'{"dashboard_bounds": {"x": 0, "y": 0, "w": 1200, "h": 780, "z": 1}}'),
     ("bounds as float", b'{"dashboard_bounds": {"x": 0.5, "y": 0, "w": 1200, "h": 780}}'),
     ("bounds off screen", b'{"dashboard_bounds": {"x": 90000, "y": 0, "w": 1200, "h": 780}}'),
+    ("choices with an unknown name", b'{"dashboard_prefs": {"nerdsWindow": "week"}}'),
+    ("a choice with an unknown value", b'{"dashboard_prefs": {"costWindow": "year"}}'),
+    ("a choice that is not text", b'{"dashboard_prefs": {"calMetric": 1}}'),
+    ("choices as a list", b'{"dashboard_prefs": ["cost"]}'),
+    ("choices as text", b'{"dashboard_prefs": "week"}'),
     ("not an object", b'[1, 2]'),
     ("bare string", b'"hello"'),
     ("invalid json", b'{"show_floating": '),

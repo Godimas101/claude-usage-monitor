@@ -680,6 +680,8 @@ def test_band_wording_follows_the_theme_copy_and_the_status():
     assert theme().extras["copy"]["no_login"] == nc.DEFAULT_NO_LOGIN == "NO LOGIN // OPEN DASHBOARD"   # no Claude Code to open (#28)
     assert nc._band_text(theme(), model(sample_rows(), ApiStatus.OFFLINE)) == theme().extras["copy"]["offline"]
     assert nc._band_text(theme(), model(sample_rows(), ApiStatus.RATE_LIMITED)) == "RATE LIMITED"
+    refused = replace(model(sample_rows(), ApiStatus.STALE), stale_message=nc.STALE_MESSAGE_REFUSED)      # HTTP 403 (#55)
+    assert nc._band_text(theme(), refused) == theme().extras["copy"]["stale_refused"] == nc.DEFAULT_STALE_REFUSED == "RELINK // RUN /login"
     assert nc._age_tag(model(sample_rows(), ApiStatus.STALE, age="41 M AGO")) == "41 M OLD"
     assert nc._age_tag(model(sample_rows(), ApiStatus.LIVE, age="12 S AGO")) is None
     assert nc._age_tag(model(sample_rows(), ApiStatus.NO_CREDENTIALS, age=None)) is None

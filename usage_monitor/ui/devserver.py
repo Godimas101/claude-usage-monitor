@@ -1,7 +1,7 @@
 """Dev helper: the real webui on the local API, fed by a fake MonitorState (no Win32, no tray).
 
     python -m usage_monitor.ui.devserver --port 8765
-        --scenario normal|warning|critical|stale|guard|no_login|limits_only [--db PATH] [--theme ID[/VARIANT]]
+        --scenario normal|warning|critical|stale|refused|guard|no_login|limits_only [--db PATH] [--theme ID[/VARIANT]]
 
 Used for Playwright checks and design review. Settings go to USAGE_MONITOR_APPDATA_DIR (or a temporary
 folder), never to the owner's real app data, and the server is a dev one, so the "Start with
@@ -79,14 +79,15 @@ from usage_monitor.data.models import (
 )
 from usage_monitor.data.pricing import Pricing
 from usage_monitor.data.store import Store
-from usage_monitor.data.usage_api import EXPIRED_DETAIL, NO_SIGN_IN_DETAIL
+from usage_monitor.data.usage_api import EXPIRED_DETAIL, NO_SIGN_IN_DETAIL, REJECTED_ADVICE
 from usage_monitor.log import get_logger
 from usage_monitor.settings import Settings
 from usage_monitor.ui.server import ApiServer, open_statistics_store
 
 log = get_logger(__name__)
 
-SCENARIOS = ("normal", "warning", "critical", "stale", "guard", "no_login", "limits_only")
+# "refused" is a sign-in the usage API turned down with HTTP 403 (#55): its help asks for /login, not for a message.
+SCENARIOS = ("normal", "warning", "critical", "stale", "refused", "guard", "no_login", "limits_only")
 # Scenarios of someone who uses Claude on the web or in the app (#28): no Claude Code transcript on this PC, so nothing is counted.
 NO_TRANSCRIPTS = ("no_login", "limits_only")
 _SESSION_S = 5 * 3600
@@ -104,6 +105,7 @@ _SCENARIO_PCT = {
     "warning": (72, 21, 4),
     "critical": (93, 58, 12),
     "stale": (13, 2, 0),
+    "refused": (13, 2, 0),
     "guard": (96, 58, 12),          # the session is past the guard's 95 % cap, the week and Fable are not
     "no_login": (0, 0, 0),          # no limits at all: there is no sign-in to read them with
     "limits_only": (13, 2, 0),      # the limits of the normal scenario
@@ -154,11 +156,14 @@ def fake_state(scenario: str, now: datetime) -> MonitorState:
     weekly_reset = now + timedelta(days=2, hours=23)       # 57 % of the 7-day window elapsed
     severity = {"critical": ("critical", "warning"), "guard": ("critical", "warning"),
                 "warning": ("warning", "normal")}.get(scenario, ("normal", "normal"))
-    fetched = now - timedelta(minutes=41) if scenario == "stale" else now - timedelta(seconds=12)
-    status = {"stale": ApiStatus.STALE, "no_login": ApiStatus.NO_CREDENTIALS}.get(scenario, ApiStatus.LIVE)
-    # A missing or an expired sign-in in UsageClient's own words, as the dashboard's sign-in help shows them.
+    fetched = now - timedelta(minutes=41) if scenario in ("stale", "refused") else now - timedelta(seconds=12)
+    status = {"stale": ApiStatus.STALE, "refused": ApiStatus.STALE,
+              "no_login": ApiStatus.NO_CREDENTIALS}.get(scenario, ApiStatus.LIVE)
+    # A missing, an expired or a refused sign-in in UsageClient's own words, as the dashboard's sign-in help shows them.
     detail = {ApiStatus.STALE: EXPIRED_DETAIL,
               ApiStatus.NO_CREDENTIALS: NO_SIGN_IN_DETAIL}.get(status, "Live usage from the Claude API.")
+    if scenario == "refused":
+        detail = f"Claude did not accept the sign-in (HTTP 403); {REJECTED_ADVICE[403]}"
 
     limits = [
         Limit(kind="session", group="session", percent=float(session_pct), severity=severity[0],
@@ -205,7 +210,8 @@ def fake_state(scenario: str, now: datetime) -> MonitorState:
         windows["all"] = WindowStats(name="all", start=None, end=None)
     burn_by_scenario = {"normal": (1240.0, 6.10, "NORMAL"), "warning": (2140.0, 10.40, "FAST"),
                         "critical": (3400.0, 17.20, "VERY FAST"), "guard": (3400.0, 17.20, "VERY FAST"),
-                        "stale": (0.0, 0.0, "IDLE"), "no_login": (0.0, 0.0, "IDLE"), "limits_only": (0.0, 0.0, "IDLE")}
+                        "stale": (0.0, 0.0, "IDLE"), "refused": (0.0, 0.0, "IDLE"), "no_login": (0.0, 0.0, "IDLE"),
+                        "limits_only": (0.0, 0.0, "IDLE")}
     tokens_per_min, usd_per_hour, velocity = burn_by_scenario[scenario]
     # A gentle minute-to-minute drift, so the burn trace has a shape to draw.
     drift = 1.0 + 0.12 * math.sin(now.timestamp() / 150.0)
@@ -231,6 +237,7 @@ def fake_state(scenario: str, now: datetime) -> MonitorState:
         unpriced_models=["claude-opus-6-preview"] if scenario == "critical" else [],
         ingest=ingest,
         updated_at=now - timedelta(seconds=12),
+        signin_refused=403 if scenario == "refused" else None,
     )
 
 

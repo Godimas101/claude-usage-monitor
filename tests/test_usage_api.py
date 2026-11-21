@@ -457,20 +457,36 @@ def test_token_is_expired_at_its_expiry_instant_not_a_second_later(tmp_path):
 def test_401_and_403_are_stale_until_the_credentials_file_changes(tmp_path, code):
     path = write_credentials(tmp_path / ".credentials.json")
     client, opener = make_client(path, http_error(code), ok())
-    assert client.fetch(T0).status is ApiStatus.STALE
+    first = client.fetch(T0)
+    assert first.status is ApiStatus.STALE and first.refused == code     # the help picks its words by the code (#55)
     assert opener.calls == 1
-    assert client.fetch(T0 + secs(3600)).status is ApiStatus.STALE  # no timer-based retry
+    waiting = client.fetch(T0 + secs(3600))
+    assert waiting.status is ApiStatus.STALE and waiting.refused == code  # no timer-based retry, and the reason stays
     assert opener.calls == 1
     write_credentials(path, mtime=BASE_MTIME + 120)  # Claude Code signed in again
     result = client.fetch(T0 + secs(3601))
-    assert opener.calls == 2 and result.status is ApiStatus.LIVE and result.fresh is True
+    assert opener.calls == 2 and result.status is ApiStatus.LIVE and result.fresh is True and result.refused is None
+
+
+@pytest.mark.parametrize("code", [401, 403])
+def test_a_turned_down_sign_in_keeps_its_reason_after_it_runs_out(tmp_path, code):
+    """#55: the token in an unchanged file expires after the refusal; the help must still say why, not "expired"."""
+    path = write_credentials(tmp_path / ".credentials.json", expires_ms=ms_at(T0 + secs(3600)))
+    client, opener = make_client(path, http_error(code), ok())
+    first = client.fetch(T0)
+    later = client.fetch(T0 + secs(7200))
+    assert first.refused == code and later.status is ApiStatus.STALE and later.refused == code
+    assert later.detail == first.detail != ua.EXPIRED_DETAIL and opener.calls == 1
+    write_credentials(path, mtime=BASE_MTIME + 120)  # signed in again
+    assert client.fetch(T0 + secs(7201)).status is ApiStatus.LIVE and opener.calls == 2
 
 
 def test_the_expired_detail_says_to_use_claude_code_not_just_open_it(tmp_path):
     """An open but idle Claude Code lets the sign-in run out: it renews it only when it sends a request (#52)."""
     assert ua.EXPIRED_DETAIL == "The Claude sign-in has expired; send Claude Code a message to renew it"
     client, _ = make_client(write_credentials(tmp_path / ".credentials.json", expires_ms=ms_at(T0 - secs(1))), ok())
-    assert client.fetch(T0).detail == ua.EXPIRED_DETAIL
+    result = client.fetch(T0)
+    assert result.detail == ua.EXPIRED_DETAIL and result.refused is None   # an expired sign-in was not turned down (#55)
 
 
 @pytest.mark.parametrize(("code", "advice"), [

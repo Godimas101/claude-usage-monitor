@@ -58,6 +58,7 @@ from usage_monitor.render.model import (
     SEVERITY_CRITICAL,
     SEVERITY_NORMAL,
     SEVERITY_WARNING,
+    STALE_MESSAGE_REFUSED,
     SURFACE_FLOATING,
     SURFACE_TASKBAR,
     SURFACE_TOOLTIP,
@@ -747,6 +748,8 @@ _STATUS_COPY: dict[ApiStatus, tuple[str, str, str]] = {
     ApiStatus.NO_CREDENTIALS: ("No sign-in found.", " Open the dashboard for help.", "warn"),
     ApiStatus.LOADING: ("", "Fetching your usage.", "text_3"),
 }
+# A sign-in the usage API turned down (HTTP 403, #55): a message to Claude Code does not fix it, only /login does.
+_REFUSED_COPY: tuple[str, str, str] = ("Sign-in refused.", " Run /login in Claude Code.", "warn")
 
 
 def _dim(model: WidgetModel) -> bool:
@@ -855,7 +858,8 @@ def _footer_runs(model: WidgetModel) -> list[tuple[str, int, str]]:
     holds: the pace of a limit that is at its cap is not news. A state that needs the user (the sign-in, the
     connection) keeps its own words."""
     if model.status is not ApiStatus.LIVE:
-        lead, rest, role = _STATUS_COPY[model.status]
+        refused = model.status is ApiStatus.STALE and model.stale_message == STALE_MESSAGE_REFUSED
+        lead, rest, role = _REFUSED_COPY if refused else _STATUS_COPY[model.status]
         return ([(lead, 600, role)] if lead else []) + [(rest, 400, "text_3")]
     holding = _hold_runs(model)
     if holding:

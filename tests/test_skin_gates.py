@@ -26,7 +26,7 @@ from PIL import Image
 from usage_monitor import themes as theme_registry
 from usage_monitor.data.models import ApiStatus, Limit
 from usage_monitor.render import dump, engine
-from usage_monitor.render.model import build_model
+from usage_monitor.render.model import STALE_MESSAGE_REFUSED, build_model
 from usage_monitor.render.skins import RenderOptions, get_skin
 from usage_monitor.render.skins import gates
 from usage_monitor.render.skins.gates import GatesSkin, Palette
@@ -736,6 +736,19 @@ def test_the_footer_copy_follows_the_state():
     assert text.startswith("Under pace · Resets ")
 
 
+def refused_model():
+    """The stale sample with a sign-in the usage API turned down (HTTP 403, #55)."""
+    return replace(dump.sample_model("stale"), stale_message=STALE_MESSAGE_REFUSED)
+
+
+def test_a_refused_sign_in_asks_for_login_not_for_a_message():
+    """#55: a message to Claude Code does not fix a 403; only a new sign-in does."""
+    runs = gates._footer_runs(refused_model())
+    assert [(text, weight, role) for text, weight, role in runs] == [
+        ("Sign-in refused.", 600, "warn"), (" Run /login in Claude Code.", 400, "text_3")]
+    assert "message" not in "".join(run[0] for run in runs).lower()
+
+
 def test_the_footer_talks_about_the_most_severe_row():
     weekly_critical = model(20.0, 95.0)
     runs = gates._footer_runs(weekly_critical)
@@ -833,6 +846,15 @@ def test_the_sign_in_advice_fits_whole_without_an_ellipsis():
         ink = gates.Ink(gates.CARD_W, gates.CARD_H, scale, gates._fonts(theme()))
         gates._footer(ink, pal, dump.sample_model("stale"), gates.FOOT_TOP)
         assert "".join(text for text, *_ in queued_runs(ink)) == "Hmm, we lost touch. Send Claude Code a message.", scale
+
+
+def test_the_refused_advice_fits_whole_without_an_ellipsis():
+    """#55: the 403 advice is read whole at every scale, as the expired one is (#52)."""
+    pal = Palette.for_variant(theme(), variant("system-dark"))
+    for scale in (1.0, 1.5, 2.0):
+        ink = gates.Ink(gates.CARD_W, gates.CARD_H, scale, gates._fonts(theme()))
+        gates._footer(ink, pal, refused_model(), gates.FOOT_TOP)
+        assert "".join(text for text, *_ in queued_runs(ink)) == "Sign-in refused. Run /login in Claude Code.", scale
 
 
 def test_fit_cuts_a_long_text_with_an_ellipsis():

@@ -397,6 +397,7 @@ class FetchResult:
     detail: str             # short UI text: "Updated 12:00:03", "next try at 12:01:03", ...
     snapshot: UsageSnapshot | None
     fresh: bool             # True only when this call received a new HTTP 200
+    refused: int | None = None   # STALE only: 401 or 403 when the usage API turned the sign-in down (#55)
 
 
 class UsageClient:
@@ -420,6 +421,7 @@ class UsageClient:
         self._base_detail = "Loading usage"
         self._failures = 0                  # consecutive failed attempts; drives the backoff
         self._stale_mtime: float | None = None
+        self.refused: int | None = None   # the HTTP code behind a STALE status, when the usage API turned the sign-in down
         self.status = ApiStatus.LOADING
         self.last_snapshot: UsageSnapshot | None = None
         self.last_ok_at: datetime | None = None
@@ -447,10 +449,15 @@ class UsageClient:
             self.next_allowed_at = None
             self._set(ApiStatus.NO_CREDENTIALS, NO_SIGN_IN_DETAIL)
             return self._result(fresh=False)
+        if self.status is ApiStatus.STALE and info.mtime == self._stale_mtime:
+            if self.refused is not None:
+                # A turned-down sign-in that has since run out is still turned down: keep its reason and its advice
+                # (/login for a 403, #55) until the file changes, rather than the expired one's "send it a message".
+                return self._result(fresh=False)
+            if not info.is_expired(now):
+                return self._result(fresh=False)  # rejected token: wait for the file to change
         if info.is_expired(now):
             return self._stale(info.mtime, EXPIRED_DETAIL)
-        if self.status is ApiStatus.STALE and info.mtime == self._stale_mtime:
-            return self._result(fresh=False)  # rejected token: wait for the file to change
         return self._request(token, info.mtime, now)
 
     def _request(self, token: str, mtime: float | None, now: datetime) -> FetchResult:
@@ -483,7 +490,8 @@ class UsageClient:
         if code in (401, 403):
             log.warning("usage API rejected the sign-in (HTTP %d); waiting for the credentials file "
                         "to change", code)
-            return self._stale(mtime, f"Claude did not accept the sign-in (HTTP {code}); {REJECTED_ADVICE[code]}")
+            return self._stale(mtime, f"Claude did not accept the sign-in (HTTP {code}); {REJECTED_ADVICE[code]}",
+                               refused=code)
         if code == 429:
             return self._rate_limited(now, _retry_after_seconds(headers, now))
         return self._offline(now, f"HTTP {code}")
@@ -523,11 +531,12 @@ class UsageClient:
         self._set(ApiStatus.OFFLINE, f"Usage API unreachable ({reason})")
         return self._result(fresh=False)
 
-    def _stale(self, mtime: float | None, detail: str) -> FetchResult:
+    def _stale(self, mtime: float | None, detail: str, refused: int | None = None) -> FetchResult:
         self._stale_mtime = mtime
         self._failures = 0
         self.next_allowed_at = None
         self._set(ApiStatus.STALE, detail)
+        self.refused = refused
         return self._result(fresh=False)
 
     def _back_off(self, now: datetime, base: float, retry_after: float | None = None) -> float:
@@ -542,10 +551,12 @@ class UsageClient:
     def _set(self, status: ApiStatus, detail: str) -> None:
         self.status = status
         self._base_detail = detail
+        self.refused = None   # a new status forgets the old refusal; _stale sets it again when there is one
 
     def _result(self, *, fresh: bool) -> FetchResult:
         return FetchResult(status=self.status, detail=self._describe(),
-                           snapshot=self.last_snapshot, fresh=fresh)
+                           snapshot=self.last_snapshot, fresh=fresh,
+                           refused=self.refused if self.status is ApiStatus.STALE else None)
 
     def _describe(self) -> str:
         if self.next_allowed_at is not None and self.status in _BACKOFF_STATUSES:

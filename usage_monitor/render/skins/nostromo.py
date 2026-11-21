@@ -32,6 +32,7 @@ from usage_monitor.render.model import (
     SEVERITY_CRITICAL,
     SEVERITY_WARNING,
     SURFACE_FLOATING,
+    STALE_MESSAGE_REFUSED,
     SURFACE_TASKBAR,
     HoverPlay,
     Insets,
@@ -180,6 +181,8 @@ STATE_WORDS: dict[str, str] = {
 STALE_MESSAGES: dict[ApiStatus, str] = {
     ApiStatus.STALE: "AUTH LINK LOST.\nUSE CLAUDE CODE TO RESTORE.",
 }
+# A sign-in the usage API turned down (HTTP 403): only a new one fixes it (#55). The command keeps its case.
+REFUSED_MESSAGE = "AUTH REFUSED.\nRUN /login IN CLAUDE CODE."
 
 
 # ── Palette ───────────────────────────────────────────────────────────────────
@@ -588,6 +591,8 @@ def _message_text(model: WidgetModel) -> str | None:
     mockup's), else the neutral text the view model carries. None when the model asks for no box."""
     if not model.stale_message:
         return None
+    if model.stale_message == STALE_MESSAGE_REFUSED:
+        return REFUSED_MESSAGE
     return STALE_MESSAGES.get(model.status, model.stale_message)
 
 

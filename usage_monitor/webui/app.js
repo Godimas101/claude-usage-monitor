@@ -132,6 +132,18 @@
     var meta = document.querySelector('meta[name="monitor-token"]');
     return meta ? meta.getAttribute("content") || "" : "";
   })();
+  // The dashboard's choices as the monitor keeps them (#54). The server puts them in the page, as it does the token. They used
+  // to live in the page's own storage, which does not last: the dashboard window runs pywebview in private mode (its default),
+  // which keeps nothing once the window closes, and the browser fallback's origin has a new port on every run.
+  var SAVED_PREFS = (function () {
+    var meta = document.querySelector('meta[name="monitor-prefs"]');
+    var text = meta ? meta.getAttribute("content") || "" : "";
+    try {
+      return text ? JSON.parse(text) : null;
+    } catch (e) {
+      return null;
+    }
+  })();
   var CHARTS = window.MonitorCharts;
   var PAGES = [
     { key: "overview", label: "OVERVIEW", title: "OVERVIEW", sub: "Session telemetry for the current window. Pace is usage against elapsed time." },
@@ -224,7 +236,12 @@
   // Points of the clock within which a limit counts as on pace. The same number as windows.PACE_BAND_POINTS on the
   // Python side (the widgets and the pacing report use it), which tests/test_webui.py checks.
   var PACE_BAND = 10;
-  var PREFS_KEY = "usage-monitor-dashboard-prefs";
+  // The choices the dashboard keeps, with the values each may take. ui/server.py's DASHBOARD_PREF_CHOICES holds the same, and
+  // tests/test_webui.py checks that they agree.
+  var PREF_CHOICES = {
+    costWindow: WINDOW_ORDER, efficiencyWindow: WINDOW_ORDER, folderMode: ["folder", "launch"],
+    calMetric: ["cost", "tokens"], matrixMetric: ["cost", "requests"]
+  };
   // What the page needs to work whatever the theme: the odometer's strips, segmented bars, chart hosts.
   var BASE_CSS = [
     ".nm-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}",
@@ -658,58 +675,38 @@
     return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   }
 
-  // ── Per-viewer preferences (the last window and toggles chosen) ─────────────────
+  // ── The dashboard's choices (the last window and toggles chosen) ──────────────────
 
-  // Before v2.3 the choices were kept under a key with a shorter, three-letter prefix. Read it once and move it here, so
-  // an update keeps them.
-  function movedPrefs() {
-    var store = window.localStorage;
-    for (var i = 0; i < (store.length || 0); i++) {
-      var key = String(store.key(i));
-      if (key !== PREFS_KEY && /^[a-z]{3}-dashboard-prefs$/.test(key)) {
-        var text = store.getItem(key);
-        store.setItem(PREFS_KEY, text);
-        store.removeItem(key);
-        return text;
-      }
+  /* Takes the saved choices (SAVED_PREFS, from the page) into S.ui. A name it does not know, or a value a name cannot take, is
+   * skipped, and that choice keeps its default. */
+  function loadPrefs(saved) {
+    if (!saved || typeof saved !== "object") {
+      return;
     }
-    return null;
+    Object.keys(PREF_CHOICES).forEach(function (key) {
+      if (PREF_CHOICES[key].indexOf(saved[key]) >= 0) {
+        S.ui[key] = saved[key];
+      }
+    });
   }
 
-  function loadPrefs() {
-    try {
-      var text = window.localStorage.getItem(PREFS_KEY);
-      if (text === null) {
-        text = movedPrefs();
-      }
-      var saved = JSON.parse(text || "null");
-      if (!saved || typeof saved !== "object") {
-        return;
-      }
-      var allowed = {
-        costWindow: WINDOW_ORDER, efficiencyWindow: WINDOW_ORDER, folderMode: ["folder", "launch"],
-        calMetric: ["cost", "tokens"], matrixMetric: ["cost", "requests"]
-      };
-      // The Efficiency page was "Nerds only", and kept its window under that name: a choice saved then still holds.
-      if (saved.efficiencyWindow === undefined && saved.nerdsWindow !== undefined) {
-        saved.efficiencyWindow = saved.nerdsWindow;
-      }
-      Object.keys(allowed).forEach(function (key) {
-        if (allowed[key].indexOf(saved[key]) >= 0) {
-          S.ui[key] = saved[key];
-        }
-      });
-    } catch (e) {
-      /* blocked or empty storage: the defaults stand */
+  /* Keeps one choice in the monitor's settings, so the next window, and the next run of the monitor, opens with it (#54).
+   * Only the one that changed is sent: the monitor merges it into the ones it holds, so two windows never undo each other's.
+   * Quiet: no status line. A refused or failed save leaves the choice in force for this window. */
+  function savePrefs(name) {
+    if (!Object.prototype.hasOwnProperty.call(PREF_CHOICES, name)) {
+      return Promise.resolve(false);
     }
-  }
-
-  function savePrefs() {
-    try {
-      window.localStorage.setItem(PREFS_KEY, JSON.stringify(S.ui));
-    } catch (e) {
-      /* a private window keeps nothing; the choice still holds until the window closes */
-    }
+    var one = {};
+    one[name] = S.ui[name];
+    return api("POST", "/api/settings", { dashboard_prefs: one }).then(function (res) {
+      if (res.ok && res.data && res.data.settings) {
+        S.settings = res.data.settings;
+      }
+      return !!res.ok;
+    }, function () {
+      return false;
+    });
   }
 
   // ── API client ──────────────────────────────────────────────────────────────────
@@ -3845,8 +3842,16 @@
       ];
       body = "<p>" + esc(SIGNIN_WHY) + "</p><ol>" + steps.map(function (step) { return "<li>" + step + "</li>"; }).join("") + "</ol><p>" + esc(SIGNIN_RENEWS) + "</p>";
     } else {
-      body = (s.status_detail ? "<p>" + esc(s.status_detail) + "</p>" : "") + "<p>" + esc("Claude Code renews the sign-in when you use it. Send it a message, or run ") +
-        codeText("claude") + esc(" in PowerShell, then press Check again.") + "</p><p>" + esc("If PowerShell says ") + codeText("claude") +
+      // An HTTP 403 (#55): Claude turned the sign-in down. Only a new sign-in fixes it, so its help asks for /login instead of
+      // a message to Claude Code.
+      var refused = s.signin_refused === 403;
+      body = (s.status_detail ? "<p>" + esc(s.status_detail) + "</p>" : "") + "<p>" +
+        (refused
+          ? esc("Only a new sign-in fixes this. Run ") + codeText("claude") + esc(" in PowerShell, type ") + codeText("/login") +
+            esc(" and sign in, then press Check again.")
+          : esc("Claude Code renews the sign-in when you use it. Send it a message, or run ") + codeText("claude") +
+            esc(" in PowerShell, then press Check again.")) +
+        "</p><p>" + esc("If PowerShell says ") + codeText("claude") +
         esc(" is not recognized, or the Claude app opens instead, run this:") + "</p>" + commandRow("start");
     }
     return '<div class="nm-msg nm-help" role="region" aria-label="Claude sign-in"><b>' + esc(missing ? SIGNIN_HEAD : info.text) + "</b>" + body +
@@ -4933,7 +4938,7 @@
       return;
     }
     S.ui[map[name]] = value;
-    savePrefs();
+    savePrefs(map[name]);
     renderPage();
   }
 
@@ -4953,7 +4958,7 @@
     var variants = document.getElementById("variants");
     var refresh = document.getElementById("refresh");
     var tipEl = document.getElementById("tip");
-    loadPrefs();
+    loadPrefs(SAVED_PREFS);
     window.addEventListener("hashchange", function () {
       renderPage();
       if (main) {
@@ -5080,7 +5085,8 @@
       updateBanner: updateBanner, themeSwatches: themeSwatches, accentLabel: accentLabel, renderVariants: renderVariants,
       syncThemePicker: syncThemePicker, chooseAccent: chooseAccent, currentPage: currentPage, skelCost: skelCost,
       skelEfficiency: skelEfficiency, skelHistory: skelHistory, errorSwap: errorSwap, tagCard: tagCard, cardPart: cardPart,
-      playEnterIfDue: playEnterIfDue, wantEnter: wantEnter, loadPrefs: loadPrefs, PAGE_KEYS: PAGE_KEYS, clockText: clockText,
+      playEnterIfDue: playEnterIfDue, wantEnter: wantEnter, loadPrefs: loadPrefs, savePrefs: savePrefs, onSegment: onSegment,
+      PREF_CHOICES: PREF_CHOICES, SAVED_PREFS: SAVED_PREFS, PAGE_KEYS: PAGE_KEYS, clockText: clockText,
       errorText: errorText, failedText: failedText, checkUpdateText: checkUpdateText, settingsClick: settingsClick,
       updateAction: updateAction, installUpdate: installUpdate, skipUpdate: skipUpdate, aboutPage: aboutPage,
       settingsPage: settingsPage, settingsChange: settingsChange, labelFor: labelFor, guardCard: guardCard, guardView: guardView,

@@ -259,7 +259,8 @@ Why not just `claude`? Anthropic's installer puts Claude Code in that folder but
 
 | You see | What is going on | What to do |
 |---|---|---|
-| **STALE**, with a message to use Claude Code | The sign-in Claude Code saved has expired or was rejected. Claude Code renews it only when you use it, so one that is open but idle lets it run out. The monitor never signs in for you. | Send Claude Code a message. It renews the sign-in file, and the monitor picks the change up by itself within a minute. If Claude Code asks you to sign in again, do that. |
+| **STALE**, with a message to use Claude Code | The sign-in Claude Code saved has expired, or Claude turned it down (HTTP 401). Claude Code renews it only when you use it, so one that is open but idle lets it run out. The monitor never signs in for you. | Send Claude Code a message. It renews the sign-in file, and the monitor picks the change up by itself within a minute. If Claude Code asks you to sign in again, do that. |
+| **STALE**, with a message to run `/login` | Claude turned the sign-in down (HTTP 403), so it can't read your plan's usage. Only a new sign-in fixes it. | In Claude Code, run `/login` and sign in again. The monitor picks the new sign-in up by itself within a minute. |
 | **NO LOGIN** | There is no Claude sign-in on this PC. | Sign in to Claude Code with your Claude account, even if you use Claude on the web or in the app: [the steps](#-using-claude-on-the-web-or-in-the-app). An API-key-only setup has no plan limits to show. |
 | Cost & value, Efficiency and History are empty | There are no Claude Code records on this PC, so there is nothing to count. That is normal if you use Claude on the web or in an app. | Nothing: the limits, pace and alerts work as usual. |
 | **OFFLINE** | The usage API could not be reached. Your last numbers stay on screen. | Check your network. It retries after 30 seconds, then waits longer each time, up to 15 minutes. |

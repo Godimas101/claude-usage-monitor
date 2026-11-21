@@ -750,6 +750,20 @@ def test_a_sign_in_written_after_a_start_without_one_fetches_at_once(make, isola
     assert service.state.status is ApiStatus.LIVE
 
 
+def test_a_sign_in_the_usage_api_turned_down_carries_its_code_into_the_state(make, isolated_folders):
+    """#55: the dashboard's help and the widgets pick their words by the refusal's code."""
+    refused = FetchResult(status=ApiStatus.STALE, detail="Claude did not accept the sign-in (HTTP 403); sign in again",
+                          snapshot=None, fresh=False, refused=403)
+    service = make(Clock(), usage_client=FakeClient(refused))
+    service._cycle()
+    assert service.state.status is ApiStatus.STALE and service.state.signin_refused == 403
+    assert service._build_state(NOW, status=ApiStatus.PAUSED).signin_refused is None    # a status set here carries no refusal
+    expired = FetchResult(status=ApiStatus.STALE, detail="The Claude sign-in has expired", snapshot=None, fresh=False)
+    other = make(Clock(), usage_client=FakeClient(expired))
+    other._cycle()
+    assert other.state.status is ApiStatus.STALE and other.state.signin_refused is None
+
+
 def test_signing_out_with_the_file_kept_resets_the_plan_to_unknown(make, isolated_folders):
     path = write_sign_in(isolated_folders, mtime=1_800_000_000.0)
     service = make(Clock(), usage_client=FakeClient(NO_SIGN_IN))

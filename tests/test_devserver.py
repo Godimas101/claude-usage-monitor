@@ -409,11 +409,19 @@ def assert_nothing_counted(server: ApiServer) -> None:
 
 
 def test_the_scenarios_of_someone_with_no_claude_code_end_the_list_and_the_usage_line_names_them() -> None:
-    assert devserver.SCENARIOS == ("normal", "warning", "critical", "stale", "guard", *NO_CLAUDE_CODE)
+    assert devserver.SCENARIOS == ("normal", "warning", "critical", "stale", "refused", "guard", *NO_CLAUDE_CODE)
     assert devserver.NO_TRANSCRIPTS == NO_CLAUDE_CODE
     docstring = " ".join((devserver.__doc__ or "").split())
-    assert "--scenario normal|warning|critical|stale|guard|no_login|limits_only" in docstring
+    assert "--scenario normal|warning|critical|stale|refused|guard|no_login|limits_only" in docstring
     assert all(f"``{name}``" in docstring for name in NO_CLAUDE_CODE), "each is explained in the module's docstring"
+
+
+def test_the_refused_scenario_is_a_sign_in_turned_down_with_403(started: Callable[..., ApiServer]) -> None:
+    """#55: the dashboard's help for it asks for /login; the state says why, as UsageClient words it."""
+    state = get_json(started("refused"), "/api/state")["state"]
+    assert state["status"] == "stale" and state["signin_refused"] == 403
+    assert state["status_detail"] == "Claude did not accept the sign-in (HTTP 403); sign in to Claude Code again with /login"
+    assert get_json(started("stale"), "/api/state")["state"]["signin_refused"] is None
 
 
 @pytest.mark.parametrize("scenario", NO_CLAUDE_CODE)

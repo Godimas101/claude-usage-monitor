@@ -34,6 +34,7 @@ from usage_monitor.render.model import (
     SEVERITY_WARNING,
     STALE_MESSAGE_EXPIRED,
     STALE_MESSAGE_NO_LOGIN,
+    STALE_MESSAGE_REFUSED,
     GuardMark,
     WidgetModel,
     build_model,
@@ -182,6 +183,17 @@ def test_nostromo_words_the_expired_sign_in_as_its_approved_mockup():
     assert text == "\n".join(NOSTROMO_AUTH_LINES)
     assert nostromo_skin._message_lines(text) == NOSTROMO_AUTH_LINES
     assert "<br>".join(NOSTROMO_AUTH_LINES) in mockup_html("nostromo")
+
+
+def test_a_sign_in_turned_down_with_403_says_to_run_login_not_to_use_claude_code():
+    """#55: using Claude Code does not fix a 403; only a new sign-in does. The command keeps its case."""
+    refused = replace(state(limit("session", 10), limit("weekly_all", 5), status=ApiStatus.STALE), signin_refused=403)
+    assert build_model(refused, NOW).stale_message == STALE_MESSAGE_REFUSED == "LOGIN REFUSED - RUN /login IN CLAUDE CODE"
+    assert build_model(replace(refused, signin_refused=401), NOW).stale_message == STALE_MESSAGE_EXPIRED   # renewed by use
+    assert build_model(replace(refused, status=ApiStatus.LIVE), NOW).stale_message is None
+    text = nostromo_skin._message_text(build_model(refused, NOW))
+    assert text == "AUTH REFUSED.\nRUN /login IN CLAUDE CODE."
+    assert nostromo_skin._message_lines(text) == ["AUTH REFUSED.", "RUN /login IN CLAUDE CODE."]
 
 
 def test_nostromo_keeps_the_neutral_text_where_it_has_no_wording_of_its_own():

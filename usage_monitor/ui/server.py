@@ -188,6 +188,35 @@ def _is_bounds(value: Any) -> bool:
             and _is_bounds_w(value["w"]) and _is_bounds_h(value["h"]))
 
 
+# The dashboard's own choices (#54): its Cost and Efficiency windows, the folder grouping and two chart metrics. They are kept
+# in the settings, because the page's own storage does not last: the dashboard window runs pywebview in private mode (its
+# default), which keeps nothing once the window closes, and the browser fallback's origin has a new port on every run. The
+# same names and values as PREF_CHOICES in app.js, which tests/test_webui.py checks.
+DASHBOARD_PREF_CHOICES: dict[str, tuple[str, ...]] = {
+    "costWindow": analytics.WINDOW_NAMES,
+    "efficiencyWindow": analytics.WINDOW_NAMES,
+    "folderMode": ("folder", "launch"),
+    "calMetric": ("cost", "tokens"),
+    "matrixMetric": ("cost", "requests"),
+}
+
+
+def _known_dashboard_prefs(value: Any) -> dict[str, str]:
+    """The entries of a stored ``dashboard_prefs`` whose name and value the page knows. A hand-edited settings file, or one
+    from another version, may hold others: each is dropped on its own, so one stray entry does not cost the rest."""
+    if not isinstance(value, dict):
+        return {}
+    return {key: choice for key, choice in value.items() if _is_dashboard_prefs({key: choice})}
+
+
+def _is_dashboard_prefs(value: Any) -> bool:
+    """The dashboard's choices: a JSON object of known names, each set to one of its values. A name may be missing."""
+    return isinstance(value, dict) and all(
+        isinstance(key, str) and key in DASHBOARD_PREF_CHOICES
+        and isinstance(choice, str) and choice in DASHBOARD_PREF_CHOICES[key]
+        for key, choice in value.items())
+
+
 @dataclasses.dataclass(frozen=True)
 class _Spec:
     check: Callable[[Any], bool]
@@ -220,6 +249,7 @@ SETTING_SPECS: dict[str, _Spec] = {
     "alert_on_credits": _Spec(_is_bool, True),
     "alert_quiet_hours": _Spec(_nullable(_is_quiet_hours), None),
     "dashboard_bounds": _Spec(_nullable(_is_bounds), None),
+    "dashboard_prefs": _Spec(_nullable(_is_dashboard_prefs), None),
     # The usage guard (#27). A cap of null leaves that limit unwatched; the rules are Settings' own.
     "guard_enabled": _Spec(_is_bool, False),
     "guard_session_cap": _Spec(_nullable(_is_percent), 95),
@@ -855,6 +885,7 @@ class ApiServer:
     ) -> None:
         self._state_provider = state_provider
         self._settings = settings
+        self._prefs_lock = threading.Lock()   # a saved dashboard choice is merged into the held ones, one save at a time
         self._refresh_cb = refresh_cb
         self._update_cb = dict(update_cb)
         self._on_settings_applied = on_settings_applied
@@ -1066,6 +1097,14 @@ class ApiServer:
                               lambda m: m.group(1) + html.escape(self._token) + m.group(2), text, count=1)
         if count != 1:
             log.warning("index.html has no monitor-token meta tag")
+        # The dashboard's choices go into the page the same way (#54), so its first paint already uses them. A stored value
+        # that is not a valid set of choices (a hand edit) is left out, and the page starts from its defaults.
+        prefs = _known_dashboard_prefs(self._current("dashboard_prefs"))
+        prefs_text = json.dumps(prefs, separators=(",", ":")) if prefs else ""
+        text, count = re.subn(r'(<meta name="monitor-prefs" content=")[^"]*(")',
+                              lambda m: m.group(1) + html.escape(prefs_text) + m.group(2), text, count=1)
+        if count != 1:
+            log.warning("index.html has no monitor-prefs meta tag")
         text = _themed_shell(text, self._theme_view())
         self._send(req, 200, text.encode("utf-8"), "text/html; charset=utf-8",
                    {"Content-Security-Policy": _CSP})
@@ -1236,10 +1275,16 @@ class ApiServer:
             self._set_launch_on_startup(want)
             applied["launch_on_startup"] = want
         if values:
-            try:
-                self._settings.update(values)    # Settings' own rules, as a last line behind the specs
-            except ValueError as exc:
-                raise _HttpError(400, str(exc)[:200]) from None
+            with self._prefs_lock:
+                if values.get("dashboard_prefs") is not None:
+                    # A window sends the choice it changed (#54). Merged here, under the lock, so two windows, or a save
+                    # and a state that crossed it, never undo each other's choices. null clears them all.
+                    held = _known_dashboard_prefs(self._current("dashboard_prefs"))
+                    values["dashboard_prefs"] = {**held, **values["dashboard_prefs"]}
+                try:
+                    self._settings.update(values)    # Settings' own rules, as a last line behind the specs
+                except ValueError as exc:
+                    raise _HttpError(400, str(exc)[:200]) from None
             applied.update(values)
         self._notify_applied(applied)
         return applied

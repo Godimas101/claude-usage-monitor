@@ -31,6 +31,9 @@ GUARD_STATES: tuple[str, ...] = (GUARD_ARMED, GUARD_HOLDING)
 
 STALE_MESSAGE_EXPIRED = "LOGIN EXPIRED - USE CLAUDE CODE"   # used, not open: an idle Claude Code renews nothing (#52)
 STALE_MESSAGE_NO_LOGIN = "NO LOGIN FOUND - OPEN THE DASHBOARD"   # it has the steps for a claude.ai or app user (#28)
+# An HTTP 403: a sign-in that works for Claude Code but cannot read usage. Using Claude Code does not fix it; only a new sign-in
+# does, so this one names /login, in its own case, as every command the user types is shown (#55).
+STALE_MESSAGE_REFUSED = "LOGIN REFUSED - RUN /login IN CLAUDE CODE"
 
 STATUS_TEXT: dict[ApiStatus, str] = {
     ApiStatus.LOADING: "LOADING",
@@ -227,7 +230,7 @@ def build_model(
         age_text=format_age(fetched_at, now) if fetched_at is not None else None,
         rows=_rows(usage, now, show_scoped),
         stale=status not in (ApiStatus.LIVE, ApiStatus.PAUSED),
-        stale_message=_stale_message(status),
+        stale_message=_stale_message(status, getattr(state, "signin_refused", None)),
         blink_on=bool(blink_on),
         updated_at=state.updated_at if state is not None else now,
         guard=_guard_mark(getattr(state, "guard", None), usage, now),
@@ -481,9 +484,9 @@ def _limit_row(
     )
 
 
-def _stale_message(status: ApiStatus) -> str | None:
+def _stale_message(status: ApiStatus, refused: int | None = None) -> str | None:
     if status is ApiStatus.STALE:
-        return STALE_MESSAGE_EXPIRED
+        return STALE_MESSAGE_REFUSED if refused == 403 else STALE_MESSAGE_EXPIRED
     if status is ApiStatus.NO_CREDENTIALS:
         return STALE_MESSAGE_NO_LOGIN
     return None

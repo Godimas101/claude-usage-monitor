@@ -46,6 +46,7 @@ from usage_monitor.render.model import (
     SEVERITY_NORMAL,
     SEVERITY_WARNING,
     SURFACE_FLOATING,
+    STALE_MESSAGE_REFUSED,
     SURFACE_TASKBAR,
     HoverPlay,
     Insets,
@@ -174,6 +175,7 @@ UNIT = Type(FONT_MONO, 11.0, 0.0, 0.85)
 STRIP_PCT = Type(FONT_MONO, 11.0, 0.0, 0.85)
 
 DEFAULT_STALE_AUTH = "RELINK // USE CLAUDE CODE"
+DEFAULT_STALE_REFUSED = "RELINK // RUN /login"   # HTTP 403: only a new sign-in fixes it; the command keeps its case (#55)
 DEFAULT_NO_LOGIN = "NO LOGIN // OPEN DASHBOARD"   # no sign-in at all: the dashboard has the steps (#28)
 DEFAULT_OFFLINE = "NO SIGNAL // NET DOWN"
 BAND_STATUSES = frozenset({ApiStatus.STALE, ApiStatus.NO_CREDENTIALS, ApiStatus.OFFLINE, ApiStatus.RATE_LIMITED})
@@ -642,6 +644,8 @@ def _band_text(theme: Any, model: WidgetModel) -> str:
         return model.status_text.upper()
     if model.status is ApiStatus.NO_CREDENTIALS:
         return _copy(theme, "no_login", DEFAULT_NO_LOGIN)
+    if model.stale_message == STALE_MESSAGE_REFUSED:
+        return _copy(theme, "stale_refused", DEFAULT_STALE_REFUSED)
     return _copy(theme, "stale_auth", DEFAULT_STALE_AUTH)
 
 

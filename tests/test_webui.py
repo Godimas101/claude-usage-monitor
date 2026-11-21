@@ -309,13 +309,19 @@ def test_chart_styles_only_use_variables() -> None:
     assert "--chart-mark" in style and "--chart-hot" in style and "--chart-text" in style
 
 
-def test_storage_is_only_for_preferences_and_always_guarded() -> None:
+def test_storage_is_always_guarded_and_the_dashboards_choices_live_in_the_settings() -> None:
     for source in (APP_CODE, *(strip_comments(js) for js in THEME_JS.values())):
         for m in re.finditer(r"(?:local|session)Storage\.", source):
             assert "try {" in source[max(0, m.start() - 260):m.start()], "storage used outside a try block"
-    assert APP_CODE.count("localStorage.") == 2                  # one read, one write: the viewer's choices
-    allowed = re.search(r"var allowed = \{(.*?)\};", APP_CODE, re.S).group(1)
-    assert set(re.findall(r"(\w+):", allowed)) == {"costWindow", "efficiencyWindow", "folderMode", "calMetric", "matrixMetric"}
+    # #54: browser storage belongs to the page's origin, whose port is new on every run, so the page keeps nothing there
+    assert "localStorage." not in strip_comments(APP_CODE) and "sessionStorage." not in strip_comments(APP_CODE)
+    assert "loadPrefs(SAVED_PREFS);" in APP_CODE                 # the saved choices are taken before the first paint
+    init = APP_CODE[APP_CODE.index("  function init() {"):]
+    init = init[:init.index("\n  }\n")]
+    assert init.index("loadPrefs(SAVED_PREFS);") < init.index("renderPage(")   # ... before anything in init can paint
+    choices = re.search(r"var PREF_CHOICES = \{(.*?)\};", APP_CODE, re.S).group(1)
+    assert set(re.findall(r"(\w+):", choices)) == set(server.DASHBOARD_PREF_CHOICES)
+    assert '<meta name="monitor-prefs" content="">' in INDEX
 
 
 # ── Charts ────────────────────────────────────────────────────────────────────────
@@ -927,13 +933,33 @@ def test_the_efficiency_page_is_called_efficiency_wherever_a_user_reads_it() -> 
 
 
 @ui_only
-def test_an_old_nerds_link_and_a_choice_saved_under_the_old_name_still_work(checks: dict[str, Any]) -> None:
+def test_an_old_nerds_link_still_opens_the_efficiency_page(checks: dict[str, Any]) -> None:
     assert checks["pageKeys"] == PAGES
     assert checks["alias"] == "efficiency" and checks["aliasNew"] == "efficiency"
     assert checks["aliasUnknown"] == "overview"
-    assert checks["legacyPrefs"] == ["week", "month"]               # the window saved as nerdsWindow, and the cost window
-    assert checks["movedPrefs"] == ["week", ["something-else", "usage-monitor-dashboard-prefs"]]   # kept before v2.3
-    assert checks["newPrefsWin"] == "today"                         # the new name wins when both are saved
+
+
+@ui_only
+def test_the_dashboards_choices_come_from_the_page_and_are_saved_in_the_monitors_settings(checks: dict[str, Any]) -> None:
+    """#54: the page reads the choices the server put in it, and saves each change through POST /api/settings."""
+    loaded = {"costWindow": "month", "efficiencyWindow": "week", "folderMode": "launch", "calMetric": "cost", "matrixMetric": "cost"}
+    assert checks["prefsAfterOldNameAlone"] == {"costWindow": "cycle", "efficiencyWindow": "cycle", "folderMode": "folder",
+                                                "calMetric": "cost", "matrixMetric": "cost"}   # nerdsWindow is not carried over
+    assert checks["loadedPrefs"] == loaded                          # an unknown value ("bogus") and an old name are skipped
+    assert checks["loadedPrefsAfterJunk"] == loaded                 # nothing that is not a set of choices changes them
+    assert checks["prefChoices"] == {name: list(values) for name, values in server.DASHBOARD_PREF_CHOICES.items()}
+    assert checks["savedPrefsWithoutMeta"] is None
+    # Only the choice that changed is sent: the server merges it into the ones it holds, so windows never undo each other's.
+    assert checks["savedPrefsPost"] == [{"url": "/api/settings", "method": "POST", "token": True,
+                                         "body": {"dashboard_prefs": {"costWindow": "month"}}}]
+    assert checks["savedPrefsUnknown"] == [] and checks["segmentUnknown"] == []
+    assert checks["segmentPost"] == [{"url": "/api/settings", "method": "POST", "token": True,
+                                      "body": {"dashboard_prefs": {"folderMode": "folder"}}}]
+    assert checks["segmentShown"]["folderMode"] == "folder"
+    assert checks["savedPrefsFromMeta"] == {"costWindow": "week", "calMetric": "tokens", "folderMode": "nope"}
+    assert checks["prefsFromMeta"] == {"costWindow": "week", "efficiencyWindow": "cycle", "folderMode": "folder",
+                                       "calMetric": "tokens", "matrixMetric": "cost"}
+    assert checks["savedPrefsBadMeta"] is None and checks["savedPrefsEmptyMeta"] is None
 
 
 @ui_only
@@ -1774,6 +1800,8 @@ SIGNIN_SIGN_IN = "Then sign in with your Claude account in the browser that open
 # "when you use it", not "each time it runs": an open but idle Claude Code lets the sign-in run out (#52)
 SIGNIN_RENEWS = "Claude Code renews the sign-in when you use it. If the monitor later says the sign-in has expired, send Claude Code a message."
 SIGNIN_EXPIRED = "Claude Code renews the sign-in when you use it. Send it a message, or run claude in PowerShell, then press Check again."
+# an HTTP 403: using Claude Code does not fix it, only a new sign-in does (#55)
+SIGNIN_REFUSED = "Only a new sign-in fixes this. Run claude in PowerShell, type /login and sign in, then press Check again."
 # an older Claude app took the name "claude" on some PCs, so typing it opens the app (Anthropic's install troubleshooting page)
 SIGNIN_NOT_FOUND = "If PowerShell says claude is not recognized, or the Claude app opens instead, run this:"
 COPY_TITLES = {"install": "Copy the install command", "start": "Copy the command that starts Claude Code"}
@@ -1823,7 +1851,8 @@ def test_the_help_and_the_no_activity_pages_say_what_they_were_given_to_say() ->
 
 
 def test_the_help_copy_keeps_jargon_out_of_a_readers_way() -> None:
-    for text in (SIGNIN_HEAD, SIGNIN_WHY, *SIGNIN_STEPS, SIGNIN_PATH_NOTE, SIGNIN_SIGN_IN, SIGNIN_RENEWS, SIGNIN_EXPIRED, SIGNIN_NOT_FOUND,
+    for text in (SIGNIN_HEAD, SIGNIN_WHY, *SIGNIN_STEPS, SIGNIN_PATH_NOTE, SIGNIN_SIGN_IN, SIGNIN_RENEWS, SIGNIN_EXPIRED, SIGNIN_REFUSED,
+                 SIGNIN_NOT_FOUND,
                  *COPY_TITLES.values(), CHECK_NONE, CHECK_STALE, CHECK_FAILED, NO_ACTIVITY, NO_ACTIVITY_WHY, "Copy", "Copied", "Press Ctrl+C",
                  "More in the README"):
         assert not re.search(JARGON, text, re.I), text
@@ -1968,6 +1997,17 @@ def test_an_expired_sign_in_keeps_the_monitors_reason_and_adds_the_one_thing_to_
     assert commands(html) == ["claude", "claude", START_COMMAND]
     assert html.index("opens instead, run this:</p>") < html.index('<div class="nm-cmd" data-command="start">') < html.index('class="nm-actions"')
     assert paragraphs(checks["signIn"]["noDetail"]) == [SIGNIN_EXPIRED, SIGNIN_NOT_FOUND]   # no reason sent: the heading and what to do
+
+
+@ui_only
+def test_a_sign_in_turned_down_with_403_asks_for_a_new_sign_in_not_a_message(checks: dict[str, Any]) -> None:
+    """#55: a 403 is a sign-in that works for Claude Code but cannot read usage. Using Claude Code does not fix it."""
+    html = checks["signIn"]["refused"]
+    assert paragraphs(html) == ["Claude did not accept the sign-in (HTTP 403); sign in to Claude Code again with /login",
+                                SIGNIN_REFUSED, SIGNIN_NOT_FOUND]
+    assert "message" not in plain(html).lower()
+    assert commands(html) == ["claude", "/login", "claude", START_COMMAND]
+    assert paragraphs(checks["signIn"]["refused401"])[1] == SIGNIN_EXPIRED     # a 401 is renewed by use: the expired help
 
 
 @ui_only

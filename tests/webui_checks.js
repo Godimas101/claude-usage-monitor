@@ -37,18 +37,17 @@ function svgElement(tag) {
   return el;
 }
 
-function load() {
+function load(query) {
   const elements = {};
   const doc = {
     readyState: "complete", visibilityState: "visible", documentElement: element("html"), head: element("head"),
-    body: svgElement("body"), querySelector: () => null, querySelectorAll: () => [],
+    body: svgElement("body"), querySelector: query || (() => null), querySelectorAll: () => [],
     getElementById: (id) => elements[id] || null, createElement: (tag) => element(tag),
     createElementNS: (_ns, tag) => svgElement(tag), addEventListener() {},
   };
   const box = { console, document: doc, __USAGE_MONITOR_TEST__: {} };
   box.window = box;
   box.location = { hash: "" };
-  box.localStorage = { getItem: () => null, setItem() {} };
   box.matchMedia = () => ({ matches: false });
   box.getComputedStyle = () => ({ getPropertyValue: () => "" });
   box.requestAnimationFrame = () => 0;
@@ -290,25 +289,43 @@ out.aliasNew = api.currentPage();
 box.location.hash = "#nowhere";
 out.aliasUnknown = api.currentPage();
 box.location.hash = "";
-box.localStorage = { getItem: () => JSON.stringify({ nerdsWindow: "week", costWindow: "month" }), setItem() {} };
-api.loadPrefs();
-out.legacyPrefs = [S.ui.efficiencyWindow, S.ui.costWindow];
-box.localStorage = { getItem: () => JSON.stringify({ efficiencyWindow: "today", nerdsWindow: "week" }), setItem() {} };
-api.loadPrefs();
-out.newPrefsWin = S.ui.efficiencyWindow;
-// choices kept under the key with the shorter prefix (before v2.3) are read once and moved to the new key
-const oldPrefsStore = { "abc-dashboard-prefs": JSON.stringify({ costWindow: "week" }), "something-else": "x" };
-box.localStorage = {
-  get length() { return Object.keys(oldPrefsStore).length; },
-  key(i) { return Object.keys(oldPrefsStore)[i]; },
-  getItem(k) { return Object.prototype.hasOwnProperty.call(oldPrefsStore, k) ? oldPrefsStore[k] : null; },
-  setItem(k, v) { oldPrefsStore[k] = String(v); },
-  removeItem(k) { delete oldPrefsStore[k]; },
-};
-api.loadPrefs();
-out.movedPrefs = [S.ui.costWindow, Object.keys(oldPrefsStore).sort()];
-S.ui.efficiencyWindow = "cycle"; S.ui.costWindow = "cycle";
-box.localStorage = { getItem: () => null, setItem() {} };
+// the dashboard's choices (#54): taken from the page's monitor-prefs meta, saved through POST /api/settings
+const shown = (a) => Object.fromEntries(Object.keys(a.PREF_CHOICES).map((k) => [k, a.S.ui[k]]));   // the choices in force
+api.loadPrefs({ nerdsWindow: "today" });                     // the old name alone: nothing carries it over (#54)
+out.prefsAfterOldNameAlone = shown(api);
+api.loadPrefs({ costWindow: "month", efficiencyWindow: "week", folderMode: "launch", calMetric: "bogus", nerdsWindow: "today" });
+out.loadedPrefs = shown(api);
+api.loadPrefs(null);
+api.loadPrefs("costWindow=all");
+out.loadedPrefsAfterJunk = shown(api);
+out.prefChoices = api.PREF_CHOICES;
+out.savedPrefsWithoutMeta = api.SAVED_PREFS;
+{
+  const sent = [];
+  const realFetch = box.fetch;
+  box.fetch = (url, opts) => {
+    sent.push({ url, method: opts.method, body: JSON.parse(opts.body), token: Object.prototype.hasOwnProperty.call(opts.headers, "X-Monitor-Token") });
+    return new Promise(() => {});                          // never answers: the choice holds in the window anyway
+  };
+  api.savePrefs("costWindow");
+  out.savedPrefsPost = sent.splice(0);
+  api.savePrefs("nerdsWindow");                              // not a choice: nothing is sent
+  out.savedPrefsUnknown = sent.splice(0);
+  api.onSegment("folder-mode", "folder");                    // a click on a segment saves that one choice
+  out.segmentPost = sent.splice(0);
+  out.segmentShown = shown(api);
+  api.onSegment("no-such-segment", "x");
+  out.segmentUnknown = sent.splice(0);
+  box.fetch = realFetch;
+}
+const prefsMeta = (content) => (sel) => (sel === 'meta[name="monitor-prefs"]' ? { getAttribute: (k) => (k === "content" ? content : null) } : null);
+const withPrefs = load(prefsMeta('{"costWindow":"week","calMetric":"tokens","folderMode":"nope"}')).api;
+out.savedPrefsFromMeta = withPrefs.SAVED_PREFS;
+withPrefs.loadPrefs(withPrefs.SAVED_PREFS);
+out.prefsFromMeta = shown(withPrefs);
+out.savedPrefsBadMeta = load(prefsMeta("{not json")).api.SAVED_PREFS;
+out.savedPrefsEmptyMeta = load(prefsMeta("")).api.SAVED_PREFS;
+S.ui.efficiencyWindow = "cycle"; S.ui.costWindow = "cycle"; S.ui.folderMode = "folder"; S.ui.calMetric = "cost"; S.ui.matrixMetric = "cost";
 
 // the compaction figure and the largest request are different counters, and say so
 reset();
@@ -545,6 +562,10 @@ monitorState("stale", { status_detail: hostile });
 out.signIn.hostile = api.statusBanner();
 monitorState("stale", { status_detail: "" });
 out.signIn.noDetail = api.statusBanner();
+monitorState("stale", { status_detail: "Claude did not accept the sign-in (HTTP 403); sign in to Claude Code again with /login", signin_refused: 403 });
+out.signIn.refused = api.statusBanner();
+monitorState("stale", { status_detail: "Claude did not accept the sign-in (HTTP 401); send Claude Code a message, and sign in again if it asks", signin_refused: 401 });
+out.signIn.refused401 = api.statusBanner();
 
 // limits only: decided from the all-time window once an ingest is done, held through the ingests that follow
 function decided(patch, before) {

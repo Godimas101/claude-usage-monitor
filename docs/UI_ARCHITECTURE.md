@@ -271,6 +271,13 @@ none. Nostromo: the dashed auth box reads "AUTH LINK LOST." / "USE CLAUDE CODE T
 Each says to use Claude Code, not to open it: Claude Code renews the sign-in only when it sends a request, so
 an open but idle Claude Code lets it run out (#52).
 
+A sign-in Claude turned down with HTTP 403 (`MonitorState.signin_refused`, #55) is not renewed by a message: only a
+new sign-in fixes it. The neutral wording is `STALE_MESSAGE_REFUSED` ("LOGIN REFUSED - RUN /login IN CLAUDE CODE").
+Nostromo: "AUTH REFUSED." / "RUN /login IN CLAUDE CODE." Night City: "RELINK // RUN /login"
+(`theme.extras.copy.stale_refused`). Gates: "Sign-in refused. Run /login in Claude Code." The dashboard's sign-in
+help asks for `/login` too. A 401 keeps the expired wording: Claude Code's next request renews the sign-in, or asks
+for a new one.
+
 No sign-in at all is a different case (#28): the person may never have used Claude Code (claude.ai and the
 Claude apps share its limits), so the widgets send them to the dashboard, which has the steps, rather than to
 Claude Code. The neutral text is "NO LOGIN FOUND - OPEN THE DASHBOARD" (Nostromo's auth box shows it as its two
@@ -320,9 +327,10 @@ six-hourly update re-check timer is armed (`update_recheck`).
   `--smoke-test` always runs as a dev instance, whatever the environment says. The API server is
   a dev server when its `dev` flag is set **or** `USAGE_MONITOR_DEV_INSTANCE=1` is in the environment.
 - **Dev server.** `python -m usage_monitor.ui.devserver [--port N] [--scenario
-  normal|warning|critical|stale|guard|no_login|limits_only] [--db PATH] [--theme ID[/VARIANT]]` serves the real webui and API
-  from a fake `MonitorState`, with settings in `USAGE_MONITOR_APPDATA_DIR` (or a temporary folder). `stale` and `no_login` carry
-  the data layer's own sign-in texts (`usage_api.EXPIRED_DETAIL`, `usage_api.NO_SIGN_IN_DETAIL`).
+  normal|warning|critical|stale|refused|guard|no_login|limits_only] [--db PATH] [--theme ID[/VARIANT]]` serves the real webui
+  and API from a fake `MonitorState`, with settings in `USAGE_MONITOR_APPDATA_DIR` (or a temporary folder). `stale` and `no_login`
+  carry the data layer's own sign-in texts (`usage_api.EXPIRED_DETAIL`, `usage_api.NO_SIGN_IN_DETAIL`). `refused` is a sign-in
+  the usage API turned down with HTTP 403 (`signin_refused` 403, #55): its help asks for `/login`, not for a message.
   The two scenarios of someone who uses Claude on the web or in the app (#28) have no Claude Code on the PC:
   `no_login` has no sign-in (no limits, no plan), and `limits_only` is signed in with the limits of `normal` and a week
   spent in chats. In both every window is empty and the ingest has finished with no file to read, and the synthetic
@@ -382,7 +390,11 @@ Settings: `theme_id`, `theme_variant`, `theme_mode` (Gates: light / dark / syste
   (the `css_vars` of `/api/state`) with `color-scheme`, the `color-scheme` meta and the theme's own
   stylesheet link. The page sets the same values when its first state arrives, so the first frame is
   never another theme's. A theme that cannot be resolved, or a shell without the markers, is served
-  as it is.
+  as it is. The dashboard's saved choices (`dashboard_prefs`, below) go in the same way, as JSON in
+  `<meta name="monitor-prefs">`, with only the names and values the page knows. The page reads them before it
+  first renders and saves a change with `POST /api/settings`: its own storage does not last, since pywebview's
+  private mode (its default) keeps nothing once the window closes and the browser fallback's port is new on every
+  run (#54).
 - Errors are JSON, `{"error": "<reason>"}`: `400` a bad query or body, `404` an unknown route or
   report, `405` the wrong method (with `Allow`), `413` a body over 64 KB, `501` a route that is not
   configured, `503` the statistics database cannot be used right now (the next request tries
@@ -403,7 +415,7 @@ Settings: `theme_id`, `theme_variant`, `theme_mode` (Gates: light / dark / syste
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/?k=<token>` | `index.html` with the token and the active theme injected (below); `401` without the key |
+| GET | `/?k=<token>` | `index.html` with the token, the active theme and the saved dashboard choices injected (below); `401` without the key |
 | GET | `/static/<path>` | webui assets (fonts cached; HTML/JS/CSS `no-store` in dev) |
 | GET | `/api/state` | MonitorState + settings subset + theme + `update` block + version (ETag) |
 | GET | `/api/themes` | themes with variants and tokens; the Gates `system-*` variants show the live Windows accent, as applied |
@@ -502,6 +514,7 @@ object is a `400` and nothing in the request is applied. The answer is `{"ok": t
 | `alert_thresholds` | 1 to 5 different whole numbers from 1 to 100 |
 | `alert_quiet_hours` | `null`, or `{"start": "HH:MM", "end": "HH:MM"}` in local 24-hour time (may wrap midnight) |
 | `dashboard_bounds` | `null`, or `{"x", "y", "w", "h"}` whole numbers (width 320 to 8000, height 240 to 8000) |
+| `dashboard_prefs` | `null`, or an object with any of the dashboard's choices: `costWindow` and `efficiencyWindow` (`session`, `today`, `week`, `month`, `cycle` or `all`), `folderMode` (`folder` or `launch`), `calMetric` (`cost` or `tokens`), `matrixMetric` (`cost` or `requests`). The page sends only the choice that changed: an object is merged into the held choices (a stored entry the page does not know is dropped), so two windows never undo each other's; `null` clears them all |
 | `guard_enabled` | boolean (default off) |
 | `guard_session_cap`, `guard_weekly_cap`, `guard_scoped_cap` | `null` (that limit is not watched), or a whole number 1 to 100 (defaults 95, 90 and `null`) |
 | `guard_resume_stagger_s` | whole number of seconds, 0 to 600 (default 120): the gap between waking one waiting session and the next |
@@ -647,8 +660,9 @@ default browser instead, and the exit code says so (below).
   load whatever the theme) and `motion.js` in the `<head>` (so a boot curtain can start before the body is parsed), then
   `charts.js` and `app.js` last: `app.js` starts the page. A test pins the order.
 - **Efficiency.** The page that was called *Nerds only* is `#efficiency`. `PAGE_ALIASES = { nerds: "efficiency" }` opens an old
-  link or bookmark and rewrites the address with `history.replaceState`. Its saved window preference is `efficiencyWindow`;
-  an old `nerdsWindow` is read when there is no new value. Its Context card says "prompt tokens per request, API count" and
+  link or bookmark and rewrites the address with `history.replaceState`. Its saved window choice is `efficiencyWindow`.
+  The old `nerdsWindow` lived in the page's own storage, which never outlived the window (#54), so nothing carries it
+  over. Its Context card says "prompt tokens per request, API count" and
   its compaction figure "Size at compaction ... Claude Code's own count": the two come from different counters and can differ.
 - Markup is shared; each theme's CSS (`themes/<id>.css`) owns layout, shapes and effects and
   reads colours from CSS variables set from the theme tokens. Optional `themes/<id>.js` adds
