@@ -448,15 +448,25 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   (`i18n.COMMANDS`) inside a string, plural forms other than the language's CLDR categories, and a Save-dialog filter
   label (a key ending in `.filter`) that pywebview's rule (`i18n.FILE_FILTER`) refuses. The keys a language lacks fail
   it only once it is offered; until then they are its to-do list. Width budgets (`tests/budgets.py`) list the widgets'
-  fixed boxes with their room, in logical px in each skin's own fonts at every frame scale (a box that shrinks its text
-  is measured at its smallest size), and the money tiles, the tray tooltip and the toasts in characters. Each language's
-  longest figures (`100 %`, `%100`, `16 h 12`, `5,96 $ US`) go in too. `tests/test_budgets.py` fails an offered
-  language past a box that has no fallback, and `python tests/budgets.py --lang <id>` reports any language. The "no
-  English left" scan (`tests/english_left.py`) lists the English the frame dump, the tray tooltip and a dashboard run
-  (`tests/english_scan.js`, every dev-server scenario) show under the pseudo-locale. It leaves out numbers, what the
-  page marks as data (`translate="no"`, or a `lang` other than the page's), the names the skins draw, the product name
-  and #86's brand marks. `tests/test_english_left.py` holds the result to `tests/fixtures/english_left.json`, which
-  each extraction ticket (#93 to #101) shrinks by recording again (`python tests/english_left.py --record`).
+  fixed boxes with their room, and the lines that hold several side by side. Each box is measured as its skin draws
+  it: Nostromo on its own canvas at every display scale and at the smaller scales a short taskbar draws its strip at,
+  Night City through its ink and its fit function (a box that shrinks its text is measured at the size it shrinks to),
+  Gates in its own faces, the tray numbers in device px, and the money figures, the tray tooltip and the toasts in
+  UTF-16 units. A pixel box's budget is its room, or what English already takes where it runs past by design; a
+  character box's budget is its limit. Each language's longest figures (`100 %`, `%100`, `16 h 12`, `5,96 $ US`) go
+  in too. `tests/test_budgets.py` holds each box's measure to the widths the skins work out as the frame dump draws,
+  and every drawn run to a box. It pins every room (`python tests/budgets.py --limits` prints them after a skin
+  change), fails English that runs past a room it did not run past before, and fails an offered language past a box
+  that has no fallback or only shrinks; `python tests/budgets.py --lang <id>` reports any language. The "no English
+  left" scan (`tests/english_left.py`) lists the English the frame dump, the tray tooltip and the dashboard show under
+  the pseudo-locale. The dashboard runs on a small DOM (`tests/mini_dom.js`, `tests/english_scan.js`) through every
+  dev-server scenario, as an installed monitor and as a dev instance, and in some scenarios with its actions, its
+  update banner and its loading and failed states. The scan leaves out numbers, what the page marks as data
+  (`translate="no"`, or a `lang` other than the page's), the names the skins draw, the product name and #86's brand
+  marks.
+  `tests/test_english_left.py` holds the result to `tests/fixtures/english_left.json`, which each extraction ticket
+  (#93 to #101) shrinks by recording again (`python tests/english_left.py --record`, which adds new English only with
+  `--allow-new`).
 - **Stays English:** the agent modes and `state.json`, the logs, the export's columns, and the dashboard window title
   "Claude Usage Monitor" (the installer and the app find the window by it).
 

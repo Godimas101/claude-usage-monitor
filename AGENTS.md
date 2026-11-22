@@ -112,12 +112,15 @@ python main.py            (console: Ctrl+C quits, errors print)     or    launch
   checks the motion stylesheets, and runs each theme script with no `motion.js` (`tests/theme_scripts_checks.js`). They
   start node, so they are gated with `USAGE_MONITOR_UI_TESTS=1`; `tests.yml` runs them once more with it set
   (`tests/test_webui.py`, `tests/test_motion.py`, `tests/test_english_left.py`), so CI covers them. A test that only
-  runs the frame dump in a fresh Python (the golden frames, the widgets' English scan) opens no window and is not gated.
+  runs the frame dump in a fresh Python (the golden frames, the widgets' English scan, the width budgets' measures)
+  opens no window and is not gated.
   A check that reads a script's source for a phrase proves the phrase is there, not that the script works: where the claim
   is behaviour, run the script.
 - **No new English outside the catalog.** `tests/test_english_left.py` holds the English the widgets and the dashboard
   show under the pseudo-locale to `tests/fixtures/english_left.json`. Text moved into the catalog is struck by
   `python tests/english_left.py --record` (it needs node); new English text goes through the catalog instead.
+- **Widget rooms are pinned.** A skin change that moves a room fails `tests/test_budgets.py` until the table that
+  `python tests/budgets.py --limits` prints replaces its `LIMITS`; English that runs past a room it fit fails it too.
 - **Hover effects play once per entry of the pointer.** A hover rule that animates, moves or clips its own target must not
   hang on `:hover` alone (it restarts itself under a pointer resting at the target's edge); it hangs on `[data-fx-play]`
   (a one-shot) or `[data-fx-hot]` (a state), which `motion.js` sets from `pointerenter`. After touching a hover rule or that
