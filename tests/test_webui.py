@@ -1284,6 +1284,35 @@ def test_every_card_names_itself_by_its_key_the_settings_and_about_cards_too(che
     assert checks["cards"]["none"] == ["none"] and "unpriced" in checks["cards"]["unpriced"]
 
 
+# Each card's Gates icon, as the theme drew it while the icons followed the card titles; Data and plan gained its icon in #90,
+# when they began to follow the cards. A key that loses, swaps or gains a glyph fails here.
+GATES_CARD_GLYPHS = {
+    "cost": "E8C7", "value": "E8C7", "credits": "E8C7", "fast": "E8C7",
+    "efficiency": "E945", "cache": "E945", "thinking": "E945", "productivity": "E945",
+    "models": "E9F9", "by-model": "E9F9", "effort": "E9F9", "haiku": "E9F9", "tool-mix": "E9F9", "mcp-mix": "E9F9",
+    "monthly": "E9F9",
+    "surfaces": "E7C4", "by-folder": "E7C4", "threads": "E7C4", "windows": "E7C4",
+    "burn": "E9D2", "compactions": "E9D2", "context": "E9D2", "tools": "E9D2", "api-web": "E9D2", "pipeline": "E9D2",
+    "tokens": "E9D2",
+    "sessions": "E81C", "streaks": "E81C",
+    "odometer": "E787", "calendar": "E787", "matrix": "E787",
+    "export": "E896", "theme": "E790", "widgets": "E7F4", "data-plan": "E8F1", "alerts": "EA8F", "guard": "EA18",
+    "system": "E713", "about-app": "E946", "none": "E946", "about-links": "E71B", "about-supporters": "EB51",
+    "unpriced": "E7BA", "not-priced": "E7BA",
+}
+
+
+def test_each_gates_card_keeps_its_icon() -> None:
+    rules = re.findall(r'((?:\.nm-card\[data-card="[^"]+"\],?\s*)+)\{\s*--g-ico:\s*"[^0-9A-F"]([0-9A-F]{4})";\s*\}',
+                       THEME_CSS["gates"])
+    glyphs: dict[str, str] = {}
+    for selectors, glyph in rules:
+        for key in re.findall(r'data-card="([^"]+)"', selectors):
+            assert key not in glyphs, f"{key} is named twice"
+            glyphs[key] = glyph
+    assert glyphs == GATES_CARD_GLYPHS
+
+
 @ui_only
 def test_gates_names_only_cards_the_pages_build(checks: dict[str, Any]) -> None:
     """Each data-card key gates.css names is carried by a card the page builds; Data and plan is the Settings card's key."""
@@ -1333,6 +1362,7 @@ def test_the_uplink_line_and_the_age_are_written_from_codes_and_units(checks: di
 @ui_only
 def test_the_scoped_limits_are_matched_by_kind_and_model_so_one_label_can_serve_two(checks: dict[str, Any]) -> None:
     assert checks["scoped"] == {"fable": 10, "opus": 90, "unnamed": 10, "none": None}      # the label is shared; the model is not
+    assert checks["scopedSurface"] == {"code": 40, "cowork": 5, "fable": 70}               # no model: the surface tells them apart
     assert ".label" not in function_body(APP_CODE, "matchScoped")
 
 

@@ -475,6 +475,18 @@ out.scoped = {
   unnamed: api.matchScoped(scopedRows, { label: "SCOPED", kind: "weekly_scoped", scope_model: "Sonnet" }, 1).percent,
   none: api.matchScoped(null, { label: "SCOPED", kind: "weekly_scoped", scope_model: "Fable" }, 0),
 };
+// limits scoped by surface have no model: the surface keeps them apart, and a model-scoped one beside them keeps its own row
+// (each index points at the wrong row, so only the match can find the right one)
+const surfaceRows = [
+  { label: "X", kind: "weekly_scoped", scope_model: null, scope_surface: "claude_code", percent: 40 },
+  { label: "X", kind: "weekly_scoped", scope_model: null, scope_surface: "cowork", percent: 5 },
+  { label: "X", kind: "weekly_scoped", scope_model: "Fable", scope_surface: null, percent: 70 },
+];
+out.scopedSurface = {
+  code: api.matchScoped(surfaceRows, { kind: "weekly_scoped", scope_model: null, scope_surface: "claude_code" }, 2).percent,
+  cowork: api.matchScoped(surfaceRows, { kind: "weekly_scoped", scope_model: null, scope_surface: "cowork" }, 0).percent,
+  fable: api.matchScoped(surfaceRows, { kind: "weekly_scoped", scope_model: "Fable", scope_surface: null }, 1).percent,
+};
 
 // the accent tooltip: a name that is not the colour's id is shown, so the id is the tooltip
 const nostromoTheme = { variants: [{ id: "amber", name: "RAY TUBE" }, { id: "blue", name: "CRYO" }] };

@@ -855,16 +855,18 @@ default browser instead, and the exit code says so (below).
   and it ends when a request is counted. Cost & value, Efficiency and History are then one wide card that explains it, and
   the Overview's cost, efficiency and model cards keep their frame and title with one `.nm-empty` line (`data-state="ready"`,
   no `data-needs`). No cost, efficiency or history report is asked for; the limits, the pace and the alerts are as before.
-- **Ids, not words (#90, part 3).** The dashboard's scripts decide nothing from English text on the page. Every card
-  carries `data-card="<key>"`: `card({key, ...})` writes it, the Settings and About cards and the Limits wrapper's two inner
-  sections set it by hand, and a page part's `tagCard` sets it on the cards it builds (`cost`, `value`, `by-model`,
-  `data-plan` ...). `gates.css` picks each card's icon by `[data-card="..."]`, never by `aria-label` (which keeps the title).
+- **Ids, not words (#90, part 3).** `app.js` decides nothing from English text on the page; `gates.js`'s re-casing still
+  reads the English words until #101. Every card carries `data-card="<key>"`: `card({key, ...})` writes it, every card
+  written out by hand (the Overview's, the Settings sections, Supporters) sets it itself, and a page part's `tagCard` sets
+  its part key on the card it builds (`cost`, `value`, `by-model` ...). `gates.css` picks each card's icon by
+  `[data-card="..."]`, never by `aria-label` (which keeps the title), and `tests/test_webui.py` pins every key's icon.
   A chip carries `data-tone` (`ok`, `warn`, `alert`, `acc` or `neutral`) from the status code it shows: the pace chip, the
   session and weekly verdicts (`SESSION_TONE`, `WEEKLY_TONE`), the burn velocity (`VELOCITY_TONE`) and the guard's OFF, ARMED and
   HOLDING. `gates.js` copies it to `data-g-tone`, and a value it does not know is `neutral`. `matchScoped` finds a scoped limit's
-  pacing row by `kind` and `scope_model` (the dashboard's entries carry both, `state.json` does not), so two limits that share a
-  label keep their own rows. The uplink line and the age are built from tables keyed by code (`LINK_WORD`, and `fmtAge`, which
-  returns `{n, unit}` for `ageWords`, with `AGE_UNIT` and `AGE_UNIT_IN_SENTENCE`), so no word is cut or lower-cased. Night City
+  pacing row by `kind`, `scope_model` and `scope_surface` (the dashboard's entries carry them, `state.json` does not), so two
+  limits that share a label, or have no model, keep their own rows. The health box's LINK row and the age are built from
+  tables keyed by code (`LINK_WORD`, and `fmtAge`, which returns `{n, unit}` for `ageWords`, with `AGE_UNIT` and
+  `AGE_UNIT_IN_SENTENCE`), so no word is cut or lower-cased; the header and the pipeline's LINK row show the `STATUS` text. Night City
   pairs a card across two renders by its `data-card`. The English on the page is unchanged; the one visible change is that the
   Settings "Data and plan" card now has its Gates icon.
 - **Forecast.** A limit's forecast runs from now at the average rate so far (used / elapsed, `averageRateForecast`) to where

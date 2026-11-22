@@ -657,6 +657,7 @@ def test_scoped_limit_entry_has_its_own_window_and_history():
     (entry,) = report["scoped"]
     assert entry["label"] == "FABLE WEEKLY" and entry["model"] == "Fable"
     assert entry["kind"] == "weekly_scoped" and entry["scope_model"] == "Fable"       # what the dashboard matches a row by
+    assert entry["scope_surface"] is None
     assert entry["allowance_pct"] == 20.0 and entry["used_pct_of_weekly"] == 5.0
     assert entry["percent"] == 10.0 and entry["verdict"] == "BEHIND"
     assert entry["daily_budget_pct"] == pytest.approx(30.0)

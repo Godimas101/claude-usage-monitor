@@ -38,10 +38,10 @@
  *             a li may hold a .nm-cmd[data-command] > code.nm-path + button.nm-btn[data-action=copy-command][data-command]; the stale
  *             panel has one after its p) + .nm-actions (button.nm-btn.solid [data-action=check-again], .nm-links > a[data-external])
  *             + p.nm-status[role=status] (what a check found). A code is a command the user types; it keeps its case.
- * Card        section.nm-card[.wide|.span-N][.is-warn|.is-crit|.is-real] > .nm-card-in > .nm-card-t
+ * Card        section.nm-card[data-card=<key>][.wide|.span-N][.is-warn|.is-crit|.is-real] > .nm-card-in > .nm-card-t
  *             (.nm-tag | h2.nm-ttl, and .nm-meta-t) + the body. .is-real marks the one card of real money.
  * Values      .nm-big (sizes .h .m .s), .nm-big-row, .nm-row2 (.is-base), .nm-facts, .nm-chip (.solid
- *             .is-ok .is-warn .is-crit), .nm-verdict, .nm-note, .nm-disc (a disclaimer), .nm-lede,
+ *             .is-ok .is-warn .is-crit; [data-tone=ok|warn|alert|acc|neutral]), .nm-verdict, .nm-note, .nm-disc (a disclaimer), .nm-lede,
  *             .nm-story (a sentence), .nm-kv-grid (.is-one) > .nm-kv > span + b, .nm-kpi (.is-row) > .nm-kl,
  *             .nm-pace (usage and time; .fc is the forecast line), .nm-rail, .nm-ratio, .nm-cells (a segmented
  *             bar: i.on / i.part with --f), .nm-mix > .nm-mrow (.k label, cells, .v value), .nm-meter
@@ -61,7 +61,7 @@
  *             .nm-addlevel, .nm-quiet, .nm-quiet-to, .nm-themes > .nm-theme (+ .nm-swatches), .nm-variants,
  *             .nm-mode-k, .nm-links, .nm-supp (a list of names), .nm-tier, .nm-authors. A switched-off group
  *             (.nm-set.is-off, Alerts) disables its controls (:disabled); its text is not dimmed.
- * Guard       The usage guard card on the Settings page (section.nm-card[aria-label="Usage guard"]) is made of the parts above and
+ * Guard       The usage guard card on the Settings page (section.nm-card[data-card="guard"]) is made of the parts above and
  *             nothing of its own: a toggle, four .nm-input number fields (a blank one is off) and two blocks the page fills in,
  *             #guard-live (.nm-verdict > .nm-chip OFF, ARMED or HOLDING, .nm-story, .nm-kv-grid.is-one, .nm-actions) and
  *             #guard-setup (the same parts, with .nm-callout for a note or the result of a click, .nm-error for a refusal, .nm-path
@@ -191,7 +191,7 @@
     no_credentials: { text: "NO LOGIN", ok: false },
     paused: { text: "PAUSED", ok: false }
   };
-  // The words of the link (the health box and the header) for each status code; the STATUS text above is the pipeline's line.
+  // The words of the health box's LINK row for each status code; the header and the pipeline's LINK row show the STATUS text.
   var LINK_WORD = {
     live: "LIVE", loading: "ACQUIRING", stale: "AUTH LOST", offline: "NO CARRIER", rate_limited: "RATE LIMITED",
     no_credentials: "NO LOGIN", paused: "PAUSED"
@@ -1297,10 +1297,13 @@
     return parts.join(" &middot; ");
   }
 
-  /* The pacing row of a scoped limit: the one of the same kind and model (the labels of two limits can be the same), else
-   * the one at its place in the list. */
+  /* The pacing row of a scoped limit: the one of the same kind and scope, its model and its surface (the labels of two limits
+   * can be the same, and a limit scoped by surface has no model), else the one at its place in the list. */
   function matchScoped(list, limit, index) {
-    var found = (list || []).filter(function (b) { return b.kind === limit.kind && b.scope_model === limit.scope_model; })[0];
+    var found = (list || []).filter(function (b) {
+      return b.kind === limit.kind && (b.scope_model || null) === (limit.scope_model || null) &&
+        (b.scope_surface || null) === (limit.scope_surface || null);
+    })[0];
     return found || (list || [])[index] || null;
   }
 
