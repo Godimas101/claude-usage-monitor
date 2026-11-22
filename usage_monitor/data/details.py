@@ -41,9 +41,10 @@ _BACKOFF = frozenset({RATE_LIMITED, OFFLINE})
 @dataclass(frozen=True)
 class Detail:
     """A status and its values. ``values`` holds only what the wording of ``code`` needs; ``next_try`` is added while
-    the usage API is backing off."""
+    the usage API is backing off. A Detail is a value, so its ``values`` are never changed (the paused and loading ones
+    are shared). It hashes by its code alone, as a dict cannot be hashed; two equal details still have equal values."""
     code: str
-    values: Mapping[str, Any] = field(default_factory=dict)
+    values: Mapping[str, Any] = field(default_factory=dict, hash=False)
 
     def with_next_try(self, clock: str) -> "Detail":
         """This status, with the clock of the next request, for a status that backs off."""
@@ -78,7 +79,7 @@ def english(detail: Detail) -> str:
     elif code == RATE_LIMITED:
         text = "Usage API rate limited"
     elif code == OFFLINE:
-        text = f"Usage API unreachable ({_reason_text(values)})"
+        text = f"Usage API unreachable ({reason_text(values)})"
     else:
         text = code
     if values.get(NEXT_TRY):
@@ -86,7 +87,8 @@ def english(detail: Detail) -> str:
     return text
 
 
-def _reason_text(values: Mapping[str, Any]) -> str:
+def reason_text(values: Mapping[str, Any]) -> str:
+    """The words of an offline detail's reason ("timed out", "HTTP 503"): the status text says them, and so does the log."""
     reason = values.get("reason")
     if reason == "http":
         return f"HTTP {values.get('http')}"

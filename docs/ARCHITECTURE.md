@@ -278,7 +278,8 @@ class UsageClient:
   `reason`, `refused` with its `http` and `advice`, and `next_try` while backing off). `FetchResult.info` carries it,
   and `FetchResult.detail` is `english(info)`, the text that `state.json` and `--status` carry. Nothing reads that text
   back. `Limit.label` is the legacy identity string from `identity.legacy_label` ("FABLE WEEKLY"): alert, guard and
-  hook identities key on it, so it does not change; titles and the UI word a limit from its kind and scope.
+  hook identities key on it, so it does not change. Alert titles word a limit from its kind and scope; the widgets and
+  the dashboard still show the label for now.
 - Never writes to `.credentials.json`. A readable file is authoritative (missing sign-in →
   "Unknown plan"); an unreadable or half-written one keeps the current plan and backoff.
 - Redirects are refused (a 3xx is an error → `OFFLINE`), so the bearer token never follows a

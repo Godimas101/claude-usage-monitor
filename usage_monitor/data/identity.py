@@ -2,7 +2,8 @@
 
 ``Limit.label`` keeps its English text, as "SESSION", "WEEKLY" or "FABLE WEEKLY". Alert identities, the guard's episodes,
 hook-seen.json and the limits_json column of usage.db all key on that text, so changing it would repeat alerts and start new
-guard episodes. Nothing reads it for words any more: titles and dashboard text are worded from ``kind`` and the scope.
+guard episodes. Alert titles are worded from ``kind`` and the scope; the widgets and the dashboard still show the label for
+now.
 """
 from __future__ import annotations
 

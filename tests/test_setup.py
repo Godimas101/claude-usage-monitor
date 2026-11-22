@@ -412,6 +412,7 @@ def test_remove_still_takes_the_hooks_out_when_claude_is_not_found(tmp_path: Pat
     result = setup.remove(rig.ctx)
     assert result["ok"] is True and rig.load() == {} and rig.claude.calls == []
     assert "claude mcp remove claude-usage -s user" in result["warnings"][0]
+    assert result["warnings"][0].code == setup.NO_CLAUDE_LEFT.code   # what main.py's uninstaller leaves out by (#90)
 
 
 def test_remove_does_not_guess_when_it_cannot_tell_whether_the_tool_is_ours(tmp_path: Path) -> None:

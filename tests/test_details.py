@@ -5,6 +5,7 @@ english() must give the text state.json and the agent modes have always carried:
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -79,3 +80,40 @@ def test_a_live_reading_carries_its_clock_as_a_value(tmp_path):
     result = UsageClient(path, opener=lambda request, timeout: Response()).fetch(now)
     assert result.info == Detail("updated", {"clock": result.info.values["clock"]})
     assert result.detail == f"Updated {result.info.values['clock']}"
+
+
+class _Status:
+    """A response that carries only a status code."""
+    headers: dict = {}
+
+    def __init__(self, status: int) -> None:
+        self.status = status
+
+    def read(self, limit=None):
+        return b""
+
+    def close(self):
+        pass
+
+
+def _timed_out(request, timeout):
+    raise TimeoutError("slow")
+
+
+@pytest.mark.parametrize(("opener", "words"), [
+    (lambda request, timeout: _Status(503), "HTTP 503"),
+    (_timed_out, "timed out"),
+])
+def test_the_log_says_in_words_why_the_usage_api_was_unreachable(tmp_path, caplog, opener, words):
+    """The app's log keeps the words and the HTTP status, not the reason's code (#90)."""
+    caplog.set_level(logging.WARNING)
+    path = tmp_path / ".credentials.json"
+    write_sign_in(path)
+    UsageClient(path, opener=opener).fetch(datetime(2026, 11, 21, 12, 0, tzinfo=timezone.utc))
+    assert f"usage API unavailable ({words}); retrying in" in caplog.text
+
+
+def test_a_detail_is_a_value_that_can_be_hashed():
+    assert hash(Detail("loading")) == hash(Detail("loading"))
+    assert {offline("timed_out"), offline("timed_out")} == {offline("timed_out")}
+    assert offline("timed_out") != offline("network_error")

@@ -286,6 +286,13 @@ def test_an_old_reading_is_marked_stale_with_its_status():
     assert not status.is_stale(document(at=NOW - timedelta(minutes=20)), NOW)
 
 
+def test_a_status_without_words_is_named_alone():
+    doc = document(at=NOW - timedelta(hours=2), state="offline")
+    doc["status_detail"] = ""
+    line = status.summary(doc, now=NOW, running=True)
+    assert "[offline]" in line and "[offline:" not in line
+
+
 def test_a_reset_that_has_passed_is_said_plainly():
     line = status.summary(document(), now=NOW + timedelta(hours=3), running=True)  # the session reset at +2h
     assert "(window reset 1h 0m ago" in line and "no newer reading" in line

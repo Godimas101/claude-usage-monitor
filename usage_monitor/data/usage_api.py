@@ -268,7 +268,7 @@ def _shares(section: Any) -> Shares:
 
 
 def _label(kind: str, scope_model: str | None, scope_surface: str | None) -> str:
-    """Limit.label: the legacy identity string (identity.py), never shown as a sentence."""
+    """Limit.label: the legacy identity string (identity.py) that alerts, the guard and usage.db key on."""
     return legacy_label(kind, scope_model, scope_surface)
 
 
@@ -520,8 +520,9 @@ class UsageClient:
 
     def _offline(self, now: datetime, reason: str, *, http: int | None = None) -> FetchResult:
         wait = self._back_off(now, NETWORK_BACKOFF_BASE_S)
-        log.warning("usage API unavailable (%s); retrying in %d s", reason, round(wait))
-        self._set(ApiStatus.OFFLINE, details.offline(reason, http))
+        detail = details.offline(reason, http)
+        log.warning("usage API unavailable (%s); retrying in %d s", details.reason_text(detail.values), round(wait))
+        self._set(ApiStatus.OFFLINE, detail)
         return self._result(fresh=False)
 
     def _stale(self, mtime: float | None, detail: Detail, refused: int | None = None) -> FetchResult:

@@ -264,7 +264,7 @@ def _name(limit: Limit) -> str:
     """The limit's name for a title, sentence case: "Fable weekly", "Weekly scoped", "Session" (#90). It is worded from the
     kind and the scope, not from the label. A limit with no label (none comes from the API) is named by its kind, else
     by its model."""
-    if (limit.label or "").strip():
+    if (limit.label or "").strip() and limit.kind:
         text = _kind_words(limit)
     else:
         text = _FALLBACK_NAMES.get(limit.kind) or (limit.scope_model or "Scoped")
@@ -281,7 +281,7 @@ def _kind_words(limit: Limit) -> str:
         scope = scope_name(limit.scope_model, limit.scope_surface)
         # Upper case first, as the label always was, so a name that upper-cases to two letters titles the same as before.
         return f"{scope.upper()} weekly" if scope else "Weekly scoped"
-    return limit.kind.replace("_", " ")
+    return limit.kind.replace("_", " ").upper()
 
 
 def _reset_text(limit: Limit, tz: tzinfo | None) -> str:
