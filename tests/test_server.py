@@ -593,6 +593,15 @@ def test_a_dev_instance_can_show_the_pseudo_locale(make_server: Any, localized: 
     assert script[0] == 200 and '"language":"pseudo"' in script[2].decode("utf-8")
 
 
+def test_only_a_dev_instance_serves_the_pseudo_locale(make_server: Any, localized: Path,
+                                                     monkeypatch: pytest.MonkeyPatch) -> None:
+    """The pseudo-locale is never offered, so an installed monitor has no catalog for it (#89)."""
+    monkeypatch.delenv(i18n.DEV_INSTANCE_ENV, raising=False)
+    server, _ = make_server()
+    assert request(server, "GET", "/static/i18n/pseudo.js")[0] == 404
+    assert request(server, "GET", "/static/i18n/en.js")[0] == 200
+
+
 def test_the_state_carries_the_locale(make_server: Any, localized: Path) -> None:
     server, _ = make_server(locale_provider=french)
     state = json.loads(request(server, "GET", "/api/state")[2])

@@ -2454,7 +2454,12 @@ def test_ci_runs_the_script_tests_with_node() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
     assert "USAGE_MONITOR_UI_TESTS" in text and "tests/test_webui.py" in text and "setup-node" in text
     assert "tests/test_motion.py" in text                                          # motion.js is run under node there too
-    assert "tests/test_english_left.py" in text                     # and app.js against the dev server, in the pseudo-locale
+    # The node step itself (not a comment) runs the three files, the dashboard's "no English left" scan among them, with
+    # the switch set in that step.
+    step = text[text.index("- name: Run the dashboard script tests"):]
+    run_line = next(line.strip() for line in step.splitlines() if line.strip().startswith("run:"))
+    assert run_line == "run: python -m pytest tests/test_webui.py tests/test_motion.py tests/test_english_left.py"
+    assert "USAGE_MONITOR_UI_TESTS: '1'" in step[:step.index(run_line)]
 
 
 def test_the_test_hook_is_inert_unless_a_test_sets_it() -> None:

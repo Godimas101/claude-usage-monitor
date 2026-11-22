@@ -64,9 +64,21 @@ DEV_LANG_ENV = "USAGE_MONITOR_LANG"   # a dev instance only: shows a catalog lan
 
 _PLACEHOLDER = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 _PLACEHOLDER_SPLIT = re.compile(r"(\{[A-Za-z_][A-Za-z0-9_]*\})")
-_KEY = re.compile(r"[a-z0-9]+(?:[._][a-z0-9]+)+")
+_KEY = re.compile(r"[a-z0-9]+(?:_[a-z0-9]+)*(?:\.[a-z0-9]+(?:_[a-z0-9]+)*)+")     # dotted; "_" joins words in a part
 _MARKUP = re.compile(r"<[A-Za-z/!?]|&(?:[A-Za-z][A-Za-z0-9]*|#[0-9]+|#[xX][0-9A-Fa-f]+);")
-_COMMAND = re.compile("|".join(r"(?<![\w/])" + re.escape(command) + r"(?![\w])" for command in COMMANDS))
+
+
+def _command_pattern(command: str) -> str:
+    """A command as a word of its own: not part of a name, a host or a path ("claude-usage", "claude.ai",
+    "C:\\claude\\"). A bare "claude" is matched as written, so the product name "Claude" is not one; a command of
+    several words ("claude update") is matched in any case, as a translator might capitalise it."""
+    body = re.escape(command)
+    if " " in command:
+        body = f"(?i:{body})"
+    return r"(?<![\w\-./\\])" + body + r"(?![\w\-/\\]|\.\w)"
+
+
+_COMMAND = re.compile("|".join(_command_pattern(command) for command in COMMANDS))
 _TAG = re.compile(r"^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$")
 
 
@@ -576,6 +588,8 @@ def _text_errors(key: str, text: Any) -> list[str]:
         errors.append(f"{key}: holds a command (commands are placeholders)")
     if any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) for name in re.findall(r"\{([^}]*)\}", text)):
         errors.append(f"{key}: a placeholder that is not a plain {{name}}")
+    if re.search(r"[{}]", re.sub(r"\{[^{}]*\}", "", text)):
+        errors.append(f"{key}: a brace that opens or closes no placeholder (placeholders are {{name}})")
     if key.endswith(".filter") and not FILE_FILTER.match(text):
         errors.append(f"{key}: not a Save-dialog filter pywebview takes (letters, digits, spaces, then (*.ext))")
     return errors
@@ -589,15 +603,40 @@ def _placeholders(value: Any) -> set[str]:
     return {name for form in _forms(value) if isinstance(form, str) for name in _PLACEHOLDER.findall(form)}
 
 
+def _read_strictly(path: Path) -> tuple[dict[str, Any], list[str]]:
+    """A catalog as the check reads it. The app shows English for a catalog it cannot read (``_read_catalog``); the
+    check reports it instead: a file that is missing, unreadable, not a JSON object, or that gives a key twice."""
+    def pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
+        seen = [key for key, _ in items]
+        twice.extend(sorted({key for key in seen if seen.count(key) > 1}))
+        return dict(items)
+
+    twice: list[str] = []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=pairs)
+    except FileNotFoundError:
+        return {}, [f"{path.name}: missing"]
+    except (OSError, ValueError) as exc:
+        return {}, [f"{path.name}: unreadable ({type(exc).__name__}: {exc})"]
+    if not isinstance(data, dict):
+        return {}, [f"{path.name}: not a JSON object"]
+    errors = [f"{key}: given twice in {path.name}" for key in twice]
+    return {key: value for key, value in data.items() if not key.startswith("_")}, errors
+
+
 def check_catalog(language: str, directory: Path = CATALOG_DIR) -> CatalogReport:
-    """The catalog check (#89) for one catalog language: no key en.json lacks; keys are dotted names; strings are plain
-    NFC text with plain {name} placeholders, no command and the same placeholders as English; plural entries use
-    exactly the language's CLDR categories; Save-dialog filter labels pass pywebview's rule. The keys it lacks are
-    listed apart (``CatalogReport.missing``)."""
-    english = _read_catalog(directory / f"{DEFAULT}.json")
-    own = english if language == DEFAULT else _read_catalog(directory / f"{language}.json")
+    """The catalog check (#89) for one catalog language: both files can be read; no key en.json lacks, and none given
+    twice; keys are dotted names; strings are plain NFC text with plain {name} placeholders, no stray brace, no
+    command and the same placeholders as English; plural entries use exactly the language's CLDR categories;
+    Save-dialog filter labels pass pywebview's rule. The keys it lacks are listed apart (``CatalogReport.missing``)."""
+    english, errors = _read_strictly(directory / f"{DEFAULT}.json")
+    if language == DEFAULT:
+        own = english
+    else:
+        own, own_errors = _read_strictly(directory / f"{language}.json")
+        errors += own_errors
     categories = set(PLURAL_CATEGORIES.get(language, PLURAL_CATEGORIES[DEFAULT]))
-    errors: list[str] = [f"{key}: not in en.json" for key in sorted(set(own) - set(english))]
+    errors += [f"{key}: not in en.json" for key in sorted(set(own) - set(english))]
     for key in sorted(own):
         value = own[key]
         if not _KEY.fullmatch(key):
@@ -618,10 +657,17 @@ def check_catalog(language: str, directory: Path = CATALOG_DIR) -> CatalogReport
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """``python -m usage_monitor.i18n``: the catalog check for every catalog language. Exit 1 when one fails."""
+    """``python -m usage_monitor.i18n [--dir FOLDER]``: the catalog check for every catalog language. Exit 1 when one
+    fails."""
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="python -m usage_monitor.i18n",
+                                     description="The catalog check (#89) for every catalog language.")
+    parser.add_argument("--dir", type=Path, default=CATALOG_DIR, help="the catalog folder (default: the app's own)")
+    args = parser.parse_args(argv)
     failed = False
     for language in LANGUAGES:
-        report = check_catalog(language)
+        report = check_catalog(language, args.dir)
         state = "offered" if language in OFFERED else "not offered"
         print(f"{language} ({state}): {len(report.errors)} errors, {len(report.missing)} keys missing")
         for error in report.errors:

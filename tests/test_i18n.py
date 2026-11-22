@@ -302,6 +302,44 @@ def test_the_check_finds_each_kind_of_fault(tmp_path: Path) -> None:
     assert not clean.failed() and clean.failed(offered=("en", "tr"))      # a missing key fails only an offered one
 
 
+def test_a_catalog_the_check_cannot_read_fails_it(tmp_path: Path) -> None:
+    """The app shows English for a catalog it cannot read; the check must not pass it. A hand edit that breaks
+    en.json fails every language, since none has anything to be held to."""
+    root = write_catalogs(tmp_path / "i18n", fr={"a.b": "Clé"}, es=[1, 2])
+    (root / "en.json").write_text('{"a.b": "Key",, "c.d": "x"}', encoding="utf-8")
+    for language in ("en", "fr"):
+        report = i18n.check_catalog(language, root)
+        assert report.failed() and report.errors[0].startswith("en.json: unreadable (JSONDecodeError"), language
+    assert "es.json: not a JSON object" in i18n.check_catalog("es", root).errors
+    assert "tr.json: missing" in i18n.check_catalog("tr", root).errors
+    (root / "en.json").write_text('{"a.b": "Key", "c.d": "One", "c.d": "Two"}', encoding="utf-8")
+    assert i18n.check_catalog("en", root).errors == ("c.d: given twice in en.json",)
+
+
+def test_braces_commands_and_keys_are_held_to_their_rules(tmp_path: Path) -> None:
+    held = {"stray.open": "Total {", "stray.close": "Total {n} }", "stray.both": "{{n}}",
+            "cmd.capital": "Run Claude update now", "cmd.end": "Then type claude.", "cmd.slash": "Run /mcp to see it",
+            "settings_language": "Language"}
+    free = {"ok.name": "Claude Usage Monitor and Claude Code", "ok.host": "See claude.ai for help",
+            "ok.folder": "The claude-usage-monitor folder", "ok.path": r"Saved to C:\claude\usage.db",
+            "ok.server": "The x/mcp-server tool", "ok.count": "{n} of {total}", "settings.reduce_motion.label": "Motion"}
+    root = write_catalogs(tmp_path / "i18n", en={**held, **free})
+    errors = i18n.check_catalog("en", root).errors
+    assert sorted({e.split(":")[0] for e in errors}) == sorted(held), errors
+    assert "settings_language: not a dotted name" in errors
+    assert "stray.open: a brace that opens or closes no placeholder (placeholders are {name})" in errors
+    assert "cmd.capital: holds a command (commands are placeholders)" in errors
+
+
+def test_the_save_dialog_labels_the_app_passes_pass_pywebviews_rule() -> None:
+    """The labels are literals in dashboard.py today; the catalog rule covers them once they move to keys ending
+    in ".filter"."""
+    source = (Path(i18n.__file__).parent / "ui" / "dashboard.py").read_text(encoding="utf-8")
+    labels = re.findall(r'"([^"]*\(\*\.[^"]*\))"', source)
+    assert {"CSV file (*.csv)", "JSON file (*.json)", "All files (*.*)"} <= set(labels)
+    assert [label for label in labels if not i18n.FILE_FILTER.match(label)] == []
+
+
 def test_the_filter_rule_is_pywebviews_own() -> None:
     """The check holds Save-dialog labels to pywebview's rule; this holds the rule to pywebview."""
     util = pytest.importorskip("webview.util")
@@ -315,10 +353,16 @@ def test_the_filter_rule_is_pywebviews_own() -> None:
         assert bool(i18n.FILE_FILTER.match(label)) is takes, label
 
 
-def test_the_check_runs_from_the_command_line(capsys: pytest.CaptureFixture[str]) -> None:
+def test_the_check_runs_from_the_command_line(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
     assert i18n.main([]) == 0
     out = capsys.readouterr().out
     assert "en (offered): 0 errors, 0 keys missing" in out and "fr (not offered): 0 errors" in out
+    root = write_catalogs(tmp_path / "i18n", en={"a.b": "Key"}, fr={"a.b": "Clé <b>"}, es={}, tr={})
+    assert i18n.main(["--dir", str(root)]) == 1                           # an error in a language not offered fails
+    assert "  error: a.b: holds a tag or an entity (strings are plain text)" in capsys.readouterr().out
+    with pytest.raises(SystemExit) as stopped:
+        i18n.main(["--help"])
+    assert stopped.value.code == 0 and "--dir" in capsys.readouterr().out
 
 
 def test_the_page_script_holds_the_language_and_english_behind_it(tmp_path: Path) -> None:

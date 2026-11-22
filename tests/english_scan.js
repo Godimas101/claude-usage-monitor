@@ -1,187 +1,345 @@
 "use strict";
 /* The dashboard half of the "no English left" scan (#89; tests/english_left.py, tests/test_english_left.py).
  *
- * Runs the dashboard's real scripts (charts.js, app.js) under node against a running dev server, with the small fake DOM
- * and the test hook tests/webui_checks.js uses. The page the server serves, its catalog script, the state and every
- * report a page asks for come from that server, as they would in the app. For each page it prints the HTML app.js builds
- * (the page model's parts, or the Settings and About forms, and each chart drawn at one width), and it prints every text,
- * markup and attribute app.js writes into the page's fixed elements (the header's link status, the data age).
+ * Runs the real page under node with no browser: index.html as the dev server serves it, then its scripts (the catalog,
+ * charts.js, app.js) from the same server, on the small DOM in tests/mini_dom.js. app.js starts as it does in the app
+ * (init: the first render and the first state), and each pass then works the page the way a person would: it opens every
+ * page from the menu, presses the segment buttons (the windows, the metrics, the folder mode), and in some passes every
+ * action button, every Settings control and the update banner's buttons. After each step it keeps the page's title and
+ * body, once each. A pass is one fresh load of the page; it can rewrite what the server answers, to show the page as an
+ * installed monitor (not a dev instance), with an update offered, with the reports still loading or failing, or with
+ * every change refused:
  *
- *   node tests/english_scan.js <webui folder> <the page's URL, with its key> <now, in ms since 1970>
+ *   installed       every page, with every segment, as an installed monitor shows them
+ *   dev             every page as the dev server serves it (its dev-instance wording)
+ *   actions         Settings, About and the sign-in help: every action button and every control, one at a time
+ *   update          an update offered (opened in the browser): the banner on every page, then each of its buttons
+ *   update-self     the same, with the monitor able to install it itself
+ *   pending         every page while nothing it asks for besides the state has arrived (reports, themes, ...)
+ *   reports-503     ... while the usage database is not ready (503)
+ *   reports-501     ... in a build without statistics (501)
+ *   reports-failed  ... when the request itself fails
+ *   lookups-failed  every page when what it looks up besides the state and the reports fails (themes, supporters...)
+ *   posts-failed    actions and the update banner when every change the page sends fails
  *
- * The page's clock stands still at <now> (the dev server's, so its times agree), and english_left.py runs node with
- * TZ pinned, so two runs draw the same words. Prints {shell, title, pages: {page: [html]}, writes: [{id, kind, name,
- * value}], errors: {page: message}}. The theme scripts are not run: their boot texts play only in a browser (#101 moves
- * them). Nothing here reads a user's data.
+ *   node tests/english_scan.js <webui folder> <the page's URL, with its key> <now, in ms since 1970> <passes as JSON>
+ *
+ * The page's clock stands still at <now> (the dev server's, so its times agree), its timers never fire (nothing is
+ * left to a later tick), and english_left.py runs node with TZ pinned, so two runs give the same snapshots. motion.js
+ * and the theme scripts are not run: they move and decorate what app.js draws, and the themes' boot texts are #101's.
+ * Prints {shell, snapshots: [{pass, step, title, body}], problems: [text]}; a problem is an error the page met (a
+ * script or a listener that threw, a rejected promise, a console.error) or a step the scan could not take. Nothing
+ * here reads a user's data: the dev server's data is made up.
  */
-const fs = require("fs");
-const path = require("path");
 const vm = require("vm");
+const D = require("./mini_dom.js");
 
-const [, , webui, pageUrl, nowArg] = process.argv;
+const [, , webui, pageUrl, nowArg, passesArg] = process.argv;
 const NOW = Number(nowArg);
-if (!Number.isFinite(NOW)) {
-  throw new Error("usage: node tests/english_scan.js <webui folder> <page URL> <now in ms>");
+if (!webui || !pageUrl || !Number.isFinite(NOW)) {
+  throw new Error("usage: node tests/english_scan.js <webui folder> <page URL> <now in ms> <passes as JSON>");
 }
-const origin = new URL(pageUrl).origin;
-const CHART_WIDTH = 640;
-const writes = [];
+const PASSES = JSON.parse(passesArg || '["installed"]');
+const page = new URL(pageUrl);
+const origin = page.origin;
+const WIDTH = 640;
+const UPDATE = { available: true, version: "9.9.9", url: "https://github.com/example/example/releases/tag/v9.9.9" };
+const STAT_PAGES = ["overview", "limits", "cost", "efficiency", "history"];
 
-function element(id, record) {
-  const attrs = {};
-  let html = "";
-  let text = "";
-  const el = {
-    id: id || "", className: "", dataset: {}, hidden: false, disabled: false, value: "", children: [],
-    style: { setProperty() {}, removeProperty() {}, getPropertyValue: () => "" },
-    getAttribute: (k) => (Object.prototype.hasOwnProperty.call(attrs, k) ? attrs[k] : null),
-    setAttribute: (k, v) => { attrs[k] = String(v); if (record) { writes.push({ id, kind: "attr", name: k, value: String(v) }); } },
-    removeAttribute: (k) => { delete attrs[k]; }, hasAttribute: (k) => Object.prototype.hasOwnProperty.call(attrs, k),
-    classList: { toggle() {}, add() {}, remove() {}, contains: () => false },
-    querySelector: () => null, querySelectorAll: () => [], addEventListener() {}, removeEventListener() {},
-    appendChild: (child) => child, insertBefore() {}, removeChild() {}, focus() {}, closest: () => null,
-    contains: () => false, matches: () => false, dispatchEvent: () => true, scrollIntoView() {},
-    getBoundingClientRect: () => ({ left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 }),
-  };
-  Object.defineProperty(el, "innerHTML", {
-    get: () => html,
-    set: (v) => { html = String(v); text = ""; if (record) { writes.push({ id, kind: "html", name: "", value: html }); } },
-  });
-  Object.defineProperty(el, "textContent", {
-    get: () => text,
-    set: (v) => { text = String(v); html = ""; if (record) { writes.push({ id, kind: "text", name: "", value: text }); } },
-  });
-  return el;
-}
+const problems = [];
+const snapshots = [];
+const kept = new Set();
+let current = "";                      // the pass and step being taken, for the problems
 
-function svgElement(tag) {
-  const el = element(tag, false);
-  el.getComputedTextLength = () => String(el.textContent).length * 6;
-  return el;
-}
+const describe = (e) => String((e && e.stack) || e).split("\n").slice(0, 3).join(" | ");
+process.on("unhandledRejection", (e) => problems.push(current + ": a promise was rejected: " + describe(e)));
 
-function unescape(text) {
-  return text.replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&#39;/g, "'").replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">").replace(/&amp;/g, "&");
-}
-
-(async () => {
-  const shell = await (await fetch(pageUrl)).text();
-  const metaOf = (name) => {
-    const found = new RegExp('<meta name="' + name + '" content="([^"]*)">').exec(shell);
-    return found ? unescape(found[1]) : "";
-  };
-  const catalogPath = /<script src="(\/static\/i18n\/[a-z]+\.js)"><\/script>/.exec(shell);
-  if (!catalogPath) {
-    throw new Error("the page names no catalog script");
-  }
-  const catalog = await (await fetch(origin + catalogPath[1])).text();
-
-  // The fixed elements of the page (index.html): one recording element per id, made on first ask. #main is not one: the
-  // page model is read from app.js itself, so a render into #main (which needs a real DOM) finds no #main and stops.
-  const fixed = {};
-  const byId = (id) => (id === "main" ? null : (fixed[id] = fixed[id] || element(id, true)));
-  let title = (/<title>([^<]*)<\/title>/.exec(shell) || [null, ""])[1];
-  const doc = {
-    readyState: "complete", visibilityState: "visible", documentElement: element("html", false),
-    head: element("head", false), body: svgElement("body"), activeElement: null,
-    querySelector: (selector) => {
-      const meta = /^meta\[name="([^"]+)"\]$/.exec(selector);
-      if (meta) {
-        const content = metaOf(meta[1]);
-        return { getAttribute: (k) => (k === "content" ? content : null) };
+// What a pass does to the server's answers: undefined passes one through; {rewrite: fn} changes its JSON; {status}
+// answers in the server's place; "fail" makes the request fail; "hang" leaves it unanswered.
+function rulesFor(pass) {
+  const state = (patch) => ({ rewrite: (data) => { Object.assign(data, patch(data)); return data; } });
+  const installed = { dev: false };
+  return (url, method) => {
+    const api = url.pathname;
+    if (pass === "dev") {
+      return undefined;
+    }
+    if (pass === "posts-failed" && method !== "GET") {
+      return "fail";
+    }
+    if (api === "/api/state") {
+      if (pass === "update" || pass === "posts-failed") {
+        return state(() => ({ dev: false, update: { ...UPDATE, can_self_update: false } }));
       }
-      const id = /^#([\w-]+)$/.exec(selector);
-      return id ? byId(id[1]) : null;
-    },
-    querySelectorAll: () => [], getElementById: byId, createElement: (tag) => element(tag, false),
-    createElementNS: (_ns, tag) => svgElement(tag), createTextNode: (text) => ({ nodeType: 3, nodeValue: text }),
-    addEventListener() {}, removeEventListener() {},
+      if (pass === "update-self") {
+        return state(() => ({ dev: false, update: { ...UPDATE, can_self_update: true } }));
+      }
+      return state(() => installed);
+    }
+    if (pass === "lookups-failed" && method === "GET" && api.startsWith("/api/") && !api.startsWith("/api/analytics/")) {
+      return "fail";
+    }
+    if (pass === "pending" && method === "GET" && api.startsWith("/api/")) {
+      return "hang";
+    }
+    if (api.startsWith("/api/analytics/")) {
+      if (pass === "reports-503") { return { status: 503, body: { error: "the usage database is not ready" } }; }
+      if (pass === "reports-501") { return { status: 501, body: { error: "statistics are not in this build" } }; }
+      if (pass === "reports-failed") { return "fail"; }
+    }
+    return undefined;
   };
-  Object.defineProperty(doc, "title", {
-    get: () => title,
-    set: (v) => { title = String(v); writes.push({ id: "", kind: "title", name: "", value: title }); },
-  });
+}
 
-  let pending = 0;
-  const box = { console, document: doc, __USAGE_MONITOR_TEST__: {} };
-  box.window = box;
-  box.location = { hash: "#overview", reload() {} };
-  box.history = { replaceState() {} };
-  box.name = "";
-  box.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
-  box.getComputedStyle = () => ({ getPropertyValue: () => "" });
-  box.requestAnimationFrame = () => 0;
-  box.cancelAnimationFrame = () => {};
-  box.setInterval = () => 0;
-  box.clearInterval = () => {};
-  box.setTimeout = () => 0;
-  box.clearTimeout = () => {};
-  box.addEventListener = () => {};
-  box.removeEventListener = () => {};
-  box.fetch = (url, options) => {
-    pending += 1;
-    return fetch(new URL(String(url), origin), options).finally(() => { pending -= 1; });
+function response(status, body, headers) {
+  return {
+    status, ok: status >= 200 && status < 300, headers: { get: (name) => (headers ? headers.get(name) : null) },
+    text: () => Promise.resolve(body), json: () => Promise.resolve(JSON.parse(body)),
   };
+}
+
+function window_(doc, pass, waiting, reloads) {
+  const rules = rulesFor(pass);
+  const frames = [];
+  const box = {
+    console: {
+      log() {}, info() {}, debug() {},
+      warn: (...a) => problems.push(current + ": console.warn: " + a.map(String).join(" ")),
+      error: (...a) => problems.push(current + ": console.error: " + a.map((x) => (x && x.stack) || String(x)).join(" ")),
+    },
+    document: doc, Event: D.Event, CustomEvent: D.CustomEvent, name: "",
+    location: {
+      href: page.href.split("#")[0] + "#overview", origin, protocol: page.protocol, host: page.host, pathname: page.pathname,
+      search: page.search, hash: "#overview", reload: () => { reloads.count += 1; }, assign() {}, replace() {},
+    },
+    history: { replaceState: (_s, _t, url) => { if (typeof url === "string" && url[0] === "#") { box.location.hash = url; } }, pushState() {} },
+    navigator: { userAgent: "node (tests/english_scan.js)", clipboard: { writeText: () => Promise.resolve() } },
+    matchMedia: (media) => ({ media, matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }),
+    getComputedStyle: () => ({ getPropertyValue: () => "" }),
+    requestAnimationFrame: (fn) => { frames.push(fn); return frames.length; },
+    cancelAnimationFrame() {}, setTimeout: () => 0, clearTimeout() {}, setInterval: () => 0, clearInterval() {},
+    open: () => null, scrollTo() {}, focus() {}, addEventListener() {}, removeEventListener() {},
+    __frames: frames,
+  };
+  // The window takes part in events (a click bubbles up to it), like the document's own nodes.
+  Object.setPrototypeOf(box, D.Target.prototype);
+  delete box.addEventListener;
+  delete box.removeEventListener;
+  box.window = box;
+  box.self = box;
+  doc.defaultView = box;
+  box.fetch = (url, options) => {
+    const target = new URL(String(url), page.href);
+    const method = String((options && options.method) || "GET").toUpperCase();
+    const rule = rules(target, method);
+    if (rule === "hang") {
+      return new Promise(() => {});                    // never answered: the page waits, and so the scan does not
+    }
+    waiting.count += 1;
+    const done = (value) => { waiting.count -= 1; return value; };
+    const failed = (e) => { waiting.count -= 1; throw e; };
+    if (rule === "fail") {
+      return Promise.reject(new TypeError("Failed to fetch")).then(done, failed);
+    }
+    if (rule && rule.status) {
+      return Promise.resolve(response(rule.status, JSON.stringify(rule.body))).then(done, failed);
+    }
+    return fetch(target, options).then(async (res) => {
+      let body = await res.text();                    // read here, so waiting counts until the page has the body
+      if (rule && rule.rewrite && res.ok && body) {
+        body = JSON.stringify(rule.rewrite(JSON.parse(body)));
+      }
+      return response(res.status, body, res.headers);
+    }).then(done, failed);
+  };
+  return box;
+}
+
+async function settle(box, waiting) {
+  for (let idle = 0, round = 0; idle < 3; round++) {
+    if (round > 20000) {
+      problems.push(current + ": the page did not settle (requests still out: " + waiting.count + ")");
+      return;
+    }
+    await new Promise((resolve) => setImmediate(resolve));
+    const frames = box.__frames.splice(0);
+    frames.forEach((fn) => {
+      try { fn(NOW); } catch (e) { problems.push(current + ": an animation frame threw: " + describe(e)); }
+    });
+    if (waiting.count || frames.length) {
+      idle = 0;
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    } else {
+      idle += 1;
+    }
+  }
+}
+
+function keep(doc, pass, step) {
+  const body = doc.body ? doc.body.outerHTML : "";
+  if (!kept.has(body)) {
+    kept.add(body);
+    snapshots.push({ pass, step, title: doc.title, body });
+  }
+}
+
+async function load(pass) {
+  current = pass + "/load";
+  const shell = await (await fetch(page.href)).text();
+  const doc = D.createDocument(shell, {
+    width: WIDTH, report: (e, event) => problems.push(current + ": a " + event.type + " listener threw: " + describe(e)),
+  });
+  const waiting = { count: 0 };
+  const reloads = { count: 0 };
+  const box = window_(doc, pass, waiting, reloads);
   vm.createContext(box);
   vm.runInContext("(function (now) { var Real = Date;" +
     " class Still extends Real { constructor(...a) { super(...(a.length ? a : [now])); } static now() { return now; } }" +
     " globalThis.Date = Still; })(" + NOW + ");", box, { filename: "still-clock.js" });
-  vm.runInContext(catalog, box, { filename: catalogPath[1] });
-  for (const name of ["charts.js", "app.js"]) {
-    vm.runInContext(fs.readFileSync(path.join(webui, name), "utf8"), box, { filename: name });
-  }
-  const api = box.__USAGE_MONITOR_TEST__.api;
-  const S = api.S;
-  const settle = async () => {
-    for (let round = 0; round < 3000 && (pending || round < 3); round++) {
-      await new Promise((resolve) => setTimeout(resolve, pending ? 5 : 0));
+  for (const script of D.createDocument(shell).querySelectorAll("script[src]")) {
+    const src = script.getAttribute("src");
+    if (/\/motion\.js$/.test(src)) {
+      continue;
     }
-    if (pending) {
-      throw new Error("the dev server did not answer");
-    }
-  };
-  const partsOf = (parts, into) => {
-    parts.forEach((p) => {
-      if (p.grid) {
-        partsOf(p.parts, into);
-      } else if (p.html) {
-        into.push(p.html);
-      }
-    });
-    return into;
-  };
-
-  api.poll(true);
-  await settle();
-  const pages = {};
-  const errors = {};
-  for (const key of api.PAGE_KEYS) {
+    const code = await (await fetch(new URL(src, page.href))).text();
     try {
-      box.location.hash = "#" + key;
-      S.page = key;
-      S.formKey = null;
-      S.charts = {};
-      api.pageStats(key).forEach((entry) => api.loadStat(entry, true));
-      await settle();
-      const html = [];
-      if (key === "settings" || key === "about") {
-        const main = element("main", false);
-        (key === "settings" ? api.settingsPage : api.aboutPage)(main);
-        await settle();
-        html.push(main.innerHTML);
-      } else {
-        const model = api.buildModel(key);
-        partsOf(model.top, html);
-        partsOf(model.cards, html);
-      }
-      Object.keys(S.charts).forEach((id) => html.push(S.charts[id].build(CHART_WIDTH)));
-      pages[key] = html;
+      vm.runInContext(code, box, { filename: src });
     } catch (e) {
-      errors[key] = String((e && e.stack) || e).split("\n").slice(0, 4).join(" | ");
+      problems.push(current + ": " + src + " threw: " + describe(e));
     }
   }
-  process.stdout.write(JSON.stringify({ shell, title, pages, writes, errors }));
+  await settle(box, waiting);
+  return { shell, doc, box, waiting, reloads };
+}
+
+const pageKeys = (doc) => doc.querySelectorAll("#menu a[data-page]").map((a) => a.getAttribute("data-page"));
+
+async function open(view, pass, key) {
+  current = pass + "/" + key;
+  view.box.location.hash = "#" + key;
+  view.box._fire(new D.Event("hashchange"), (e) => problems.push(current + ": hashchange threw: " + describe(e)));
+  await settle(view.box, view.waiting);
+  keep(view.doc, pass, key);
+}
+
+async function press(view, pass, step, el) {
+  current = pass + "/" + step;
+  el.click();
+  if (el.localName === "input" && (el.type === "checkbox" || el.type === "radio")) {
+    el.dispatchEvent(new D.Event("change", { bubbles: true }));
+  }
+  await settle(view.box, view.waiting);
+  keep(view.doc, pass, step);
+}
+
+async function change(view, pass, step, el, value) {
+  current = pass + "/" + step;
+  el.value = value;
+  el.dispatchEvent(new D.Event("input", { bubbles: true }));
+  el.dispatchEvent(new D.Event("change", { bubbles: true }));
+  await settle(view.box, view.waiting);
+  keep(view.doc, pass, step);
+}
+
+const label = (el) => el.getAttribute("data-action") || el.getAttribute("data-seg") + "=" + el.getAttribute("data-value");
+
+async function everyPage(pass, segments) {
+  const view = await load(pass);
+  keep(view.doc, pass, "load");
+  for (const key of pageKeys(view.doc)) {
+    await open(view, pass, key);
+    if (!segments) {
+      continue;
+    }
+    const seen = new Set();
+    for (;;) {
+      const next = view.doc.querySelectorAll("#main button[data-seg], #main button[data-cmp]")
+        .find((b) => !seen.has(label(b) + "|" + b.getAttribute("data-cmp")));
+      if (!next) {
+        break;
+      }
+      seen.add(label(next) + "|" + next.getAttribute("data-cmp"));
+      await press(view, pass, key + ":" + label(next), next);
+    }
+  }
+}
+
+// Every action button and control of a page, one at a time, each on a page opened afresh (a button can change what
+// the next one does: skip the update, remove the setup). Applying a language reloads the page, so it is left out.
+async function everyAction(pass, key, scope) {
+  const probe = await load(pass);
+  await open(probe, pass, key);
+  const actions = probe.doc.querySelectorAll(scope + " button[data-action], " + scope + " a[data-action]")
+    .map(label).filter((a) => a !== "language-apply");
+  for (const action of [...new Set(actions)]) {
+    const view = await load(pass);
+    await open(view, pass, key);
+    const el = view.doc.querySelectorAll(scope + " [data-action]").find((b) => label(b) === action);
+    if (el) {
+      await press(view, pass, key + ":" + action, el);
+    } else {
+      problems.push(pass + "/" + key + ": the " + action + " button went away when the page was opened again");
+    }
+  }
+  if (key !== "settings") {
+    return;
+  }
+  const view = await load(pass);
+  await open(view, pass, key);
+  for (const el of view.doc.querySelectorAll("#main [data-key]")) {
+    const name = el.getAttribute("data-key");
+    if (el.localName === "input" && el.type === "checkbox") {
+      await press(view, pass, key + ":" + name, el);
+      await press(view, pass, key + ":" + name + " again", el);
+    } else if (el.localName === "select") {
+      const was = el.value;
+      for (const option of el.options.map((o) => o.value)) {
+        await change(view, pass, key + ":" + name + "=" + option, el, option);
+      }
+      await change(view, pass, key + ":" + name + "=" + was, el, was);
+    } else if (el.localName === "input" || el.localName === "textarea") {
+      const was = el.value;
+      await change(view, pass, key + ":" + name + " (not a value)", el, "x?");
+      await change(view, pass, key + ":" + name + " (cleared)", el, "");
+      await change(view, pass, key + ":" + name + "=" + was, el, was);
+    }
+  }
+}
+
+(async () => {
+  for (const pass of PASSES) {
+    try {
+      if (pass === "installed") {
+        await everyPage(pass, true);
+      } else if (pass === "dev" || pass === "lookups-failed" || pass === "pending") {
+        await everyPage(pass, false);
+      } else if (pass === "actions") {
+        await everyAction(pass, "settings", "#main");
+        await everyAction(pass, "about", "#main");
+        await everyAction(pass, "overview", "#main .nm-help");
+      } else if (pass === "update" || pass === "update-self") {
+        await everyPage(pass, false);
+        await everyAction(pass, "overview", "#main .nm-update");
+        await everyAction(pass, "about", "#main");
+      } else if (pass.startsWith("reports-")) {
+        const view = await load(pass);
+        for (const key of STAT_PAGES) {
+          await open(view, pass, key);
+        }
+      } else if (pass === "posts-failed") {
+        await everyAction(pass, "settings", "#main");
+        await everyAction(pass, "about", "#main");
+        await everyAction(pass, "overview", "#main .nm-update");
+        await everyAction(pass, "overview", "#main .nm-help");
+      } else {
+        problems.push("no such pass: " + pass);
+      }
+    } catch (e) {
+      problems.push(current + ": the scan stopped: " + describe(e));
+    }
+  }
+  const shell = await (await fetch(page.href)).text();
+  process.stdout.write(JSON.stringify({ shell, snapshots, problems }));
 })().catch((e) => {
   console.error(e && e.stack ? e.stack : e);
   process.exit(1);

@@ -110,7 +110,9 @@ python main.py            (console: Ctrl+C quits, errors print)     or    launch
   `tests/webui_checks.js` loads `charts.js` and `app.js` with a fake DOM and the test hook at the end of `app.js`, and
   `tests/test_webui.py` asserts on what they return; `tests/test_motion.py` runs `motion.js` on its own fake DOM and
   checks the motion stylesheets, and runs each theme script with no `motion.js` (`tests/theme_scripts_checks.js`). They
-  start node, so they are gated with `USAGE_MONITOR_UI_TESTS=1`; `tests.yml` runs both files once more with it set, so CI covers them.
+  start node, so they are gated with `USAGE_MONITOR_UI_TESTS=1`; `tests.yml` runs them once more with it set
+  (`tests/test_webui.py`, `tests/test_motion.py`, `tests/test_english_left.py`), so CI covers them. A test that only
+  runs the frame dump in a fresh Python (the golden frames, the widgets' English scan) opens no window and is not gated.
   A check that reads a script's source for a phrase proves the phrase is there, not that the script works: where the claim
   is behaviour, run the script.
 - **No new English outside the catalog.** `tests/test_english_left.py` holds the English the widgets and the dashboard
