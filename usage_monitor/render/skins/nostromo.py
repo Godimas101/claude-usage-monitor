@@ -48,6 +48,7 @@ from usage_monitor.render.model import (
     age_unit,
     countdown_units,
     pace_delta,
+    unknown_kind_names,
     worst_severity,
 )
 from usage_monitor.render.skins import RenderOptions, coerce_options
@@ -375,7 +376,7 @@ def _short_qualifier(row: Row) -> str | None:
 def _row_names(row: Row) -> tuple[str, str]:
     """(the row's name, its shorter form for a tight line). A scoped limit is named for its model, else its surface:
     ("FABLE WEEKLY", "FABLE"), and ("WEEKLY SCOPED", "WEEKLY SCOPED") when it has neither. A kind this skin has no
-    words for, and a row built without one, keep their label whole."""
+    words for is named from its code (unknown_kind_names), and a row built without a kind keeps its label whole."""
     if row.kind in LIMIT_NAMES:
         name = LIMIT_NAMES[row.kind]
         return name, name
@@ -385,6 +386,8 @@ def _row_names(row: Row) -> tuple[str, str]:
         scope = row.scope_name.upper()
         name = scope + SCOPED_SUFFIX
         return name, scope.strip() or name
+    if row.kind:
+        return unknown_kind_names(row.kind)
     return row.label, row.label
 
 
@@ -968,27 +971,32 @@ def _guard_statement(model: WidgetModel) -> tuple[str, str] | None:
     return _lead("GUARD HOLDING", rest.strip())
 
 
-def _guard_lines(cv: Canvas, model: WidgetModel) -> tuple[int, list[str]]:
-    """(characters of the lead, the guard's line broken to the card's width), measured on ``cv`` (any canvas of the
-    frame's scale). No lines while the guard is off; a guard with nothing to list is its lead alone."""
+def _guard_lines(cv: Canvas, model: WidgetModel) -> tuple[str, list[str]]:
+    """(the lead, the guard's line broken to the card's width), measured on ``cv`` (any canvas of the frame's scale).
+    No lines while the guard is off; a guard with nothing to list is its lead alone."""
     statement = _guard_statement(model)
     if statement is None:
-        return 0, []
+        return "", []
     lead, rest = statement
     reg = cv.font(FONT_REG, LABEL_SIZE)
     text = f"{lead} {rest}" if rest else lead
-    return len(lead), engine.wrap_words(text, lambda line: cv.advance(line, reg, QUALIFIER_TRACKING), RIGHT - LEFT)
+    return lead, engine.wrap_words(text, lambda line: cv.advance(line, reg, QUALIFIER_TRACKING), RIGHT - LEFT)
 
 
-def _guard_block(plan: _Plan, cv: Canvas, pal: Palette, lead: int, lines: list[str], last_top: float) -> None:
-    """A rule under the last row and the guard's lines under it. The lead (the line's first ``lead`` characters) is
+def _split_lead(line: str, lead: str) -> tuple[str, str]:
+    """(the lead, the rest) of the guard's first line. A first line the wrap ended inside the lead is all lead."""
+    return (lead, line[len(lead):]) if line.startswith(lead) else (line, "")
+
+
+def _guard_block(plan: _Plan, cv: Canvas, pal: Palette, lead: str, lines: list[str], last_top: float) -> None:
+    """A rule under the last row and the guard's lines under it. The lead, at the start of the first line, is
     semibold and bright, the rest of it plain."""
     plan.mark(lambda c: c.fill_rect(LEFT, last_top + GUARD_RULE_OFFSET, RIGHT, last_top + GUARD_RULE_OFFSET + 1, pal.rule))
     semi = cv.font(FONT_SEMI, LABEL_SIZE)
     reg = cv.font(FONT_REG, LABEL_SIZE)
     for index, line in enumerate(lines):
         top = last_top + GUARD_TEXT_OFFSET + GUARD_LINE_H * index
-        head, tail = (line[:lead], line[lead:]) if index == 0 else ("", line)
+        head, tail = _split_lead(line, lead) if index == 0 else ("", line)
         x = LEFT
         if head:
             layer, advance = cv.text_layer(head, x, cv.baseline_in_box(top, 12, semi), semi, QUALIFIER_TRACKING)

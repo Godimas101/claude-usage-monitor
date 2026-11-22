@@ -60,6 +60,7 @@ from usage_monitor.render.model import (
     age_unit,
     countdown_units,
     pace_delta,
+    unknown_kind_names,
 )
 from usage_monitor.render.skins import RenderOptions, coerce_options
 
@@ -647,14 +648,18 @@ def _is_scoped(row: Row) -> bool:
 
 def _row_name(row: Row) -> str:
     """The row's name as the design shows it, in capitals: "SESSION", "WEEKLY", and a scoped limit named for its model,
-    else its surface ("FABLE"), or "WEEKLY SCOPED" when it has neither. A kind this skin has no words for, and a row
-    built without one, keep their label."""
+    else its surface ("FABLE"), or "WEEKLY SCOPED" when it has neither. A kind this skin has no words for is named
+    from its code, its short name when it is scoped ("DESIGN" for design_weekly, unknown_kind_names); a row built
+    without a kind keeps its label."""
     if row.kind in LIMIT_NAMES:
         return LIMIT_NAMES[row.kind]
     if row.kind == "weekly_scoped":
         if not row.scope_name:
             return UNNAMED_SCOPED
         return row.scope_name.strip().upper() or LIMIT_NAMES["weekly_all"]     # a name of spaces leaves its WEEKLY
+    if row.kind:
+        name, short = unknown_kind_names(row.kind)
+        return short if _is_scoped(row) else name
     return row.label.strip().upper()
 
 

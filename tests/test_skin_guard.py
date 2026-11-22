@@ -506,9 +506,9 @@ def test_nostromo_the_guard_line_fits_the_card_and_the_card_grows_by_exactly_its
     variant = picked("nostromo", "default")
     for model in fit_models():
         lead, lines = nostromo._guard_lines(cv, model)
-        assert lines and lead > 0
+        assert lines and lead and lines[0].startswith(lead)
         for index, line in enumerate(lines):
-            head, tail = (line[:lead], line[lead:]) if index == 0 else ("", line)      # the lead is semibold
+            head, tail = nostromo._split_lead(line, lead) if index == 0 else ("", line)      # the lead is semibold
             width = cv.advance(head, semi, nostromo.QUALIFIER_TRACKING) + cv.advance(tail, reg, nostromo.QUALIFIER_TRACKING)
             assert width <= nostromo.RIGHT - nostromo.LEFT + 1e-6, (scale, line)
         card = draw("nostromo", variant, model, scale, "tooltip")

@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from usage_monitor.data.identity import scope_name
+from usage_monitor.data.identity import legacy_label, scope_name
 from usage_monitor.data.models import ApiStatus, Limit, MonitorState, UsageSnapshot
 from usage_monitor.data.windows import PACE_BAND_POINTS
 
@@ -409,6 +409,14 @@ def countdown_units(seconds: float) -> tuple[tuple[int, str], ...]:
 def format_countdown(seconds: float) -> str:
     """Time left as "2D 3H", "2H 14M", "9M" or "<1M" (see countdown_units)."""
     return " ".join(f"{count}{unit.upper()}" for count, unit in countdown_units(seconds)) or "<1M"
+
+
+def unknown_kind_names(kind: str) -> tuple[str, str]:
+    """(name, short name) of a limit kind no skin has words for, in capitals, from its code as Limit.label spells it:
+    ("DESIGN WEEKLY", "DESIGN") for design_weekly, ("AMBER GAUGE", "AMBER GAUGE") for amber_gauge. The usage API names
+    such kinds itself, so they have no words of their own to translate."""
+    name = legacy_label(kind, None, None).strip()
+    return name, name.removesuffix(" WEEKLY").strip() or name
 
 
 def english_stale_message(reason: str | None) -> str | None:

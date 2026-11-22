@@ -18,6 +18,7 @@ import pytest
 from PIL import Image
 
 from usage_monitor.agent import guard as guard_mod
+from usage_monitor.data import usage_api
 from usage_monitor.data.models import (
     ApiStatus,
     BurnRate,
@@ -53,6 +54,7 @@ from usage_monitor.render.model import (
     reset_day,
     severity_for,
     share_text,
+    unknown_kind_names,
     worst_severity,
 )
 from usage_monitor.render.skins import RenderOptions, coerce_options, get_skin
@@ -1293,6 +1295,23 @@ def test_a_kind_nostromo_has_no_words_for_keeps_its_label_whole():
     other = limit("amber_gauge", 40, label="AMBER GAUGE", allowance=25.0)
     row = build_model(state(limit("session", 10), limit("weekly_all", 10), other), NOW).rows[2]
     assert row.kind == "amber_gauge" and nostromo_skin._row_names(row) == ("AMBER GAUGE", "AMBER GAUGE")
+
+
+@pytest.mark.parametrize(("kind", "full", "short"), [
+    ("design_weekly", "DESIGN WEEKLY", "DESIGN"),             # a kind the usage API may add
+    ("fable_weekly", "FABLE WEEKLY", "FABLE"),                 # a codename window of the old payload
+    ("claude_sonnet_4_5_weekly", "CLAUDE SONNET 4 5 WEEKLY", "CLAUDE SONNET 4 5"),
+    ("amber_gauge", "AMBER GAUGE", "AMBER GAUGE"),
+])
+def test_a_kind_the_skins_have_no_words_for_is_named_from_its_code_as_its_label_was(kind, full, short):
+    """The names the skins drew from such a row's label before #90: Nostromo the label and the label without WEEKLY,
+    Night City the label without WEEKLY. The label is the one the usage API's parser gives the kind."""
+    other = limit(kind, 40, label=usage_api._label(kind, None, None), allowance=25.0)
+    row = build_model(state(limit("session", 10), limit("weekly_all", 10), other), NOW).rows[2]
+    assert row.label == full and row.kind == kind
+    assert unknown_kind_names(kind) == (full, short)
+    assert nostromo_skin._row_names(row) == (full, short)
+    assert night_city_skin._row_name(row) == short
 
 
 # ── Taskbar strip ─────────────────────────────────────────────────────────────
