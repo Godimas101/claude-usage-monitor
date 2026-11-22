@@ -57,6 +57,30 @@ BACKUP_INFIX = ".usage-monitor-backup-"      # settings.json.usage-monitor-backu
 _LEGACY_PREFIX = "".join(word[0] for word in "claude usage monitor".split())
 _BACKUP_NAME = r"\.(?:usage-monitor|" + re.escape(_LEGACY_PREFIX) + r")-backup-\d{8}-\d{6}(?:-\d+)?"
 CLAUDE_COMMAND = "claude"
+
+
+class Note(str):
+    """A line of a setup result: its English text, which the card shows and the tests compare, with a ``code`` and the
+    ``values`` the code acting on it reads (main.py's uninstaller, say). Nothing matches on the words (#90)."""
+
+    code: str
+    values: dict
+
+    def __new__(cls, text: str, code: str = "", values: Mapping[str, Any] | None = None) -> "Note":
+        note = super().__new__(cls, text)
+        note.code, note.values = code, dict(values or {})
+        return note
+
+    def __add__(self, other: str) -> "Note":
+        """The line with more text after it keeps its code; its values describe the text it had, so they go."""
+        return Note(str.__add__(self, other), self.code)
+
+
+def _problem(base: str, code: str, advice: str = "") -> Note:
+    """A problem the card shows: ``base``, then ``advice`` (to try again), which the uninstaller leaves out."""
+    return Note(f"{base} {advice}" if advice else base, code, {"base": base, "advice": advice})
+
+
 CLAUDE_TIMEOUT_S = 20.0
 CONFIG_ENV = "CLAUDE_CONFIG_DIR"   # Claude Code's own override of its config folder
 GATE_FLAG = "--gate"
@@ -64,14 +88,13 @@ WATCH_FLAG = "--watch"
 VSCODE_WARNING = ("This card checks only the claude command. Claude Code in VS Code has its own version: "
                   f"in VS Code, check under Extensions that it is {MIN_CLAUDE_TEXT} or newer.")  # #38: not a check
 NOT_INSTALLED_REASON = "One-click setup works in the installed app. This copy runs from source."
-NO_CLAUDE_REASON = ("Claude Code was not found on this PC: there is no claude command on the PATH. The copy inside "
-                    "the VS Code extension is not on it; install Claude Code itself (see the README).")
-NO_CLAUDE_LEFT = f"Claude Code was not found, so the {MCP_NAME} MCP tool was left alone."
+NO_CLAUDE_REASON = Note("Claude Code was not found on this PC: there is no claude command on the PATH. The copy inside "
+                        "the VS Code extension is not on it; install Claude Code itself (see the README).", "no_claude")
+NO_CLAUDE_LEFT = Note(f"Claude Code was not found, so the {MCP_NAME} MCP tool was left alone.", "no_claude_left")
 HOOK_DOCS_URL = "https://github.com/Godimas101/claude-usage-monitor/blob/main/docs/AGENT_HOOK.md"
 # After an uninstall there is no Remove to press again, so what could not be done is done by hand.
 BY_HAND_IF_THERE = f"If this app's hooks are in it, delete them by hand: {HOOK_DOCS_URL} says how."
 BY_HAND = f"Delete them by hand: {HOOK_DOCS_URL} says how."
-_TRY_AGAIN = ("Fix it or move it aside, then try again.", "Try again.")
 GATE_LEFT = "A --gate hook of this app stays in Claude Code's settings. It was added by hand, so delete it by hand."
 KEEP_BACKUPS = 5                   # the newest backups of the settings file kept beside it; older ones go
 _STAMP_UNKNOWN = ("unknown",)      # a settings file whose size and time cannot be read
@@ -500,8 +523,8 @@ def read_settings(path: Path) -> tuple[dict | None, str | None]:
     try:
         doc = json.loads(text, parse_constant=_reject_constant)
     except (ValueError, RecursionError):
-        return None, ("The Claude Code settings file is not valid JSON, so setup left it alone. "
-                      "Fix it or move it aside, then try again.")
+        return None, _problem("The Claude Code settings file is not valid JSON, so setup left it alone.", "invalid_json",
+                              "Fix it or move it aside, then try again.")
     if not isinstance(doc, dict):
         return None, "The Claude Code settings file does not hold a JSON object, so setup left it alone."
     return doc, None
@@ -741,7 +764,8 @@ def _write_problem(path: Path, stamp: tuple, doc: Mapping[str, Any]) -> str | No
     """Why the new settings must not be written, or None: something else wrote the file since setup read it (Claude
     Code saves it too), or the document cannot be written back as strict JSON."""
     if _stamp(path) != stamp or stamp == _STAMP_UNKNOWN:
-        return "The Claude Code settings file changed while setup was working, so setup left it alone. Try again."
+        return _problem("The Claude Code settings file changed while setup was working, so setup left it alone.",
+                        "settings_changed", "Try again.")
     try:
         settings_text(doc)
     except ValueError:
@@ -826,13 +850,13 @@ def _remove_hooks(ctx: Context, path: Path, exe: str, result: dict, only_here: b
     problem = problem or (hooks_problem(doc) if doc is not None else None)
     if problem or doc is None:
         problem = problem or NOT_INSTALLED_REASON
-        return f"{_without_try_again(problem)} {BY_HAND_IF_THERE}" if only_here else problem
+        return f"{_without_advice(problem)} {BY_HAND_IF_THERE}" if only_here else problem
 
     merged, removed = merge_remove(doc, exe, only_here=only_here)
     if removed:
         problem = _write_problem(path, stamp, merged)
         if problem:
-            return (f"{_without_try_again(problem)} The hooks were not removed. {BY_HAND}" if only_here
+            return (f"{_without_advice(problem)} The hooks were not removed. {BY_HAND}" if only_here
                     else problem + " The hooks were not removed.")
         try:
             result["backup"] = str(backup_settings(path, ctx.now()))
@@ -849,18 +873,15 @@ def _remove_hooks(ctx: Context, path: Path, exe: str, result: dict, only_here: b
     return None
 
 
-def _without_try_again(problem: str) -> str:
-    """``problem`` without the card's advice to try again."""
-    for ending in _TRY_AGAIN:
-        if problem.endswith(ending):
-            return problem[: -len(ending)].rstrip()
-    return problem
+def _without_advice(problem: str) -> str:
+    """``problem`` without the card's advice to try again, which the uninstaller has no button to act on."""
+    return problem.values["base"] if isinstance(problem, Note) and "base" in problem.values else problem
 
 
 def _remove_mcp(ctx: Context, claude: str | None, exe: str, result: dict) -> None:
     by_hand = f"Remove it by hand with: {typed_claude(ctx, claude)} mcp remove {MCP_NAME} -s user"
     if claude is None:
-        result["warnings"].append(f"{NO_CLAUDE_LEFT} {by_hand}")
+        result["warnings"].append(Note(f"{NO_CLAUDE_LEFT} {by_hand}", NO_CLAUDE_LEFT.code))
         return
     state = _mcp_state(ctx, claude, exe)
     if state == "registered":

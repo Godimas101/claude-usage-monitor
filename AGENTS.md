@@ -162,7 +162,8 @@ reading). Both read `%APPDATA%\ClaudeUsageMonitor\state.json`, which the running
 the reading changes. Wiring, the hook recipe and the JSON fields: [`docs/AGENT_HOOK.md`](docs/AGENT_HOOK.md).
 The modes are read-only and must stay that way: never put the token or any other secret from the
 credentials file (the plan name and tier are fine), or transcript text, in `state.json`, a summary or
-a log. `--hook` and `--gate` must exit 0 on every path: Claude Code blocks the prompt or the tool on
+a log. They are English in every app language and load no catalog (#90; `tests/test_agent_language.py`).
+`--hook` and `--gate` must exit 0 on every path: Claude Code blocks the prompt or the tool on
 exit code 2. `--watch` is the one exception: Claude Code runs it in the background (`asyncRewake`),
 and its exit code 2 wakes an idle conversation with the notice, after the turn has ended. It exits 0
 on every other path.

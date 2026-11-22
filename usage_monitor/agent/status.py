@@ -433,7 +433,8 @@ def summary(doc: Mapping[str, Any] | None, *, now: datetime, running: bool) -> s
     status = doc.get("status")
     note = ""
     if status not in ("live", None):
-        note = f" [{status}: {doc.get('status_detail') or ''}]".replace(": ]", "]")
+        detail = doc.get("status_detail")
+        note = f" [{status}: {detail}]" if detail else f" [{status}]"
     return f"Claude plan usage ({plan}, {when}){note}: " + " | ".join(part for part in parts if part) + "."
 
 

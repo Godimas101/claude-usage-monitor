@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
+from usage_monitor.data.details import Detail
+
 
 # ── Transcript items ──────────────────────────────────────────────────────────
 # One transcript line can yield several items. Items are deduplicated by the
@@ -361,3 +363,4 @@ class MonitorState:
     updated_at: datetime
     guard: dict = field(default_factory=dict)  # agent/guard.py evaluate(): state, over, resume_at, policy
     signin_refused: int | None = None   # 401 or 403 when the usage API turned the sign-in down; set only while STALE (#55)
+    detail: Detail | None = None        # the status as a code and its values; status_detail is english(detail) (#90)

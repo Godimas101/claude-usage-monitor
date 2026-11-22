@@ -177,7 +177,8 @@ def _remove_setup(path: str | None) -> int:
     from usage_monitor.agent import setup
 
     result = setup.remove(only_here=True)
-    warnings = [line for line in result["warnings"] if result["changed"] or not line.startswith(setup.NO_CLAUDE_LEFT)]
+    warnings = [line for line in result["warnings"]
+                if result["changed"] or getattr(line, "code", None) != setup.NO_CLAUDE_LEFT.code]
     left = [*result["errors"], *warnings]
     if path:
         target = Path(path)

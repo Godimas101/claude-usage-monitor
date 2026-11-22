@@ -1285,3 +1285,22 @@ def test_backups_from_before_v2_3_count_toward_the_five_and_age_out(tmp_path: Pa
     assert BACKUP_NAME in kept and all(name in kept for name in others)                     # another tool's files stay
     assert sorted(name for name in kept if f".{legacy}-" in name) == [
         f"settings.json.{legacy}-backup-202610{day:02d}-120000" for day in (3, 4, 5, 6)]
+
+
+def test_a_setup_line_carries_a_code_that_survives_being_extended():
+    """The uninstaller acts on the code, not the words (#90); a line built by adding text to it keeps the code."""
+    import copy
+
+    line = setup.NO_CLAUDE_LEFT + " Remove it by hand."
+    assert isinstance(line, setup.Note) and line.code == "no_claude_left" and line.startswith(setup.NO_CLAUDE_LEFT)
+    assert copy.deepcopy(setup.NO_CLAUDE_LEFT).code == "no_claude_left"
+    assert setup.NO_CLAUDE_REASON.code == "no_claude"
+
+
+def test_the_advice_to_try_again_is_a_value_the_uninstaller_leaves_out():
+    problem = setup._problem("The settings file is not valid JSON, so setup left it alone.", "invalid_json",
+                             "Fix it or move it aside, then try again.")
+    assert problem == ("The settings file is not valid JSON, so setup left it alone. "
+                       "Fix it or move it aside, then try again.")
+    assert setup._without_advice(problem) == "The settings file is not valid JSON, so setup left it alone."
+    assert setup._without_advice("A plain line.") == "A plain line."

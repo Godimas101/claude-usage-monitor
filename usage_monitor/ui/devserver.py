@@ -56,6 +56,7 @@ from usage_monitor import i18n, paths, themes
 from usage_monitor.agent import guard as agent_guard
 from usage_monitor.agent import sessions as agent_sessions
 from usage_monitor.agent import setup as agent_setup
+from usage_monitor.data import details
 from usage_monitor.data.models import (
     ApiErrorEvent,
     ApiStatus,
@@ -79,7 +80,8 @@ from usage_monitor.data.models import (
 )
 from usage_monitor.data.pricing import Pricing
 from usage_monitor.data.store import Store
-from usage_monitor.data.usage_api import EXPIRED_DETAIL, NO_SIGN_IN_DETAIL, REJECTED_ADVICE
+from usage_monitor.data.details import Detail, english
+from usage_monitor.data.usage_api import _clock
 from usage_monitor.log import get_logger
 from usage_monitor.settings import Settings
 from usage_monitor.ui.server import ApiServer, open_statistics_store
@@ -160,10 +162,12 @@ def fake_state(scenario: str, now: datetime) -> MonitorState:
     status = {"stale": ApiStatus.STALE, "refused": ApiStatus.STALE,
               "no_login": ApiStatus.NO_CREDENTIALS}.get(scenario, ApiStatus.LIVE)
     # A missing, an expired or a refused sign-in in UsageClient's own words, as the dashboard's sign-in help shows them.
-    detail = {ApiStatus.STALE: EXPIRED_DETAIL,
-              ApiStatus.NO_CREDENTIALS: NO_SIGN_IN_DETAIL}.get(status, "Live usage from the Claude API.")
+    # A live reading carries its clock, as the real client's does (#90).
+    info = {ApiStatus.STALE: Detail(details.EXPIRED),
+            ApiStatus.NO_CREDENTIALS: Detail(details.NO_SIGN_IN)}.get(
+                status, Detail(details.UPDATED, {"clock": _clock(fetched)}))
     if scenario == "refused":
-        detail = f"Claude did not accept the sign-in (HTTP 403); {REJECTED_ADVICE[403]}"
+        info = details.refused(403)
 
     limits = [
         Limit(kind="session", group="session", percent=float(session_pct), severity=severity[0],
@@ -227,7 +231,8 @@ def fake_state(scenario: str, now: datetime) -> MonitorState:
             PlanInfo(subscription_type="max", rate_limit_tier="default_claude_max_5x", name="Max 5x", monthly_price_usd=100.0))
     return MonitorState(
         status=status,
-        status_detail=detail,
+        status_detail=english(info),
+        detail=info,
         usage=usage,
         usage_fetched_at=None if usage is None else fetched,
         plan=plan,

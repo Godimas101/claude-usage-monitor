@@ -19,6 +19,14 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any, Callable, TypeVar
 
+from usage_monitor.data import details
+from usage_monitor.data.details import (  # EXPIRED_DETAIL and NO_SIGN_IN_DETAIL stay importable from here
+    EXPIRED_DETAIL,
+    NO_SIGN_IN_DETAIL,
+    Detail,
+    english,
+)
+from usage_monitor.data.identity import legacy_label
 from usage_monitor.data.models import (
     ApiStatus,
     BreakdownRow,
@@ -51,15 +59,6 @@ _LEGACY_RESERVED = frozenset({
     "limits", "weekly_scoped_shares",
 })
 _BACKOFF_STATUSES = frozenset({ApiStatus.RATE_LIMITED, ApiStatus.OFFLINE})
-# Claude Code renews the sign-in only when it sends a request, so an open but idle Claude Code lets it run out (#52).
-EXPIRED_DETAIL = "The Claude sign-in has expired; send Claude Code a message to renew it"
-# What fixes a refused sign-in. Claude Code's next request renews a token refused with 401, or asks for a sign-in when it
-# can't. A 403 is a sign-in that works for Claude Code but can't read usage, which only a new sign-in fixes (#52).
-REJECTED_ADVICE = {401: "send Claude Code a message, and sign in again if it asks",
-                   403: "sign in to Claude Code again with /login"}
-# Said to people who may never have used Claude Code (claude.ai and the Claude apps share its limits, #28), so it names
-# no file and no token, and points at the dashboard, which has the steps.
-NO_SIGN_IN_DETAIL = "No Claude sign-in on this PC; sign in to Claude Code once (the dashboard shows how)"
 _FRACTION = re.compile(r"\.(\d+)")
 
 Opener = Callable[..., Any]
@@ -269,14 +268,8 @@ def _shares(section: Any) -> Shares:
 
 
 def _label(kind: str, scope_model: str | None, scope_surface: str | None) -> str:
-    if kind == "session":
-        return "SESSION"
-    if kind == "weekly_all":
-        return "WEEKLY"
-    if kind == "weekly_scoped":
-        name = scope_model or scope_surface
-        return f"{name.upper()} WEEKLY" if name else "WEEKLY SCOPED"
-    return kind.replace("_", " ").upper()
+    """Limit.label: the legacy identity string (identity.py), never shown as a sentence."""
+    return legacy_label(kind, scope_model, scope_surface)
 
 
 def _scope(scope: Any) -> tuple[str | None, str | None]:
@@ -394,10 +387,11 @@ def _parse_reset(value: Any) -> datetime | None:
 class FetchResult:
     """Outcome of one UsageClient.fetch(). ``snapshot`` is the last good one, even on failure."""
     status: ApiStatus
-    detail: str             # short UI text: "Updated 12:00:03", "next try at 12:01:03", ...
+    detail: str             # short UI text: "Updated 12:00:03", "next try at 12:01:03", ... (english(info))
     snapshot: UsageSnapshot | None
     fresh: bool             # True only when this call received a new HTTP 200
     refused: int | None = None   # STALE only: 401 or 403 when the usage API turned the sign-in down (#55)
+    info: Detail | None = None   # the same status as codes and values (details.py); None when a caller gave only text
 
 
 class UsageClient:
@@ -418,7 +412,7 @@ class UsageClient:
         self._opener: Opener = opener or _DEFAULT_OPENER
         self._user_agent = user_agent or f"ClaudeUsageMonitor/{version}"
         self._lock = threading.Lock()
-        self._base_detail = "Loading usage"
+        self._base = Detail(details.LOADING)
         self._failures = 0                  # consecutive failed attempts; drives the backoff
         self._stale_mtime: float | None = None
         self.refused: int | None = None   # the HTTP code behind a STALE status, when the usage API turned the sign-in down
@@ -434,7 +428,7 @@ class UsageClient:
                 return self._fetch(when)
             except Exception as exc:  # thread boundary: the poller must survive any failure here
                 log.warning("usage fetch failed unexpectedly (%s)", type(exc).__name__)
-                return self._offline(when, "unexpected error")
+                return self._offline(when, "unexpected_error")
 
     def _fetch(self, now: datetime) -> FetchResult:
         if self.next_allowed_at is not None and now < self.next_allowed_at:
@@ -447,7 +441,7 @@ class UsageClient:
             self._stale_mtime = None
             self._failures = 0
             self.next_allowed_at = None
-            self._set(ApiStatus.NO_CREDENTIALS, NO_SIGN_IN_DETAIL)
+            self._set(ApiStatus.NO_CREDENTIALS, Detail(details.NO_SIGN_IN))
             return self._result(fresh=False)
         if self.status is ApiStatus.STALE and info.mtime == self._stale_mtime:
             if self.refused is not None:
@@ -457,7 +451,7 @@ class UsageClient:
             if not info.is_expired(now):
                 return self._result(fresh=False)  # rejected token: wait for the file to change
         if info.is_expired(now):
-            return self._stale(info.mtime, EXPIRED_DETAIL)
+            return self._stale(info.mtime, Detail(details.EXPIRED))
         return self._request(token, info.mtime, now)
 
     def _request(self, token: str, mtime: float | None, now: datetime) -> FetchResult:
@@ -490,11 +484,10 @@ class UsageClient:
         if code in (401, 403):
             log.warning("usage API rejected the sign-in (HTTP %d); waiting for the credentials file "
                         "to change", code)
-            return self._stale(mtime, f"Claude did not accept the sign-in (HTTP {code}); {REJECTED_ADVICE[code]}",
-                               refused=code)
+            return self._stale(mtime, details.refused(code), refused=code)
         if code == 429:
             return self._rate_limited(now, _retry_after_seconds(headers, now))
-        return self._offline(now, f"HTTP {code}")
+        return self._offline(now, "http", http=code)
 
     def _on_network_error(self, exc: BaseException, token: str, now: datetime) -> FetchResult:
         log.debug("usage API request error: %s", _scrub(str(exc), token))
@@ -503,9 +496,9 @@ class UsageClient:
     def _on_body(self, body: object, token: str, now: datetime) -> FetchResult:
         raw = _decode_body(body, token)
         if raw is None:
-            return self._offline(now, "bad response")
+            return self._offline(now, "bad_response")
         if not _looks_like_usage(raw):
-            return self._offline(now, "unexpected response")
+            return self._offline(now, "unexpected_response")
         self._succeed(parse_usage(raw, now), now)
         return self._result(fresh=True)
 
@@ -517,21 +510,21 @@ class UsageClient:
         self.next_allowed_at = None
         self._failures = 0
         self._stale_mtime = None
-        self._set(ApiStatus.LIVE, f"Updated {_clock(now)}")
+        self._set(ApiStatus.LIVE, Detail(details.UPDATED, {"clock": _clock(now)}))
 
     def _rate_limited(self, now: datetime, retry_after: float | None) -> FetchResult:
         wait = self._back_off(now, RATE_BACKOFF_BASE_S, retry_after)
         log.info("usage API rate limited; retrying in %d s", round(wait))
-        self._set(ApiStatus.RATE_LIMITED, "Usage API rate limited")
+        self._set(ApiStatus.RATE_LIMITED, Detail(details.RATE_LIMITED))
         return self._result(fresh=False)
 
-    def _offline(self, now: datetime, reason: str) -> FetchResult:
+    def _offline(self, now: datetime, reason: str, *, http: int | None = None) -> FetchResult:
         wait = self._back_off(now, NETWORK_BACKOFF_BASE_S)
         log.warning("usage API unavailable (%s); retrying in %d s", reason, round(wait))
-        self._set(ApiStatus.OFFLINE, f"Usage API unreachable ({reason})")
+        self._set(ApiStatus.OFFLINE, details.offline(reason, http))
         return self._result(fresh=False)
 
-    def _stale(self, mtime: float | None, detail: str, refused: int | None = None) -> FetchResult:
+    def _stale(self, mtime: float | None, detail: Detail, refused: int | None = None) -> FetchResult:
         self._stale_mtime = mtime
         self._failures = 0
         self.next_allowed_at = None
@@ -548,20 +541,21 @@ class UsageClient:
         self.next_allowed_at = now + timedelta(seconds=wait)
         return wait
 
-    def _set(self, status: ApiStatus, detail: str) -> None:
+    def _set(self, status: ApiStatus, detail: Detail) -> None:
         self.status = status
-        self._base_detail = detail
+        self._base = detail
         self.refused = None   # a new status forgets the old refusal; _stale sets it again when there is one
 
     def _result(self, *, fresh: bool) -> FetchResult:
-        return FetchResult(status=self.status, detail=self._describe(),
+        info = self._describe()
+        return FetchResult(status=self.status, detail=english(info), info=info,
                            snapshot=self.last_snapshot, fresh=fresh,
                            refused=self.refused if self.status is ApiStatus.STALE else None)
 
-    def _describe(self) -> str:
+    def _describe(self) -> Detail:
         if self.next_allowed_at is not None and self.status in _BACKOFF_STATUSES:
-            return f"{self._base_detail}; next try at {_clock(self.next_allowed_at)}"
-        return self._base_detail
+            return self._base.with_next_try(_clock(self.next_allowed_at))
+        return self._base
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -653,8 +647,8 @@ def _retry_after_seconds(headers: Any, now: datetime) -> float | None:
 def _network_reason(exc: BaseException) -> str:
     reason = getattr(exc, "reason", None)
     if isinstance(exc, TimeoutError) or isinstance(reason, TimeoutError):
-        return "timed out"
-    return "network error"
+        return "timed_out"
+    return "network_error"
 
 
 def _scrub(text: str, secret: str) -> str:

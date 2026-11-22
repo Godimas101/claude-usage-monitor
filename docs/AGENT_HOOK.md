@@ -386,7 +386,7 @@ can read over 100.
 |---|---|
 | `source` | `monitor` (the running app wrote it) or `cli` (a reader fetched it while the app was closed) |
 | `written_at`, `usage_fetched_at` | When the file was written; when the numbers were taken |
-| `status`, `status_detail` | `live`, `paused`, `stale` (the sign-in has expired), `offline`, `rate_limited` or `no_credentials`, with the app's own words |
+| `status`, `status_detail` | `live`, `paused`, `stale` (the sign-in has expired), `offline`, `rate_limited` or `no_credentials`, with the app's own words (the English wording of its status code, `data/details.py`; the same in every app language) |
 | `poll_interval_s` | The app's poll interval |
 | `plan` | `name` (such as `Max 5x`) and `tier` |
 | `session` | `percent`, `resets_at`, `window_start`, `slope_pct_per_hour` (the climb over the last 90 minutes), `projected_limit_at` and `verdict`: `SAFE`, `AT_RISK` (the limit falls before the reset at this rate), `IDLE`, `LIMITED` or `UNKNOWN` |

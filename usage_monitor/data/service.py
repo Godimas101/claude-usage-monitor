@@ -21,8 +21,9 @@ from typing import Any
 from usage_monitor import paths
 from usage_monitor.agent import guard as agent_guard
 from usage_monitor.agent import status as agent_status
-from usage_monitor.data import analytics
+from usage_monitor.data import analytics, details
 from usage_monitor.data import windows as win
+from usage_monitor.data.details import Detail, english
 from usage_monitor.data.ingest import Ingestor
 from usage_monitor.data.models import (
     ApiStatus,
@@ -58,8 +59,10 @@ SESSION_LOOKBACK_MAX = timedelta(days=14)
 # Changing one of these settings changes the next cycle, so it wakes the loop. Other keys do not.
 WAKE_KEYS = frozenset({"poll_interval_ms", "ingest_interval_s", "billing_day", *agent_guard.SETTING_KEYS})
 RESET_FETCH_DELAY = timedelta(seconds=30)  # after a window resets, its fresh numbers are asked for this soon
-PAUSED_DETAIL = "Paused"
-LOADING_DETAIL = "Loading usage"
+PAUSED_INFO = Detail(details.PAUSED)     # the status as a code (details.py); the words come from english()
+LOADING_INFO = Detail(details.LOADING)
+PAUSED_DETAIL = english(PAUSED_INFO)
+LOADING_DETAIL = english(LOADING_INFO)
 
 
 class DataService:
@@ -241,7 +244,7 @@ class DataService:
         if self._is_paused():
             if self._check_credentials():
                 self._creds_pending = True  # the change is acted on by the first cycle that is not paused
-            state = self._build_state(now, status=ApiStatus.PAUSED, detail=PAUSED_DETAIL)
+            state = self._build_state(now, status=ApiStatus.PAUSED, info=PAUSED_INFO)
             self._publish(state)
             if self._status_written != ApiStatus.PAUSED:  # once per pause: the reading does not change
                 self._write_status(now, state)
@@ -440,21 +443,26 @@ class DataService:
             log.exception("could not publish the service state")
 
     def _build_state(self, now: datetime, *, status: ApiStatus | None = None,
-                     detail: str | None = None) -> MonitorState:
+                     info: Detail | None = None) -> MonitorState:
         """A full state from the last fetch, the last store values and the current plan."""
         fetch = self._last_fetch
         snapshot = fetch.snapshot if fetch is not None else None
         if status is None:
             status = fetch.status if fetch is not None else ApiStatus.LOADING
-        if detail is None:
-            detail = fetch.detail if fetch is not None else LOADING_DETAIL
+        if info is not None:
+            text = english(info)
+        elif fetch is not None:   # a fetch made by a test may carry its words alone
+            text, info = fetch.detail, fetch.info
+        else:
+            text, info = LOADING_DETAIL, LOADING_INFO
         # Every documented window is always present, so a consumer never meets a missing key. A window
         # not computed yet reads as empty.
         windows = {name: WindowStats(name=name, start=None, end=None) for name in WINDOW_NAMES}
         windows.update(self._windows)
         return MonitorState(
             status=status,
-            status_detail=detail,
+            status_detail=text,
+            detail=info,
             usage=snapshot,
             usage_fetched_at=snapshot.fetched_at if snapshot is not None else None,
             plan=self._plan,

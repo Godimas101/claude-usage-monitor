@@ -457,7 +457,9 @@ def test_no_login_found_no_sign_in_and_has_no_limits_and_no_plan(started: Callab
 
 def test_limits_only_is_signed_in_with_the_limits_of_normal(started: Callable[..., ApiServer]) -> None:
     state = get_json(started("limits_only"), "/api/state")["state"]
-    assert state["status"] == "live" and state["status_detail"] == "Live usage from the Claude API."
+    # A live reading is worded as the real client words one: its clock (#90). The dev server's own clock, not a fixed text.
+    assert state["status"] == "live" and re.fullmatch(r"Updated \d{2}:\d{2}:\d{2}", state["status_detail"])
+    assert state["detail"] == {"code": "updated", "values": {"clock": state["status_detail"][len("Updated "):]}}
     assert state["usage"] is not None and state["usage_fetched_at"] == state["usage"]["fetched_at"]
     assert state["plan"]["name"] == "Max 5x" and state["burn"]["velocity"] == "IDLE"
 

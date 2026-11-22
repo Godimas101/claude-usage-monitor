@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone, tzinfo
 from typing import Any
 
+from usage_monitor.data.identity import scope_name
 from usage_monitor.data.models import ApiStatus, Limit, MonitorState, Spend
 from usage_monitor.log import get_logger
 from usage_monitor.settings import DEFAULTS, Settings, parse_clock
@@ -260,9 +261,27 @@ def _window_key(resets_at: datetime) -> str:
 
 
 def _name(limit: Limit) -> str:
-    """Sentence-case label: "FABLE WEEKLY" becomes "Fable weekly"."""
-    text = " ".join((limit.label or "").split()) or _FALLBACK_NAMES.get(limit.kind) or (limit.scope_model or "Scoped")
+    """The limit's name for a title, sentence case: "Fable weekly", "Weekly scoped", "Session" (#90). It is worded from the
+    kind and the scope, not from the label. A limit with no label (none comes from the API) is named by its kind, else
+    by its model."""
+    if (limit.label or "").strip():
+        text = _kind_words(limit)
+    else:
+        text = _FALLBACK_NAMES.get(limit.kind) or (limit.scope_model or "Scoped")
+    text = " ".join(text.split())
     return text[:1].upper() + text[1:].lower()
+
+
+def _kind_words(limit: Limit) -> str:
+    if limit.kind == "session":
+        return "Session"
+    if limit.kind == "weekly_all":
+        return "Weekly"
+    if limit.kind == "weekly_scoped":
+        scope = scope_name(limit.scope_model, limit.scope_surface)
+        # Upper case first, as the label always was, so a name that upper-cases to two letters titles the same as before.
+        return f"{scope.upper()} weekly" if scope else "Weekly scoped"
+    return limit.kind.replace("_", " ")
 
 
 def _reset_text(limit: Limit, tz: tzinfo | None) -> str:

@@ -532,6 +532,9 @@ Settings: `theme_id`, `theme_variant`, `theme_mode` (Gates: light / dark / syste
 | GET | `/static/<path>` | webui assets (fonts cached; HTML/JS/CSS `no-store` in dev) |
 | GET | `/static/i18n/<lang>.js` | a catalog as the page loads it, built from `i18n/<lang>.json` (#87; "Languages") |
 | GET | `/api/state` | MonitorState + settings subset + theme + `update` block + version + `locale` (ETag) |
+
+The MonitorState's `detail` (#90) is the status as a code and its values (`{"code": "offline", "values": {...}}`, or null);
+`status_detail` is its English text. The dashboard still reads `status_detail`; it does not read `detail` yet.
 | GET | `/api/themes` | themes with variants and tokens; the Gates `system-*` variants show the live Windows accent, as applied |
 | GET | `/api/analytics/<name>` | statistics report: `cost`, `efficiency`, `pacing`, `history`, `sessions` (below) |
 | GET | `/api/export?format=csv\|json` | daily rollups download (below) |

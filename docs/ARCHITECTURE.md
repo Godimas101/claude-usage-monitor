@@ -18,6 +18,8 @@ usage_monitor/            the application package
     store.py              SQLite (WAL) store: dedupe, rollups, snapshots
     ingest.py             incremental transcript ingest into the store
     usage_api.py          credentials + GET /api/oauth/usage client + parser
+    details.py            a reading's status as codes and values, and its one English wording (#90)
+    identity.py           a limit's identity string (Limit.label) and its scope names (#90)
     windows.py            time windows + burn rate
     service.py            DataService: the one poller; publishes MonitorState
   (Phase 2) data/analytics.py      cost/value, efficiency, pacing, history queries
@@ -272,6 +274,11 @@ class UsageClient:
   so a 403, which only a new sign-in fixes, is not worded as an expired sign-in (#55). 429 → `RATE_LIMITED`, honour
   `Retry-After`, else exponential backoff 60 s → 15 min. Network / 5xx → `OFFLINE`,
   backoff 30 s → 15 min. 200 → `LIVE`, backoff reset.
+- A status is a `Detail` (`data/details.py`): a code and its values (`updated` with its clock, `offline` with its
+  `reason`, `refused` with its `http` and `advice`, and `next_try` while backing off). `FetchResult.info` carries it,
+  and `FetchResult.detail` is `english(info)`, the text that `state.json` and `--status` carry. Nothing reads that text
+  back. `Limit.label` is the legacy identity string from `identity.legacy_label` ("FABLE WEEKLY"): alert, guard and
+  hook identities key on it, so it does not change; titles and the UI word a limit from its kind and scope.
 - Never writes to `.credentials.json`. A readable file is authoritative (missing sign-in →
   "Unknown plan"); an unreadable or half-written one keeps the current plan and backoff.
 - Redirects are refused (a 3xx is an error → `OFFLINE`), so the bearer token never follows a
@@ -549,6 +556,8 @@ in local time; may wrap midnight).
   tolerance (the API jitters it); each window also keeps a high-water mark, the highest percent
   seen in it, and a threshold at or below that mark never fires (so a threshold added or lowered
   in settings does not toast for a level already passed).
+- Alert titles are worded from each limit's kind and scope ("Fable weekly", "Session"), not from its label (#90);
+  the words are the same as before. A limit's window identity still uses the label.
 - The first evaluation with usage records a baseline and returns nothing (no toasts for
   levels already reached at startup).
 - Threshold: the first time percent ≥ T in a window → one alert for the highest T crossed;
