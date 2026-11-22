@@ -3,6 +3,11 @@
 No Win32 and no drawing code here. Skins draw a WidgetModel; the host builds one whenever the
 state, the settings or the minute changes. Severity, pace, time windows, local reset times and
 the status wording are decided once here, so every skin tells the same story.
+
+The model carries values and codes beside its English texts (#90): the age in seconds, why the
+sign-in needs the user, each row's kind and scope, its share and its reset day, and the guard's
+resume time and the kinds of the limits it watches. Each skin words its own text from those, and
+never cuts or matches the English texts to find a value in them.
 """
 from __future__ import annotations
 
@@ -12,6 +17,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal
 
+from usage_monitor.data.identity import scope_name
 from usage_monitor.data.models import ApiStatus, Limit, MonitorState, UsageSnapshot
 from usage_monitor.data.windows import PACE_BAND_POINTS
 
@@ -29,11 +35,27 @@ GUARD_ARMED = "armed"                   # the usage guard (#27): watching its ca
 GUARD_HOLDING = "holding"               # ... or a watched limit is at its cap and Claude sessions were told to wind down
 GUARD_STATES: tuple[str, ...] = (GUARD_ARMED, GUARD_HOLDING)
 
+# Why the user must act on the sign-in (WidgetModel.stale_reason). Each skin picks its own copy for a reason.
+STALE_EXPIRED = "expired"               # the sign-in ran out: using Claude Code renews it
+STALE_REFUSED = "refused"               # the usage API turned it down (HTTP 403): only a new sign-in fixes it (#55)
+STALE_NO_LOGIN = "no_login"             # there is no sign-in at all (#28)
+STALE_REASONS: tuple[str, ...] = (STALE_EXPIRED, STALE_REFUSED, STALE_NO_LOGIN)
+
 STALE_MESSAGE_EXPIRED = "LOGIN EXPIRED - USE CLAUDE CODE"   # used, not open: an idle Claude Code renews nothing (#52)
 STALE_MESSAGE_NO_LOGIN = "NO LOGIN FOUND - OPEN THE DASHBOARD"   # it has the steps for a claude.ai or app user (#28)
 # An HTTP 403: a sign-in that works for Claude Code but cannot read usage. Using Claude Code does not fix it; only a new sign-in
 # does, so this one names /login, in its own case, as every command the user types is shown (#55).
 STALE_MESSAGE_REFUSED = "LOGIN REFUSED - RUN /login IN CLAUDE CODE"
+_STALE_MESSAGES = {STALE_EXPIRED: STALE_MESSAGE_EXPIRED, STALE_REFUSED: STALE_MESSAGE_REFUSED,
+                   STALE_NO_LOGIN: STALE_MESSAGE_NO_LOGIN}
+
+# The units of an age and of a countdown, as codes: each skin words them ("12 S", "41 min", "2h 14m").
+UNIT_SECONDS = "s"
+UNIT_MINUTES = "m"
+UNIT_HOURS = "h"
+UNIT_DAYS = "d"
+_UNIT_S = {UNIT_SECONDS: 1, UNIT_MINUTES: 60, UNIT_HOURS: 60 * 60, UNIT_DAYS: 24 * 60 * 60}
+AGE_HOURS_BEFORE_DAYS = 48              # an age is told in hours up to two days, then in days
 
 STATUS_TEXT: dict[ApiStatus, str] = {
     ApiStatus.LOADING: "LOADING",
@@ -88,6 +110,13 @@ class Row:
     key is "session", "weekly" or "scoped:<name>". percent and time_fraction are None when there
     is no data yet. time_fraction is the elapsed share of the limit's window (0..1). pace is
     "ahead", "on_pace" or "behind" (usage against the clock, +/-10 points), or None.
+
+    label, resets_text and share_text are English. The skins word a row from its values instead:
+    kind is the limit's kind ("session", "weekly_all", "weekly_scoped", or another the usage API
+    names), scope_model and scope_name what a scoped limit is named for (scope_name is the model,
+    else the surface; None when it has neither), share_pct its share of the weekly limit, and
+    resets_same_day and resets_weekday (0 is Monday) the local day of its reset. kind is None on a
+    row built by hand; a skin names such a row, and a kind it has no words for, by its label.
     """
     key: str
     label: str
@@ -98,6 +127,12 @@ class Row:
     resets_text: str | None             # local time: "7:39 PM" today, else "Sat 4:00 PM"
     pace: str | None
     share_text: str | None              # scoped limits only: "50% SHARE"
+    kind: str | None = None
+    scope_model: str | None = None
+    scope_name: str | None = None
+    share_pct: float | None = None      # scoped limits only: 50.0; the skins round it with round(), as share_text does
+    resets_same_day: bool | None = None # None while the reset time is unknown
+    resets_weekday: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,8 +152,14 @@ class GuardMark:
     resume_at is the latest reset among the limits over their caps (None when one has no reset time or the
     guard is only armed). resume_text is that moment in one word for a surface with room for one: a countdown
     ("2H 14M", "9M", "<1M") under a day, past a day a reset time as the rows give it ("Wed 4:00 PM"); no skin
-    draws it today (each picks resume_in or resume_clock itself), the dump and the tests read it. resume_in is always the
-    countdown ("2D 3H" past a day) and resume_clock always the reset time, for a surface with room for both.
+    draws it today (each picks its countdown or resume_clock itself), the dump and the tests read it. resume_in is
+    always the countdown ("2D 3H" past a day) and resume_clock always the reset time, for a surface with room for both.
+
+    labels, resume_text and resume_in are English. The values the skins word the guard from: kinds, models and
+    scope_names give each watched limit's kind, scoped model and scope name (as Row has them) by Row key; a key
+    they lack is a limit the reading no longer carries, which keeps the guard's own label. resume_seconds is the
+    time left until resume_at in whole seconds (0 once it has passed), which countdown_units words; resume_same_day
+    and resume_weekday (0 is Monday) are the local day of resume_at. All three are None when resume_at is.
     """
     state: str
     over_keys: tuple[str, ...] = ()
@@ -129,6 +170,12 @@ class GuardMark:
     resume_clock: str | None = None
     labels: dict[str, str] = field(default_factory=dict)
     readings: dict[str, float] = field(default_factory=dict)
+    resume_seconds: int | None = None
+    resume_same_day: bool | None = None
+    resume_weekday: int | None = None
+    kinds: dict[str, str] = field(default_factory=dict)
+    models: dict[str, str | None] = field(default_factory=dict)
+    scope_names: dict[str, str | None] = field(default_factory=dict)
 
     @property
     def holding(self) -> bool:
@@ -155,6 +202,11 @@ class WidgetModel:
     the values are not live (everything except LIVE and PAUSED). stale_message is set when the
     user must act (expired or missing login). blink_on drives the alive mark (animation only).
     guard is the usage guard when it is armed or holding, None while it is off.
+
+    The skins word the age and the sign-in from values, not from those English texts. age_seconds
+    is the age in whole seconds, never negative, which age_unit tells in its unit; None exactly when
+    age_text is. stale_reason is why the user must act: "expired", "refused" (an HTTP 403) or
+    "no_login" (STALE_REASONS), None exactly when stale_message is.
     """
     status: ApiStatus
     status_text: str
@@ -165,6 +217,8 @@ class WidgetModel:
     blink_on: bool
     updated_at: datetime
     guard: GuardMark | None = None
+    age_seconds: int | None = None
+    stale_reason: str | None = None
 
     @property
     def lamp(self) -> str:
@@ -224,16 +278,19 @@ def build_model(
         state.usage_fetched_at if state is not None else None,
         usage.fetched_at if usage is not None else None,
     )
+    reason = _stale_reason(status, getattr(state, "signin_refused", None))
     return WidgetModel(
         status=status,
         status_text=STATUS_TEXT[status],
         age_text=format_age(fetched_at, now) if fetched_at is not None else None,
         rows=_rows(usage, now, show_scoped),
         stale=status not in (ApiStatus.LIVE, ApiStatus.PAUSED),
-        stale_message=_stale_message(status, getattr(state, "signin_refused", None)),
+        stale_message=english_stale_message(reason),
         blink_on=bool(blink_on),
         updated_at=state.updated_at if state is not None else now,
         guard=_guard_mark(getattr(state, "guard", None), usage, now),
+        age_seconds=_age_seconds(fetched_at, now) if fetched_at is not None else None,
+        stale_reason=reason,
     )
 
 
@@ -298,23 +355,33 @@ def format_resets(resets_at: datetime, now: datetime) -> str:
     """Local reset time: "7:39 PM" on the same local day, otherwise "Sat 4:00 PM"."""
     local = resets_at.astimezone()
     clock = _clock_text(local)
-    if local.date() == _aware(now).astimezone().date():
-        return clock
-    return f"{_WEEKDAYS[local.weekday()]} {clock}"
+    same_day, weekday = reset_day(resets_at, now)
+    return clock if same_day else f"{_WEEKDAYS[weekday]} {clock}"
+
+
+def reset_day(moment: datetime, now: datetime) -> tuple[bool, int]:
+    """(whether ``moment`` falls on the local day of ``now``, its local weekday with 0 for Monday)."""
+    local = moment.astimezone()
+    return local.date() == _aware(now).astimezone().date(), local.weekday()
+
+
+def age_unit(seconds: int) -> tuple[int, str]:
+    """An age in the unit its readout shows, as (count, unit code): (12, "s") under a minute, (41, "m") under an
+    hour, (3, "h") under two days, else (2, "d"). Whole units, rounded down; a negative age is 0 seconds."""
+    seconds = max(0, int(seconds))
+    if seconds < _UNIT_S[UNIT_MINUTES]:
+        return seconds, UNIT_SECONDS
+    if seconds < _UNIT_S[UNIT_HOURS]:
+        return seconds // _UNIT_S[UNIT_MINUTES], UNIT_MINUTES
+    if seconds < AGE_HOURS_BEFORE_DAYS * _UNIT_S[UNIT_HOURS]:
+        return seconds // _UNIT_S[UNIT_HOURS], UNIT_HOURS
+    return seconds // _UNIT_S[UNIT_DAYS], UNIT_DAYS
 
 
 def format_age(fetched_at: datetime, now: datetime) -> str:
     """"12 S AGO", "41 M AGO", "3 H AGO" or "2 D AGO". Never negative."""
-    seconds = max(0, int((_aware(now) - fetched_at).total_seconds()))
-    if seconds < 60:
-        return f"{seconds} S AGO"
-    minutes = seconds // 60
-    if minutes < 60:
-        return f"{minutes} M AGO"
-    hours = minutes // 60
-    if hours < 48:
-        return f"{hours} H AGO"
-    return f"{hours // 24} D AGO"
+    count, unit = age_unit(int((_aware(now) - fetched_at).total_seconds()))
+    return f"{count} {unit.upper()} AGO"
 
 
 def share_text(allowance_pct: float | None) -> str | None:
@@ -323,27 +390,38 @@ def share_text(allowance_pct: float | None) -> str | None:
     return f"{round(allowance_pct)}% SHARE"
 
 
-def format_countdown(seconds: float) -> str:
-    """Time left as "2D 3H", "2H 14M", "9M" or "<1M": whole minutes rounded down, and days once a day or
-    more is left (minutes are noise by then). A whole hour or day has no zero tail: "2H", "1D"."""
+def countdown_units(seconds: float) -> tuple[tuple[int, str], ...]:
+    """Time left as (count, unit code) pairs: ((2, "d"), (3, "h")) once a day or more is left (minutes are noise by
+    then), ((2, "h"), (14, "m")), ((9, "m"),), and () under a minute. Whole minutes rounded down; a whole hour or day
+    has no zero tail: ((2, "h"),), ((1, "d"),)."""
     minutes = max(0, int(seconds)) // 60
     if minutes < 1:
-        return "<1M"
+        return ()
     days, rest = divmod(minutes, 24 * 60)
     hours, minutes = divmod(rest, 60)
     if days:
-        return f"{days}D {hours}H" if hours else f"{days}D"
+        return ((days, UNIT_DAYS), (hours, UNIT_HOURS)) if hours else ((days, UNIT_DAYS),)
     if hours:
-        return f"{hours}H {minutes}M" if minutes else f"{hours}H"
-    return f"{minutes}M"
+        return ((hours, UNIT_HOURS), (minutes, UNIT_MINUTES)) if minutes else ((hours, UNIT_HOURS),)
+    return ((minutes, UNIT_MINUTES),)
+
+
+def format_countdown(seconds: float) -> str:
+    """Time left as "2D 3H", "2H 14M", "9M" or "<1M" (see countdown_units)."""
+    return " ".join(f"{count}{unit.upper()}" for count, unit in countdown_units(seconds)) or "<1M"
+
+
+def english_stale_message(reason: str | None) -> str | None:
+    """The English text of a stale reason (STALE_MESSAGE_EXPIRED and the others), None for no reason."""
+    return _STALE_MESSAGES.get(reason) if reason is not None else None
 
 
 # ── Internals ─────────────────────────────────────────────────────────────────
 
 def _rows(usage: UsageSnapshot | None, now: datetime, show_scoped: str) -> list[Row]:
     rows = [
-        _limit_row("session", "SESSION", usage.session if usage else None, now, SESSION_WINDOW_S, False),
-        _limit_row("weekly", "WEEKLY", usage.weekly if usage else None, now, WEEKLY_WINDOW_S, False),
+        _limit_row("session", "SESSION", "session", usage.session if usage else None, now, SESSION_WINDOW_S, False),
+        _limit_row("weekly", "WEEKLY", "weekly_all", usage.weekly if usage else None, now, WEEKLY_WINDOW_S, False),
     ]
     if usage is None or show_scoped == "never":
         return rows
@@ -352,7 +430,7 @@ def _rows(usage: UsageSnapshot | None, now: datetime, show_scoped: str) -> list[
             continue
         name = _scoped_name(limit, index)
         rows.append(_limit_row(
-            f"scoped:{name}", limit.label or name.upper(), limit, now, WEEKLY_WINDOW_S, True,
+            f"scoped:{name}", limit.label or name.upper(), limit.kind, limit, now, WEEKLY_WINDOW_S, True,
         ))
     return rows
 
@@ -365,7 +443,8 @@ def _scoped_name(limit: Limit, index: int) -> str:
 # The usage guard. agent/guard.py judges a reading against the caps and says which limits are over, by name
 # ("session", "weekly", or a scoped limit's own label) and by a label for people ("Fable weekly"). The widgets
 # key a row by "session", "weekly" or "scoped:<model>", so the guard's answer is mapped onto the rows here, once,
-# and every skin marks the rows it is told about.
+# and every skin marks the rows it is told about. The mapping matches the guard's identity strings (its name and
+# label never change with the language); the skins word each limit from the kind and scope the mark carries.
 
 def _guard_mark(block: Any, usage: UsageSnapshot | None, now: datetime) -> GuardMark | None:
     """The guard block of the state as a mark, or None when it is off, missing or empty, and while there is
@@ -375,10 +454,17 @@ def _guard_mark(block: Any, usage: UsageSnapshot | None, now: datetime) -> Guard
     holding = block["state"] == GUARD_HOLDING
     policy = block.get("policy") if isinstance(block.get("policy"), Mapping) else {}
     scoped = []                         # (key, name, label) of every scoped limit: the guard watches the hidden ones too
+    kinds = {"session": "session", "weekly": "weekly_all"}
+    models: dict[str, str | None] = {}
+    scope_names: dict[str, str | None] = {}
     for index, limit in enumerate(usage.scoped if usage is not None else ()):
         model = limit.scope_model
         label = f"{model} weekly" if model else str(limit.label or "scoped").lower()   # as agent/guard.py names it
-        scoped.append((f"scoped:{_scoped_name(limit, index)}", str(limit.label or label), label))
+        key = f"scoped:{_scoped_name(limit, index)}"
+        scoped.append((key, str(limit.label or label), label))
+        kinds[key] = limit.kind
+        models[key] = model
+        scope_names[key] = scope_name(model, limit.scope_surface)
 
     labels = {"session": "session", "weekly": "weekly", **{key: label for key, _name, label in scoped}}
     caps: dict[str, int | float] = {}
@@ -408,15 +494,19 @@ def _guard_mark(block: Any, usage: UsageSnapshot | None, now: datetime) -> Guard
             caps[key] = cap             # the cap the guard applied is the one that counts
 
     resume_at = _moment(block.get("resume_at")) if holding else None
-    resume_in = resume_clock = resume_text = None
+    resume_in = resume_clock = resume_text = resume_seconds = resume_same_day = resume_weekday = None
     if resume_at is not None:
         remaining = (resume_at - now).total_seconds()
         resume_in = format_countdown(remaining)
         resume_clock = format_resets(resume_at, now)
         resume_text = resume_in if remaining < DAY_S else resume_clock
+        resume_seconds = max(0, int(remaining))
+        resume_same_day, resume_weekday = reset_day(resume_at, now)
     return GuardMark(
         state=block["state"], over_keys=tuple(over_keys), caps=caps, resume_at=resume_at, resume_text=resume_text,
         resume_in=resume_in, resume_clock=resume_clock, labels=labels, readings=readings,
+        resume_seconds=resume_seconds, resume_same_day=resume_same_day, resume_weekday=resume_weekday,
+        kinds=kinds, models=models, scope_names=scope_names,
     )
 
 
@@ -461,16 +551,18 @@ def _auto_shows(limit: Limit) -> bool:
 def _limit_row(
     key: str,
     label: str,
+    kind: str,
     limit: Limit | None,
     now: datetime,
     default_window_s: int,
     scoped: bool,
 ) -> Row:
     if limit is None:
-        return Row(key, label, None, None, SEVERITY_NORMAL, None, None, None, None)
+        return Row(key, label, None, None, SEVERITY_NORMAL, None, None, None, None, kind=kind)
     percent = float(limit.percent)
     window = limit.window_seconds if limit.window_seconds and limit.window_seconds > 0 else default_window_s
     fraction = elapsed_fraction(limit.resets_at, window, now)
+    same_day, weekday = reset_day(limit.resets_at, now) if limit.resets_at is not None else (None, None)
     return Row(
         key=key,
         label=label,
@@ -481,15 +573,26 @@ def _limit_row(
         resets_text=format_resets(limit.resets_at, now) if limit.resets_at is not None else None,
         pace=pace_for(percent, fraction),
         share_text=share_text(limit.allowance_pct) if scoped else None,
+        kind=kind,
+        scope_model=limit.scope_model if scoped else None,
+        scope_name=scope_name(limit.scope_model, limit.scope_surface) if scoped else None,
+        share_pct=limit.allowance_pct if scoped else None,
+        resets_same_day=same_day,
+        resets_weekday=weekday,
     )
 
 
-def _stale_message(status: ApiStatus, refused: int | None = None) -> str | None:
+def _stale_reason(status: ApiStatus, refused: int | None = None) -> str | None:
     if status is ApiStatus.STALE:
-        return STALE_MESSAGE_REFUSED if refused == 403 else STALE_MESSAGE_EXPIRED
+        return STALE_REFUSED if refused == 403 else STALE_EXPIRED
     if status is ApiStatus.NO_CREDENTIALS:
-        return STALE_MESSAGE_NO_LOGIN
+        return STALE_NO_LOGIN
     return None
+
+
+def _age_seconds(fetched_at: datetime, now: datetime) -> int:
+    """The age in whole seconds, as format_age counts it. Never negative."""
+    return max(0, int((_aware(now) - fetched_at).total_seconds()))
 
 
 def _clock_text(local: datetime) -> str:

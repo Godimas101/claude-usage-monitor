@@ -35,7 +35,6 @@ from __future__ import annotations
 import functools
 import math
 import os
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -58,14 +57,21 @@ from usage_monitor.render.model import (
     SEVERITY_CRITICAL,
     SEVERITY_NORMAL,
     SEVERITY_WARNING,
-    STALE_MESSAGE_REFUSED,
+    STALE_REFUSED,
     SURFACE_FLOATING,
     SURFACE_TASKBAR,
     SURFACE_TOOLTIP,
+    UNIT_DAYS,
+    UNIT_HOURS,
+    UNIT_MINUTES,
+    UNIT_SECONDS,
+    GuardMark,
     HoverPlay,
     Insets,
     Row,
     WidgetModel,
+    age_unit,
+    countdown_units,
     pace_delta,
 )
 from usage_monitor.render.skins import RenderOptions, coerce_options
@@ -187,8 +193,14 @@ TRAY_NUMBER_SIZE = 10.0
 KEYLINE = 0.6                   # px: the outline that keeps the ring readable on a taskbar of the other mode
 KEYLINE_ALPHA = 0xC0
 
-_AGE = re.compile(r"^\s*(\d+)\s*([SMHD])\b(?:\s*AGO)?\s*$", re.IGNORECASE)
-_AGE_UNITS = {"S": "s", "M": "min", "H": "h", "D": "d"}
+# The skin's words for the view model's values: a row's name ("Fable weekly") and a guarded limit's ("Fable weekly" too,
+# but a model name keeps its case there) by kind, and the units of an age ("41 min") and of a countdown ("2h 14m").
+ROW_NAMES: dict[str, str] = {"session": "Session", "weekly_all": "Weekly"}
+GUARD_NAMES: dict[str, str] = {"session": "session", "weekly_all": "weekly"}
+UNNAMED_SCOPED = "Weekly scoped"
+AGE_UNITS: dict[str, str] = {UNIT_SECONDS: "s", UNIT_MINUTES: "min", UNIT_HOURS: "h", UNIT_DAYS: "d"}
+COUNTDOWN_UNITS: dict[str, str] = {UNIT_MINUTES: "m", UNIT_HOURS: "h", UNIT_DAYS: "d"}
+UNDER_A_MINUTE = "<1m"
 
 
 # ── Typefaces ─────────────────────────────────────────────────────────────────
@@ -773,14 +785,16 @@ def _exact_percent_text(percent: float | None) -> str:
 
 
 def _age_label(model: WidgetModel) -> str | None:
-    """The model's "12 S AGO" as the pill shows it: "12 s", "41 min", "3 h", "2 d"."""
-    text = model.age_text
-    if not text:
+    """The model's age as the pill shows it: "12 s", "41 min", "3 h", "2 d"."""
+    if model.age_seconds is None:
         return None
-    match = _AGE.match(text)
-    if match:
-        return f"{match.group(1)} {_AGE_UNITS[match.group(2).upper()]}"
-    return text.lower().removesuffix(" ago").strip() or None
+    count, unit = age_unit(model.age_seconds)
+    return f"{count} {AGE_UNITS[unit]}"
+
+
+def _countdown(seconds: int) -> str:
+    """The time left as the footer and the hover card say it: "2d 3h", "2h 14m", "9m", or "<1m" under a minute."""
+    return " ".join(f"{count}{COUNTDOWN_UNITS[unit]}" for count, unit in countdown_units(seconds)) or UNDER_A_MINUTE
 
 
 def _sentence(label: str) -> str:
@@ -788,23 +802,55 @@ def _sentence(label: str) -> str:
     return label.capitalize() if label.isupper() else label
 
 
+def _row_name(row: Row) -> str:
+    """The row's name in sentence case: "Session", "Weekly", and a scoped limit named for its model, else its surface,
+    "Fable weekly", or "Weekly scoped" when it has neither. A kind this skin has no words for, and a row built
+    without one, keep their label (in sentence case when it is all capitals)."""
+    if row.kind in ROW_NAMES:
+        return ROW_NAMES[row.kind]
+    if row.kind == "weekly_scoped":
+        if not row.scope_name:
+            return UNNAMED_SCOPED
+        # In capitals first, as the limit's label always was, so capitalize() gives what it gave that label: the rest
+        # of the name in lower case ("Claude design weekly"), a quirk kept for now (#90).
+        return _sentence(f"{row.scope_name.upper()} WEEKLY")
+    return _sentence(row.label)
+
+
+def _guard_name(guard: GuardMark, key: str) -> str:
+    """A limit the guard watches, as its line names it: "session", "weekly", a scoped limit "Fable weekly" with its
+    model's own case, and one named for its surface or for nothing in lower case, as the guard words a limit it knows
+    only by its label ("claude_code weekly", "weekly scoped"). A kind this skin has no words for, and a limit the
+    reading no longer carries, keep the guard's own label for it."""
+    kind = guard.kinds.get(key)
+    if kind in GUARD_NAMES:
+        return GUARD_NAMES[kind]
+    if kind == "weekly_scoped":
+        model = guard.models.get(key)
+        if model:
+            return f"{model} weekly"
+        scope = guard.scope_names.get(key)
+        return f"{scope.upper()} WEEKLY".lower() if scope else UNNAMED_SCOPED.lower()
+    return guard.labels.get(key, key)
+
+
 def _tag(row: Row) -> str:
     if row.key == "session":
         return "5H"
     if row.key == "weekly":
         return "7D"
-    return row.share_text.lower() if row.share_text else "7D"
+    return f"{round(row.share_pct)}% share" if row.share_pct is not None else "7D"
 
 
-def _blank_row(key: str, label: str) -> Row:
-    return Row(key, label, None, None, SEVERITY_NORMAL, None, None, None, None)
+def _blank_row(key: str, label: str, kind: str) -> Row:
+    return Row(key, label, None, None, SEVERITY_NORMAL, None, None, None, None, kind=kind)
 
 
 def _rows(model: WidgetModel) -> list[Row]:
     """The model's rows, with at least the session and the weekly row (a model with fewer is padded)."""
     rows = list(model.rows)
-    for key, label in (("session", "SESSION"), ("weekly", "WEEKLY"))[len(rows):]:
-        rows.append(_blank_row(key, label))
+    for key, label, kind in (("session", "SESSION", "session"), ("weekly", "WEEKLY", "weekly_all"))[len(rows):]:
+        rows.append(_blank_row(key, label, kind))
     return rows
 
 
@@ -847,9 +893,8 @@ def _hold_runs(model: WidgetModel) -> list[tuple[str, int, str]]:
     if guard is None or not guard.holding:
         return []
     runs = [("Guard holding", 600, "alert")]
-    if guard.resume_clock:
-        countdown = (guard.resume_in or "").lower()
-        runs.append((f" · Resumes {guard.resume_clock} (in {countdown})", 400, "text_3"))
+    if guard.resume_seconds is not None and guard.resume_clock:
+        runs.append((f" · Resumes {guard.resume_clock} (in {_countdown(guard.resume_seconds)})", 400, "text_3"))
     return runs
 
 
@@ -858,7 +903,7 @@ def _footer_runs(model: WidgetModel) -> list[tuple[str, int, str]]:
     holds: the pace of a limit that is at its cap is not news. A state that needs the user (the sign-in, the
     connection) keeps its own words."""
     if model.status is not ApiStatus.LIVE:
-        refused = model.status is ApiStatus.STALE and model.stale_message == STALE_MESSAGE_REFUSED
+        refused = model.status is ApiStatus.STALE and model.stale_reason == STALE_REFUSED
         lead, rest, role = _REFUSED_COPY if refused else _STATUS_COPY[model.status]
         return ([(lead, 600, role)] if lead else []) + [(rest, 400, "text_3")]
     holding = _hold_runs(model)
@@ -1109,7 +1154,7 @@ def _row(ink: Ink, pal: Palette, model: WidgetModel, row: Row, top: float, *, ex
     value = _exact_percent_text(row.percent) if exact else _percent_text(row.percent)
     value_w = ink.advance(value, value_face)
     room = RIGHT - LEFT - value_w - 10
-    label = _sentence(row.label)
+    label = _row_name(row)
     tag = _tag(row)
     label_w = ink.advance(label, label_face)
     tag_w = ink.advance(tag, tag_face)
@@ -1161,41 +1206,48 @@ def _footer(ink: Ink, pal: Palette, model: WidgetModel, top: float) -> None:
 
 # ── Tooltip: the usage guard's bar ────────────────────────────────────────────
 
+def _lead(words: str, rest: str) -> tuple[str, str]:
+    """(lead, rest): the lead takes its colon only when something follows it."""
+    return (f"{words}:" if rest else words), rest
+
+
 def _guard_statement(model: WidgetModel) -> tuple[str, str] | None:
     """(lead, rest) of the hover card's guard line, or None while the guard is off:
     ("Guard armed:", "session 95%, weekly 90%") and
-    ("Guard holding:", "weekly 91% (cap 90%). Resumes Fri 7:12 PM (in 2d 3h).")."""
+    ("Guard holding:", "weekly 91% (cap 90%). Resumes Fri 7:12 PM (in 2d 3h)."). A guard with nothing to list (no
+    caps) is its lead alone, without the colon: ("Guard armed", "")."""
     guard = model.guard
     if guard is None:
         return None
     if not guard.holding:
-        caps = ", ".join(engine.glue(f"{label} {_number(cap)}%") for label, cap in guard.watched())
-        return "Guard armed:", caps
+        caps = ", ".join(engine.glue(f"{_guard_name(guard, key)} {_number(cap)}%") for key, cap in guard.caps.items())
+        return _lead("Guard armed", caps)
     limits = []
-    for label, reading, cap in guard.over_limits():
-        text = engine.glue(label if reading is None else f"{label} {_percent_text(reading)}")
+    for key in guard.over_keys:
+        name, reading, cap = _guard_name(guard, key), guard.readings.get(key), guard.caps.get(key)
+        text = engine.glue(name if reading is None else f"{name} {_percent_text(reading)}")
         if cap is not None:
             text += " " + engine.glue(f"(cap {_number(cap)}%)")
         limits.append(text)
     rest = ", ".join(limits)
     rest = f"{rest}." if rest else ""
-    if guard.resume_clock:
+    if guard.resume_seconds is not None and guard.resume_clock:
         clock = engine.glue(guard.resume_clock)
-        countdown = engine.glue("(in " + (guard.resume_in or "").lower() + ")")
+        countdown = engine.glue("(in " + _countdown(guard.resume_seconds) + ")")
         rest = f"{rest} Resumes {clock} {countdown}."
-    return "Guard holding:", rest.strip()
+    return _lead("Guard holding", rest.strip())
 
 
 def _guard_bar_lines(ink: Ink, model: WidgetModel) -> tuple[str, list[str]]:
     """(the lead, the rest of the guard's line broken to the bar's text width), measured on ``ink`` (any canvas of the
     frame's scale). The first line leaves room for the lead. No lines while the guard is off; a guard with nothing to
-    list (no caps) is its lead alone, without the colon."""
+    list is its lead alone."""
     statement = _guard_statement(model)
     if statement is None:
         return "", []
     lead, rest = statement
     if not rest:
-        return lead.removesuffix(":"), []
+        return lead, []
     lead_w = ink.advance(lead, ink.face(ink.fonts.body, SIZE_FOOT, 600))
     body = ink.face(ink.fonts.body, SIZE_FOOT, 400)
     room = RIGHT - LEFT - 2 * BAR_PAD - BAR_ICON_W - BAR_TEXT_GAP

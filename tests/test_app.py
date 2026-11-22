@@ -1581,11 +1581,26 @@ def test_without_a_reading_no_surface_says_the_guard_is_armed():
 def test_the_longest_guard_tooltip_still_fits_the_shell_limit():
     model = model_for("rate_limited")
     rows = [dataclasses.replace(row, percent=100.0) for row in model.rows]
-    guard = GuardMark(state="holding", over_keys=("session", "weekly"), resume_clock="Wed 12:00 PM", resume_in="6D 23H")
+    guard = GuardMark(state="holding", over_keys=("session", "weekly"), resume_clock="Wed 12:00 PM", resume_in="6D 23H",
+                      resume_seconds=(6 * 24 + 23) * 3600)
     text = tray_tooltip(dataclasses.replace(model, rows=rows, guard=guard), dev=True)
     assert text == ("Claude usage - session 100% - weekly 100% - rate limited - guard holding, resumes Wed 12:00 PM "
                     "(in 6d 23h) (dev)")
     assert len(text) <= 127
+
+
+def test_the_tray_tooltip_words_its_limits_by_kind_and_its_status_by_code():
+    """#90: no row key and none of the model's English status or countdown text is a word the tooltip shows."""
+    base = model_for("rate_limited")
+    rekeyed = dataclasses.replace(base, status_text="SOMETHING ELSE", rows=[
+        dataclasses.replace(row, key=f"row{index}", label="?") for index, row in enumerate(base.rows)][::-1])
+    assert tray_tooltip(rekeyed) == "Claude usage - session 13% - weekly 2% - rate limited"   # session first, by kind
+    held = model_for("guard_hold_session")
+    retexted = dataclasses.replace(held, guard=dataclasses.replace(held.guard, resume_in="?", resume_text="?"))
+    assert tray_tooltip(retexted) == tray_tooltip(held) == (
+        f"Claude usage - session 96% - weekly 58% - guard holding, resumes {held.guard.resume_clock} (in 2h 14m)")
+    under = dataclasses.replace(held, guard=dataclasses.replace(held.guard, resume_seconds=59))
+    assert tray_tooltip(under).endswith("(in <1m)")
 
 
 def test_the_menu_lists_the_actions_in_order_and_marks_the_toggles():

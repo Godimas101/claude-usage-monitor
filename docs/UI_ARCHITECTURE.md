@@ -167,17 +167,28 @@ icons, links and selection and never draws "normal" bars in the critical red.
 # model.py — plain data, no Win32
 @dataclass class Row: key ("session" | "weekly" | "scoped:<name>"), label, percent (0..100+),
                       time_fraction (0..1 | None), severity ("normal" | "warning" | "critical"),
-                      resets_at, resets_text, pace ("ahead" | "on_pace" | "behind" | None), share_text
+                      resets_at, resets_text, pace ("ahead" | "on_pace" | "behind" | None), share_text,
+                      kind ("session" | "weekly_all" | "weekly_scoped" | another kind; None on a row built by hand),
+                      scope_model, scope_name (the model, else the surface), share_pct,
+                      resets_same_day, resets_weekday (0 is Monday)
 @dataclass class WidgetModel: status: ApiStatus, status_text, age_text, rows: list[Row],
                               stale: bool, stale_message: str | None, blink_on: bool, updated_at,
-                              guard: GuardMark | None      # the usage guard (#27); None while it is off
+                              guard: GuardMark | None,     # the usage guard (#27); None while it is off
+                              age_seconds (None exactly when age_text is),
+                              stale_reason ("expired" | "refused" | "no_login"; None exactly when stale_message is)
                               .lamp -> "live" | "paused" | "stale" | "offline" | "limited" | "loading"   # LAMP_KINDS
 @dataclass class GuardMark: state ("armed" | "holding"), over_keys (Row keys at or past their caps),
                             caps {key: %}, labels {key: "Fable weekly"}, readings {key: %}, resume_at,
                             resume_text ("2H 14M" under a day, else "Wed 4:00 PM"), resume_in (always the
-                            countdown), resume_clock (always the time); .holding, .over_limits(), .watched()
+                            countdown), resume_clock (always the time), resume_seconds, resume_same_day,
+                            resume_weekday, kinds {key: kind}, models {key: scoped model}, scope_names {key: model,
+                            else surface}; .holding, .over_limits(), .watched()
 build_model(state: MonitorState | None, now, *, show_scoped="auto", blink_on=True) -> WidgetModel
+age_unit(seconds) -> (12, "s") | (41, "m") | (3, "h") | (2, "d")   # the unit an age is told in: UNIT_* codes
+countdown_units(seconds) -> ((2, "d"), (3, "h")) | ((2, "h"), (14, "m")) | ((9, "m"),) | ()   # () under a minute
 format_countdown(seconds) -> "2D 3H" | "2H 14M" | "9M" | "<1M"     # whole minutes, rounded down
+reset_day(moment, now) -> (on now's local day, local weekday)
+english_stale_message(reason) -> STALE_MESSAGE_EXPIRED | STALE_MESSAGE_REFUSED | STALE_MESSAGE_NO_LOGIN | None
 SURFACE_FLOATING | SURFACE_TASKBAR | SURFACE_TOOLTIP          # the surfaces the optional skin methods name
 Insets = (left, top, right, bottom); NO_INSETS = (0, 0, 0, 0)  # transparent margin of a frame, in its own pixels
 @dataclass(frozen) class HoverPlay: frames, delays_ms, hold=False, leave=(), leave_ms=40   # plain data, see below
@@ -198,6 +209,31 @@ Skins draw at 2× and downsample (LANCZOS); colours come only from variant token
 ahead when usage − time > 10 points, behind when < −10, else on pace. The 10 is one number,
 `windows.PACE_BAND_POINTS`: the pacing report, every widget and the dashboard (`PACE_BAND` in `app.js`,
 which a test keeps equal) read it.
+
+**Values, not English (#90).** The model keeps its English texts (`label`, `age_text`, `stale_message`, `share_text`,
+`resets_text`, and the guard's `labels`, `resume_text` and `resume_in`), and the dump and the tests read them. The skins
+and the tray tooltip word their own text from the values beside them, and never cut, split or match those texts to find
+a value:
+- A row is named from its `kind`: session and weekly by the skin's own words, a scoped limit for its `scope_name`
+  ("FABLE WEEKLY", Night City's "FABLE", Gates' "Fable weekly"), or "WEEKLY SCOPED" when it has neither. A kind a skin
+  has no words for, and a row built without a kind, keep their label whole. Gates puts the name in capitals before
+  `capitalize()`, as it did the label, so a model name reads "Claude design weekly".
+- The share is `share_pct`, rounded with `round()` as `share_text` is ("50% SHARE", Gates' "50% share").
+- The age is `age_seconds` told in its unit by `age_unit`; each skin has its own words for the unit codes
+  ("12 S", Night City's "12 S OLD", Gates' "12 s" and "41 min").
+- The sign-in copy is picked by `stale_reason` (see "Sign-in copy" below).
+- The guard's limits are worded from `GuardMark.kinds`, `models` and `scope_names` as the rows are. A limit the
+  reading no longer carries, and a kind the skin has no words for, keep the guard's own label. Gates keeps a model's own
+  case there ("Fable weekly") and words a limit named for its surface or for nothing in lower case ("weekly scoped"),
+  as the guard does.
+- Every countdown (the HOLD chips, the hover card, Gates' footer, the tray) is `resume_seconds` through
+  `countdown_units`, in the skin's units ("2H 14M", Gates' and the tray's "2h 14m").
+- The tray tooltip names the session and weekly rows by kind and words its status from the status itself
+  (`app.TRAY_STATUS`).
+
+`age_seconds` and `resume_seconds` are whole seconds, never negative. The reset and resume times are still drawn from
+`resets_text` and `resume_clock`; `resets_same_day`, `resets_weekday`, `resume_same_day` and `resume_weekday` carry
+their day as values, and no skin reads them yet.
 
 **Lamp kinds.** A status with no room for words (the strip, the tray icon) is drawn by `WidgetModel.lamp`
 (`model.LAMP_KINDS`): `live`, `paused`, `stale` (sign-in lost or missing: the user acts), `offline` (no connection),
@@ -266,16 +302,16 @@ Night City's strip tag, whatever the link status is: a paused or loading widget 
 pill beside the shield. Without a reading (no sign-in, still loading) no surface shows the guard: it cannot act on
 nothing.
 
-Sign-in copy. `WidgetModel.stale_message` is the neutral wording ("LOGIN EXPIRED - USE CLAUDE CODE");
-a skin words the state as its approved mockup does and falls back to the neutral text where it has
-none. Nostromo: the dashed auth box reads "AUTH LINK LOST." / "USE CLAUDE CODE TO RESTORE."
-(`STALE_MESSAGES`, by status). Night City: the hazard band reads "RELINK // USE CLAUDE CODE"
+Sign-in copy. `WidgetModel.stale_reason` says why the user must act (`expired`, `refused`, `no_login`), and
+`stale_message` is its neutral wording ("LOGIN EXPIRED - USE CLAUDE CODE"). Each skin picks its copy by the reason,
+as its approved mockup words it, and never reads the neutral text. Nostromo: the dashed auth box reads
+"AUTH LINK LOST." / "USE CLAUDE CODE TO RESTORE." (`AUTH_LINES`, by reason). Night City: the hazard band reads "RELINK // USE CLAUDE CODE"
 (`theme.extras.copy.stale_auth`). Gates: the footer reads "Hmm, we lost touch. Send Claude Code a message."
 Each says to use Claude Code, not to open it: Claude Code renews the sign-in only when it sends a request, so
 an open but idle Claude Code lets it run out (#52).
 
 A sign-in Claude turned down with HTTP 403 (`MonitorState.signin_refused`, #55) is not renewed by a message: only a
-new sign-in fixes it. The neutral wording is `STALE_MESSAGE_REFUSED` ("LOGIN REFUSED - RUN /login IN CLAUDE CODE").
+new sign-in fixes it. Its reason is `refused`, and its neutral wording `STALE_MESSAGE_REFUSED` ("LOGIN REFUSED - RUN /login IN CLAUDE CODE").
 Nostromo: "AUTH REFUSED." / "RUN /login IN CLAUDE CODE." Night City: "RELINK // RUN /login"
 (`theme.extras.copy.stale_refused`). Gates: "Sign-in refused. Run /login in Claude Code." The dashboard's sign-in
 help asks for `/login` too. A 401 keeps the expired wording: Claude Code's next request renews the sign-in, or asks
@@ -283,8 +319,8 @@ for a new one.
 
 No sign-in at all is a different case (#28): the person may never have used Claude Code (claude.ai and the
 Claude apps share its limits), so the widgets send them to the dashboard, which has the steps, rather than to
-Claude Code. The neutral text is "NO LOGIN FOUND - OPEN THE DASHBOARD" (Nostromo's auth box shows it as its two
-lines), Night City's band "NO LOGIN // OPEN DASHBOARD" (`theme.extras.copy.no_login`), and Gates' footer
+Claude Code. The neutral text is "NO LOGIN FOUND - OPEN THE DASHBOARD" (Nostromo's auth box has the same words, as
+its two lines), Night City's band "NO LOGIN // OPEN DASHBOARD" (`theme.extras.copy.no_login`), and Gates' footer
 "No sign-in found. Open the dashboard for help." The dashboard's link status reads "NO LOGIN" too (Gates: "Not signed in"),
 and its status banner becomes the sign-in help (see "webui").
 

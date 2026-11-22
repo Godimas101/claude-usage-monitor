@@ -26,7 +26,7 @@ from PIL import Image
 from usage_monitor import themes as theme_registry
 from usage_monitor.data.models import ApiStatus, Limit
 from usage_monitor.render import dump, engine
-from usage_monitor.render.model import STALE_MESSAGE_REFUSED, build_model
+from usage_monitor.render.model import STALE_MESSAGE_REFUSED, STALE_REFUSED, build_model
 from usage_monitor.render.skins import RenderOptions, get_skin
 from usage_monitor.render.skins import gates
 from usage_monitor.render.skins.gates import GatesSkin, Palette
@@ -70,7 +70,8 @@ def model(session: float = 13.0, weekly: float = 2.0, *, status: ApiStatus = Api
     ]
     if scoped is not None:
         limits.append(Limit(kind="weekly_scoped", group="weekly", percent=scoped, severity=None,
-                            resets_at=NOW + timedelta(days=3), is_active=True, label=label, scope_model="Fable",
+                            resets_at=NOW + timedelta(days=3), is_active=True, label=label,
+                            scope_model=label.removesuffix(" WEEKLY").title(),      # the model the label names (#90)
                             window_seconds=604800, allowance_pct=50.0))
     return build_model(dump._state(NOW, status, limits, age_s), NOW)
 
@@ -738,7 +739,7 @@ def test_the_footer_copy_follows_the_state():
 
 def refused_model():
     """The stale sample with a sign-in the usage API turned down (HTTP 403, #55)."""
-    return replace(dump.sample_model("stale"), stale_message=STALE_MESSAGE_REFUSED)
+    return replace(dump.sample_model("stale"), stale_reason=STALE_REFUSED, stale_message=STALE_MESSAGE_REFUSED)
 
 
 def test_a_refused_sign_in_asks_for_login_not_for_a_message():
@@ -757,12 +758,12 @@ def test_the_footer_talks_about_the_most_severe_row():
     assert gates._driver(model(50.0, 50.0)).key == "session"            # ties go to the session
 
 
-@pytest.mark.parametrize(("age_text", "label"), [
-    ("12 S AGO", "12 s"), ("41 M AGO", "41 min"), ("3 H AGO", "3 h"), ("2 D AGO", "2 d"), (None, None),
-    ("0 S AGO", "0 s"),
+@pytest.mark.parametrize(("age_text", "age_s", "label"), [
+    ("12 S AGO", 12, "12 s"), ("41 M AGO", 41 * 60, "41 min"), ("3 H AGO", 3 * 3600, "3 h"), ("2 D AGO", 2 * 86400, "2 d"),
+    (None, None, None), ("0 S AGO", 0, "0 s"),
 ])
-def test_the_pill_shows_the_age_in_the_mockup_style(age_text, label):
-    m = replace(dump.sample_model("normal3"), age_text=age_text)
+def test_the_pill_shows_the_age_in_the_mockup_style(age_text, age_s, label):
+    m = replace(dump.sample_model("normal3"), age_text=age_text, age_seconds=age_s)
     assert gates._age_label(m) == label
 
 
@@ -771,6 +772,23 @@ def test_labels_are_sentence_case_and_tags_follow_the_row():
     assert [gates._sentence(row.label) for row in m.rows] == ["Session", "Weekly", "Fable weekly"]
     assert [gates._tag(row) for row in m.rows] == ["5H", "7D", "50% share"]
     assert gates._sentence("Claude Design weekly") == "Claude Design weekly"
+
+
+@pytest.mark.parametrize(("model_name", "surface", "name"), [
+    ("Fable", None, "Fable weekly"), (None, "claude_code", "Claude_code weekly"), (None, None, "Weekly scoped"),
+    ("Claude Design", None, "Claude design weekly"),             # the name's own capitals go, as the label's did
+])
+def test_a_scoped_row_is_named_for_its_scope_not_its_label(model_name, surface, name, monkeypatch):
+    """#90: the name is worded from the row's scope. The label (here one that names something else) is never read."""
+    made = drawn_canvases(monkeypatch)
+    scoped = Limit(kind="weekly_scoped", group="weekly", percent=40.0, severity=None, resets_at=NOW + timedelta(days=3),
+                   is_active=True, label="SOMETHING ELSE WEEKLY", scope_model=model_name, scope_surface=surface,
+                   window_seconds=604800, allowance_pct=50.0)
+    m = build_model(dump._state(NOW, ApiStatus.LIVE, [*dump.sample_state("normal2").usage.limits, scoped], 12), NOW)
+    assert m.rows[2].label == "SOMETHING ELSE WEEKLY" and gates._row_name(m.rows[2]) == name
+    skin().render_floating(m, theme(), variant("system-dark"), 1.0, None)
+    shown = [text for text, _ in row_texts(made[-1], list(gates.ROW_TOPS))[2]]
+    assert name in shown and "50% share" in shown and not any("omething" in text for text in shown)
 
 
 @pytest.mark.parametrize(("percent", "text"), [

@@ -31,13 +31,22 @@ from usage_monitor.render.model import (
     NO_INSETS,
     SEVERITY_CRITICAL,
     SEVERITY_WARNING,
+    STALE_EXPIRED,
+    STALE_NO_LOGIN,
+    STALE_REFUSED,
     SURFACE_FLOATING,
-    STALE_MESSAGE_REFUSED,
     SURFACE_TASKBAR,
+    UNIT_DAYS,
+    UNIT_HOURS,
+    UNIT_MINUTES,
+    UNIT_SECONDS,
+    GuardMark,
     HoverPlay,
     Insets,
     Row,
     WidgetModel,
+    age_unit,
+    countdown_units,
     pace_delta,
     worst_severity,
 )
@@ -175,14 +184,24 @@ STATE_WORDS: dict[str, str] = {
     "no_credentials": "AUTH REQUIRED",
 }
 
-# The auth box wording the approved mockup gives (final.html, "stale3": two lines). The view model's
-# stale_message stays the neutral default for every status not listed here (a missing login has no
-# mockup wording yet, so it keeps the neutral text).
-STALE_MESSAGES: dict[ApiStatus, str] = {
-    ApiStatus.STALE: "AUTH LINK LOST.\nUSE CLAUDE CODE TO RESTORE.",
+# The dashed auth box's two lines for each reason the user must act on the sign-in (WidgetModel.stale_reason). A lost
+# sign-in has the approved mockup's wording (final.html, "stale3"); a sign-in the usage API turned down (HTTP 403) needs
+# a new one, and the command keeps its case (#55); a missing one has no mockup wording, so it reads as the view model's
+# neutral text does.
+AUTH_LINES: dict[str, tuple[str, str]] = {
+    STALE_EXPIRED: ("AUTH LINK LOST.", "USE CLAUDE CODE TO RESTORE."),
+    STALE_REFUSED: ("AUTH REFUSED.", "RUN /login IN CLAUDE CODE."),
+    STALE_NO_LOGIN: ("NO LOGIN FOUND", "OPEN THE DASHBOARD"),
 }
-# A sign-in the usage API turned down (HTTP 403): only a new one fixes it (#55). The command keeps its case.
-REFUSED_MESSAGE = "AUTH REFUSED.\nRUN /login IN CLAUDE CODE."
+
+# The skin's words for the view model's values: a row's or a guarded limit's name by kind (a scoped one is named for
+# its model or surface, "<NAME> WEEKLY"), and the units of an age ("12 S") and of a countdown ("2H 14M").
+LIMIT_NAMES: dict[str, str] = {"session": "SESSION", "weekly_all": "WEEKLY"}
+SCOPED_SUFFIX = " WEEKLY"
+UNNAMED_SCOPED = "WEEKLY SCOPED"
+UNITS: dict[str, str] = {UNIT_SECONDS: "S", UNIT_MINUTES: "M", UNIT_HOURS: "H", UNIT_DAYS: "D"}
+UNDER_A_MINUTE = "<1M"
+HOLD = "HOLD"
 
 
 # ── Palette ───────────────────────────────────────────────────────────────────
@@ -301,13 +320,13 @@ def _palette(theme: Any, variant: Any, model: WidgetModel) -> Palette:
 def _visible_rows(model: WidgetModel) -> list[Row]:
     """The widget's rows. A message box takes the third slot, so only the first two rows show."""
     rows = list(model.rows)
-    return rows[:2] if model.stale_message else rows
+    return rows[:2] if _message_lines(model) is not None else rows
 
 
 def _frame_height(model: WidgetModel) -> int:
     """94 px for two rows, 126 for three (the stale message box takes the third slot)."""
     rows = max(2, len(_visible_rows(model)))
-    if model.stale_message:
+    if _message_lines(model) is not None:
         rows = max(rows, 3)
     return FLOAT_BASE_H + ROW_PITCH * (rows - 1)
 
@@ -343,14 +362,30 @@ def _qualifier(row: Row) -> str | None:
         return "5H"
     if row.key == "weekly":
         return "7D"
-    return f"OF {row.share_text}" if row.share_text else None
+    return f"OF {round(row.share_pct)}% SHARE" if row.share_pct is not None else None
 
 
 def _short_qualifier(row: Row) -> str | None:
     """The qualifier when the full one does not fit: a scoped limit's share on its own ("25%")."""
-    if row.key in ("session", "weekly") or not row.share_text:
+    if row.key in ("session", "weekly") or row.share_pct is None:
         return _qualifier(row)
-    return row.share_text.split()[0]
+    return f"{round(row.share_pct)}%"
+
+
+def _row_names(row: Row) -> tuple[str, str]:
+    """(the row's name, its shorter form for a tight line). A scoped limit is named for its model, else its surface:
+    ("FABLE WEEKLY", "FABLE"), and ("WEEKLY SCOPED", "WEEKLY SCOPED") when it has neither. A kind this skin has no
+    words for, and a row built without one, keep their label whole."""
+    if row.kind in LIMIT_NAMES:
+        name = LIMIT_NAMES[row.kind]
+        return name, name
+    if row.kind == "weekly_scoped":
+        if not row.scope_name:
+            return UNNAMED_SCOPED, UNNAMED_SCOPED
+        scope = row.scope_name.upper()
+        name = scope + SCOPED_SUFFIX
+        return name, scope.strip() or name
+    return row.label, row.label
 
 
 def _name_line(cv: Canvas, row: Row, value: str, semi: Any, reg: Any, vt: Any,
@@ -372,8 +407,8 @@ def _name_line(cv: Canvas, row: Row, value: str, semi: Any, reg: Any, vt: Any,
         return used <= room
 
     qualifier, short = _qualifier(row), _short_qualifier(row)
-    shorter = row.label.removesuffix(" WEEKLY").strip() or row.label
-    for name, kept in ((row.label, qualifier), (row.label, short), (shorter, short)):
+    full, shorter = _row_names(row)
+    for name, kept in ((full, qualifier), (full, short), (shorter, short)):
         if fits(name, kept):
             return name, kept
     cut = shorter
@@ -383,11 +418,17 @@ def _name_line(cv: Canvas, row: Row, value: str, semi: Any, reg: Any, vt: Any,
     return (cut, short) if fits(cut, short) else (cut, None)
 
 
+def _countdown(seconds: int) -> str:
+    """The time left as the chip and the hover card say it: "2D 3H", "2H 14M", "9M", or "<1M" under a minute."""
+    return " ".join(f"{count}{UNITS[unit]}" for count, unit in countdown_units(seconds)) or UNDER_A_MINUTE
+
+
 def _age_text(model: WidgetModel) -> str | None:
-    """The age after the status pill, shown while the values are live or last-known."""
-    if model.age_text is None or model.status not in (ApiStatus.LIVE, ApiStatus.STALE, ApiStatus.RATE_LIMITED):
+    """The age after the status pill ("12 S", "41 M"), shown while the values are live or last-known."""
+    if model.age_seconds is None or model.status not in (ApiStatus.LIVE, ApiStatus.STALE, ApiStatus.RATE_LIMITED):
         return None
-    return model.age_text.removesuffix(" AGO")
+    count, unit = age_unit(model.age_seconds)
+    return f"{count} {UNITS[unit]}"
 
 
 def _hold_word(model: WidgetModel) -> str | None:
@@ -397,7 +438,7 @@ def _hold_word(model: WidgetModel) -> str | None:
     guard = model.guard
     if guard is None or not guard.holding:
         return None
-    return f"HOLD {guard.resume_in}" if guard.resume_in else "HOLD"
+    return f"{HOLD} {_countdown(guard.resume_seconds)}" if guard.resume_seconds is not None else HOLD
 
 
 def _over_cap(model: WidgetModel, row: Row) -> bool:
@@ -586,27 +627,16 @@ def _dashed_box(plan: _Plan, cv: Canvas, pal: Palette, x0: float, y0: float, x1:
     plan.mark(draw)
 
 
-def _message_text(model: WidgetModel) -> str | None:
-    """The wording of the dashed auth box: this skin's own for the statuses it words (the approved
-    mockup's), else the neutral text the view model carries. None when the model asks for no box."""
-    if not model.stale_message:
-        return None
-    if model.stale_message == STALE_MESSAGE_REFUSED:
-        return REFUSED_MESSAGE
-    return STALE_MESSAGES.get(model.status, model.stale_message)
+def _message_lines(model: WidgetModel) -> tuple[str, ...] | None:
+    """The lines of the dashed auth box, worded for the reason the user must act (AUTH_LINES). None when the model
+    asks for no box."""
+    return AUTH_LINES.get(model.stale_reason) if model.stale_reason is not None else None
 
 
-def _message_lines(text: str) -> list[str]:
-    """One or two lines: a line feed splits them, and so does the view model's "A - B" spelling."""
-    if "\n" in text:
-        return [part.strip() for part in text.split("\n")]
-    return [part.strip() for part in text.split(" - ")] if " - " in text else [text]
-
-
-def _message(plan: _Plan, cv: Canvas, pal: Palette, text: str, top: float, x0: float, x1: float, y1: float) -> None:
+def _message(plan: _Plan, cv: Canvas, pal: Palette, lines: tuple[str, ...], top: float, x0: float, x1: float,
+             y1: float) -> None:
     """Dashed auth box with one or two lines of 10 px SemiBold text (see _message_lines)."""
     _dashed_box(plan, cv, pal, x0, top, x1, y1)
-    lines = _message_lines(text)
     semi = cv.font(FONT_SEMI, LABEL_SIZE)
     for index, line in enumerate(lines[:2]):
         line_top = top + 2 + 12 * index
@@ -739,7 +769,7 @@ class NostromoSkin:
         rows = _visible_rows(model)
         for index, row in enumerate(rows):
             _row_widget(plan, cv, pal, model, row, index)
-        message = _message_text(model)
+        message = _message_lines(model)
         if message:
             _message(plan, cv, pal, message, MESSAGE_TOP, LEFT, RIGHT, MESSAGE_TOP + MESSAGE_H)
         plan.run(cv)
@@ -758,7 +788,8 @@ class NostromoSkin:
         # measured on a canvas as wide as the card: a canvas's buffer factor follows its width at a fractional scale
         lead, guard_lines = _guard_lines(_canvas(FLOAT_W, 1, scale, theme), model)
         guard_h = GUARD_BLOCK_PAD + GUARD_LINE_H * len(guard_lines) if guard_lines else 0
-        height = int(last_top + 56 + guard_h) if not model.stale_message else int(last_top + 92 + guard_h)
+        message = _message_lines(model)
+        height = int(last_top + 56 + guard_h) if message is None else int(last_top + 92 + guard_h)
         cv = _canvas(FLOAT_W, height, scale, theme)
         outer = engine.chamfer_polygon(0, 0, FLOAT_W, height, CHAMFER, CHAMFER)
         body = engine.inset_chamfer(0, 0, FLOAT_W, height, CHAMFER, CHAMFER, 1)
@@ -772,7 +803,6 @@ class NostromoSkin:
             _row_tooltip(plan, cv, pal, model, row, index)
         if guard_lines:
             _guard_block(plan, cv, pal, lead, guard_lines, last_top)
-        message = _message_text(model)
         if message:
             top = last_top + TOOLTIP_INFO_OFFSET + 20 + guard_h
             _message(plan, cv, pal, message, top, LEFT, RIGHT, top + MESSAGE_H)
@@ -893,41 +923,58 @@ def _row_tooltip(plan: _Plan, cv: Canvas, pal: Palette, model: WidgetModel, row:
 
 # ── Tooltip: the usage guard's line ───────────────────────────────────────────
 
+def _guard_name(guard: GuardMark, key: str) -> str:
+    """A limit the guard watches, in capitals, worded from its kind as the rows are: "SESSION", "WEEKLY",
+    "FABLE WEEKLY", "WEEKLY SCOPED". A kind this skin has no words for, and a limit the reading no longer carries,
+    keep the guard's own label for it."""
+    kind = guard.kinds.get(key)
+    if kind in LIMIT_NAMES:
+        return LIMIT_NAMES[kind]
+    if kind == "weekly_scoped":
+        scope = guard.scope_names.get(key)
+        return scope.upper() + SCOPED_SUFFIX if scope else UNNAMED_SCOPED
+    return guard.labels.get(key, key).upper()
+
+
+def _lead(words: str, rest: str) -> tuple[str, str]:
+    """(lead, rest): the lead takes its colon only when something follows it."""
+    return (f"{words}:" if rest else words), rest
+
+
 def _guard_statement(model: WidgetModel) -> tuple[str, str] | None:
     """(lead, rest) of the hover card's guard line, in capitals, or None while the guard is off:
     ("GUARD ARMED:", "SESSION 95%, WEEKLY 90%") and
-    ("GUARD HOLDING:", "WEEKLY 91% (CAP 90%). RESUMES FRI 7:12 PM (IN 2D 3H).")."""
+    ("GUARD HOLDING:", "WEEKLY 91% (CAP 90%). RESUMES FRI 7:12 PM (IN 2D 3H)."). A guard with nothing to list (no
+    caps) is its lead alone, without the colon: ("GUARD ARMED", "")."""
     guard = model.guard
     if guard is None:
         return None
     if not guard.holding:
-        caps = ", ".join(engine.glue(f"{label.upper()} {_number(cap)}%") for label, cap in guard.watched())
-        return "GUARD ARMED:", caps
+        caps = ", ".join(engine.glue(f"{_guard_name(guard, key)} {_number(cap)}%") for key, cap in guard.caps.items())
+        return _lead("GUARD ARMED", caps)
     limits = []
-    for label, reading, cap in guard.over_limits():
-        text = engine.glue(label.upper() if reading is None else f"{label.upper()} {_percent_text(reading)}")
+    for key in guard.over_keys:
+        name, reading, cap = _guard_name(guard, key), guard.readings.get(key), guard.caps.get(key)
+        text = engine.glue(name if reading is None else f"{name} {_percent_text(reading)}")
         if cap is not None:
             text += " " + engine.glue(f"(CAP {_number(cap)}%)")
         limits.append(text)
     rest = ", ".join(limits)
     rest = f"{rest}." if rest else ""
-    if guard.resume_clock:
+    if guard.resume_seconds is not None and guard.resume_clock:
         clock = engine.glue(guard.resume_clock.upper())
-        countdown = engine.glue(f"(IN {guard.resume_in})")
+        countdown = engine.glue(f"(IN {_countdown(guard.resume_seconds)})")
         rest = f"{rest} RESUMES {clock} {countdown}."
-    return "GUARD HOLDING:", rest.strip()
+    return _lead("GUARD HOLDING", rest.strip())
 
 
 def _guard_lines(cv: Canvas, model: WidgetModel) -> tuple[int, list[str]]:
     """(characters of the lead, the guard's line broken to the card's width), measured on ``cv`` (any canvas of the
-    frame's scale). No lines while the guard is off. A guard with nothing to list (no caps) is its lead alone,
-    without the colon."""
+    frame's scale). No lines while the guard is off; a guard with nothing to list is its lead alone."""
     statement = _guard_statement(model)
     if statement is None:
         return 0, []
     lead, rest = statement
-    if not rest:
-        lead = lead.removesuffix(":")
     reg = cv.font(FONT_REG, LABEL_SIZE)
     text = f"{lead} {rest}" if rest else lead
     return len(lead), engine.wrap_words(text, lambda line: cv.advance(line, reg, QUALIFIER_TRACKING), RIGHT - LEFT)

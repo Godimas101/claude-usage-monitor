@@ -15,7 +15,7 @@ import sys
 import time
 import uuid
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -23,9 +23,9 @@ from typing import Any
 import pytest
 from PIL import Image, ImageChops
 
-from usage_monitor.data.models import ApiStatus
+from usage_monitor.data.models import ApiStatus, Limit
 from usage_monitor.render import dump, engine
-from usage_monitor.render.model import Row, WidgetModel
+from usage_monitor.render.model import STALE_MESSAGE_REFUSED, STALE_REFUSED, Row, WidgetModel, build_model
 from usage_monitor.render.skins import RenderOptions, get_skin
 from usage_monitor.render.skins import night_city as nc
 from usage_monitor.render.skins.night_city import NightCitySkin, Palette
@@ -67,10 +67,16 @@ def palette(variant_id: str, *, plate: bool = True) -> Palette:
 
 def row(key: str, label: str, percent: float | None, *, fraction: float | None = 0.31, severity: str = "normal",
         reset: str | None = "7:39 PM", pace: str | None = "behind", share: str | None = None) -> Row:
-    return Row(key, label, percent, fraction, severity, None, reset, pace, share)
+    """A row with the values the view model gives it (#90): its kind from the key, a scoped one named for its label
+    without WEEKLY, and its share from the share text ("50% SHARE" is 50)."""
+    kind = {"session": "session", "weekly": "weekly_all"}.get(key, "weekly_scoped")
+    scope = label.removesuffix(" WEEKLY") if kind == "weekly_scoped" else None
+    share_pct = float(share.split("%")[0]) if share else None
+    return Row(key, label, percent, fraction, severity, None, reset, pace, share, kind=kind, scope_model=scope,
+               scope_name=scope, share_pct=share_pct)
 
 
-def model(rows: list[Row], status: ApiStatus = ApiStatus.LIVE, *, age: str | None = "12 S AGO",
+def model(rows: list[Row], status: ApiStatus = ApiStatus.LIVE, *, age: str | None = "12 S AGO", age_s: int = 12,
           stale: bool | None = None, blink_on: bool = True) -> WidgetModel:
     texts = {ApiStatus.LIVE: "LIVE", ApiStatus.STALE: "STALE", ApiStatus.OFFLINE: "OFFLINE",
              ApiStatus.PAUSED: "PAUSED", ApiStatus.LOADING: "LOADING", ApiStatus.RATE_LIMITED: "RATE LIMITED",
@@ -78,7 +84,7 @@ def model(rows: list[Row], status: ApiStatus = ApiStatus.LIVE, *, age: str | Non
     return WidgetModel(
         status=status, status_text=texts[status], age_text=age, rows=rows,
         stale=(status not in (ApiStatus.LIVE, ApiStatus.PAUSED)) if stale is None else stale,
-        stale_message=None, blink_on=blink_on, updated_at=NOW,
+        stale_message=None, blink_on=blink_on, updated_at=NOW, age_seconds=age_s if age is not None else None,
     )
 
 
@@ -680,9 +686,10 @@ def test_band_wording_follows_the_theme_copy_and_the_status():
     assert theme().extras["copy"]["no_login"] == nc.DEFAULT_NO_LOGIN == "NO LOGIN // OPEN DASHBOARD"   # no Claude Code to open (#28)
     assert nc._band_text(theme(), model(sample_rows(), ApiStatus.OFFLINE)) == theme().extras["copy"]["offline"]
     assert nc._band_text(theme(), model(sample_rows(), ApiStatus.RATE_LIMITED)) == "RATE LIMITED"
-    refused = replace(model(sample_rows(), ApiStatus.STALE), stale_message=nc.STALE_MESSAGE_REFUSED)      # HTTP 403 (#55)
+    refused = replace(model(sample_rows(), ApiStatus.STALE), stale_reason=STALE_REFUSED,
+                      stale_message=STALE_MESSAGE_REFUSED)      # HTTP 403 (#55)
     assert nc._band_text(theme(), refused) == theme().extras["copy"]["stale_refused"] == nc.DEFAULT_STALE_REFUSED == "RELINK // RUN /login"
-    assert nc._age_tag(model(sample_rows(), ApiStatus.STALE, age="41 M AGO")) == "41 M OLD"
+    assert nc._age_tag(model(sample_rows(), ApiStatus.STALE, age="41 M AGO", age_s=41 * 60)) == "41 M OLD"
     assert nc._age_tag(model(sample_rows(), ApiStatus.LIVE, age="12 S AGO")) is None
     assert nc._age_tag(model(sample_rows(), ApiStatus.NO_CREDENTIALS, age=None)) is None
 
@@ -1042,6 +1049,22 @@ def test_the_widget_draws_the_rounded_value_and_the_tooltip_the_exact_one(monkey
     seen.clear()
     skin().render_tooltip(m, theme(), variant("blackwall"), 1.0)
     assert ("session", "79.6") in seen
+
+
+@pytest.mark.parametrize(("model_name", "surface", "name"), [
+    ("Fable", None, "FABLE"), (None, "claude_code", "CLAUDE_CODE"), (None, None, "WEEKLY SCOPED"),
+])
+def test_a_scoped_row_is_named_for_its_scope_not_its_label(model_name, surface, name, monkeypatch):
+    """#90: the name is worded from the row's scope. The label (here one that names something else) is never cut."""
+    scoped = Limit(kind="weekly_scoped", group="weekly", percent=40.0, severity=None, resets_at=NOW + timedelta(days=3),
+                   is_active=True, label="SOMETHING ELSE WEEKLY", scope_model=model_name, scope_surface=surface,
+                   window_seconds=604800, allowance_pct=50.0)
+    built = build_model(dump._state(NOW, ApiStatus.LIVE, [*dump.sample_state("normal2").usage.limits, scoped], 12), NOW)
+    assert built.rows[2].label == "SOMETHING ELSE WEEKLY" and nc._row_name(built.rows[2]) == name
+    texts = drawn_text(monkeypatch)
+    render(built, "blackwall", 1.0)
+    assert name in texts and "50% SHARE" in texts
+    assert not any("SOMETHING" in text for text in texts)
 
 
 def test_a_scoped_row_leaves_its_reset_time_to_the_tooltip(monkeypatch):

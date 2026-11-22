@@ -57,7 +57,15 @@ from usage_monitor.data.models import ApiStatus, MonitorState
 from usage_monitor.data.service import DataService
 from usage_monitor.data.store import Store
 from usage_monitor.log import get_logger, setup_logging
-from usage_monitor.render.model import GuardMark, WidgetModel, build_model
+from usage_monitor.render.model import (
+    UNIT_DAYS,
+    UNIT_HOURS,
+    UNIT_MINUTES,
+    GuardMark,
+    WidgetModel,
+    build_model,
+    countdown_units,
+)
 from usage_monitor.render.skins import RenderOptions, get_skin
 from usage_monitor.settings import DEFAULTS as SETTINGS_DEFAULTS
 from usage_monitor.settings import Settings, parse_clock
@@ -194,18 +202,32 @@ def _percent_text(percent: float) -> str:
     return f"{int(percent + 0.5) if percent >= 0 else 0}%"
 
 
+# The tray tooltip's words for the view model's values (#90): the two limits it reads, by kind; the status after them
+# when the numbers are not live; the units of the guard's countdown.
+TRAY_LIMITS: tuple[tuple[str, str], ...] = (("session", "session"), ("weekly_all", "weekly"))
+TRAY_STATUS: dict[ApiStatus, str] = {
+    ApiStatus.LOADING: "loading",
+    ApiStatus.LIVE: "live",
+    ApiStatus.STALE: "stale",
+    ApiStatus.OFFLINE: "offline",
+    ApiStatus.RATE_LIMITED: "rate limited",
+    ApiStatus.NO_CREDENTIALS: "no login",
+    ApiStatus.PAUSED: "paused",
+}
+TRAY_UNITS: dict[str, str] = {UNIT_MINUTES: "m", UNIT_HOURS: "h", UNIT_DAYS: "d"}
+
+
 def tray_tooltip(model: WidgetModel, *, dev: bool = False) -> str:
     """"Claude usage - session 13% - weekly 2%", with the status after it when the numbers are not
     live ("... - stale"), the usage guard while it is on ("... - guard armed") and " (dev)" for a dev
     instance."""
-    rows = {row.key: row for row in model.rows}
     parts = ["Claude usage"]
-    for key in ("session", "weekly"):
-        row = rows.get(key)
+    for kind, word in TRAY_LIMITS:
+        row = next((row for row in model.rows if row.kind == kind), None)
         if row is not None and row.percent is not None:
-            parts.append(f"{key} {_percent_text(row.percent)}")
+            parts.append(f"{word} {_percent_text(row.percent)}")
     if len(parts) == 1 or model.status not in (ApiStatus.LIVE, ApiStatus.PAUSED):
-        parts.append(model.status_text.lower())
+        parts.append(TRAY_STATUS[model.status])
     if model.guard is not None:
         parts.append(_guard_tip(model.guard))
     return " - ".join(parts) + (" (dev)" if dev else "")
@@ -217,9 +239,10 @@ def _guard_tip(guard: GuardMark) -> str:
     worst case still fits the shell's 127 characters."""
     if not guard.holding:
         return "guard armed"
-    if guard.resume_clock is None:
+    if guard.resume_seconds is None or guard.resume_clock is None:
         return "guard holding"
-    return f"guard holding, resumes {guard.resume_clock} (in {(guard.resume_in or '').lower()})"
+    countdown = " ".join(f"{count}{TRAY_UNITS[unit]}" for count, unit in countdown_units(guard.resume_seconds)) or "<1m"
+    return f"guard holding, resumes {guard.resume_clock} (in {countdown})"
 
 
 def menu_items(

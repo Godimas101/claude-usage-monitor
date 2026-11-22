@@ -45,13 +45,20 @@ from usage_monitor.render.model import (
     SEVERITY_CRITICAL,
     SEVERITY_NORMAL,
     SEVERITY_WARNING,
+    STALE_REFUSED,
     SURFACE_FLOATING,
-    STALE_MESSAGE_REFUSED,
     SURFACE_TASKBAR,
+    UNIT_DAYS,
+    UNIT_HOURS,
+    UNIT_MINUTES,
+    UNIT_SECONDS,
+    GuardMark,
     HoverPlay,
     Insets,
     Row,
     WidgetModel,
+    age_unit,
+    countdown_units,
     pace_delta,
 )
 from usage_monitor.render.skins import RenderOptions, coerce_options
@@ -189,6 +196,15 @@ STRIP_WORDS: dict[ApiStatus, str] = {
     ApiStatus.RATE_LIMITED: "LIMITED",
     ApiStatus.NO_CREDENTIALS: "NO LOGIN",
 }
+# The skin's words for the view model's values: a row's or a guarded limit's name by kind (a scoped row is named for
+# its model or surface alone; the hover card's guard line adds WEEKLY), and the units of an age ("41 M OLD") and of a
+# countdown ("HOLD 2H 14M").
+LIMIT_NAMES: dict[str, str] = {"session": "SESSION", "weekly_all": "WEEKLY"}
+SCOPED_SUFFIX = " WEEKLY"
+UNNAMED_SCOPED = "WEEKLY SCOPED"
+UNITS: dict[str, str] = {UNIT_SECONDS: "S", UNIT_MINUTES: "M", UNIT_HOURS: "H", UNIT_DAYS: "D"}
+UNDER_A_MINUTE = "<1M"
+HOLD = "HOLD"
 
 
 # ── Looks and palette ─────────────────────────────────────────────────────────
@@ -592,12 +608,17 @@ def _chip_word(model: WidgetModel, row: Row) -> str:
     if model.stale or not _over_cap(model, row) or guard is None:
         return "CRIT"
     cap = guard.caps.get(row.key)
-    return "HOLD" if cap is None else f"CAP {_number(cap)}"
+    return HOLD if cap is None else f"CAP {_number(cap)}"
 
 
 def _number(value: float) -> str:
     """A cap as people write it: 95, not 95.0."""
     return str(int(value)) if float(value).is_integer() else f"{value:g}"
+
+
+def _countdown(seconds: int) -> str:
+    """The time left as the chip and the hover card say it: "2D 3H", "2H 14M", "9M", or "<1M" under a minute."""
+    return " ".join(f"{count}{UNITS[unit]}" for count, unit in countdown_units(seconds)) or UNDER_A_MINUTE
 
 
 def _hold_word(model: WidgetModel) -> str | None:
@@ -606,7 +627,7 @@ def _hold_word(model: WidgetModel) -> str | None:
     guard = model.guard
     if guard is None or not guard.holding:
         return None
-    return f"HOLD {guard.resume_in}" if guard.resume_in else "HOLD"
+    return f"{HOLD} {_countdown(guard.resume_seconds)}" if guard.resume_seconds is not None else HOLD
 
 
 def _digits(percent: float | None) -> str:
@@ -625,11 +646,21 @@ def _is_scoped(row: Row) -> bool:
 
 
 def _row_name(row: Row) -> str:
-    """The row's name as the design shows it: upper case, and a scoped limit is named for its model."""
-    name = row.label.strip().upper()
-    if _is_scoped(row):
-        name = name.removesuffix(" WEEKLY").strip() or name
-    return name
+    """The row's name as the design shows it, in capitals: "SESSION", "WEEKLY", and a scoped limit named for its model,
+    else its surface ("FABLE"), or "WEEKLY SCOPED" when it has neither. A kind this skin has no words for, and a row
+    built without one, keep their label."""
+    if row.kind in LIMIT_NAMES:
+        return LIMIT_NAMES[row.kind]
+    if row.kind == "weekly_scoped":
+        if not row.scope_name:
+            return UNNAMED_SCOPED
+        return row.scope_name.strip().upper() or LIMIT_NAMES["weekly_all"]     # a name of spaces leaves its WEEKLY
+    return row.label.strip().upper()
+
+
+def _share_tag(row: Row) -> str | None:
+    """A scoped row's share of the weekly limit, "50% SHARE"; None for the other rows and a scoped one without it."""
+    return f"{round(row.share_pct)}% SHARE" if _is_scoped(row) and row.share_pct is not None else None
 
 
 def _copy(theme: Any, key: str, default: str) -> str:
@@ -644,16 +675,17 @@ def _band_text(theme: Any, model: WidgetModel) -> str:
         return model.status_text.upper()
     if model.status is ApiStatus.NO_CREDENTIALS:
         return _copy(theme, "no_login", DEFAULT_NO_LOGIN)
-    if model.stale_message == STALE_MESSAGE_REFUSED:
+    if model.stale_reason == STALE_REFUSED:
         return _copy(theme, "stale_refused", DEFAULT_STALE_REFUSED)
     return _copy(theme, "stale_auth", DEFAULT_STALE_AUTH)
 
 
 def _age_tag(model: WidgetModel) -> str | None:
-    """"41 M OLD" for the band, from the model's "41 M AGO"."""
-    if model.age_text is None or model.status not in AGE_STATUSES:
+    """"41 M OLD" for the band: the model's age in this skin's units."""
+    if model.age_seconds is None or model.status not in AGE_STATUSES:
         return None
-    return model.age_text.removesuffix(" AGO") + " OLD"
+    count, unit = age_unit(model.age_seconds)
+    return f"{count} {UNITS[unit]} OLD"
 
 
 def _fit(ink: _Ink, text: str, spec: Type, limit: float) -> str:
@@ -844,25 +876,22 @@ def _draw_band(ink: _Ink, theme: Any, model: WidgetModel) -> None:
         ink.text(age, RESET, BAND_AGE_RIGHT, BAND_BASE, pal.signal if pal.plate else pal.ink2, align="right")
 
 
-def _draw_band_hold(ink: _Ink, model: WidgetModel, text: str, age: str | None, hold: str) -> None:
+def _draw_band_hold(ink: _Ink, model: WidgetModel, text: str, age: str | None, hold: str, short: str = HOLD) -> None:
     """The stale band while the guard holds. The cause stays whole (it is what the user acts on), the HOLD chip
     sits at the right end between the hazard strips, and the age keeps its place before it when the band has room
-    for all three. What gives way, in order: the countdown (the chip is then HOLD alone), the age, and last the
-    end of the cause."""
+    for all three. What gives way, in order: the countdown (the chip is then ``short``, HOLD alone), the age, and last
+    the end of the cause. ``hold`` is the chip's full word; with no countdown it is ``short`` itself, and the first
+    two tries are the same."""
     pal = ink.pal
     x0, y0, x1, y1 = BAND
     text_w = ink.width(text, BAND_TYPE)
     age_w = ink.width(age, RESET) + 10 if age else 0.0
-    plans = [(hold, age_w)]
-    if hold != "HOLD":
-        plans.append(("HOLD", age_w))
-    plans.append(("HOLD", 0.0))
-    for word, with_age in plans:
+    for word, with_age in ((hold, age_w), (short, age_w), (short, 0.0)):
         chip_w = _chip_hold_width(ink, word)
         if BAND_TEXT_X + text_w + with_age + GUARD_GAP + chip_w <= BAND_AGE_RIGHT:
             break
     else:
-        word, with_age = "HOLD", 0.0
+        word, with_age = short, 0.0
     chip_w = _chip_hold_width(ink, word)
     left = BAND_AGE_RIGHT - chip_w
     fitted = _fit(ink, text, BAND_TYPE, left - GUARD_GAP - with_age - BAND_TEXT_X)
@@ -901,7 +930,7 @@ def _layout_row(ink: _Ink, look: Look, row: Row, emphasis: str, digits: str, res
     value = (RIGHT - value_w, float(RIGHT))
     name = _row_name(row)
     name_w = ink.width(name, NAME)
-    tag = row.share_text.upper() if _is_scoped(row) and row.share_text else None
+    tag = _share_tag(row)
     tag_w = ink.width(tag, TAG) if tag else 0.0
     chip_w = _chip_width(ink, emphasis, chip_word)
 
@@ -1051,8 +1080,9 @@ def _draw_row(ink: _Ink, look: Look, model: WidgetModel, row: Row, top: float, m
     if ink.width(name, NAME) > boxes.name[1] - boxes.name[0] + 0.01:
         name = _fit(ink, name, NAME, boxes.name[1] - boxes.name[0])
     ink.text(name, NAME, LEFT, top + NAME_BASE, pal.fg)
-    if boxes.tag is not None and row.share_text:
-        ink.text(row.share_text.upper(), TAG, boxes.tag[0], top + TAG_BASE, pal.ink3)
+    tag = _share_tag(row)
+    if boxes.tag is not None and tag:
+        ink.text(tag, TAG, boxes.tag[0], top + TAG_BASE, pal.ink3)
     if boxes.chip is not None:
         if emphasis == SEVERITY_CRITICAL:
             _chip_crit(ink, boxes.chip[0], top, word)
@@ -1116,41 +1146,61 @@ def _tooltip_height(rows: int) -> int:
 
 # ── Tooltip: the usage guard's line ───────────────────────────────────────────
 
+def _guard_name(guard: GuardMark, key: str) -> str:
+    """A limit the guard watches, in capitals, worded from its kind: "SESSION", "WEEKLY", "FABLE WEEKLY",
+    "WEEKLY SCOPED". A kind this skin has no words for, and a limit the reading no longer carries, keep the guard's own
+    label for it."""
+    kind = guard.kinds.get(key)
+    if kind in LIMIT_NAMES:
+        return LIMIT_NAMES[kind]
+    if kind == "weekly_scoped":
+        scope = guard.scope_names.get(key)
+        return scope.upper() + SCOPED_SUFFIX if scope else UNNAMED_SCOPED
+    return guard.labels.get(key, key).upper()
+
+
+def _lead(words: str, rest: str) -> tuple[str, str]:
+    """(lead, rest): the lead takes its colon only when something follows it."""
+    return (f"{words}:" if rest else words), rest
+
+
 def _guard_statement(model: WidgetModel) -> tuple[str, str] | None:
     """(lead, rest) of the hover card's guard line, in capitals and the theme's slashes, or None while the guard is
     off: ("GUARD // ARMED:", "SESSION 95%, WEEKLY 90%") and ("GUARD // HOLDING:",
-    "WEEKLY 91% (CAP 90%). RESUMES FRI 7:12 PM (IN 2D 3H).")."""
+    "WEEKLY 91% (CAP 90%). RESUMES FRI 7:12 PM (IN 2D 3H)."). A guard with nothing to list (no caps) is its lead
+    alone, without the colon: ("GUARD // ARMED", "")."""
     guard = model.guard
     if guard is None:
         return None
     if not guard.holding:
-        caps = ", ".join(engine.glue(f"{label.upper()} {_number(cap)}%") for label, cap in guard.watched())
-        return "GUARD // ARMED:", caps
+        caps = ", ".join(engine.glue(f"{_guard_name(guard, key)} {_number(cap)}%") for key, cap in guard.caps.items())
+        return _lead("GUARD // ARMED", caps)
     limits = []
-    for label, reading, cap in guard.over_limits():
-        text = engine.glue(label.upper() if reading is None else f"{label.upper()} {_digits(reading)}%")
+    for key in guard.over_keys:
+        name, reading, cap = _guard_name(guard, key), guard.readings.get(key), guard.caps.get(key)
+        text = engine.glue(name if reading is None else f"{name} {_digits(reading)}%")
         if cap is not None:
             text += " " + engine.glue(f"(CAP {_number(cap)}%)")
         limits.append(text)
     rest = ", ".join(limits)
     rest = f"{rest}." if rest else ""
-    if guard.resume_clock:
+    if guard.resume_seconds is not None and guard.resume_clock:
         clock = engine.glue(guard.resume_clock.upper())
-        countdown = engine.glue(f"(IN {guard.resume_in})")
+        countdown = engine.glue(f"(IN {_countdown(guard.resume_seconds)})")
         rest = f"{rest} RESUMES {clock} {countdown}."
-    return "GUARD // HOLDING:", rest.strip()
+    return _lead("GUARD // HOLDING", rest.strip())
 
 
 def _guard_lines(ink: _Ink, model: WidgetModel) -> tuple[str, list[str]]:
     """(the lead, the rest of the guard's line broken to the card's width), measured on ``ink`` (any canvas of the
     frame's scale). The first line leaves room for the lead. No lines while the guard is off; a guard with nothing to
-    list (no caps) is its lead alone, without the colon."""
+    list is its lead alone."""
     statement = _guard_statement(model)
     if statement is None:
         return "", []
     lead, rest = statement
     if not rest:
-        return lead.removesuffix(":"), []
+        return lead, []
     room = CONTENT_W - ink.width(lead, CHIP) - GUARD_GAP
     return lead, engine.wrap_words(rest, lambda line: ink.width(line, RESET), CONTENT_W, room)
 
@@ -1210,7 +1260,7 @@ def _draw_strip_status(ink: _Ink, look: Look, model: WidgetModel, motion: Motion
     pal = ink.pal
     x0, y0, x1, y1 = STRIP_TAG
     if _hold_word(model) is not None:
-        word = "HOLD"
+        word = HOLD
         _chip_hold(ink, (x0 + x1 - _chip_hold_width(ink, word)) / 2, y0, word, y1 - y0, glitch=not model.stale)
         return
     if pal.plate:

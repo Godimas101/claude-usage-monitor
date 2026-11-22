@@ -32,22 +32,32 @@ from usage_monitor.render.model import (
     SEVERITY_CRITICAL,
     SEVERITY_NORMAL,
     SEVERITY_WARNING,
+    STALE_EXPIRED,
     STALE_MESSAGE_EXPIRED,
     STALE_MESSAGE_NO_LOGIN,
     STALE_MESSAGE_REFUSED,
+    STALE_NO_LOGIN,
+    STALE_REASONS,
+    STALE_REFUSED,
     GuardMark,
     WidgetModel,
+    age_unit,
     build_model,
+    countdown_units,
     elapsed_fraction,
+    english_stale_message,
     format_age,
     format_countdown,
     format_resets,
     pace_for,
+    reset_day,
     severity_for,
     share_text,
     worst_severity,
 )
 from usage_monitor.render.skins import RenderOptions, coerce_options, get_skin
+from usage_monitor.render.skins import gates as gates_skin
+from usage_monitor.render.skins import night_city as night_city_skin
 from usage_monitor.render.skins import nostromo as nostromo_skin
 from usage_monitor.render.skins.nostromo import NostromoSkin, Palette
 
@@ -179,9 +189,7 @@ def mockup_html(theme_id: str) -> str:
 def test_nostromo_words_the_expired_sign_in_as_its_approved_mockup():
     model = dump.sample_model("stale")
     assert model.stale_message == STALE_MESSAGE_EXPIRED          # the neutral default stays in the model
-    text = nostromo_skin._message_text(model)
-    assert text == "\n".join(NOSTROMO_AUTH_LINES)
-    assert nostromo_skin._message_lines(text) == NOSTROMO_AUTH_LINES
+    assert nostromo_skin._message_lines(model) == tuple(NOSTROMO_AUTH_LINES)
     assert "<br>".join(NOSTROMO_AUTH_LINES) in mockup_html("nostromo")
 
 
@@ -191,17 +199,15 @@ def test_a_sign_in_turned_down_with_403_says_to_run_login_not_to_use_claude_code
     assert build_model(refused, NOW).stale_message == STALE_MESSAGE_REFUSED == "LOGIN REFUSED - RUN /login IN CLAUDE CODE"
     assert build_model(replace(refused, signin_refused=401), NOW).stale_message == STALE_MESSAGE_EXPIRED   # renewed by use
     assert build_model(replace(refused, status=ApiStatus.LIVE), NOW).stale_message is None
-    text = nostromo_skin._message_text(build_model(refused, NOW))
-    assert text == "AUTH REFUSED.\nRUN /login IN CLAUDE CODE."
-    assert nostromo_skin._message_lines(text) == ["AUTH REFUSED.", "RUN /login IN CLAUDE CODE."]
+    assert nostromo_skin._message_lines(build_model(refused, NOW)) == ("AUTH REFUSED.", "RUN /login IN CLAUDE CODE.")
 
 
 def test_nostromo_keeps_the_neutral_text_where_it_has_no_wording_of_its_own():
     no_login = dump.sample_model("no_credentials")
-    assert nostromo_skin._message_text(no_login) == STALE_MESSAGE_NO_LOGIN
-    assert nostromo_skin._message_lines(STALE_MESSAGE_NO_LOGIN) == ["NO LOGIN FOUND", "OPEN THE DASHBOARD"]
+    assert no_login.stale_message == STALE_MESSAGE_NO_LOGIN
+    assert nostromo_skin._message_lines(no_login) == ("NO LOGIN FOUND", "OPEN THE DASHBOARD")
     for name in ("normal3", "offline", "paused", "rate_limited", "loading"):
-        assert nostromo_skin._message_text(dump.sample_model(name)) is None, name
+        assert nostromo_skin._message_lines(dump.sample_model(name)) is None, name
 
 
 def test_a_skin_wording_never_leaks_into_the_view_model():
@@ -601,6 +607,104 @@ def test_a_guard_mark_is_plain_frozen_data():
     assert GuardMark("armed") == GuardMark("armed", (), {}, None, None)
 
 
+# ── View model: the values the skins word their text from (#90) ──────────────
+
+def test_the_rows_carry_their_kind_scope_share_and_reset_day():
+    reset = datetime(2026, 10, 21, 19, 39).astimezone()
+    model = build_model(state(limit("session", 10, resets_in=reset - NOW), limit("weekly_all", 20, resets_in=timedelta(days=3)),
+                              limit("weekly_scoped", 4, label="FABLE WEEKLY", scope="Fable", allowance=49.5,
+                                    resets_in=timedelta(days=3))), NOW)
+    assert [row.kind for row in model.rows] == ["session", "weekly_all", "weekly_scoped"]
+    assert [(row.scope_model, row.scope_name, row.share_pct) for row in model.rows] == [
+        (None, None, None), (None, None, None), ("Fable", "Fable", 49.5)]
+    assert model.rows[2].share_text == "50% SHARE"                       # the English text, rounded as before
+    assert [(row.resets_same_day, row.resets_weekday) for row in model.rows] == [
+        reset_day(row.resets_at, NOW) for row in model.rows]
+    assert model.rows[0].resets_same_day is True and model.rows[1].resets_same_day is False
+    assert model.rows[1].resets_weekday == (NOW + timedelta(days=3)).astimezone().weekday()
+    empty = build_model(None, NOW).rows                                  # no reading: the two rows still have their kind
+    assert [(row.kind, row.scope_name, row.share_pct, row.resets_same_day, row.resets_weekday) for row in empty] == [
+        ("session", None, None, None, None), ("weekly_all", None, None, None, None)]
+
+
+@pytest.mark.parametrize(("model_name", "surface", "name"), [
+    ("Fable", None, "Fable"), (None, "claude_code", "claude_code"), (None, None, None), ("", "chat", "chat"),
+    ("Fable", "chat", "Fable"),
+])
+def test_a_scoped_row_is_named_for_its_model_else_its_surface(model_name, surface, name):
+    scoped = replace(limit("weekly_scoped", 4, label="ANOTHER WEEKLY", allowance=25.0), scope_model=model_name,
+                     scope_surface=surface)
+    row = build_model(state(limit("session", 10), limit("weekly_all", 10), scoped), NOW).rows[2]
+    assert (row.kind, row.scope_model, row.scope_name, row.share_pct) == ("weekly_scoped", model_name, name, 25.0)
+    assert row.label == "ANOTHER WEEKLY"                                 # the identity string is left as it is
+
+
+@pytest.mark.parametrize(("status", "refused", "reason", "message"), [
+    (ApiStatus.LIVE, None, None, None),
+    (ApiStatus.LIVE, 403, None, None),
+    (ApiStatus.PAUSED, None, None, None),
+    (ApiStatus.STALE, None, STALE_EXPIRED, STALE_MESSAGE_EXPIRED),
+    (ApiStatus.STALE, 401, STALE_EXPIRED, STALE_MESSAGE_EXPIRED),
+    (ApiStatus.STALE, 403, STALE_REFUSED, STALE_MESSAGE_REFUSED),
+    (ApiStatus.NO_CREDENTIALS, None, STALE_NO_LOGIN, STALE_MESSAGE_NO_LOGIN),
+    (ApiStatus.OFFLINE, 403, None, None),
+    (ApiStatus.RATE_LIMITED, None, None, None),
+    (ApiStatus.LOADING, None, None, None),
+])
+def test_the_stale_reason_is_a_code_and_the_stale_message_its_english(status, refused, reason, message):
+    model = build_model(replace(state(limit("session", 10), status=status), signin_refused=refused), NOW)
+    assert (model.stale_reason, model.stale_message) == (reason, message)
+    assert english_stale_message(reason) == message
+    assert reason is None or reason in STALE_REASONS
+
+
+GATES_AGE_UNITS = {"s": "s", "m": "min", "h": "h", "d": "d"}
+
+
+@pytest.mark.parametrize(("seconds", "count", "unit"), [
+    (0, 0, "s"), (1, 1, "s"), (59, 59, "s"), (60, 1, "m"), (61, 1, "m"), (3599, 59, "m"), (3600, 1, "h"),
+    (3601, 1, "h"), (172799, 47, "h"), (172800, 2, "d"), (1_000_000, 11, "d"), (-30, 0, "s"),
+])
+def test_the_age_units_change_at_their_boundaries(seconds, count, unit):
+    assert age_unit(seconds) == (count, unit)
+    model = build_model(state(limit("session", 10), status=ApiStatus.STALE, age=timedelta(seconds=seconds)), NOW)
+    assert model.age_text == f"{count} {unit.upper()} AGO"
+    assert model.age_seconds == max(0, seconds)                         # whole seconds, never negative
+    assert nostromo_skin._age_text(model) == f"{count} {unit.upper()}"
+    assert night_city_skin._age_tag(model) == f"{count} {unit.upper()} OLD"
+    assert gates_skin._age_label(model) == f"{count} {GATES_AGE_UNITS[unit]}"
+
+
+@pytest.mark.parametrize(("seconds", "units"), [
+    (-5, ()), (59, ()), (60, ((1, "m"),)), (3599, ((59, "m"),)), (3600, ((1, "h"),)), (3660, ((1, "h"), (1, "m"))),
+    (86399, ((23, "h"), (59, "m"))), (86400, ((1, "d"),)), (90000, ((1, "d"), (1, "h"))), (183600, ((2, "d"), (3, "h"))),
+])
+def test_countdown_units(seconds, units):
+    assert countdown_units(seconds) == units
+    assert format_countdown(seconds) == (" ".join(f"{count}{unit.upper()}" for count, unit in units) or "<1M")
+
+
+def test_the_guard_mark_carries_the_kinds_and_scopes_it_watches_and_its_resume_time():
+    surface = replace(limit("weekly_scoped", 5, label="CHAT WEEKLY", allowance=25.0, resets_in=timedelta(days=3)),
+                      scope_surface="chat")
+    neither = limit("weekly_scoped", 5, label="WEEKLY SCOPED", allowance=25.0, resets_in=timedelta(days=3))
+    held = guarded(limit("session", 10), limit("weekly_all", 91, resets_in=timedelta(days=2, hours=3, minutes=30)),
+                   limit("weekly_scoped", 5, **FABLE), surface, neither, policy={"scoped_cap": 90})
+    mark = build_model(held, NOW).guard
+    keys = ("scoped:fable", "scoped:chat weekly", "scoped:weekly scoped")
+    assert mark.kinds == {"session": "session", "weekly": "weekly_all", **dict.fromkeys(keys, "weekly_scoped")}
+    assert mark.models == dict(zip(keys, ("Fable", None, None)))
+    assert mark.scope_names == dict(zip(keys, ("Fable", "chat", None)))
+    assert mark.over_keys == ("weekly",) and mark.resume_in == "2D 3H"
+    assert mark.resume_seconds == (2 * 24 + 3) * 3600 + 30 * 60 and countdown_units(mark.resume_seconds) == ((2, "d"), (3, "h"))
+    late = build_model(held, mark.resume_at + timedelta(minutes=1)).guard            # past its resume time: 0, not less
+    assert late.resume_seconds == 0 and late.resume_in == "<1M"
+    local = mark.resume_at.astimezone()
+    assert (mark.resume_same_day, mark.resume_weekday) == reset_day(mark.resume_at, NOW) == (False, local.weekday())
+    armed = build_model(guarded(limit("session", 10), limit("weekly_all", 10)), NOW).guard
+    assert (armed.resume_seconds, armed.resume_same_day, armed.resume_weekday) == (None, None, None)
+
+
 # ── Engine ────────────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize(("text", "rgba"), [
@@ -965,11 +1069,12 @@ def test_stale_and_live_render_differently():
 
 
 def _auth_box_variants() -> tuple[Any, Any, Any]:
-    """The expired-sign-in model, the same box text arriving through a status the skin does not word
-    (so the model's text is drawn as given), and that status with the neutral expired text."""
+    """The expired-sign-in model; that model with the English text of another reason (the skin words the box from
+    the reason, never from the text, so its box is the same); and the reason Nostromo words with the neutral text (no
+    sign-in at all) with the expired text left in (the box follows the reason, so it differs)."""
     stale = dump.sample_model("stale")
-    spelled = replace(stale, status=ApiStatus.NO_CREDENTIALS, stale_message="\n".join(NOSTROMO_AUTH_LINES))
-    neutral = replace(stale, status=ApiStatus.NO_CREDENTIALS, stale_message=STALE_MESSAGE_EXPIRED)
+    spelled = replace(stale, stale_message=STALE_MESSAGE_NO_LOGIN)
+    neutral = replace(stale, stale_reason=STALE_NO_LOGIN)
     return stale, spelled, neutral
 
 
@@ -1060,7 +1165,7 @@ STRESS_LABELS = [("CLAUDE DESIGN WEEKLY", 25.0), ("CLAUDE OPUS 4.8 WEEKLY", 100.
 def scoped_model(label: str, allowance: float, percent: float = 33.0, session: float = 13.0):
     return build_model(state(
         limit("session", session), limit("weekly_all", 2.0),
-        limit("weekly_scoped", percent, label=label, active=True, scope=label.split()[1].lower(),
+        limit("weekly_scoped", percent, label=label, active=True, scope=label.removesuffix(" WEEKLY"),
               allowance=allowance, resets_in=timedelta(days=3)),
     ), NOW)
 
@@ -1164,6 +1269,30 @@ def test_the_session_and_weekly_rows_keep_their_fixed_qualifiers():
     rows = scoped_model("FABLE WEEKLY", 50.0).rows
     assert nostromo_skin._name_line(cv, rows[0], "13%", semi, reg, vt) == ("SESSION", "5H")
     assert nostromo_skin._name_line(cv, rows[1], "2%", semi, reg, vt) == ("WEEKLY", "7D")
+
+
+@pytest.mark.parametrize(("model_name", "surface", "full", "short"), [
+    ("Fable", None, "FABLE WEEKLY", "FABLE"),
+    (None, "claude_code", "CLAUDE_CODE WEEKLY", "CLAUDE_CODE"),
+    (None, None, "WEEKLY SCOPED", "WEEKLY SCOPED"),
+])
+def test_a_scoped_row_is_named_for_its_scope_not_its_label(model_name, surface, full, short, text_runs):
+    """#90: the name is worded from the row's scope. The label (here one that names something else) is never cut."""
+    scoped = replace(limit("weekly_scoped", 4, label="SOMETHING ELSE WEEKLY", active=True, allowance=50.0,
+                           resets_in=timedelta(days=3)), scope_model=model_name, scope_surface=surface)
+    model = build_model(state(limit("session", 13), limit("weekly_all", 2), scoped), NOW)
+    assert model.rows[2].label == "SOMETHING ELSE WEEKLY"
+    assert nostromo_skin._row_names(model.rows[2]) == (full, short)
+    theme = nostromo()
+    get_skin("nostromo").render_floating(model, theme, theme.variant("amber"), 1.0, None)
+    line, _ = scoped_row_runs(text_runs, nostromo_skin.ROW_PITCH)
+    assert [r["text"] for r in line] == [full, "OF 50% SHARE"]
+
+
+def test_a_kind_nostromo_has_no_words_for_keeps_its_label_whole():
+    other = limit("amber_gauge", 40, label="AMBER GAUGE", allowance=25.0)
+    row = build_model(state(limit("session", 10), limit("weekly_all", 10), other), NOW).rows[2]
+    assert row.kind == "amber_gauge" and nostromo_skin._row_names(row) == ("AMBER GAUGE", "AMBER GAUGE")
 
 
 # ── Taskbar strip ─────────────────────────────────────────────────────────────

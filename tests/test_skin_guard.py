@@ -386,7 +386,8 @@ def test_nostromo_armed_is_a_quiet_bracketed_guard_after_the_age_and_the_state_w
 def test_nostromo_hold_without_a_reset_time_says_hold_alone(text_runs):
     model = dataclasses.replace(dump.sample_model("guard_hold_session"),
                                 guard=dataclasses.replace(dump.sample_model("guard_hold_session").guard, resume_at=None,
-                                                          resume_text=None, resume_in=None, resume_clock=None))
+                                                          resume_text=None, resume_in=None, resume_clock=None,
+                                                          resume_seconds=None, resume_same_day=None, resume_weekday=None))
     nostromo_frame(model)
     assert "HOLD" in texts(text_runs) and not any(text.startswith("HOLD ") for text in texts(text_runs))
 
@@ -880,6 +881,27 @@ def test_gates_a_long_scoped_name_keeps_its_room_and_the_badge_is_left_off(gates
     assert model.guard.over_keys == (model.rows[2].key,)
     gates_frame(model)
     assert not any(text.startswith("Cap") for text in texts(gates_runs)) and "Guard holding" in texts(gates_runs)
+
+
+# ── Words from values (#90) ───────────────────────────────────────────────────
+
+def test_every_skin_words_the_guard_from_its_kinds_and_seconds_not_from_its_english():
+    """The skins name the guard's limits from the kind and scope the mark carries and say its countdown from its
+    seconds: the mark's English labels and countdown are not read. A limit the reading no longer carries (no kind)
+    keeps the guard's own label."""
+    for model in (custom(97, 92, 95, scoped_cap=90), custom(10, 10, 5, scoped_cap=80), guarded("normal3", "holding")):
+        guard = model.guard
+        junk = dataclasses.replace(model, guard=dataclasses.replace(
+            guard, labels={key: "?" for key in guard.labels}, resume_in="?", resume_text="?"))
+        for skin in (nostromo, night_city, gates):
+            assert skin._guard_statement(junk) == skin._guard_statement(model), (skin.__name__, guard.state)
+        assert nostromo._hold_word(junk) == nostromo._hold_word(model)
+        assert night_city._hold_word(junk) == night_city._hold_word(model)
+        assert gates._hold_runs(junk) == gates._hold_runs(model)
+    held = custom(97, 92, 95, scoped_cap=90)
+    gone = dataclasses.replace(held, guard=dataclasses.replace(held.guard, kinds={}, models={}, scope_names={}))
+    assert plain_text(gates._guard_statement(gone)[1]).startswith("session 97% (cap 95%), weekly 92% (cap 90%), Fable weekly 95%")
+    assert plain_text(nostromo._guard_statement(gone)[1]).startswith("SESSION 97% (CAP 95%), WEEKLY 92% (CAP 90%), FABLE WEEKLY 95%")
 
 
 # ── The marks do not blink ────────────────────────────────────────────────────
