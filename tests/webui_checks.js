@@ -383,6 +383,108 @@ S.data = { state: { status: "live", plan: { name: "Max 5x", monthly_price_usd: 1
   usage: { limits: [liveLimit("session", "SESSION", 13), liveLimit("weekly_all", "WEEKLY", 2), liveLimit("weekly_scoped", "SCOPED", 0, "Fable")], breakdown: [], spend: null } }, model_names: {} };
 out.stateOnly = {};
 for (const page of PAGE_LIST) out.stateOnly[page] = states(page);
+// ── Part 3 (#90): the scripts read ids, never the words on the page ─────────────────────────────────────────
+// Every card names itself by data-card (gates.css picks its icons by it), the Settings and About cards too, and the
+// Limits wrapper's two inner sections.
+const cardKeyOf = (html) => { const m = /^<\w+[^>]*data-card="([^"]*)"/.exec(html); return m ? m[1] : null; };
+const keysIn = (html) => (html.match(/data-card="[^"]*"/g) || []).map((attr) => attr.slice(11, -1));
+const pageHtml = (fn) => {
+  const main = element("main");
+  S.formKey = null;
+  try { fn(main); } catch (error) { /* the page asks for the guard once it is written; the fetch is refused here */ }
+  return main.innerHTML;
+};
+reset();
+out.cards = {};
+for (const page of PAGE_LIST) out.cards[page] = modelOf(page).cards.map((c) => cardKeyOf(c.html));
+out.cards.settings = keysIn(pageHtml(api.settingsPage));
+out.cards.about = keysIn(pageHtml(api.aboutPage));
+reset();
+S.noActivity = true;                                                              // no Claude Code activity: the one explanatory card
+out.cards.none = modelOf("cost").cards.map((c) => cardKeyOf(c.html));
+reset();
+S.noActivity = false;
+S.data = { state: { status: "live", plan: { name: "Max 5x", monthly_price_usd: 100 }, windows: {}, ingest: null,
+  unpriced_models: ["mystery-model"], usage: { limits: [], breakdown: [], spend: null } }, model_names: {} };
+out.cards.unpriced = modelOf("cost").cards.map((c) => cardKeyOf(c.html));
+reset();
+out.tokensTotal = (modelOf("efficiency").cards.filter((c) => c.key === "tokens")[0].html.match(/<tr class="([^"]*)"><th scope="row" class="lead">Total<\/th>/) || [])[1] || null;
+out.tokensToday = (modelOf("efficiency").cards.filter((c) => c.key === "tokens")[0].html.match(/is-today/g) || []).length;
+S.data = { state: { status: "live", plan: { name: "Max 5x", monthly_price_usd: 100 }, windows: {}, ingest: null, unpriced_models: [],
+  usage: { limits: [liveLimit("session", "SESSION", 13), liveLimit("weekly_all", "WEEKLY", 2), liveLimit("weekly_scoped", "SCOPED", 0, "Fable")], breakdown: [], spend: null } }, model_names: {} };
+out.cards.limitsInner = keysIn(((modelOf("limits").cards.filter((c) => c.key === "credits-surfaces")[0] || { html: "" }).html).replace(/^<\w+[^>]*>/, ""));
+out.cards.limitsKeys = modelOf("limits").cards.map((c) => cardKeyOf(c.html));
+
+// the chips: each names its tone by id (data-tone); the tone table is the status's, not its words
+const tagsOf = (html) => html.match(/<span class="nm-chip[^"]*"[^>]*>/g) || [];
+const toneOfTag = (tag) => { const m = /data-tone="([^"]*)"/.exec(tag); return m ? m[1] : null; };
+out.chipTags = [];
+for (const page of ["overview", "limits"]) for (const c of modelOf(page).cards) out.chipTags.push(...tagsOf(c.html));
+out.burnTone = {};
+for (const velocity of ["IDLE", "SLOW", "NORMAL", "FAST", "VERY FAST", "constructor"]) {
+  S.data.state.burn = { velocity, tokens_per_min: 900, usd_per_hour: 1.1 };
+  const burn = modelOf("overview").cards.filter((c) => c.key === "burn")[0];
+  out.burnTone[velocity] = toneOfTag(tagsOf(burn.html)[0]);
+}
+out.tones = {
+  pace: {
+    ahead: api.paceChip({ percent: 13 }, { kind: "ahead" }, false).tone,
+    behind: api.paceChip({ percent: 13 }, { kind: "behind" }, false).tone,
+    onPace: api.paceChip({ percent: 13 }, { kind: "on_pace" }, false).tone,
+    noClock: api.paceChip({ percent: 13 }, { kind: "none" }, false).tone,
+    unused: api.paceChip({ percent: 0 }, { kind: "ahead" }, false).tone,
+    noDraw: api.paceChip({ percent: 0 }, { kind: "ahead" }, true).tone,
+  },
+  session: ["LIMITED", "AT_RISK", "SAFE", "IDLE", "UNKNOWN", "constructor"].map((v) => api.sessionStory({ verdict: v, percent: 50, resets_at: null, projected_limit_at: null }).toneId),
+  weekly: ["AHEAD", "ON_PACE", "BEHIND", "UNKNOWN", "constructor"].map((v) => api.weeklyStory({ verdict: v, percent: 50, pace_delta_pp: 3 }).toneId),
+};
+out.paceWords = [api.paceChip({ percent: 13 }, { kind: "ahead" }, false).text, api.paceChip({ percent: 13 }, { kind: "behind" }, false).text,
+  api.paceChip({ percent: 0 }, { kind: "ahead" }, true).text];
+
+// the uplink line: its words come from the status code, and the health box shows them
+out.uplinkWords = {};
+for (const status of ["live", "loading", "stale", "offline", "rate_limited", "no_credentials", "paused", "unknown"]) {
+  reset();
+  elements.health = element("health");
+  S.data = { state: { status, ingest: { running: false, files_done: 1, files_total: 1 }, unpriced_models: [] } };
+  api.renderHealth();
+  out.uplinkWords[status] = (elements.health.innerHTML.match(/<span>LINK<\/span><b class="[^"]*"><i[^>]*><\/i>([^<]*)<\/b>/) || [])[1] || null;
+}
+reset();
+elements.health = element("health");
+S.data = { state: { status: "live", ingest: null, unpriced_models: [] } };
+S.linkOk = false;
+api.renderHealth();
+out.uplinkWords.nolink = (elements.health.innerHTML.match(/<span>LINK<\/span><b class="[^"]*"><i[^>]*><\/i>([^<]*)<\/b>/) || [])[1] || null;
+S.linkOk = null;
+
+// the age: a number and a unit code, written as the badges write it and inside the stale sentence
+const AGES = [0, 999, 59000, 60000, 3599000, 3600000, 47 * 3600000, 48 * 3600000, 4 * 86400000];
+out.age = AGES.map((ms) => ({ badge: api.ageWords(api.fmtAge(ms), api.AGE_UNIT), sentence: api.ageWords(api.fmtAge(ms), api.AGE_UNIT_IN_SENTENCE) }));
+out.ageNone = api.ageWords(api.fmtAge(null), api.AGE_UNIT);
+out.staleBanner = api.staleBanner([{ data: { x: 1 }, error: "HTTP 500", at: Date.now() - 180000 }]);
+
+// scoped limits: the row is matched by kind and model, so two limits with one label keep their own rows
+const scopedRows = [
+  { label: "SCOPED", kind: "weekly_scoped", scope_model: "Opus", percent: 90 },
+  { label: "SCOPED", kind: "weekly_scoped", scope_model: "Fable", percent: 10 },
+];
+out.scoped = {
+  fable: api.matchScoped(scopedRows, { label: "SCOPED", kind: "weekly_scoped", scope_model: "Fable" }, 0).percent,
+  opus: api.matchScoped(scopedRows, { label: "SCOPED", kind: "weekly_scoped", scope_model: "Opus" }, 1).percent,
+  unnamed: api.matchScoped(scopedRows, { label: "SCOPED", kind: "weekly_scoped", scope_model: "Sonnet" }, 1).percent,
+  none: api.matchScoped(null, { label: "SCOPED", kind: "weekly_scoped", scope_model: "Fable" }, 0),
+};
+
+// the accent tooltip: a name that is not the colour's id is shown, so the id is the tooltip
+const nostromoTheme = { variants: [{ id: "amber", name: "RAY TUBE" }, { id: "blue", name: "CRYO" }] };
+const cityTheme = { variants: [{ id: "blackwall", name: "Blackwall" }] };
+out.accentTitled = {
+  amber: api.accentTitled(nostromoTheme, "amber"), blue: api.accentTitled(nostromoTheme, "blue"),
+  blackwall: api.accentTitled(cityTheme, "blackwall"), unnamed: api.accentTitled(nostromoTheme, "green"),
+};
+reset();
+
 // a report failed and there is nothing to show: its cards say so, each in its own frame, and the other cards stand
 const failed = (name, params, status) => { const e = api.statEntry(name, params); e.error = "HTTP " + status; e.status = status; e.errAt = 1; return e; };
 reset();

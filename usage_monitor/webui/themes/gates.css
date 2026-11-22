@@ -206,29 +206,24 @@ html[data-g-icons] .nm-card-t:not(.nm-chart-t) > .nm-ttl::before, html[data-g-ic
 .nm-card[data-limit="session"] { --g-ico: "\E916"; }
 .nm-card[data-limit="weekly_all"] { --g-ico: "\E787"; }
 .nm-card[data-limit="weekly_scoped"] { --g-ico: "\E81D"; }
-.nm-card[aria-label="API-equivalent cost, this cycle"], .nm-card[aria-label="Value of your plan"], .nm-card[aria-label="Cost & value"],
-.nm-card[aria-label="Usage credits"], .nm-card[aria-label="Fast mode"] { --g-ico: "\E8C7"; }
-.nm-card[aria-label="Cache and thinking"], .nm-card[aria-label="Cache"], .nm-card[aria-label="Thinking"], .nm-card[aria-label="Efficiency"],
-.nm-card[aria-label="Productivity"] { --g-ico: "\E945"; }
-.nm-card[aria-label="Model mix"], .nm-card[aria-label="By model"], .nm-card[aria-label="Effort mix"], .nm-card[aria-label="Haiku share"],
-.nm-card[aria-label="Tool mix: built-in"], .nm-card[aria-label="Tool mix: MCP"], .nm-card[aria-label="Month by month"] { --g-ico: "\E9F9"; }
-.nm-card[aria-label="Where the week went"], .nm-card[aria-label="Seven-day surface breakdown"], .nm-card[aria-label="By folder"],
-.nm-card[aria-label="By launch folder"], .nm-card[aria-label="Main and subagents"], .nm-card[aria-label="Windows"] { --g-ico: "\E7C4"; }
-.nm-card[aria-label="Burn rate"], .nm-card[aria-label="Compactions"], .nm-card[aria-label="Context size"], .nm-card[aria-label="Tool health"],
-.nm-card[aria-label="API errors and web"], .nm-card[aria-label="Pipeline"], .nm-card[aria-label="Exact token counts"] { --g-ico: "\E9D2"; }
-.nm-card[aria-label="Top sessions this week"], .nm-card[aria-label="Streaks and records"], .nm-card[aria-label="History"] { --g-ico: "\E81C"; }
-.nm-card[aria-label="All-time odometer"], .nm-card[aria-label="Every day"], .nm-card[aria-label="When you work"] { --g-ico: "\E787"; }
-.nm-card[aria-label="Export"] { --g-ico: "\E896"; }
-.nm-card[aria-label="Theme"] { --g-ico: "\E790"; }
-.nm-card[aria-label="Widgets and display"], .nm-card[aria-label="Widgets & display"] { --g-ico: "\E7F4"; }
-.nm-card[aria-label="Data & plan"] { --g-ico: "\E8F1"; }
-.nm-card[aria-label="Alerts"] { --g-ico: "\EA8F"; }
-.nm-card[aria-label="Usage guard"] { --g-ico: "\EA18"; }
-.nm-card[aria-label="System"] { --g-ico: "\E713"; }
-.nm-card[aria-label="Claude Usage Monitor"], .nm-card[aria-label="No Claude Code activity on this PC"] { --g-ico: "\E946"; }
-.nm-card[aria-label="Links"] { --g-ico: "\E71B"; }
-.nm-card[aria-label="Supporters"] { --g-ico: "\EB51"; }
-.nm-card[aria-label="Not priced yet"], .nm-card[aria-label="Not priced"] { --g-ico: "\E7BA"; }
+.nm-card[data-card="cost"], .nm-card[data-card="value"], .nm-card[data-card="credits"], .nm-card[data-card="fast"] { --g-ico: "\E8C7"; }
+.nm-card[data-card="efficiency"], .nm-card[data-card="cache"], .nm-card[data-card="thinking"], .nm-card[data-card="productivity"] { --g-ico: "\E945"; }
+.nm-card[data-card="models"], .nm-card[data-card="by-model"], .nm-card[data-card="effort"], .nm-card[data-card="haiku"], .nm-card[data-card="tool-mix"], .nm-card[data-card="mcp-mix"], .nm-card[data-card="monthly"] { --g-ico: "\E9F9"; }
+.nm-card[data-card="surfaces"], .nm-card[data-card="by-folder"], .nm-card[data-card="threads"], .nm-card[data-card="windows"] { --g-ico: "\E7C4"; }
+.nm-card[data-card="burn"], .nm-card[data-card="compactions"], .nm-card[data-card="context"], .nm-card[data-card="tools"], .nm-card[data-card="api-web"], .nm-card[data-card="pipeline"], .nm-card[data-card="tokens"] { --g-ico: "\E9D2"; }
+.nm-card[data-card="sessions"], .nm-card[data-card="streaks"] { --g-ico: "\E81C"; }
+.nm-card[data-card="odometer"], .nm-card[data-card="calendar"], .nm-card[data-card="matrix"] { --g-ico: "\E787"; }
+.nm-card[data-card="export"] { --g-ico: "\E896"; }
+.nm-card[data-card="theme"] { --g-ico: "\E790"; }
+.nm-card[data-card="widgets"] { --g-ico: "\E7F4"; }
+.nm-card[data-card="data-plan"] { --g-ico: "\E8F1"; }
+.nm-card[data-card="alerts"] { --g-ico: "\EA8F"; }
+.nm-card[data-card="guard"] { --g-ico: "\EA18"; }
+.nm-card[data-card="system"] { --g-ico: "\E713"; }
+.nm-card[data-card="about-app"], .nm-card[data-card="none"] { --g-ico: "\E946"; }
+.nm-card[data-card="about-links"] { --g-ico: "\E71B"; }
+.nm-card[data-card="about-supporters"] { --g-ico: "\EB51"; }
+.nm-card[data-card="unpriced"], .nm-card[data-card="not-priced"] { --g-ico: "\E7BA"; }
 
 /* the status text of a limit, a verdict or a velocity */
 .nm-chip { display: inline-flex; align-items: center; gap: 6px; height: 20px; padding: 0 8px; border-radius: 10px; border: 0;
@@ -239,9 +234,6 @@ html[data-g-icons] .nm-card-t:not(.nm-chart-t) > .nm-ttl::before, html[data-g-ic
 .nm-chip[data-g-tone="acc"] { color: var(--text); background: var(--accent-soft); }
 .nm-chip[data-g-tone="acc"]::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--g-fill-accent); }
 .nm-chip[data-g-tone="neutral"] { color: var(--text-dim); background: var(--g-hover); }
-/* the guard's ARMED and HOLDING chips carry their tone as a class; the tone script has no word for them and calls them neutral */
-#guard-live .nm-chip.is-ok[data-g-tone="neutral"] { color: var(--ok); background: color-mix(in srgb, var(--ok) 16%, transparent); }
-#guard-live .nm-chip.is-crit[data-g-tone="neutral"] { color: var(--alert); background: color-mix(in srgb, var(--alert) 16%, transparent); }
 .nm-pill { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 10px; font: 600 12px/20px var(--g-font); color: var(--text); background: var(--accent-soft); }
 
 /* ── values: figures, facts, notes ──────────────────────────────────────────────────────────────────────── */

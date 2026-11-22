@@ -64,7 +64,7 @@
     }
     var card = el.closest(".nm-card, .nm-compare");
     if (card) {
-      return "card:" + (card.getAttribute("data-limit") || card.getAttribute("id") || card.getAttribute("aria-label") || card.className);
+      return "card:" + (card.getAttribute("data-limit") || card.getAttribute("id") || card.getAttribute("data-card") || card.className);
     }
     return "page";
   }

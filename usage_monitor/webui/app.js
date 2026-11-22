@@ -191,6 +191,11 @@
     no_credentials: { text: "NO LOGIN", ok: false },
     paused: { text: "PAUSED", ok: false }
   };
+  // The words of the link (the health box and the header) for each status code; the STATUS text above is the pipeline's line.
+  var LINK_WORD = {
+    live: "LIVE", loading: "ACQUIRING", stale: "AUTH LOST", offline: "NO CARRIER", rate_limited: "RATE LIMITED",
+    no_credentials: "NO LOGIN", paused: "PAUSED"
+  };
   // The sidebar's short names for the Gates accents. Nostromo's sidebar names its phosphors in full (accentLabel), and
   // any other id shows its first three letters.
   var ACCENT_ABBR = {
@@ -681,23 +686,44 @@
     return mins + " M";
   }
 
+  /* An age as a number and a unit code (S, M, H or D), or null when there is none. ageWords writes it. */
   function fmtAge(ms) {
     if (ms === null || !isFinite(ms)) {
-      return "--";
+      return null;
     }
     var s = Math.max(0, Math.floor(ms / 1000));
     if (s < 60) {
-      return s + " S";
+      return { n: s, unit: "S" };
     }
     var m = Math.floor(s / 60);
     if (m < 60) {
-      return m + " M";
+      return { n: m, unit: "M" };
     }
     var h = Math.floor(m / 60);
     if (h < 48) {
-      return h + " H";
+      return { n: h, unit: "H" };
     }
-    return Math.floor(h / 24) + " D";
+    return { n: Math.floor(h / 24), unit: "D" };
+  }
+
+  /* The units of an age as the badges write them ("3 M") and inside a sentence ("from 3 m ago"). */
+  var AGE_UNIT = { S: "S", M: "M", H: "H", D: "D" };
+  var AGE_UNIT_IN_SENTENCE = { S: "s", M: "m", H: "h", D: "d" };
+
+  /* A table entry for a code from the data; a code the table does not name takes the fallback code's entry. Only the table's
+   * own keys count, never an object's inherited ones. */
+  function entryOf(table, code, fallback) {
+    return Object.prototype.hasOwnProperty.call(table, code) ? table[code] : table[fallback];
+  }
+
+  /* The tone of a status code (data-tone): ok, warn, alert, acc, or neutral for any code the table does not name. */
+  function toneOf(table, code) {
+    return Object.prototype.hasOwnProperty.call(table, code) ? table[code] : "neutral";
+  }
+
+  /* An age (fmtAge) written with the given unit words: "3 M", or "--" when there is no age. */
+  function ageWords(age, units) {
+    return age === null ? "--" : age.n + " " + units[age.unit];
   }
 
   function parseTime(iso) {
@@ -1059,7 +1085,7 @@
     if (!bad.length) {
       return "";
     }
-    return '<div class="nm-msg" role="status"><b>STATISTICS OLD</b>' + esc("The latest refresh failed (" + bad[0].error + "). These figures are from " + fmtAge(Date.now() - bad[0].at).toLowerCase() + " ago.") + "</div>";
+    return '<div class="nm-msg" role="status"><b>STATISTICS OLD</b>' + esc("The latest refresh failed (" + bad[0].error + "). These figures are from " + ageWords(fmtAge(Date.now() - bad[0].at), AGE_UNIT_IN_SENTENCE) + " ago.") + "</div>";
   }
 
   /* A banner with the whole sentence when a report failed and there is no older one to show: each card it feeds says only
@@ -1182,21 +1208,22 @@
     return { elapsed: elapsed, diff: diff, kind: kind, reset: reset, remain: reset - now };
   }
 
+  /* The chip of a limit: its words, its class and its tone (data-tone: the status, which Gates colours). */
   function paceChip(limit, p, scoped) {
     var pct = num(limit.percent) || 0;
     if (pct <= 0) {
-      return { text: scoped ? "NO DRAW" : "UNUSED", cls: "" };
+      return { text: scoped ? "NO DRAW" : "UNUSED", cls: "", tone: "neutral" };
     }
     if (p.kind === "ahead") {
-      return { text: "AHEAD OF PACE", cls: " solid" };
+      return { text: "AHEAD OF PACE", cls: " solid", tone: "warn" };
     }
     if (p.kind === "behind") {
-      return { text: "UNDER PACE", cls: "" };
+      return { text: "UNDER PACE", cls: "", tone: "ok" };
     }
     if (p.kind === "on_pace") {
-      return { text: "ON PACE", cls: "" };
+      return { text: "ON PACE", cls: "", tone: "ok" };
     }
-    return { text: "NO CLOCK", cls: "" };
+    return { text: "NO CLOCK", cls: "", tone: "neutral" };
   }
 
   function cellsHTML(n, value) {
@@ -1270,8 +1297,10 @@
     return parts.join(" &middot; ");
   }
 
+  /* The pacing row of a scoped limit: the one of the same kind and model (the labels of two limits can be the same), else
+   * the one at its place in the list. */
   function matchScoped(list, limit, index) {
-    var found = (list || []).filter(function (b) { return b.label === limit.label; })[0];
+    var found = (list || []).filter(function (b) { return b.kind === limit.kind && b.scope_model === limit.scope_model; })[0];
     return found || (list || [])[index] || null;
   }
 
@@ -1292,7 +1321,7 @@
         facts.push("<span>IN " + esc(fmtRemain(p.remain)) + "</span>");
       }
     }
-    facts.push('<span class="nm-chip' + chip.cls + '">' + esc(chip.text) + "</span>");
+    facts.push('<span class="nm-chip' + chip.cls + '" data-tone="' + chip.tone + '">' + esc(chip.text) + "</span>");
     var diffText = p.diff === null ? "NO RESET TIME" : (p.diff >= 0 ? "+" : "") + Math.round(p.diff) + " PTS, " + chip.text;
     return '<section class="nm-card' + (opts.wide ? " wide" : "") + sevClass(limit) + '" data-limit="' + esc(limit.kind) + '">' +
       '<div class="nm-card-in">' +
@@ -1314,14 +1343,16 @@
 
   // ── Building blocks shared by the pages ─────────────────────────────────────────
 
-  /* A card. o: {title | tag, meta (text) or metaHtml (markup, for controls), cls, id, body, label}. */
+  /* A card. o: {key, title | tag, meta (text) or metaHtml (markup, for controls), cls, id, body, label}. key is the card's id
+   * (data-card): what the Gates icons and the scripts name it by. The title is its words, for people, and never a key. */
   function card(o) {
     var meta = o.metaHtml !== undefined ? o.metaHtml : '<span class="nm-meta-t">' + esc(o.meta || "") + "</span>";
     var head = o.tag
       ? '<div class="nm-card-t"><span class="nm-tag">' + esc(o.tag) + "</span>" + meta + "</div>"
       : '<div class="nm-card-t"><h2 class="nm-ttl">' + esc(o.title) + "</h2>" + meta + "</div>";
     return '<section class="nm-card' + (o.cls ? " " + o.cls : "") + '"' + (o.id ? ' id="' + o.id + '"' : "") +
-      ' aria-label="' + esc(o.label || o.title || o.tag || "") + '"><div class="nm-card-in">' + head + o.body + "</div></section>";
+      ' aria-label="' + esc(o.label || o.title || o.tag || "") + '" data-card="' + esc(o.key) + '"><div class="nm-card-in">' + head + o.body +
+      "</div></section>";
   }
 
   /* The heading of a page. */
@@ -1977,7 +2008,7 @@
   /* Cost & value, Efficiency and History on such a PC: one card that says why there is nothing, in place of cards full of zeros. */
   function noActivityPage(key) {
     var cards = [cardPart("none", "ready", [], function () {
-      return card({ title: NO_ACTIVITY, cls: "wide", body: '<p class="nm-lede">' + esc(NO_ACTIVITY_WHY) + "</p>" });
+      return card({ key: "none", title: NO_ACTIVITY, cls: "wide", body: '<p class="nm-lede">' + esc(NO_ACTIVITY_WHY) + "</p>" });
     })];
     return pageModel(key, "nm-pgrid", cards);
   }
@@ -2136,7 +2167,7 @@
       : esc(ratioNote(ratio, n.planName));
     var title = "API-equivalent cost, this cycle";
     var meta = (n.cycleStart ? rangeText(n.cycleStart, n.cycleEnd) + " &middot; " : "") + "AT LIST PRICES";
-    return '<section class="nm-card wide" id="cost" aria-label="' + esc(title) + '"><div class="nm-card-in">' +
+    return '<section class="nm-card wide" id="cost" aria-label="' + esc(title) + '" data-card="cost"><div class="nm-card-in">' +
       '<div class="nm-card-t"><h2 class="nm-ttl">' + esc(title) + '</h2><span class="nm-meta-t">' + meta + "</span></div>" +
       '<div class="nm-cost"><div class="nm-cost-l"><div class="nm-hero"><div class="nm-big h" style="--n:' + heroText.length + '">' + esc(heroText) + "</div>" + planBlock + "</div>" +
       (ratio === null || n.price === null ? "" : ratioCells(ratio, fmtMult(ratio) + " months of the plan", n.pending ? 12 : 0)) +
@@ -2151,7 +2182,7 @@
   function efficiencyCard(n) {
     var hit = n.hit === null ? null : n.hit * 100;
     var thinking = n.thinking === null ? null : n.thinking * 100;
-    return '<section class="nm-card" id="efficiency" aria-label="Cache and thinking"><div class="nm-card-in">' +
+    return '<section class="nm-card" id="efficiency" aria-label="Cache and thinking" data-card="efficiency"><div class="nm-card-in">' +
       '<div class="nm-card-t"><h2 class="nm-ttl">Cache &amp; thinking</h2><span class="nm-meta-t">' + (n.loaded ? "this cycle" : "this month") + "</span></div>" +
       '<div class="nm-kpi"><div class="nm-kl">Cache hit rate</div><div class="nm-big m">' + esc(hit === null ? "--" : hit.toFixed(1) + "%") +
       '</div><div class="nm-cells" aria-hidden="true">' + cellsHTML(20, hit || 0) + "</div></div>" +
@@ -2169,7 +2200,7 @@
           cellsHTML(20, r.share) + '</div><span class="v">' + esc(fmtPct(r.share)) + "</span></div>";
       }).join("")
       : '<p class="nm-empty">No model mix yet.</p>';
-    return '<section class="nm-card" id="models" aria-label="Model mix"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Model mix</h2><span class="nm-meta-t">share of cost, ' + (n.loaded ? "cycle" : "month") + "</span></div>" +
+    return '<section class="nm-card" id="models" aria-label="Model mix" data-card="models"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Model mix</h2><span class="nm-meta-t">share of cost, ' + (n.loaded ? "cycle" : "month") + "</span></div>" +
       '<div class="nm-mix">' + body + "</div></div></section>";
   }
 
@@ -2181,9 +2212,12 @@
           cellsHTML(20, r.percent) + '</div><span class="v">' + esc(fmtPct(r.percent)) + "</span></div>";
       }).join("")
       : '<p class="nm-empty">No surface split reported yet.</p>';
-    return '<section class="nm-card" aria-label="Where the week went"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Where the week went</h2><span class="nm-meta-t">share, 7 days</span></div>' +
+    return '<section class="nm-card" aria-label="Where the week went" data-card="surfaces"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Where the week went</h2><span class="nm-meta-t">share, 7 days</span></div>' +
       '<div class="nm-mix">' + body + "</div></div></section>";
   }
+
+  // The tone of a burn velocity, by the code the monitor sends (IDLE, SLOW, NORMAL, FAST or VERY FAST); the others are neutral.
+  var VELOCITY_TONE = { NORMAL: "ok", FAST: "acc", "VERY FAST": "warn" };
 
   function burnCard(s) {
     var burn = s && s.burn ? s.burn : null;
@@ -2192,7 +2226,7 @@
     var spark = S.samples.length > 1
       ? CHARTS.sparkline(S.samples, { width: 300, height: 58, label: "Burn rate, recent samples" })
       : CHARTS.sparkline([], { width: 300, height: 58, label: "Burn rate, sampling" }).replace("<svg ", '<svg data-pending="" ');
-    return '<section class="nm-card" id="burn" aria-label="Burn rate"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Burn rate</h2><span class="nm-chip">' + esc(velocity) + "</span></div>" +
+    return '<section class="nm-card" id="burn" aria-label="Burn rate" data-card="burn"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Burn rate</h2><span class="nm-chip" data-tone="' + toneOf(VELOCITY_TONE, velocity) + '">' + esc(velocity) + "</span></div>" +
       '<div class="nm-row2 is-base"><div class="nm-big m">' + esc(burn ? fmtInt(burn.tokens_per_min) : "--") +
       '</div><div class="nm-facts"><span>TOK / MIN</span><span>' + esc(burn ? fmtUsd(burn.usd_per_hour) : "--") + " / HOUR</span></div></div>" +
       spark + "</div></section>";
@@ -2258,6 +2292,9 @@
 
   var SESSION_VERDICT = { LIMITED: "LIMITED", AT_RISK: "AT RISK", SAFE: "SAFE", IDLE: "IDLE", UNKNOWN: "UNKNOWN" };
   var WEEKLY_VERDICT = { AHEAD: "AHEAD", ON_PACE: "ON PACE", BEHIND: "BEHIND", UNKNOWN: "UNKNOWN" };
+  // The tone of each verdict (data-tone); a verdict not named here is neutral.
+  var SESSION_TONE = { LIMITED: "alert", AT_RISK: "warn", SAFE: "ok" };
+  var WEEKLY_TONE = { AHEAD: "warn", ON_PACE: "ok", BEHIND: "ok" };
 
   /* Rows of a label and a value: [[label, value, pending, title]]. A row marked pending shows a placeholder where its value will
    * be; a title is the label's tooltip (the full text of a name that is shown short). */
@@ -2291,7 +2328,8 @@
     } else {
       text = "A forecast needs two readings at least 10 minutes apart. It appears as soon as there are two.";
     }
-    return { chip: SESSION_VERDICT[v], tone: v === "LIMITED" ? " is-crit" : v === "AT_RISK" ? " is-warn" : "", text: text };
+    return { chip: SESSION_VERDICT[v], tone: v === "LIMITED" ? " is-crit" : v === "AT_RISK" ? " is-warn" : "",
+      toneId: toneOf(SESSION_TONE, v), text: text };
   }
 
   function weeklyStory(blk) {
@@ -2307,7 +2345,7 @@
     } else {
       text = "No window reported for this limit yet.";
     }
-    return { chip: WEEKLY_VERDICT[v], tone: v === "AHEAD" ? " is-warn" : "", text: text };
+    return { chip: WEEKLY_VERDICT[v], tone: v === "AHEAD" ? " is-warn" : "", toneId: toneOf(WEEKLY_TONE, v), text: text };
   }
 
   /* Time elapsed against usage: the gap between the two bars is the pace. */
@@ -2465,7 +2503,7 @@
       blk = skelPacingBlock(limit);
     }
     var story = waiting
-      ? { chip: "UNKNOWN", tone: "", text: kind === "session"
+      ? { chip: "UNKNOWN", tone: "", toneId: "neutral", text: kind === "session"
         ? "At the current rate you stay under the limit until the window resets at 12:00 PM, and a little more."
         : "You are 00.0 points under an even pace, so there is room to spare." }
       : !blk && !entry.data
@@ -2484,7 +2522,7 @@
     }
     var hold = waiting ? ' data-pending=""' : "";
     var body = '<div class="nm-big-row"><div class="nm-big">' + esc(fmtPct(pct)) + '</div><div class="nm-verdict">' +
-      (story.chip ? '<span class="nm-chip solid' + story.tone + '"' + hold + ">" + esc(story.chip) + "</span>" : "") + "</div></div>" +
+      (story.chip ? '<span class="nm-chip solid' + story.tone + '" data-tone="' + story.toneId + '"' + hold + ">" + esc(story.chip) + "</span>" : "") + "</div></div>" +
       '<p class="nm-story"' + hold + ">" + esc(story.text) + "</p>" +
       (elapsed === null ? "" : meterHTML(elapsed, pct)) + chart + limitFacts(limit, blk, kind, p, waiting);
     return '<section class="nm-card span-6' + sevClass(limit) + '" data-limit="' + esc(limit.kind) + '" aria-label="' + esc(tag) + '"><div class="nm-card-in">' +
@@ -2530,7 +2568,7 @@
     if (!cards.length) {
       cards.push(cardPart("limit-none", "ready", [], function () { return emptyLimitCard("LIMITS", "No reading yet"); }));
     }
-    var spendCard = card({ title: "Usage credits", meta: "real money", cls: "is-real", body: spendCardBody(u && u.spend, !!(u && u.skeleton)) });
+    var spendCard = card({ key: "credits", title: "Usage credits", meta: "real money", cls: "is-real", body: spendCardBody(u && u.spend, !!(u && u.skeleton)) });
     var breakdown = u && u.breakdown ? u.breakdown : [];
     var colours = ["main", "alt", "dim"];
     var stack = breakdown.length
@@ -2542,7 +2580,7 @@
       return mixRow(String(r.name || r.key || "").toUpperCase(), r.percent, fmtPct(r.percent));
     }).join("");
     var surfaceCard = card({
-      title: "Seven-day surface breakdown", meta: "share of the weekly window",
+      key: "surfaces", title: "Seven-day surface breakdown", meta: "share of the weekly window",
       body: '<div class="nm-stack-wrap">' + stack + '</div><div class="nm-legend">' + legend + "</div>"
     });
     var odd = (cards.length % 2) === 1;
@@ -2596,7 +2634,7 @@
           ["Plan", fmtPlanPrice(price) + " / month"]
         ], "is-one");
     }
-    return card({ title: "Value of your plan", meta: "this cycle", cls: "span-5", id: "value",
+    return card({ key: "value", title: "Value of your plan", meta: "this cycle", cls: "span-5", id: "value",
       body: body + '<p class="nm-note nm-disc">' + BASIS + ", not amounts billed to your plan.</p>" });
   }
 
@@ -2618,7 +2656,7 @@
         return CHARTS.hbars(rows, { width: w, labelWidth: 64, valueWidth: 118, label: "API-equivalent cost by month" });
       }, [e.digest, "monthly"], "nm-hbars") + '<p class="nm-note">The bar is the month&rsquo;s API-equivalent cost; the multiple is against the plan price.</p>'
       : '<p class="nm-empty">No monthly history yet.</p>';
-    return card({ title: "Month by month", meta: "API-equivalent, with the plan multiple", cls: "span-7", body: body });
+    return card({ key: "monthly", title: "Month by month", meta: "API-equivalent, with the plan multiple", cls: "span-7", body: body });
   }
 
   function breakdownList(rows, key, noun) {
@@ -2698,7 +2736,7 @@
     cards.push(cardPart("monthly", whole, [e], function () { return monthlyCard(base, src || e); }));
     cards.push(cardPart("windows", whole, [e], function () {
       return card({
-        title: "Windows", meta: "requests, tokens and cost by window", cls: "wide",
+        key: "windows", title: "Windows", meta: "requests, tokens and cost by window", cls: "wide",
         body: '<div class="nm-table-wrap"><table class="nm-table"><caption class="nm-sr">Cost by time window, API-equivalent at list prices</caption><thead><tr><th scope="col">Window</th><th scope="col" class="r">Requests</th><th scope="col" class="r">Tokens</th>' +
           '<th scope="col" class="r">Cache hit</th><th scope="col" class="r">Saved by cache</th><th scope="col" class="r">API-equiv.</th></tr></thead><tbody>' +
           WINDOW_ORDER.map(function (name) { return windowRow(name, base.windows[name]); }).join("") + "</tbody></table></div>"
@@ -2707,12 +2745,12 @@
     var winCost = src ? num(base.windows[pick] && base.windows[pick].cost_usd) : null;
     cards.push(part("toolbar", costToolbar(pick, winCost, whole === "error")));
     cards.push(cardPart("by-model", broken, [e], function () {
-      return card({ title: "By model", meta: "share of cost", cls: "span-6", body: breakdownCard("By model", "", b.by_model, e, "model", "model") });
+      return card({ key: "by-model", title: "By model", meta: "share of cost", cls: "span-6", body: breakdownCard("By model", "", b.by_model, e, "model", "model") });
     }));
     var launch = S.ui.folderMode === "launch";
     cards.push(cardPart("by-folder", broken, [e], function () {
       return card({
-        title: launch ? "By launch folder" : "By folder", cls: "span-6",
+        key: "by-folder", title: launch ? "By launch folder" : "By folder", cls: "span-6",
         metaHtml: seg("folder-mode", "Group by", [["folder", "FOLDER"], ["launch", "LAUNCH FOLDER"]], S.ui.folderMode),
         body: breakdownCard(launch ? "By launch folder" : "By folder", "", launch ? b.by_project : b.by_folder, e, launch ? "launch" : "folder", launch ? "launch" : "folder",
           '<p class="nm-note">' + (launch ? "Where Claude Code was started. One launch folder can hold work from many repositories." : "Where the work happened: the repository the files live in. Worktrees count toward their repository.") + "</p>")
@@ -2723,7 +2761,7 @@
     var share = function (v) { return threadTotal > 0 ? (num(v) || 0) / threadTotal * 100 : 0; };
     cards.push(cardPart("threads", broken, [e], function () {
       return card({
-        title: "Main and subagents", meta: "cost split", cls: "span-4",
+        key: "threads", title: "Main and subagents", meta: "cost split", cls: "span-4",
         body: CHARTS.stackedBar([
           { value: num(main.cost_usd) || 0, cls: "main", tip: "Main threads: " + fmtUsdExact(main.cost_usd) },
           { value: num(sub.cost_usd) || 0, cls: "alt", tip: "Subagents: " + fmtUsdExact(sub.cost_usd) }
@@ -2739,7 +2777,7 @@
     var haikuShare = skel ? 0 : chosenCost > 0 ? haikuCost / chosenCost * 100 : null;
     cards.push(cardPart("haiku", broken, [e], function () {
       return card({
-        title: "Haiku share", meta: "of cost", cls: "span-4",
+        key: "haiku", title: "Haiku share", meta: "of cost", cls: "span-4",
         body: '<div class="nm-stats">' + statTile("haiku-share", "Haiku share of cost", haikuShare === null ? "--" : fmtPct(haikuShare, 1), {
           big: true, bar: haikuShare, sub: plural(haikuReq, "request"), cls: "is-wide"
         }) + statTile("haiku-main", "Main threads", fmtUsd(b.haiku.main.cost_usd), { sub: plural(b.haiku.main.requests, "request") }) +
@@ -2749,24 +2787,24 @@
     var fast = b.fast || { requests: 0, cost_usd: 0 };
     cards.push(cardPart("fast", broken, [e], function () {
       return card({
-        title: "Fast mode", meta: "paid from usage credits", cls: "span-4" + (fast.requests > 0 ? " is-warn" : ""),
+        key: "fast", title: "Fast mode", meta: "paid from usage credits", cls: "span-4" + (fast.requests > 0 ? " is-warn" : ""),
         body: '<div class="nm-stats">' + statTile("fast-mode", "Fast-mode requests", fmtInt(fast.requests), { big: true, sub: fmtUsd(fast.cost_usd) + " API-equivalent", cls: "is-wide" }) + "</div>" +
           '<div class="nm-callout' + (fast.requests > 0 ? " is-warn" : "") + '" role="note"' + (skel ? ' data-pending=""' : "") + "><b>Heads up.</b> " + FAST_NOTE + "</div>"
       });
     }));
     cards.push(cardPart("sessions", whole, [e], function () {
-      return card({ title: "Top sessions this week", meta: "by API-equivalent cost", cls: "span-8", body: sessionsTable(base.top_sessions_week || []) });
+      return card({ key: "sessions", title: "Top sessions this week", meta: "by API-equivalent cost", cls: "span-8", body: sessionsTable(base.top_sessions_week || []) });
     }));
     var spend = (base.spend && !base.skeleton) ? base.spend : (u && u.spend);
     cards.push(cardPart("credits", s ? "ready" : "pending", [], function () {
       return card({
-        title: "Usage credits", meta: "real money", cls: "span-4 is-real",
+        key: "credits", title: "Usage credits", meta: "real money", cls: "span-4 is-real",
         body: spendCardBody(spend, !!(u && u.skeleton)) + '<p class="nm-note nm-disc">Only this card is real money. Every other figure on this page is ' + BASIS + ".</p>"
       });
     }));
     if (s && s.unpriced_models && s.unpriced_models.length) {
       cards.push(cardPart("unpriced", "ready", [], function () {
-        return card({ title: "Not priced yet", meta: "excluded from cost", cls: "wide", body: '<ul class="nm-supp">' + s.unpriced_models.map(function (id) { return "<li>" + esc(id) + "</li>"; }).join("") + "</ul>" });
+        return card({ key: "unpriced", title: "Not priced yet", meta: "excluded from cost", cls: "wide", body: '<ul class="nm-supp">' + s.unpriced_models.map(function (id) { return "<li>" + esc(id) + "</li>"; }).join("") + "</ul>" });
       }));
     }
     return pageModel("cost", "nm-pgrid", cards, { problem: problemBanner([e]), stale: staleBanner([e]) });
@@ -2810,7 +2848,7 @@
     }
     add("cache", function () {
       return card({
-        title: "Cache", meta: "prompt tokens from cache", cls: "span-4",
+        key: "cache", title: "Cache", meta: "prompt tokens from cache", cls: "span-4",
         body: '<div class="nm-stats">' +
           statTile("cache-hit", "Cache hit rate", fmtRate(c.hit_rate), { big: true, bar: pct100(c.hit_rate), cls: "is-wide" }) +
           statTile("cache-saved", "Caching saved", fmtUsd(c.saved_usd), { big: true, sub: "list prices", cls: "is-wide" }) +
@@ -2828,7 +2866,7 @@
     });
     add("thinking", function () {
       return card({
-        title: "Thinking", meta: "share of output", cls: "span-4",
+        key: "thinking", title: "Thinking", meta: "share of output", cls: "span-4",
         body: '<div class="nm-stats">' +
           statTile("thinking-share", "Thinking share", fmtRate(th.share), { big: true, bar: pct100(th.share), cls: "is-wide" }) +
           statTile("thinking-tokens", "Thinking tokens", fmtCount(th.thinking_tokens), { sub: fmtInt(th.thinking_tokens) }) +
@@ -2837,7 +2875,7 @@
     });
     add("compactions", function () {
       return card({
-        title: "Compactions", meta: "conversation summaries", cls: "span-4",
+        key: "compactions", title: "Compactions", meta: "conversation summaries", cls: "span-4",
         body: '<div class="nm-stats">' +
           statTile("compactions", "Compactions", fmtInt(cp.count), { big: true, sub: fmtInt(cp.auto) + " auto · " + fmtInt(cp.manual) + " manual", cls: "is-wide" }) +
           statTile("compactions-day", "Per active day", num(cp.per_active_day) === null ? "--" : cp.per_active_day.toFixed(2)) +
@@ -2850,7 +2888,7 @@
     var ctxBar = function (v) { return cmax > 0 && num(v) !== null ? v / cmax * 100 : 0; };
     add("context", function () {
       return card({
-        title: "Context size", meta: "prompt tokens per request, API count", cls: "span-6",
+        key: "context", title: "Context size", meta: "prompt tokens per request, API count", cls: "span-6",
         body: '<div class="nm-stats is-quad">' +
           statTile("ctx-avg", "Average", cx.avg === null ? "--" : fmtCount(cx.avg), { big: true, bar: ctxBar(cx.avg) }) +
           statTile("ctx-p50", "Median (p50)", cx.p50 === null ? "--" : fmtCount(cx.p50), { big: true, bar: ctxBar(cx.p50) }) +
@@ -2861,7 +2899,7 @@
     });
     add("tools", function () {
       return card({
-        title: "Tool health", meta: "calls and errors", cls: "span-6",
+        key: "tools", title: "Tool health", meta: "calls and errors", cls: "span-6",
         body: '<div class="nm-stats">' +
           statTile("tool-total", "Tool calls", fmtInt(t.total), { big: true }) +
           statTile("tool-errors", "Tool errors", fmtInt(t.errors), { big: true }) +
@@ -2874,7 +2912,7 @@
     });
     add("tool-mix", function () {
       return card({
-        title: "Tool mix: built-in", meta: "calls by tool", cls: "span-7",
+        key: "tool-mix", title: "Tool mix: built-in", meta: "calls by tool", cls: "span-7",
         body: builtin.length ? statBlock("tool-mix", "Calls by tool", chartHost(function (width) {
           return CHARTS.hbars(builtin, { width: width, valueWidth: 70, label: "Built-in tool calls" });
         }, [e.digest, "builtin"], "nm-hbars")) : '<p class="nm-empty">No tool calls in this window.</p>'
@@ -2882,7 +2920,7 @@
     });
     add("mcp-mix", function () {
       return card({
-        title: "Tool mix: MCP", meta: "calls by server", cls: "span-5",
+        key: "mcp-mix", title: "Tool mix: MCP", meta: "calls by server", cls: "span-5",
         body: mcp.length ? chartHost(function (width) {
           return CHARTS.hbars(mcp, { width: width, valueWidth: 70, label: "MCP server calls" });
         }, [e.digest, "mcp"], "nm-hbars") + '<p class="nm-note">MCP tools are grouped by the server that provides them.</p>' : '<p class="nm-empty">No MCP servers were called.</p>'
@@ -2890,7 +2928,7 @@
     });
     add("productivity", function () {
       return card({
-        title: "Productivity", meta: "what the tokens produced", cls: "span-8",
+        key: "productivity", title: "Productivity", meta: "what the tokens produced", cls: "span-8",
         body: '<div class="nm-stats is-quad">' +
           statTile("lines-added", "Lines added", (pr.lines_added > 0 ? "+" : "") + fmtInt(pr.lines_added), { big: true }) +
           statTile("lines-removed", "Lines removed", (pr.lines_removed > 0 ? "-" : "") + fmtInt(pr.lines_removed), { big: true }) +
@@ -2907,7 +2945,7 @@
     });
     add("effort", function () {
       return card({
-        title: "Effort mix", meta: "cost by effort level", cls: "span-4",
+        key: "effort", title: "Effort mix", meta: "cost by effort level", cls: "span-4",
         body: effort.length ? statBlock("effort-mix", "Cost by effort", chartHost(function (width) {
           return CHARTS.hbars(effort, { width: width, valueWidth: 80, label: "Cost by effort level" });
         }, [e.digest, "effort"], "nm-hbars")) : '<p class="nm-empty">No requests in this window.</p>'
@@ -2917,19 +2955,19 @@
       ["Fresh input", c.fresh_input_tokens], ["Output", th.output_tokens], ["Cache reads", c.read_tokens],
       ["Writes, 5 min", c.write_5m_tokens], ["Writes, 1 hour", c.write_1h_tokens],
       ["Thinking", th.thinking_tokens],
-      ["Total", (c.fresh_input_tokens || 0) + (th.output_tokens || 0) + (c.read_tokens || 0) + (c.write_tokens || 0)]
+      ["Total", (c.fresh_input_tokens || 0) + (th.output_tokens || 0) + (c.read_tokens || 0) + (c.write_tokens || 0), "total"]
     ];
     add("tokens", function () {
       return card({
-        title: "Exact token counts", meta: "this window", cls: "span-4",
+        key: "tokens", title: "Exact token counts", meta: "this window", cls: "span-4",
         body: '<div class="nm-table-wrap"><table class="nm-table nm-tokens"><caption class="nm-sr">Exact token counts for the chosen window</caption><tbody>' + tokenRows.map(function (row) {
-          return '<tr class="' + (row[0] === "Total" ? "is-today" : "") + '"><th scope="row" class="lead">' + esc(row[0]) + '</th><td class="r v">' + esc(fmtInt(row[1])) + "</td></tr>";
+          return '<tr class="' + (row[2] === "total" ? "is-today" : "") + '"><th scope="row" class="lead">' + esc(row[0]) + '</th><td class="r v">' + esc(fmtInt(row[1])) + "</td></tr>";
         }).join("") + "</tbody></table></div>"
       });
     });
     add("api-web", function () {
       return card({
-        title: "API errors and web", meta: "outside the tools", cls: "span-4",
+        key: "api-web", title: "API errors and web", meta: "outside the tools", cls: "span-4",
         body: '<div class="nm-stats">' +
           statTile("api-errors", "API errors", fmtInt(d.api_errors), { big: true }) +
           statTile("web-searches", "Web searches", fmtInt(w.searches), { big: true }) +
@@ -2956,13 +2994,13 @@
       ["PLAN", s && s.plan && s.plan.name ? String(s.plan.name).toUpperCase() : "--"],
       ["PRICE", effectivePlanPrice() !== null ? fmtPlanPrice(effectivePlanPrice()) + " / MO" : "UNKNOWN"]
     ];
-    return card({ title: "Pipeline", meta: "data health", cls: "span-6", body: kvGrid(kv) });
+    return card({ key: "pipeline", title: "Pipeline", meta: "data health", cls: "span-6", body: kvGrid(kv) });
   }
 
   function notPricedCard(s) {
     var unpriced = s && s.unpriced_models && s.unpriced_models.length
       ? s.unpriced_models.map(function (id) { return "<li>" + esc(id) + "</li>"; }).join("") : "<li>NONE</li>";
-    return card({ title: "Not priced", meta: "models without a price row", cls: "span-6", body: '<ul class="nm-supp">' + unpriced + "</ul>" });
+    return card({ key: "not-priced", title: "Not priced", meta: "models without a price row", cls: "span-6", body: '<ul class="nm-supp">' + unpriced + "</ul>" });
   }
 
   function efficiencyPage() {
@@ -3130,7 +3168,7 @@
     S.cmpList = skel ? null : comparisonList(od);
     cards.push(cardPart("odometer", state, [e], function () {
       return card({
-        title: "All-time odometer", meta: "tokens, everything Claude has read and written", cls: "wide", id: "odometer",
+        key: "odometer", title: "All-time odometer", meta: "tokens, everything Claude has read and written", cls: "wide", id: "odometer",
         body: '<div class="nm-odo-row"><div class="nm-odo-main">' + odometerHTML(od.total_tokens, skel) +
           '<div class="nm-odo-facts"><span><b>' + esc(fmtInt(od.requests)) + "</b> requests</span><span><b>" + esc(fmtCount(od.output_tokens)) + "</b> output tokens</span><span><b>" +
           esc(fmtUsd(od.cost_usd)) + "</b> API-equivalent</span><span><b>" + esc(fmtInt(h.active_days)) + "</b> active days</span></div></div>" +
@@ -3147,7 +3185,7 @@
     });
     cards.push(cardPart("calendar", state, [e], function () {
       return card({
-        title: "Every day", cls: "wide", metaHtml: seg("cal-metric", "Colour each day by", [["cost", "COST"], ["tokens", "TOKENS"]], metric),
+        key: "calendar", title: "Every day", cls: "wide", metaHtml: seg("cal-metric", "Colour each day by", [["cost", "COST"], ["tokens", "TOKENS"]], metric),
         body: chartHost(function (w) {
           return CHARTS.calendar(days, { width: w, maxCell: 22, label: "Daily " + (metric === "cost" ? "cost" : "token") + " heatmap, " + days.length + " days", legend: ["LESS", "MORE"] });
         }, [e.digest, metric, CHARTS.pips()], "nm-calendar") +
@@ -3162,7 +3200,7 @@
     }
     cards.push(cardPart("matrix", state, [e], function () {
       return card({
-        title: "When you work", cls: "span-8", metaHtml: seg("matrix-metric", "Colour each hour by", [["cost", "COST"], ["requests", "REQUESTS"]], mm),
+        key: "matrix", title: "When you work", cls: "span-8", metaHtml: seg("matrix-metric", "Colour each hour by", [["cost", "COST"], ["requests", "REQUESTS"]], mm),
         body: chartHost(function (w) {
           return CHARTS.matrix(grid, {
             width: w, maxCell: 34, rowLabels: WEEKDAYS_MON, colLabels: colLabels, label: "Activity by weekday and hour of day, local time",
@@ -3178,7 +3216,7 @@
     var sinceFirst = first === null ? null : Math.max(1, Math.round((Date.now() - first) / 86400000));
     cards.push(cardPart("streaks", state, [e], function () {
       return card({
-        title: "Streaks and records", meta: "all time", cls: "span-4",
+        key: "streaks", title: "Streaks and records", meta: "all time", cls: "span-4",
         body: '<div class="nm-stats">' +
           statTile("streak-current", "Current streak", plural(sk.current_days, "day"), { big: true }) +
           statTile("streak-longest", "Longest streak", plural(sk.longest_days, "day"), { big: true, sub: sk.longest_start ? dayText(sk.longest_start) + " to " + dayText(sk.longest_end) : "" }) +
@@ -3189,7 +3227,7 @@
     }));
     cards.push(cardPart("export", "ready", [], function () {
       return card({
-        title: "Export", meta: "daily totals", cls: "wide",
+        key: "export", title: "Export", meta: "daily totals", cls: "wide",
         body: '<p class="nm-lede">One row for each day you used Claude Code: requests, tokens by kind, and cost (' + BASIS + '). Prompts, replies and code are never included.</p>' +
           '<div class="nm-actions"><button class="nm-btn" type="button" data-action="export" data-format="csv" data-fid="export-csv">Export CSV</button>' +
           '<button class="nm-btn" type="button" data-action="export" data-format="json" data-fid="export-json">Export JSON</button></div>' +
@@ -3261,7 +3299,7 @@
 
   function alertsCard() {
     var dependent = ' data-needs-alerts="1"';
-    return '<section class="nm-card wide" aria-label="Alerts"><div class="nm-card-in">' +
+    return '<section class="nm-card wide" aria-label="Alerts" data-card="alerts"><div class="nm-card-in">' +
       '<div class="nm-card-t"><h2 class="nm-ttl">Alerts</h2><span class="nm-meta-t">Windows notifications from the tray</span></div><div class="nm-set" id="alerts-set">' +
       toggleRow("alerts_enabled", "Alerts", "Show a Windows notice when a limit reaches a level or starts over. Off silences every alert below.") +
       '<div class="nm-row-set is-stack"><span><span class="t">Levels</span><span class="d">A notice appears the first time a limit reaches each level in its window. One to five levels, each from 1 to 100.</span></span>' +
@@ -3287,9 +3325,9 @@
       S.sig = "";
       main.innerHTML = pageHead("settings") +
         '<div class="nm-pgrid">' +
-        '<section class="nm-card wide" aria-label="Theme"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Theme</h2><span class="nm-meta-t" id="set-theme-meta"></span></div>' +
+        '<section class="nm-card wide" aria-label="Theme" data-card="theme"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Theme</h2><span class="nm-meta-t" id="set-theme-meta"></span></div>' +
         '<div class="nm-themes" id="set-themes"></div><div id="set-mode" class="nm-actions" hidden></div><div class="nm-variants" id="set-accents"></div></div></section>' +
-        '<section class="nm-card" aria-label="Widgets and display"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Widgets &amp; display</h2><span class="nm-meta-t">floating and taskbar</span></div><div class="nm-set">' +
+        '<section class="nm-card" aria-label="Widgets and display" data-card="widgets"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Widgets &amp; display</h2><span class="nm-meta-t">floating and taskbar</span></div><div class="nm-set">' +
         languageRow() +
         toggleRow("show_floating", "Floating widget", "Show the always-on-top widget on the desktop.") +
         toggleRow("show_taskbar", "Taskbar strip", "Show the strip beside the clock.") +
@@ -3301,7 +3339,7 @@
         selectRow("show_scoped_rows", "Scoped rows", "Show rows for scoped limits on the widget.", [["auto", "AUTO"], ["always", "ALWAYS"], ["never", "NEVER"]]) +
         toggleRow("reduce_motion", "Reduce motion", "Stop the boot sequences, page entrances, hover effects (here and on the desktop widgets), flicker, blinking and the rotating comparison.") +
         "</div></div></section>" +
-        '<section class="nm-card" aria-label="Data and plan"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Data &amp; plan</h2><span class="nm-meta-t">how often, and what you pay</span></div><div class="nm-set">' +
+        '<section class="nm-card" aria-label="Data and plan" data-card="data-plan"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Data &amp; plan</h2><span class="nm-meta-t">how often, and what you pay</span></div><div class="nm-set">' +
         selectRow("poll_interval_ms", "Fetch usage every", "How often the usage API is asked. The minimum is one minute.", POLL_CHOICES) +
         '<label class="nm-row-set"><span><span class="t">Billing day</span><span class="d">The day of the month your billing cycle starts. Blank uses the calendar month.</span></span>' +
         '<select class="nm-select" data-key="billing_day" aria-describedby="err-billing_day"><option value="">CALENDAR MONTH</option>' +
@@ -3311,7 +3349,7 @@
         '</div><div class="nm-actions"><button class="nm-btn" type="button" data-action="refresh">Refresh now</button></div></div></section>' +
         alertsCard() +
         guardCard() +
-        '<section class="nm-card wide" aria-label="System"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">System</h2><span class="nm-meta-t">start-up and updates</span></div><div class="nm-set">' +
+        '<section class="nm-card wide" aria-label="System" data-card="system"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">System</h2><span class="nm-meta-t">start-up and updates</span></div><div class="nm-set">' +
         toggleRow("launch_on_startup", "Start with Windows", startupHintText(), "", "startup-hint") +
         toggleRow("check_updates", "Check for updates", "Look for a newer release once in a while.") +
         '</div><div class="nm-actions" id="set-update-actions"><button class="nm-btn" type="button" data-action="check-update">Check for updates now</button>' +
@@ -3471,7 +3509,7 @@
 
   /* The Settings card. Its two blocks are filled by syncGuard: the live status and the one-click setup. */
   function guardCard() {
-    return '<section class="nm-card wide" aria-label="Usage guard"><div class="nm-card-in">' +
+    return '<section class="nm-card wide" aria-label="Usage guard" data-card="guard"><div class="nm-card-in">' +
       '<div class="nm-card-t"><h2 class="nm-ttl">Usage guard</h2><span class="nm-meta-t">tells working sessions to wrap up</span></div><div class="nm-set" id="guard-set">' +
       toggleRow("guard_enabled", "Arm the guard", GUARD_EXPLAIN) +
       capRow("guard_session_cap", "Session cap", "Percent of the 5-hour session limit, 1 to 100. Blank leaves it unwatched.", "OFF", 1, 100) +
@@ -3532,7 +3570,7 @@
 
   /* The status block as it is before the monitor has answered: the shape of the common case, so nothing moves when it does. */
   function guardLivePlaceholder() {
-    return '<div class="nm-verdict"><span class="nm-chip" data-pending="" aria-hidden="true">ARMED</span></div>' +
+    return '<div class="nm-verdict"><span class="nm-chip" data-pending="" aria-hidden="true" data-tone="neutral">ARMED</span></div>' +
       '<p class="nm-story" data-pending="" aria-hidden="true">Watching the session limit at 95% and the weekly limit at 90%. Every watched limit is under its cap.</p>' +
       '<div class="nm-actions"><button class="nm-btn" type="button" data-fid="guard-resume" disabled>Resume now</button></div>';
   }
@@ -3580,14 +3618,14 @@
     var chip;
     var story;
     if (v.state === "off") {
-      chip = '<span class="nm-chip">OFF</span>';
+      chip = '<span class="nm-chip" data-tone="neutral">OFF</span>';
       story = "The guard is off. Nothing is watched, and no session is told anything.";
     } else if (v.state === "armed") {
       var watched = watchedWords(v.policy);
-      chip = '<span class="nm-chip is-ok">ARMED</span>';
+      chip = '<span class="nm-chip is-ok" data-tone="ok">ARMED</span>';
       story = watched.length ? "Watching " + listWords(watched) + ". Every watched limit is under its cap." : "No cap is set, so no limit is watched. Set at least one cap above.";
     } else {
-      chip = '<span class="nm-chip solid is-crit">HOLDING</span>';
+      chip = '<span class="nm-chip solid is-crit" data-tone="alert">HOLDING</span>';
       story = "A cap was reached. Working sessions are told once to wrap up, and sessions that wait wake when every watched limit is under its cap again.";
     }
     var hooks = v.setup && v.setup.hooks ? v.setup.hooks.state : "";
@@ -3832,12 +3870,24 @@
 
   /* The words on a colour button, in capitals. A theme with one variant per colour shows that variant's name (Nostromo's
    * RAY TUBE for amber, Night City's RELIC). Gates has a dark and a light variant of each accent, so it shows the accent. */
-  function accentLabel(theme, accent) {
+  /* The name the theme gives an accent, or null when it gives none: a theme with modes names no accent (its picker shows the id). */
+  function accentName(theme, accent) {
     var perMode = theme && theme.modes && theme.modes.length;
     var named = theme && !perMode ? (theme.variants || []).filter(function (v) {
       return (v.accent || accentOf(v.id)) === accent;
     })[0] : null;
-    return String(named && named.name ? named.name : accent).toUpperCase();
+    return named && named.name ? String(named.name) : null;
+  }
+
+  function accentLabel(theme, accent) {
+    var name = accentName(theme, accent);
+    return String(name === null ? accent : name).toUpperCase();
+  }
+
+  /* A name that is not the colour's id is shown, so the id is kept as the tooltip. */
+  function accentTitled(theme, accent) {
+    var name = accentName(theme, accent);
+    return name !== null && name.toLowerCase() !== accent.toLowerCase();
   }
 
   function syncThemePicker(main) {
@@ -3875,9 +3925,9 @@
     });
     var active = current ? accentOf(current.variant) : "";
     var accentHtml = accentList.map(function (a) {
-      var label = accentLabel(theme, a);                  // a name that is not the colour's id keeps the id as its tooltip
+      var label = accentLabel(theme, a);
       return '<button type="button" class="nm-btn' + (a === active ? " solid" : "") + '" data-accent="' + esc(a) + '"' +
-        (label === a.toUpperCase() ? "" : ' title="' + esc(a) + '"') + ' aria-pressed="' + (a === active ? "true" : "false") + '">' +
+        (accentTitled(theme, a) ? ' title="' + esc(a) + '"' : "") + ' aria-pressed="' + (a === active ? "true" : "false") + '">' +
         esc(label) + "</button>";
     }).join("");
     if (accents.getAttribute("data-sig") !== accentHtml) {
@@ -4189,7 +4239,7 @@
         '<div id="about-update" style="display:contents"></div>' +
         '<div class="nm-pgrid">' +
         card({
-          title: "Claude Usage Monitor", metaHtml: '<span class="nm-meta-t" id="about-version"></span>',
+          key: "about-app", title: "Claude Usage Monitor", metaHtml: '<span class="nm-meta-t" id="about-version"></span>',
           body: '<p class="nm-lede">A local monitor for Claude Code plan limits. It reads the usage API with your existing Claude Code sign-in, ' +
             "and your own transcripts. It never sends a model request.</p>" +
             '<p class="nm-lede">Free and open source, under the MIT licence.</p>' +
@@ -4197,19 +4247,19 @@
             "They are not amounts billed to your plan. Only the usage credits card shows real money.</p>"
         }) +
         card({
-          title: "Links", meta: "opens in your browser",
+          key: "about-links", title: "Links", meta: "opens in your browser",
           body: '<div class="nm-links"><a href="' + esc(LINKS.repo) + '" data-external="1">Repository on GitHub</a>' +
             '<a href="' + esc(LINKS.bug) + '" data-external="1">Issues: report a bug</a>' +
             '<a href="' + esc(LINKS.patreon) + '" data-external="1">Support on Patreon</a></div>'
         }) +
         card({
-          title: "Credits", meta: "built with Claude Code",
+          key: "about-credits", title: "Credits", meta: "built with Claude Code",
           body: '<div class="nm-kv nm-authors"><span>AUTHORS</span><b>CHRIS CARPENTER, WITH CLAUDE</b></div>' +
             '<p class="nm-lede">Version 2 was built with Claude Code: Claude Opus 5.5, with Sonnet 5.5 and Haiku 5.5 subagents.</p>' +
             '<p class="nm-lede">Version 1 was built with Claude Sonnet 4.6.</p>'
         }) +
-        card({ title: "Fonts", meta: "SIL Open Font License 1.1", body: fontsCardBody() }) +
-        '<section class="nm-card wide" aria-label="Supporters"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Supporters</h2><span class="nm-meta-t" id="about-supporters-meta">Thank You</span></div>' +
+        card({ key: "about-fonts", title: "Fonts", meta: "SIL Open Font License 1.1", body: fontsCardBody() }) +
+        '<section class="nm-card wide" aria-label="Supporters" data-card="about-supporters"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Supporters</h2><span class="nm-meta-t" id="about-supporters-meta">Thank You</span></div>' +
         '<div id="about-supporters"><p class="nm-empty">Loading the supporters list&hellip;</p></div></div></section>' +
         "</div>";
     }
@@ -4824,7 +4874,7 @@
 
   function renderAge() {
     var a = ageMs();
-    var text = a === null ? "--" : fmtAge(a);
+    var text = ageWords(fmtAge(a), AGE_UNIT);
     var el = document.getElementById("data-age");
     if (el) {
       el.textContent = "DATA AGE " + text;
@@ -4848,7 +4898,7 @@
         : fmtInt(ingest.files_total) + " OK")
       : "--";
     var unpriced = s && s.unpriced_models ? s.unpriced_models.length : 0;
-    var link = S.linkOk === false ? "NO LINK" : (s ? (STATUS[s.status] || STATUS.loading).text.replace("UPLINK ", "") : "--");
+    var link = S.linkOk === false ? "NO LINK" : (s ? entryOf(LINK_WORD, s.status, "loading") : "--");
     var live = S.linkOk !== false && !!(s && s.status === "live");
     var signature = [link, sources, unpriced, live].join("|");
     if (box.getAttribute("data-sig") !== signature) {
@@ -5319,7 +5369,10 @@
       costNumbers: costNumbers, modelMixCard: modelMixCard, spendCardBody: spendCardBody, sessionsTable: sessionsTable,
       renderHealth: renderHealth, weeklyStory: weeklyStory, effectivePlanPrice: effectivePlanPrice,
       planFromState: planFromState, pipelineCard: pipelineCard, topModels: topModels, railHTML: railHTML,
-      limitCard: limitCard, remainHTML: remainHTML, buildModel: buildModel, statEntry: statEntry, entryState: entryState,
+      limitCard: limitCard, remainHTML: remainHTML, buildModel: buildModel, matchScoped: matchScoped, paceChip: paceChip,
+      sessionStory: sessionStory, weeklyStory: weeklyStory, fmtAge: fmtAge, ageWords: ageWords, AGE_UNIT: AGE_UNIT,
+      AGE_UNIT_IN_SENTENCE: AGE_UNIT_IN_SENTENCE, staleBanner: staleBanner, renderHealth: renderHealth, accentName: accentName,
+      accentTitled: accentTitled, LINK_WORD: LINK_WORD, entryOf: entryOf, statEntry: statEntry, entryState: entryState,
       averageRateForecast: averageRateForecast, pacingChart: pacingChart, limitFacts: limitFacts, pendingUpdate: pendingUpdate,
       updateBanner: updateBanner, themeSwatches: themeSwatches, accentLabel: accentLabel, renderVariants: renderVariants,
       syncThemePicker: syncThemePicker, chooseAccent: chooseAccent, currentPage: currentPage, skelCost: skelCost,

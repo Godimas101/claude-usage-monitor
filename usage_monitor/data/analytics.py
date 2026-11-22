@@ -835,7 +835,9 @@ def _scoped_pace(store: Store, now: datetime, usage: UsageSnapshot | None) -> li
                             and _is_number(item.get("percent"))):
                         stored.append((snap["ts"], float(item["percent"])))
             points = _hourly(_with_live(stored, usage.fetched_at, limit.percent))
-        entries.append({"label": limit.label, "model": limit.scope_model,
+        # kind and scope_model: the dashboard matches a row to its limit by these, never by label (state.json takes only
+        # the keys status.py _SCOPED_KEYS names, so it does not change)
+        entries.append({"label": limit.label, "model": limit.scope_model, "kind": limit.kind, "scope_model": limit.scope_model,
                         "allowance_pct": limit.allowance_pct,
                         "used_pct_of_weekly": limit.used_pct_of_weekly,
                         **_pace(now, limit.percent, resets, length, points)})

@@ -7,7 +7,8 @@
  * takes over. Only the app's own wording is touched: names and titles that come from your data (session titles, folders,
  * supporters, file paths, chart labels) are left exactly as they are. It also
  *   - flags html[data-g-icons] when Segoe Fluent Icons (or Segoe MDL2 Assets) is installed, which turns the glyphs on;
- *   - gives each status chip a tone from its words (data-g-tone), so "Under pace" is green and "At risk" amber;
+ *   - gives each status chip the tone app.js set on it (data-tone: ok, warn, alert, acc, or neutral; anything else is neutral),
+ *     as data-g-tone, so an "under pace" chip is green and an "at risk" chip amber;
  *   - sets the small percent sign on the big percentages;
  *   - reads the accent colours from /api/themes (the call app.js makes too) and flags html[data-g-swatches].
  * Nothing here stores or prints a token, a message or a file. app.js calls window.USAGE_MONITOR_THEME_FX.gates.start() once this
@@ -40,11 +41,7 @@
     "UPLINK LIVE": "Live", "LIVE": "Live", "ACQUIRING": "Connecting", "AUTH LOST": "Sign-in needed", "NO CARRIER": "Offline",
     "RATE LIMITED": "Rate limited", "NO LOGIN": "Not signed in", "PAUSED": "Paused", "NO LINK": "No connection"
   };
-  var TONES = {
-    "UNDER PACE": "ok", "ON PACE": "ok", "SAFE": "ok", "BEHIND": "ok", "NORMAL": "ok", "NOMINAL": "ok",
-    "AHEAD OF PACE": "warn", "AHEAD": "warn", "AT RISK": "warn", "ADVISORY": "warn", "VERY FAST": "warn",
-    "LIMITED": "alert", "CRITICAL": "alert", "FAST": "acc"
-  };
+  var TONE_IDS = ["ok", "warn", "alert", "acc"];
   var ICON_PROBE = String.fromCharCode(0xE916);   // Segoe Fluent Icons: the stopwatch glyph
   var PHRASES = { "NONE": "None", "TOK / MIN": "Tokens / min", "CLAUDE CODE": "Claude Code" };
   var SVG_WORDS = { TODAY: "Today", NOW: "Now", LESS: "Less", MORE: "More", AVG: "Avg" };
@@ -197,9 +194,10 @@
     el.appendChild(sign);
   }
 
+  /* The tone is app.js's, from the status the chip shows (data-tone), never from its words. */
   function toneChip(chip) {
-    var words = (chip.textContent || "").trim().toUpperCase();
-    chip.setAttribute("data-g-tone", TONES[words] || "neutral");
+    var tone = chip.getAttribute("data-tone");
+    chip.setAttribute("data-g-tone", TONE_IDS.indexOf(tone) >= 0 ? tone : "neutral");
   }
 
   /* Chart text carries no user data except the folder and tool names on the left of the bars, so only strings made

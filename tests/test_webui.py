@@ -1262,6 +1262,97 @@ def test_the_placeholder_layout_has_the_cards_of_the_real_one(checks: dict[str, 
         assert keys(checks["stateOnly"][page]) == CARDS[page]
 
 
+# ── Part 3 (#90): the scripts read ids, never the words on the page ──────────────────────────────────────────
+
+TONE_IDS = {"ok", "warn", "alert", "acc", "neutral"}
+
+
+def tone_in(html: str) -> str | None:
+    found = re.search(r'<span class="nm-chip[^"]*"[^>]*data-tone="([^"]*)"', html)
+    return found.group(1) if found else None
+
+
+@ui_only
+def test_every_card_names_itself_by_its_key_the_settings_and_about_cards_too(checks: dict[str, Any]) -> None:
+    for page in ("overview", "limits", "cost", "efficiency", "history"):
+        keys = [card["key"] for card in checks["empty"][page]["cards"]]
+        assert checks["cards"][page] == keys, page
+        assert all(checks["cards"][page]), page                                       # no card without a key
+    assert checks["cards"]["settings"] == ["theme", "widgets", "data-plan", "alerts", "guard", "system"]
+    assert checks["cards"]["about"] == ["about-app", "about-links", "about-credits", "about-fonts", "about-supporters"]
+    assert checks["cards"]["limitsInner"] == ["credits", "surfaces"]                  # the Limits wrapper's two sections
+    assert checks["cards"]["none"] == ["none"] and "unpriced" in checks["cards"]["unpriced"]
+
+
+@ui_only
+def test_gates_names_only_cards_the_pages_build(checks: dict[str, Any]) -> None:
+    """Each data-card key gates.css names is carried by a card the page builds; Data and plan is the Settings card's key."""
+    named = set(re.findall(r'\[data-card="([^"]+)"\]', THEME_CSS["gates"]))
+    built = {key for keys in checks["cards"].values() for key in keys}
+    assert named <= built, sorted(named - built)
+    assert "data-plan" in named
+
+
+@ui_only
+def test_every_gates_chip_carries_a_tone_id_and_an_unknown_one_is_neutral(checks: dict[str, Any]) -> None:
+    tags = list(checks["chipTags"])
+    for html in checks["guard"]["live"].values():
+        tags += re.findall(r'<span class="nm-chip[^"]*"[^>]*>', html)
+    assert len(tags) >= 10
+    for tag in tags:
+        tone = re.search(r'data-tone="([^"]*)"', tag)
+        assert tone and tone.group(1) in TONE_IDS, tag
+    assert checks["tones"]["pace"]["noClock"] == "neutral"
+
+
+@ui_only
+def test_a_chip_takes_its_tone_from_its_status_id_not_from_its_words(checks: dict[str, Any]) -> None:
+    assert checks["tones"]["pace"] == {"ahead": "warn", "behind": "ok", "onPace": "ok", "noClock": "neutral", "unused": "neutral", "noDraw": "neutral"}
+    assert checks["tones"]["session"] == ["alert", "warn", "ok", "neutral", "neutral", "neutral"]     # LIMITED, AT_RISK, SAFE, IDLE, UNKNOWN, unknown
+    assert checks["tones"]["weekly"] == ["warn", "ok", "ok", "neutral", "neutral"]                   # AHEAD, ON_PACE, BEHIND, UNKNOWN, unknown
+    assert checks["burnTone"] == {"IDLE": "neutral", "SLOW": "neutral", "NORMAL": "ok", "FAST": "acc", "VERY FAST": "warn", "constructor": "neutral"}
+    assert checks["paceWords"] == ["AHEAD OF PACE", "UNDER PACE", "NO DRAW"]                         # the words themselves are unchanged
+    guard = checks["guard"]["live"]
+    assert (tone_in(guard["off"]), tone_in(guard["armed"]), tone_in(guard["holding"])) == ("neutral", "ok", "alert")
+
+
+@ui_only
+def test_the_uplink_line_and_the_age_are_written_from_codes_and_units(checks: dict[str, Any]) -> None:
+    assert checks["uplinkWords"] == {
+        "live": "LIVE", "loading": "ACQUIRING", "stale": "AUTH LOST", "offline": "NO CARRIER", "rate_limited": "RATE LIMITED",
+        "no_credentials": "NO LOGIN", "paused": "PAUSED", "unknown": "ACQUIRING", "nolink": "NO LINK"}
+    assert [(row["badge"], row["sentence"]) for row in checks["age"]] == [
+        ("0 S", "0 s"), ("0 S", "0 s"), ("59 S", "59 s"), ("1 M", "1 m"), ("59 M", "59 m"),
+        ("1 H", "1 h"), ("47 H", "47 h"), ("2 D", "2 d"), ("4 D", "4 d")]
+    assert checks["ageNone"] == "--"
+    assert "These figures are from 3 m ago." in checks["staleBanner"]                 # the sentence reads as it did
+    assert ".toLowerCase()" not in function_body(APP_CODE, "staleBanner") and ".toLowerCase()" not in function_body(APP_CODE, "renderAge")
+    assert 'replace("UPLINK "' not in APP_CODE
+
+
+@ui_only
+def test_the_scoped_limits_are_matched_by_kind_and_model_so_one_label_can_serve_two(checks: dict[str, Any]) -> None:
+    assert checks["scoped"] == {"fable": 10, "opus": 90, "unnamed": 10, "none": None}      # the label is shared; the model is not
+    assert ".label" not in function_body(APP_CODE, "matchScoped")
+
+
+@ui_only
+def test_the_accent_tooltip_follows_the_theme_name_and_not_the_colour_word(checks: dict[str, Any]) -> None:
+    assert checks["accentTitled"] == {"amber": True, "blue": True, "blackwall": False, "unnamed": False}
+
+
+@ui_only
+def test_the_total_row_of_the_token_table_is_marked_by_a_code(checks: dict[str, Any]) -> None:
+    assert checks["tokensTotal"] == "is-today" and checks["tokensToday"] == 1
+    assert 'row[0] === "Total"' not in APP_CODE
+
+
+def test_gates_has_no_english_chip_words_and_its_script_reads_the_tone_attribute() -> None:
+    script = read("themes/gates.js")
+    assert "TONES" not in script and '"AT RISK"' not in script and '"UNDER PACE"' not in script
+    assert 'getAttribute("data-tone")' in function_body(script, "toneChip")
+
+
 @ui_only
 def test_every_card_is_marked_by_how_its_numbers_are_doing(checks: dict[str, Any]) -> None:
     only = checks["stateOnly"]
@@ -1683,17 +1774,32 @@ def test_the_guard_blocks_are_built_from_the_existing_parts_and_open_as_placehol
 
 
 def test_the_gates_theme_gives_the_guard_card_its_icon_and_the_other_themes_need_none() -> None:
-    assert re.search(r'\.nm-card\[aria-label="Usage guard"\] \{ --g-ico: "\\[0-9A-F]{4}"; \}', THEME_CSS["gates"])
+    assert re.search(r'\.nm-card\[data-card="guard"\] \{ --g-ico: "\\[0-9A-F]{4}"; \}', THEME_CSS["gates"])
     for theme_id in ("nostromo", "night_city"):
         assert "--g-ico" not in THEME_CSS[theme_id]
 
 
-def test_the_gates_theme_keeps_the_tone_of_the_guard_chips_its_script_calls_neutral() -> None:
-    """gates.js tones a chip from its words and calls a word it does not know neutral, which would wash ARMED and HOLDING
-    out: the two chips carry their tone as a class (is-ok, is-crit), and Gates lets that class win inside the guard block."""
+def test_gates_colours_a_chip_by_its_tone_attribute_and_the_guard_has_no_override() -> None:
+    """gates.js copies a chip's data-tone to data-g-tone; the colours are keyed by that, for the ARMED and HOLDING chips too
+    (they carry ok and alert), so the guard block needs no rule of its own to win over a neutral tone."""
     css = THEME_CSS["gates"]
-    for tone, colour in (("is-ok", "--ok"), ("is-crit", "--alert")):
-        assert f'#guard-live .nm-chip.{tone}[data-g-tone="neutral"] {{ color: var({colour});' in css, tone
+    for tone, colour in (("ok", "--ok"), ("alert", "--alert")):
+        assert re.search(rf'\.nm-chip\[data-g-tone="{tone}"\][^{{]*\{{ color: var\({colour}\)', css), tone
+    assert "#guard-live .nm-chip" not in css
+
+
+def test_gates_picks_its_card_icons_by_data_card_and_never_by_an_english_title() -> None:
+    """The English title of a card is for people; the icon is picked by the card's key (data-card), so a translated title keeps it."""
+    css = THEME_CSS["gates"]
+    assert "[aria-label=" not in css
+    keys = re.findall(r'\[data-card="([^"]+)"\]', css)
+    assert keys and len(keys) == len(set(keys)), keys
+    assert re.search(r'\.nm-card\[data-card="data-plan"\] \{ --g-ico: "\\[0-9A-F]{4}"; \}', css)      # the Data and plan card has its icon
+
+
+def test_the_night_city_refresh_pairs_a_card_by_its_key_not_its_title() -> None:
+    body = function_body(read("themes/night_city.js"), "ownerKey")
+    assert 'getAttribute("data-card")' in body and "aria-label" not in body
 
 
 def test_the_manual_setup_the_card_points_at_is_in_the_repository() -> None:
@@ -2169,7 +2275,7 @@ def test_nostromo_sets_the_help_in_natural_case_under_a_heading_in_capitals() ->
 
 
 def test_gates_gives_the_no_activity_card_an_icon_like_its_neighbours() -> None:
-    assert re.search(r'\.nm-card\[aria-label="No Claude Code activity on this PC"\][^{]*\{ --g-ico: "\\[0-9A-F]{4}"; \}', THEME_CSS["gates"])
+    assert re.search(r'\.nm-card\[data-card="none"\][^{]*\{ --g-ico: "\\[0-9A-F]{4}"; \}', THEME_CSS["gates"])
 
 
 @ui_only

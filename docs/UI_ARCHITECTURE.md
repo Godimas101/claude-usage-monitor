@@ -855,6 +855,18 @@ default browser instead, and the exit code says so (below).
   and it ends when a request is counted. Cost & value, Efficiency and History are then one wide card that explains it, and
   the Overview's cost, efficiency and model cards keep their frame and title with one `.nm-empty` line (`data-state="ready"`,
   no `data-needs`). No cost, efficiency or history report is asked for; the limits, the pace and the alerts are as before.
+- **Ids, not words (#90, part 3).** The dashboard's scripts decide nothing from English text on the page. Every card
+  carries `data-card="<key>"`: `card({key, ...})` writes it, the Settings and About cards and the Limits wrapper's two inner
+  sections set it by hand, and a page part's `tagCard` sets it on the cards it builds (`cost`, `value`, `by-model`,
+  `data-plan` ...). `gates.css` picks each card's icon by `[data-card="..."]`, never by `aria-label` (which keeps the title).
+  A chip carries `data-tone` (`ok`, `warn`, `alert`, `acc` or `neutral`) from the status code it shows: the pace chip, the
+  session and weekly verdicts (`SESSION_TONE`, `WEEKLY_TONE`), the burn velocity (`VELOCITY_TONE`) and the guard's OFF, ARMED and
+  HOLDING. `gates.js` copies it to `data-g-tone`, and a value it does not know is `neutral`. `matchScoped` finds a scoped limit's
+  pacing row by `kind` and `scope_model` (the dashboard's entries carry both, `state.json` does not), so two limits that share a
+  label keep their own rows. The uplink line and the age are built from tables keyed by code (`LINK_WORD`, and `fmtAge`, which
+  returns `{n, unit}` for `ageWords`, with `AGE_UNIT` and `AGE_UNIT_IN_SENTENCE`), so no word is cut or lower-cased. Night City
+  pairs a card across two renders by its `data-card`. The English on the page is unchanged; the one visible change is that the
+  Settings "Data and plan" card now has its Gates icon.
 - **Forecast.** A limit's forecast runs from now at the average rate so far (used / elapsed, `averageRateForecast`) to where
   it crosses 100 % (the end is marked "100% ~ <time>", the same moment as the card's "Limit reached") or to the reset when it
   stays below; the end label and the "Projected end" fact read the same value, so they cannot disagree. Scoped limits use the

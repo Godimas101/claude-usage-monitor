@@ -4,6 +4,9 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Changed
+- On the Gates theme, the Settings card Data and plan now has its icon, as the theme always meant it to. The icons follow the cards, not their titles.
+
 ### Fixed
 - The dashboard keeps its choices (the Cost and Efficiency windows, the folder grouping and the chart metrics) after its window closes and when the monitor restarts or updates. Before, they were lost each time: the dashboard window keeps nothing once it closes, and in the browser the storage was tied to a port that changes each run ([#54](https://github.com/Godimas101/claude-usage-monitor/issues/54)).
 - After Claude turns a sign-in down with HTTP 403, the dashboard's help and the widgets on every theme now say to run `/login` in Claude Code, not to send it a message, and the README's troubleshooting table has a row for it ([#55](https://github.com/Godimas101/claude-usage-monitor/issues/55)).
