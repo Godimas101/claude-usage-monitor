@@ -504,6 +504,21 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   `tests/test_english_left.py` holds the result to `tests/fixtures/english_left.json`, which each extraction ticket
   (#93 to #101) shrinks by recording again (`python tests/english_left.py --record`, which adds new English only with
   `--allow-new`).
+- **Fonts (#92).** The widgets draw U+202F, the narrow no-break space of French grouping and of some 12-hour clocks, as
+  U+00A0 (`engine.drawn`), in all three run builders. No bundled face has U+202F, and U+00A0 is as wide as a space in
+  every face the widgets use, so a figure measures the same on every machine. A theme role may list fallback families,
+  `fonts.<role>.fallback`, found as `family_font_path` finds any family (bundled first, then Windows); the page never
+  sees the list. A character the run's face lacks comes from the first fallback face whose character map has it
+  (`engine.face_index`; `render/glyphs.py` reads the maps). It is drawn at the run's size with its own advance, and the
+  run keeps its own face's metrics. The engine, Night City's `_advance_gap` and Gates' `_text_px` and `_run` pick the
+  face alike, so a run measures what it draws. Night City's mono lists Consolas, then the bundled IBM Plex Mono, for the
+  ğ Ğ ş Ş İ that Share Tech Mono lacks; Nostromo and Gates list none. An `engine.Donor` with `chars` (a CSS
+  `unicode-range`) is tried before the run's own face, for S3 (#61). The dashboard falls to Consolas through its own
+  stacks (`--font-mono`, `--f-data`), so with Consolas both draw the same letters. Without it the page takes them from
+  the browser's `monospace` and the widgets from Plex: accepted. `tests/test_font_coverage.py` is the gate for every
+  face: each character of the catalogs, the pseudo-locale, the CLDR formats and a floor of French, Spanish and Turkish
+  letters must be mapped, with an outline, in the face that draws it. A new face (S3, O3) joins through its theme JSON
+  and its skin's `_FACE_ROLES`.
 - **Stays English:** the agent modes and `state.json`, the logs, the export's columns, and the dashboard window title
   "Claude Usage Monitor" (the installer and the app find the window by it).
 

@@ -301,7 +301,7 @@ Have an idea? [Request a feature →](https://github.com/Godimas101/claude-usage
 
 Built by **Chris Carpenter** with **Claude Code**: Claude Opus 5.5, with Sonnet 5.5 and Haiku 5.5 subagents. (Version 1 was built with Claude Sonnet 4.6.)
 
-Fonts, all under the SIL Open Font License 1.1: Michroma, IBM Plex Mono and VT323 (Nostromo); Chakra Petch, Rajdhani and Share Tech Mono (Night City). Gates uses fonts from your own Windows install (Segoe UI Variable, Segoe Fluent Icons and Cascadia Mono, with Segoe UI and Consolas as fallbacks) and bundles none. Each licence text sits beside its font in `usage_monitor/webui/fonts`.
+Fonts, all under the SIL Open Font License 1.1: Michroma, IBM Plex Mono and VT323 (Nostromo); Chakra Petch, Rajdhani and Share Tech Mono (Night City). Gates uses fonts from your own Windows install (Segoe UI Variable, Segoe Fluent Icons and Cascadia Mono, with Segoe UI and Consolas as fallbacks) and bundles none. Night City draws the Turkish letters Share Tech Mono lacks (ğ, Ğ, ş, Ş and İ) from Consolas in your Windows install; where Consolas is missing, its widgets take them from the bundled IBM Plex Mono. Each licence text sits beside its font in `usage_monitor/webui/fonts`.
 
 Claude and Claude Code belong to Anthropic. This is an independent, unofficial tool.
 
