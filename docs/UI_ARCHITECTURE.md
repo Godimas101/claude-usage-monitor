@@ -509,16 +509,19 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   every face the widgets use, so a figure measures the same on every machine. A theme role may list fallback families,
   `fonts.<role>.fallback`, found as `family_font_path` finds any family (bundled first, then Windows); the page never
   sees the list. A character the run's face lacks comes from the first fallback face whose character map has it
-  (`engine.face_index`; `render/glyphs.py` reads the maps). It is drawn at the run's size with its own advance, and the
-  run keeps its own face's metrics. The engine, Night City's `_advance_gap` and Gates' `_text_px` and `_run` pick the
-  face alike, so a run measures what it draws. Night City's mono lists Consolas, then the bundled IBM Plex Mono, for the
-  ğ Ğ ş Ş İ that Share Tech Mono lacks; Nostromo and Gates list none. An `engine.Donor` with `chars` (a CSS
-  `unicode-range`) is tried before the run's own face, for S3 (#61). The dashboard falls to Consolas through its own
-  stacks (`--font-mono`, `--f-data`), so with Consolas both draw the same letters. Without it the page takes them from
-  the browser's `monospace` and the widgets from Plex: accepted. `tests/test_font_coverage.py` is the gate for every
-  face: each character of the catalogs, the pseudo-locale, the CLDR formats and a floor of French, Spanish and Turkish
-  letters must be mapped, with an outline, in the face that draws it. A new face (S3, O3) joins through its theme JSON
-  and its skin's `_FACE_ROLES`.
+  (`engine.face_index`). `render/glyphs.py` reads the maps, each read held to the cmap table and each map to its
+  format's order (segments and groups ascending, none overlapping), as FreeType's validator holds them; a map it cannot
+  read gives `None` and one warning, and the run is drawn in its own face. A donor glyph is drawn at the run's size
+  with its own advance, and the run keeps its own face's metrics. The engine, Night City's `_advance_gap` and Gates'
+  `_text_px` and `_run` pick the face alike, so a run measures what it draws. Night City's mono lists Consolas, then
+  the bundled IBM Plex Mono, for the ğ Ğ ş Ş İ that Share Tech Mono lacks; Nostromo and Gates list none. An
+  `engine.Donor` with `chars` (a CSS `unicode-range`) is tried before the run's own face, for S3 (#61). The dashboard
+  falls to Consolas through its own stacks (`--font-mono`, `--f-data`), so with Consolas both draw the same letters.
+  Without it the page takes them from the browser's `monospace` and the widgets from Plex: accepted.
+  `tests/test_font_coverage.py` is the gate for every face: each character of the catalogs, the pseudo-locale, the
+  CLDR formats and a floor of French, Spanish and Turkish letters must be mapped, with an outline, in the face that
+  draws it. It reads every shipped theme through the skin `get_skin` gives it, so a new theme, skin or face (S3, O3)
+  joins through its theme JSON and its skin's `_FACE_ROLES` with no edit to the test.
 - **Stays English:** the agent modes and `state.json`, the logs, the export's columns, and the dashboard window title
   "Claude Usage Monitor" (the installer and the app find the window by it).
 

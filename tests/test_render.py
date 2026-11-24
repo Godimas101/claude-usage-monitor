@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import struct
 import time
 from dataclasses import replace
 from datetime import datetime, timedelta
@@ -972,6 +973,181 @@ def test_a_font_whose_character_map_cannot_be_read_is_drawn_in_its_own_face(tmp_
                 _run_fields(engine._build_run(own, "ğA", 0.0))
     warnings = [record.getMessage() for record in caplog.records if record.name == "usage_monitor.render.glyphs"]
     assert len(warnings) == 2 and all("cannot read the character map" in message for message in warnings)
+
+
+# ── The character-map reader refuses a damaged map (#92 review) ───────────────
+
+RAJDHANI = engine.font_file("rajdhani/Rajdhani-Bold.ttf")
+
+
+@dataclasses.dataclass(frozen=True)
+class _Map4:
+    """Where a bundled face keeps the (3, 1) format 4 subtable the reader picks, and the table directory's entries."""
+    entries: dict[bytes, int]                       # tag -> its entry in the table directory
+    base: int                                       # the cmap table
+    at: int                                         # the subtable
+    segments: int
+
+    def array(self, n: int) -> int:
+        """Where array ``n`` starts: 0 endCode, 1 startCode, 2 idDelta, 3 idRangeOffset, 4 the glyph id array."""
+        return self.at + 14 + 2 * self.segments * n + (2 if n else 0)
+
+    def word(self, data: bytes, n: int, k: int) -> int:
+        return struct.unpack_from(">H", data, self.array(n) + 2 * k)[0]
+
+    def put(self, data: bytearray, n: int, k: int, value: int) -> None:
+        struct.pack_into(">H", data, self.array(n) + 2 * k, value)
+
+
+def _map4(data: bytes) -> _Map4:
+    count = struct.unpack_from(">H", data, 4)[0]
+    entries = {bytes(data[12 + 16 * i:16 + 16 * i]): 12 + 16 * i for i in range(count)}
+    base = struct.unpack_from(">I", data, entries[b"cmap"] + 8)[0]
+    subtables: dict[tuple[int, int], int] = {}
+    for i in range(struct.unpack_from(">H", data, base + 2)[0]):
+        platform, encoding, offset = struct.unpack_from(">HHI", data, base + 4 + 8 * i)
+        subtables.setdefault((platform, encoding), base + offset)
+    assert next(key for key in glyphs.SUBTABLES if key in subtables) == (3, 1)
+    at = subtables[(3, 1)]
+    assert struct.unpack_from(">H", data, at)[0] == 4
+    return _Map4(entries, base, at, struct.unpack_from(">H", data, at + 6)[0] // 2)
+
+
+def _ranged_segment(data: bytes, m: _Map4) -> int:
+    """A segment, not the last one, whose glyph ids are read through idRangeOffset."""
+    return next(k for k in range(m.segments - 1) if m.word(data, 3, k))
+
+
+def _segment_count_inflated(data: bytearray, m: _Map4) -> None:
+    data[m.at + 6] = 0x7F                               # the review's one byte: segCountX2's high byte
+
+
+def _segment_overlaps_the_one_before(data: bytearray, m: _Map4) -> None:
+    k = m.segments // 2
+    m.put(data, 1, k, m.word(data, 0, k - 1))           # it starts where the one before it ends
+
+
+def _segment_starts_after_it_ends(data: bytearray, m: _Map4) -> None:
+    k = m.segments // 2
+    m.put(data, 1, k, m.word(data, 0, k) + 1)
+
+
+def _subtable_runs_past_the_cmap(data: bytearray, m: _Map4) -> None:
+    struct.pack_into(">I", data, m.entries[b"cmap"] + 12, m.at - m.base + 16)   # the cmap ends inside its header
+
+
+def _glyph_read_past_the_cmap(data: bytearray, m: _Map4) -> None:
+    k = _ranged_segment(data, m)
+    end = m.base + struct.unpack_from(">I", data, m.entries[b"cmap"] + 12)[0]
+    offset = end - (m.array(3) + 2 * k)                 # the segment's first glyph id sits right at the cmap's end
+    assert 0 < offset < 0x10000 and end + 2 * (m.word(data, 0, k) - m.word(data, 1, k) + 1) <= len(data)
+    m.put(data, 3, k, offset)
+
+
+def _glyph_read_before_the_glyph_ids(data: bytearray, m: _Map4) -> None:
+    m.put(data, 3, _ranged_segment(data, m), 2)         # it points at the next segment's idRangeOffset
+
+
+def _assert_refused(path: Path, data: bytes, caplog: Any) -> None:
+    """The reader gives None for ``data`` at once, and logs one warning across two calls."""
+    path.write_bytes(data)
+    with caplog.at_level(logging.WARNING, logger="usage_monitor.render.glyphs"):
+        began = time.perf_counter()
+        for _ in range(2):
+            assert glyphs.cmap(str(path)) is None and glyphs.codepoints(str(path)) is None
+        assert time.perf_counter() - began < 1.0
+    warnings = [record.getMessage() for record in caplog.records if record.name == "usage_monitor.render.glyphs"]
+    assert len(warnings) == 1 and "cannot read the character map" in warnings[0], warnings
+
+
+FORMAT_4_DAMAGE = [
+    (RAJDHANI, _segment_count_inflated),
+    (RAJDHANI, _segment_overlaps_the_one_before),
+    (RAJDHANI, _segment_starts_after_it_ends),
+    (RAJDHANI, _subtable_runs_past_the_cmap),
+    (STM, _glyph_read_past_the_cmap),
+    (STM, _glyph_read_before_the_glyph_ids),
+]
+
+
+@pytest.mark.parametrize("face, damage", FORMAT_4_DAMAGE, ids=[damage.__name__[1:] for _, damage in FORMAT_4_DAMAGE])
+def test_a_damaged_format_4_map_is_refused_at_once(face, damage, tmp_path, caplog):
+    """One byte, segCountX2's high byte, made the reader walk 16,000 garbage segments for about a minute and claim
+    nearly the whole BMP, where FreeType opens the copy at once (#92 review). A map that breaks its format's rules is
+    now unreadable: None and one warning, so the face is drawn as before fallbacks existed."""
+    data = bytearray(face.read_bytes())
+    damage(data, _map4(data))
+    _assert_refused(tmp_path / face.name, bytes(data), caplog)
+
+
+def test_an_undamaged_copy_reads_as_the_face_itself(tmp_path):
+    for face in (RAJDHANI, STM):
+        _map4(face.read_bytes())
+        copy = tmp_path / face.name
+        copy.write_bytes(face.read_bytes())
+        assert dict(glyphs.cmap(str(copy))) == dict(glyphs.cmap(str(face)))
+        assert len(glyphs.cmap(str(face))) > 200
+
+
+def test_a_glyph_id_past_the_glyph_count_is_dropped_and_a_font_without_maxp_keeps_every_id(tmp_path):
+    """As FreeType drops it (FT_Get_Char_Index gives 0 for an id at or above maxp's numGlyphs)."""
+    data = RAJDHANI.read_bytes()
+    m = _map4(data)
+    whole = dict(glyphs.cmap(str(RAJDHANI)))
+    fewer = bytearray(data)
+    struct.pack_into(">H", fewer, struct.unpack_from(">I", data, m.entries[b"maxp"] + 8)[0] + 4, 100)
+    (tmp_path / "fewer.ttf").write_bytes(bytes(fewer))
+    kept = {code: glyph for code, glyph in whole.items() if glyph < 100}
+    assert 0 < len(kept) < len(whole)
+    assert dict(glyphs.cmap(str(tmp_path / "fewer.ttf"))) == kept
+    unnamed = bytearray(data)
+    unnamed[m.entries[b"maxp"]:m.entries[b"maxp"] + 4] = b"maxq"
+    (tmp_path / "no-maxp.ttf").write_bytes(bytes(unnamed))
+    assert dict(glyphs.cmap(str(tmp_path / "no-maxp.ttf"))) == whole
+
+
+def _format_12_font(groups: list[tuple[int, int, int]], *, length: int | None = None,
+                    glyph_count: int = 0xFFFF) -> bytes:
+    """A font file the reader can read (FreeType cannot: it has only a cmap and a maxp). Its cmap is one (3, 10)
+    format 12 subtable of ``groups`` (first, last, first glyph id), whose length field can lie."""
+    length = 16 + 12 * len(groups) if length is None else length
+    subtable = struct.pack(">HHIII", 12, 0, length, 0, len(groups))
+    subtable += b"".join(struct.pack(">III", *group) for group in groups)
+    tables = ((b"cmap", struct.pack(">HHHHI", 0, 1, 3, 10, 12) + subtable),
+              (b"maxp", struct.pack(">IH", 0x00005000, glyph_count)))
+    offset, directory, body = 12 + 16 * len(tables), b"", b""
+    for tag, table in tables:
+        directory += struct.pack(">4sIII", tag, 0, offset + len(body), len(table))
+        body += table
+    return struct.pack(">IHHHH", 0x00010000, len(tables), 0, 0, 0) + directory + body
+
+
+GROUPS = [(0x41, 0x43, 10), (0x1F600, 0x1F601, 20), (0x10FFF0, 0x10FFFF, 30)]
+
+
+def test_a_format_12_map_is_read_up_to_the_glyph_count(tmp_path):
+    (tmp_path / "groups.ttf").write_bytes(_format_12_font(GROUPS))
+    assert dict(glyphs.cmap(str(tmp_path / "groups.ttf"))) == {
+        0x41: 10, 0x42: 11, 0x43: 12, 0x1F600: 20, 0x1F601: 21, **{0x10FFF0 + i: 30 + i for i in range(16)}}
+    (tmp_path / "few.ttf").write_bytes(_format_12_font(GROUPS, glyph_count=12))
+    assert dict(glyphs.cmap(str(tmp_path / "few.ttf"))) == {0x41: 10, 0x42: 11}
+
+
+FORMAT_12_DAMAGE = {
+    "groups_past_its_length": _format_12_font(GROUPS, length=16 + 12 * 2),
+    "length_past_the_cmap": _format_12_font(GROUPS, length=16 + 12 * 4),
+    "groups_overlap": _format_12_font([(0x41, 0x50, 1), (0x50, 0x60, 20)]),
+    "groups_out_of_order": _format_12_font([(0x100, 0x110, 1), (0x41, 0x50, 20)]),
+    "group_starts_after_it_ends": _format_12_font([(0x41, 0x43, 1), (0x50, 0x48, 20)]),
+    "group_passes_u_10ffff": _format_12_font([(0x41, 0x43, 1), (0x10FFF0, 0x110005, 20)]),
+}
+
+
+@pytest.mark.parametrize("name", list(FORMAT_12_DAMAGE))
+def test_a_damaged_format_12_map_is_refused_at_once(name, tmp_path, caplog):
+    """numGroups and each group's range came from the file unchecked: a large one hung the reader or ran it out of
+    memory (#92 review). The groups must fit the subtable and the cmap, ascend without overlap and stop at U+10FFFF."""
+    _assert_refused(tmp_path / f"{name}.ttf", FORMAT_12_DAMAGE[name], caplog)
 
 
 # ── Options ───────────────────────────────────────────────────────────────────

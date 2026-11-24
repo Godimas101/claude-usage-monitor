@@ -6,18 +6,22 @@ from tests/font_tables.py. Pillow is used once, as an independent check of the c
 The corpus is every string of every catalog and of the pseudo-locale, in the cases the skins draw them; the CLDR
 formats the languages use (FORMAT_SAMPLES, until #91's formats module gives them); a floor of the French, Spanish and
 Turkish letters (FLOOR, until #93's drafts fill the catalogs); printable ASCII; and the skins' own non-ASCII text.
-The chains are the skins' own tables: each face a skin draws with, and its fallback faces (fonts.<role>.fallback in
-the theme's JSON), chosen per character as the engine chooses them. A Windows face this machine lacks is skipped.
+The chains are the skins' own tables, for every shipped theme, read from the skin that draws it as the widgets pick
+it (skins.get_skin): each face the skin draws with, and its fallback faces (fonts.<role>.fallback in the theme's
+JSON), chosen per character as the engine chooses them. A Windows face this machine lacks is skipped.
 
-A new face (S3, O3) joins through its theme JSON and its skin's _FACE_ROLES, and must pass here before it ships.
+A new face (S3, O3) joins through its theme JSON and its skin's _FACE_ROLES, and must pass here before it ships. A new
+theme or skin is found without an edit here; one whose faces this test cannot read fails it.
 """
 from __future__ import annotations
 
 import re
+import sys
 import unicodedata
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import pytest
@@ -175,11 +179,40 @@ class Chain:
         return f"{self.theme} {self.face} [{chain}]"
 
 
+def skin_module(theme_id: str) -> ModuleType:
+    """The skin module that draws ``theme_id``, as the widgets find it: get_skin gives the Nostromo skin to a theme
+    with no skin of its own and to one whose skin module does not exist yet."""
+    return sys.modules[type(skins.get_skin(theme_id)).__module__]
+
+
+def theme_skins() -> dict[str, tuple[str, ModuleType]]:
+    """Every shipped theme's id -> (how its faces are read, the skin module that draws it): "gates" through
+    gates._fonts, "canvas" through the skin's _FACE_ROLES, _faces and the donors. A skin with neither fails here."""
+    found: dict[str, tuple[str, ModuleType]] = {}
+    for theme_id in themes.all_themes():
+        module = skin_module(theme_id)
+        if module is gates:
+            found[theme_id] = ("gates", module)
+        elif hasattr(module, "_FACE_ROLES") and hasattr(module, "_faces"):
+            found[theme_id] = ("canvas", module)
+        else:
+            raise AssertionError(f"theme {theme_id!r} is drawn by {module.__name__}, which has neither _FACE_ROLES "
+                                 "(with _faces) nor Gates' _fonts: the coverage test cannot read its faces")
+    return found
+
+
+def canvas_skins() -> tuple[ModuleType, ...]:
+    """The distinct Canvas skin modules that draw a shipped theme."""
+    return tuple(dict.fromkeys(module for route, module in theme_skins().values() if route == "canvas"))
+
+
 def canvas_chains() -> list[Chain]:
-    """Night City's and Nostromo's faces, from their own tables (_FACE_ROLES through _faces and the donors)."""
+    """The faces of every theme a Canvas skin draws, from the skin's own tables (_FACE_ROLES through _faces and the
+    donors)."""
     found: list[Chain] = []
-    for module in (night_city, nostromo):
-        theme_id = module.__name__.rsplit(".", 1)[-1]
+    for theme_id, (route, module) in theme_skins().items():
+        if route != "canvas":
+            continue
         theme = themes.get_theme(theme_id)
         faces = module._faces(theme)
         donors = skin_donors(theme, module, faces)
@@ -190,21 +223,25 @@ def canvas_chains() -> list[Chain]:
 
 
 def gates_chains() -> list[Chain]:
-    """Gates' body and mono at the weights it draws, and each whole-face fallback this machine has as its own chain."""
-    fonts = gates._fonts(themes.get_theme("gates"))
+    """For every theme Gates draws: its body and mono at the weights Gates draws, and each whole-face fallback this
+    machine has as its own chain."""
     found: list[Chain] = []
-    for role in ("body", "mono"):
-        typeface = getattr(fonts, role)
-        for weight in (400, 600, 700):
-            path = typeface.file_for(weight)
-            if path is not None:
-                found.append(Chain("gates", f"{role} {weight}", path, typeface_donors(typeface)))
-    spares = (("Segoe UI", gates._static_typeface(gates._STATIC_BODY)),
-              ("Consolas", gates._static_typeface(gates._STATIC_MONO)),
-              ("bundled mono", gates._bundled_mono()))
-    for name, typeface in spares:
-        for weight, path in typeface.files if typeface is not None else ():
-            found.append(Chain("gates", f"{name} {weight}", path, typeface_donors(typeface)))
+    for theme_id, (route, _module) in theme_skins().items():
+        if route != "gates":
+            continue
+        fonts = gates._fonts(themes.get_theme(theme_id))
+        for role in ("body", "mono"):
+            typeface = getattr(fonts, role)
+            for weight in (400, 600, 700):
+                path = typeface.file_for(weight)
+                if path is not None:
+                    found.append(Chain(theme_id, f"{role} {weight}", path, typeface_donors(typeface)))
+        spares = (("Segoe UI", gates._static_typeface(gates._STATIC_BODY)),
+                  ("Consolas", gates._static_typeface(gates._STATIC_MONO)),
+                  ("bundled mono", gates._bundled_mono()))
+        for name, typeface in spares:
+            for weight, path in typeface.files if typeface is not None else ():
+                found.append(Chain(theme_id, f"{name} {weight}", path, typeface_donors(typeface)))
     return list(dict.fromkeys(found))
 
 
@@ -289,6 +326,11 @@ def _coverage_failures(found: list[Chain]) -> list[str]:
     return failures
 
 
+def test_the_chains_take_in_every_shipped_theme():
+    """A theme the routing above passed over would go unchecked: every shipped theme has chains of its own."""
+    assert {chain.theme for chain in chains()} == set(themes.all_themes())
+
+
 def test_every_widget_face_covers_every_character_through_its_chain():
     failures = _coverage_failures(chains())
     assert not failures, "no face in the chain draws:\n" + "\n".join(failures)
@@ -365,9 +407,12 @@ def test_the_corpus_holds_what_the_languages_need():
 
 
 def test_every_face_key_a_skin_draws_with_is_in_its_face_table():
-    """A key outside _FACE_ROLES would draw with no theme role and no fallback, and this test would not see it."""
+    """A key outside _FACE_ROLES would draw with no theme role and no fallback, and this test would not see it.
+    Night City's text styles (Type) are its own; the FONT_* keys are checked in every Canvas skin a theme uses."""
     styles = [value for value in vars(night_city).values() if isinstance(value, night_city.Type)]
     assert styles and {style.face for style in styles} <= set(night_city._FACE_ROLES)
-    for module in (night_city, nostromo):
+    modules = canvas_skins()
+    assert {night_city, nostromo} <= set(modules)
+    for module in modules:
         keys = {value for name, value in vars(module).items() if name.startswith("FONT_")}
         assert keys and keys <= set(module._FACE_ROLES), module.__name__

@@ -1106,6 +1106,38 @@ def test_gates_measures_and_draws_a_missing_letter_in_the_same_donor():
     assert two.size[0] == math.ceil(expected) + 2 * (30 // 2 + 2)
 
 
+def _variable_segoe() -> str:
+    path = theme_registry.family_font_path("Segoe UI Variable")
+    if path is None or not gates._is_variable(str(path)):
+        pytest.skip("Segoe UI Variable is not installed on this machine as a variable font")
+    return str(path)
+
+
+@pytest.mark.parametrize("wght", [400, 700])
+def test_a_variable_donor_is_set_to_the_faces_weight_and_optical_size(wght):
+    """A variable donor, which S3 (#61) may declare, is measured and drawn at the face's wght and opsz. The face is
+    Share Tech Mono, for the ğ it lacks, given the axes Ink.face gives a variable face. Optical size 30 is far from
+    Segoe UI Variable's default, so the width moves at weight 400 too; the ink is checked at both weights."""
+    seg = _variable_segoe()
+    stm = str(engine.font_file("sharetechmono/ShareTechMono-Regular.ttf"))
+    face = gates.Face(stm, 30.0, wght, 30.0, False, (engine.Donor(seg, variable=True),))
+    expected = (gates._em_advance(stm, wght, 30.0, False, "A") + gates._em_advance(seg, wght, 30.0, True, "ğ")) * 30
+    assert gates._text_px(face, "Ağ") == pytest.approx(expected)
+    assert _gates_ink(gates._run(face, "ğ", 1.0, 0.0)) == \
+        _gates_ink(gates._run(gates.Face(seg, 30.0, wght, 30.0, True), "ğ", 1.0, 0.0))
+
+
+def test_a_variable_donor_under_a_static_face_is_drawn_at_the_regular_weight():
+    """A static face keeps no weight (Ink.face gives it wght 0 and no optical size): its variable donor is set to 400
+    and to its own default optical size."""
+    seg = _variable_segoe()
+    stm = str(engine.font_file("sharetechmono/ShareTechMono-Regular.ttf"))
+    face = gates.Face(stm, 30.0, 0, None, False, (engine.Donor(seg, variable=True),))
+    assert gates._glyph_faces(face, "Ağ") == [(stm, 0, None, False), (seg, 400, None, True)]
+    assert _gates_ink(gates._run(face, "ğ", 1.0, 0.0)) == \
+        _gates_ink(gates._run(gates.Face(seg, 30.0, 400, None, True), "ğ", 1.0, 0.0))
+
+
 def test_gates_faces_carry_the_theme_fallback_and_gates_declares_none():
     fonts = gates._fonts(theme())
     assert fonts.body.donors == () and fonts.mono.donors == ()
