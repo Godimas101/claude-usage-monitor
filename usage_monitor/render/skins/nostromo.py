@@ -51,7 +51,7 @@ from usage_monitor.render.model import (
     unknown_kind_names,
     worst_severity,
 )
-from usage_monitor.render.skins import RenderOptions, coerce_options
+from usage_monitor.render.skins import RenderOptions, coerce_options, face_donors
 
 # ── Geometry (logical px, origin top-left) ────────────────────────────────────
 
@@ -151,6 +151,7 @@ _FACE_ROLES = {
     FONT_VT: ("mono", "regular"),
 }
 _FACES: dict[str, dict[str, Path]] = {}
+_DONORS: dict[tuple[str, tuple[str, ...]], dict[str, tuple[engine.Donor, ...]]] = {}
 LABEL_SIZE = 10.0
 VALUE_SIZE = 22.0
 STRIP_LABEL_SIZE = 11.0
@@ -305,9 +306,19 @@ def _faces(theme: Any) -> dict[str, Path]:
     return _FACES[key]
 
 
+def _donors(theme: Any, faces: Mapping[str, Path]) -> dict[str, tuple[engine.Donor, ...]]:
+    """The fallback faces of each face file (face_donors), resolved once per theme and set of files. The Nostromo
+    theme declares none."""
+    key = (str(getattr(theme, "id", "nostromo")), tuple(str(path) for path in faces.values()))
+    if key not in _DONORS:
+        _DONORS[key] = face_donors(theme, _FACE_ROLES, faces)
+    return _DONORS[key]
+
+
 def _canvas(width: float, height: float, scale: float, theme: Any) -> Canvas:
     cv = Canvas(width, height, scale)
     cv.faces = _faces(theme)
+    cv.donors = _donors(theme, cv.faces)
     return cv
 
 

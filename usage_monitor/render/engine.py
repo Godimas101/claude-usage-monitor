@@ -20,6 +20,7 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 from usage_monitor import paths
 from usage_monitor.log import get_logger
+from usage_monitor.render import glyphs
 
 log = get_logger(__name__)
 
@@ -90,22 +91,84 @@ def font_file(relative: str) -> Path:
     return bundled_font_root() / relative
 
 
-def _build_run(font, text: str, tracking_px: float) -> tuple[Image.Image, int, int, float]:
+# ── Characters and faces (#92) ────────────────────────────────────────────────
+
+# U+202F, the narrow no-break space of French grouping and of some 12-hour clocks in CLDR, is drawn as U+00A0. No
+# bundled face has U+202F, and every face the widgets draw with has U+00A0 as wide as its space, so a figure measures
+# the same on every machine whatever face draws it.
+DRAWN_AS = str.maketrans({"\u202f": "\u00a0"})
+
+
+def drawn(text: str) -> str:
+    """``text`` as every run builder draws and measures it (DRAWN_AS)."""
+    return text.translate(DRAWN_AS)
+
+
+@dataclass(frozen=True, slots=True)
+class Donor:
+    """A fallback face for one face of a theme (fonts.<role>.fallback), tried per character as CSS font matching does.
+
+    chars None: the donor draws what the faces before it lack, in the order given. A set (a CSS unicode-range): the
+    donor draws those characters even where the run's own face has them, as S3 (#61) needs for two letters.
+    variable: the file is a variable font (Gates sets its axes).
+    """
+    path: str
+    chars: frozenset[str] | None = None
+    variable: bool = False
+
+
+def _maps(path: str, ch: str) -> bool:
+    found = glyphs.codepoints(path)
+    return found is not None and ord(ch) in found
+
+
+def face_index(primary: str, donors: Sequence[Donor], ch: str) -> int:
+    """Which face draws ``ch``: 0 for the run's own face (``primary``), i + 1 for donors[i]. In order: a donor whose
+    ``chars`` hold ``ch`` and whose face maps it; the run's own face when it maps ``ch`` or its map cannot be read;
+    the other donors, in order, when one maps ``ch``; else the run's own face. Without donors no map is read."""
+    if not donors:
+        return 0
+    for index, donor in enumerate(donors):
+        if donor.chars is not None and ch in donor.chars and _maps(donor.path, ch):
+            return index + 1
+    own = glyphs.codepoints(primary)
+    if own is None or ord(ch) in own:
+        return 0
+    for index, donor in enumerate(donors):
+        if donor.chars is None and _maps(donor.path, ch):
+            return index + 1
+    return 0
+
+
+def _faces_for(font, text: str, donors: Sequence[Donor]) -> list:
+    """The face each character of ``text`` is drawn in: ``font``, or a donor at the same size."""
+    path = getattr(font, "path", None)
+    if not donors or not isinstance(path, str):
+        return [font] * len(text)
+    picked = [face_index(path, donors, ch) for ch in text]
+    return [font if index == 0 else load_font(donors[index - 1].path, font.size) for index in picked]
+
+
+def _build_run(font, text: str, tracking_px: float, donors: Sequence[Donor] = ()) -> tuple[Image.Image, int, int, float]:
     """One run of glyphs with its baseline at a fixed row: (mask, pad, ascent, width_px).
 
     Advances are the font's own plus tracking after every glyph, the CSS letter-spacing model.
     The mask is drawn from an integer origin, so the run can be pasted at any integer position
-    without being rendered again.
+    without being rendered again. A character ``font`` lacks is drawn from the first of ``donors``
+    that has it (face_index), at the same pixel size and with its own advance; the run keeps
+    ``font``'s metrics and pad, which leave room for the donor glyphs.
     """
+    text = drawn(text)
     ascent, descent = font.getmetrics()
-    advances = [font.getlength(ch) + tracking_px for ch in text]
+    faces = _faces_for(font, text, donors)
+    advances = [face.getlength(ch) + tracking_px for face, ch in zip(faces, text)]
     width_px = sum(advances)
     pad = int(font.size) // 2 + 2
     mask = Image.new("L", (math.ceil(width_px) + 2 * pad, ascent + descent + 2 * pad), 0)
     draw = ImageDraw.Draw(mask)
     pen = float(pad)
-    for ch, advance in zip(text, advances):
-        draw.text((pen, pad + ascent), ch, font=font, fill=255, anchor="ls")
+    for ch, face, advance in zip(text, faces, advances):
+        draw.text((pen, pad + ascent), ch, font=face, fill=255, anchor="ls")
         pen += advance
     return mask.point(_GLYPH_COVERAGE), pad, ascent, width_px
 
@@ -116,16 +179,17 @@ GLYPH_GAMMA = 0.6
 _GLYPH_COVERAGE = [round(255 * (v / 255) ** GLYPH_GAMMA) for v in range(256)]
 
 @functools.lru_cache(maxsize=2048)
-def _cached_run(path: str, size: float, text: str, tracking_px: float) -> tuple[Image.Image, int, int, float]:
-    return _build_run(load_font(path, size), text, tracking_px)
+def _cached_run(path: str, size: float, text: str, tracking_px: float,
+                donors: tuple[Donor, ...] = ()) -> tuple[Image.Image, int, int, float]:
+    return _build_run(load_font(path, size), text, tracking_px, donors)
 
 
-def _run(font, text: str, tracking_px: float) -> tuple[Image.Image, int, int, float]:
-    """The cached glyph run for a font, or a fresh one for a font without a file path."""
+def _run(font, text: str, tracking_px: float, donors: tuple[Donor, ...] = ()) -> tuple[Image.Image, int, int, float]:
+    """The cached glyph run for a font, or a fresh one for a font without a file path (which takes no donors)."""
     path = getattr(font, "path", None)
     size = getattr(font, "size", None)
     if isinstance(path, str) and isinstance(size, (int, float)):
-        return _cached_run(path, float(size), text, tracking_px)
+        return _cached_run(path, float(size), text, tracking_px, donors)
     return _build_run(font, text, tracking_px)
 
 
@@ -196,6 +260,8 @@ class Canvas:
         self.draw = ImageDraw.Draw(self.image)
         # Optional map from a font key to the face file a theme chose for it (see skins).
         self.faces: dict[str, Path] | None = None
+        # Optional map from a face file (as a string) to its fallback faces (skins.face_donors).
+        self.donors: dict[str, tuple[Donor, ...]] | None = None
 
     # ── Coordinates ──
 
@@ -232,9 +298,16 @@ class Canvas:
         path = self.faces[key] if self.faces and key in self.faces else font_file(key)
         return load_font(str(path), round(size * self.k, 3))
 
+    def font_donors(self, font) -> tuple[Donor, ...]:
+        """The fallback faces of ``font``'s file, from ``donors``; none for a font without a file path."""
+        path = getattr(font, "path", None)
+        if not self.donors or not isinstance(path, str):
+            return ()
+        return self.donors.get(path, ())
+
     def advance(self, text: str, font, tracking: float = 0.0) -> float:
         """Logical width of ``text`` with letter-spacing ``tracking`` after every glyph (CSS style)."""
-        return _run(font, text, tracking * self.k)[3] / self.k
+        return _run(font, text, tracking * self.k, self.font_donors(font))[3] / self.k
 
     def baseline_in_box(self, top: float, line_h: float, font) -> float:
         """Baseline (logical) of text centred in a CSS-style line box of ``line_h`` at ``top``."""
@@ -328,7 +401,7 @@ class Canvas:
         at x; "centre" centres the run on x. Positions snap to whole buffer pixels, under a
         quarter of a logical pixel at every supported scale.
         """
-        mask, pad, ascent, width_px = _run(font, text, tracking * self.k)
+        mask, pad, ascent, width_px = _run(font, text, tracking * self.k, self.font_donors(font))
         bx = x * self.kx
         if align == "right":
             start_px = bx - width_px

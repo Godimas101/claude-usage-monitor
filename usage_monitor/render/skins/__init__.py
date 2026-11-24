@@ -28,10 +28,12 @@ from __future__ import annotations
 import importlib
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
 from PIL import Image
 
+from usage_monitor import themes as theme_registry
 from usage_monitor.render.model import WidgetModel
 
 
@@ -51,6 +53,27 @@ class RenderOptions:
 
 
 _OPTION_NAMES = ("transparent_bg", "text_fx", "reduce_motion", "phase")
+
+
+def face_donors(theme: Any, face_roles: Mapping[str, tuple[str, str]],
+                faces: Mapping[str, Path]) -> dict[str, tuple[Any, ...]]:
+    """The fallback faces (engine.Donor) of each face file a skin draws with, keyed by the file's path as a string,
+    for Canvas.donors: the theme's fallback families for the font key's role and weight (themes.fallback_paths). A
+    face whose role declares none is left out. ``face_roles`` maps a font key to (role, weight), ``faces`` maps it to
+    its file. The engine is imported here, so importing this package loads no drawing code. The registry is the
+    module-level one the skins use: a late ``from usage_monitor import themes`` can return another copy of it (the
+    package attribute an earlier re-import left behind; see themes._platform)."""
+    from usage_monitor.render import engine
+
+    found: dict[str, tuple[Any, ...]] = {}
+    for font_key, (role, weight) in face_roles.items():
+        try:
+            paths = theme_registry.fallback_paths(theme, role, weight)
+        except (AttributeError, KeyError, TypeError):   # an object that is not a theme
+            paths = ()
+        if paths and font_key in faces:
+            found[str(faces[font_key])] = tuple(engine.Donor(str(path)) for path in paths)
+    return found
 
 
 def coerce_options(opts: RenderOptions | Mapping[str, Any] | None) -> RenderOptions:

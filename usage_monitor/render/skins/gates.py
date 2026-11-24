@@ -207,9 +207,11 @@ UNDER_A_MINUTE = "<1m"
 
 @dataclass(frozen=True, slots=True)
 class Typeface:
-    """A font role resolved to files: one variable file, or one static file per weight."""
+    """A font role resolved to files: one variable file, or one static file per weight, and the fallback faces of the
+    role (the theme's fonts.<role>.fallback; Gates declares none)."""
     files: tuple[tuple[int, str], ...]
     variable: bool
+    donors: tuple[engine.Donor, ...] = ()
 
     def file_for(self, weight: int) -> str | None:
         if not self.files:
@@ -227,12 +229,14 @@ class Fonts:
 @dataclass(frozen=True, slots=True)
 class Face:
     """One font at one size and weight. size is in buffer px; opsz (a variable font's optical size)
-    is in logical px, so a face looks the same at every scale."""
+    is in logical px, so a face looks the same at every scale. donors are the faces a character the
+    font lacks is drawn from (engine.face_index)."""
     path: str | None
     size: float
     wght: int
     opsz: float | None
     variable: bool
+    donors: tuple[engine.Donor, ...] = ()
 
 
 _WEIGHTS = (("regular", 400), ("semibold", 600), ("bold", 700))
@@ -268,10 +272,21 @@ def _theme_typeface(theme: Any, role: str) -> Typeface | None:
             found[weight] = str(path)
     if not found:
         return None
+    donors = _theme_donors(theme, role)
     distinct = set(found.values())
     if len(distinct) == 1 and _is_variable(next(iter(distinct))):
-        return Typeface(((400, next(iter(distinct))),), True)
-    return Typeface(tuple(sorted(found.items())), False)
+        return Typeface(((400, next(iter(distinct))),), True, donors)
+    return Typeface(tuple(sorted(found.items())), False, donors)
+
+
+def _theme_donors(theme: Any, role: str) -> tuple[engine.Donor, ...]:
+    """The role's fallback faces (themes.fallback_paths), each marked variable or not. A static donor family gives
+    its regular file for every weight; a variable one is set to the face's weight."""
+    try:
+        paths = theme_registry.fallback_paths(theme, role)
+    except (AttributeError, KeyError, TypeError):   # an object that is not a theme
+        return ()
+    return tuple(engine.Donor(str(path), variable=_is_variable(str(path))) for path in paths)
 
 
 def _static_typeface(table: tuple[tuple[int, str], ...]) -> Typeface | None:
@@ -373,16 +388,39 @@ def _run(face: Face, text: str, gamma: float, frac: float) -> tuple[Image.Image,
     mask = Image.new("L", (math.ceil(width + frac) + 2 * pad, ascent + descent + 2 * pad), 0)
     draw = ImageDraw.Draw(mask)
     pen = pad + frac
-    for ch in text:
+    text = engine.drawn(text)
+    for ch, (path, wght, opsz, variable) in zip(text, _glyph_faces(face, text)):
         if not ch.isspace():
-            draw.text((pen, pad + ascent), ch, font=font, fill=255, anchor="ls")
-        pen += _em_advance(face.path, face.wght, face.opsz, face.variable, ch) * face.size
+            glyph_font = font if path == face.path else _font(path, face.size, wght, opsz, variable)
+            draw.text((pen, pad + ascent), ch, font=glyph_font, fill=255, anchor="ls")
+        pen += _em_advance(path, wght, opsz, variable, ch) * face.size
     return mask.point(_coverage_table(gamma)), pad, ascent
 
 
+def _glyph_faces(face: Face, text: str) -> list[tuple[str | None, int, float | None, bool]]:
+    """(path, wght, opsz, variable) of the face each character of ``text`` (already drawn()) comes from: the face
+    itself, or the donor engine.face_index picks, at the face's weight and optical size when the donor is variable."""
+    own = (face.path, face.wght, face.opsz, face.variable)
+    if not face.donors or face.path is None:
+        return [own] * len(text)
+    found = []
+    for ch in text:
+        index = engine.face_index(face.path, face.donors, ch)
+        if index == 0:
+            found.append(own)
+            continue
+        donor = face.donors[index - 1]
+        if donor.variable:                          # a static face keeps no weight (wght 0): the donor's is regular
+            found.append((donor.path, face.wght or 400, face.opsz, True))
+        else:
+            found.append((donor.path, 0, None, False))
+    return found
+
+
 def _text_px(face: Face, text: str) -> float:
-    """Width of ``text`` in output px."""
-    return sum(_em_advance(face.path, face.wght, face.opsz, face.variable, ch) for ch in text) * face.size
+    """Width of ``text`` in output px, each character in the face it is drawn from."""
+    text = engine.drawn(text)
+    return sum(_em_advance(*glyph_face, ch) for glyph_face, ch in zip(_glyph_faces(face, text), text)) * face.size
 
 
 def _is_light(color: Color) -> bool:
@@ -552,8 +590,8 @@ class Ink(Canvas):
         path = typeface.file_for(weight)
         px = round(size * self.scale, 3)
         if typeface.variable:
-            return Face(path, px, weight, size if opsz is None else opsz, True)
-        return Face(path, px, 0, None, False)
+            return Face(path, px, weight, size if opsz is None else opsz, True, typeface.donors)
+        return Face(path, px, 0, None, False, typeface.donors)
 
     def advance(self, text: str, face: Face) -> float:
         """Logical width of ``text``."""

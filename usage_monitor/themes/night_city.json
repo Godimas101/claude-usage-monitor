@@ -15,6 +15,7 @@
     },
     "mono": {
       "family": "Share Tech Mono",
+      "fallback": ["Consolas", "IBM Plex Mono"],
       "file_hint": "ShareTechMono-Regular.ttf (values, reset times, data noise)",
       "licence": "SIL Open Font License 1.1"
     }

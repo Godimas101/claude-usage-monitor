@@ -40,7 +40,8 @@ Fonts. font_path() maps a theme role to a TTF file: bundled faces under
 usage_monitor/webui/fonts/<family>/ first, then Windows fonts in the Fonts folder of %WINDIR%.
 Weights follow CSS font-weight matching. A family with a single face (a variable font) gives
 that face for every weight. Both folders come from paths.resource_dir(), so frozen builds find
-them too.
+them too. fallback_paths() finds a role's fallback families (fonts.<role>.fallback) the same way,
+for the widgets' per-character fallback (#92).
 """
 from __future__ import annotations
 
@@ -272,6 +273,16 @@ def _check_fonts(fonts: object, problems: list[str]) -> None:
         spec = fonts.get(role)
         if not isinstance(spec, dict) or not _is_text(spec.get("family")):
             problems.append(f"fonts.{role} needs a family name")
+        elif "fallback" in spec and not _is_fallback(spec["fallback"], spec["family"]):
+            problems.append(f"fonts.{role}.fallback must be a list of family names")
+
+
+def _is_fallback(value: object, family: str) -> bool:
+    """A list of family names, none of them the role's own family and none twice (compared as bundled folders are)."""
+    if not isinstance(value, list) or not all(_is_text(name) for name in value):
+        return False
+    keys = [_family_key(name) for name in value]
+    return all(keys) and _family_key(family) not in keys and len(set(keys)) == len(keys)
 
 
 def _parse_variants(
@@ -638,6 +649,23 @@ def font_path(theme: Theme, role: str, weight: str = "regular") -> Path | None:
         log.debug("theme %s has no %r font", theme.id, role)
         return None
     return family_font_path(family, weight)
+
+
+def fallback_paths(theme: Theme, role: str, weight: str = "regular") -> tuple[Path, ...]:
+    """The TTFs of a role's fallback families (``fonts.<role>.fallback``), in their order, each found as
+    family_font_path finds it. A family found nowhere is left out, and logged once. The dashboard never sees the
+    list: css_variables builds its font stacks from the role's family alone."""
+    spec = theme.fonts.get(role)
+    families = spec.get("fallback") if isinstance(spec, dict) else None
+    found: list[Path] = []
+    for family in families if isinstance(families, list) else ():
+        path = family_font_path(family, weight) if _is_text(family) else None
+        if path is None:
+            _warn_once(f"fallback:{theme.id}:{role}:{family}", "theme %s: fallback font %r for %s is not installed",
+                       theme.id, family, role)
+            continue
+        found.append(path)
+    return tuple(found)
 
 
 def family_font_path(family: str, weight: str | int = "regular") -> Path | None:

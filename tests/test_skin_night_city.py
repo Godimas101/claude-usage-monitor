@@ -23,8 +23,9 @@ from typing import Any
 import pytest
 from PIL import Image, ImageChops
 
+from usage_monitor import themes as theme_registry
 from usage_monitor.data.models import ApiStatus, Limit
-from usage_monitor.render import dump, engine
+from usage_monitor.render import dump, engine, glyphs
 from usage_monitor.render.model import STALE_MESSAGE_REFUSED, STALE_REFUSED, Row, WidgetModel, build_model
 from usage_monitor.render.skins import RenderOptions, get_skin
 from usage_monitor.render.skins import night_city as nc
@@ -1157,6 +1158,56 @@ def test_missing_font_files_degrade_to_a_default_face_instead_of_failing(monkeyp
     assert skin().render_floating(sample, theme(), variant("blackwall"), 1.0, None).size == (264, 126)
     assert skin().render_taskbar(sample, theme(), variant("blackwall"), 48, 1.0, None).size == (240, 48)
     assert skin().render_tooltip(sample, theme(), variant("blackwall"), 1.0).size == (264, 182)
+
+
+def _mono_donor_names() -> list[str]:
+    faces = nc._faces(theme())
+    return [Path(donor.path).name for donor in nc._donors(theme(), faces).get(str(faces[nc.FONT_MONO]), ())]
+
+
+def test_the_mono_face_falls_back_to_consolas_then_the_bundled_plex(monkeypatch):
+    if not (theme_registry._windows_fonts_dir() / "consola.ttf").is_file():
+        pytest.skip("Consolas is not installed on this machine")
+    monkeypatch.setattr(nc, "_DONORS", {})
+    assert _mono_donor_names() == ["consola.ttf", "IBMPlexMono-Regular.ttf"]
+    faces = nc._faces(theme())
+    assert set(nc._donors(theme(), faces)) == {str(faces[nc.FONT_MONO])}          # Rajdhani declares none
+    assert nc._canvas(8, 8, 1.0, theme()).donors == nc._donors(theme(), faces)
+
+
+def test_without_consolas_the_mono_face_falls_back_to_the_bundled_plex(tmp_path, monkeypatch):
+    monkeypatch.setattr(theme_registry, "_windows_fonts_dir", lambda: tmp_path)
+    monkeypatch.setattr(theme_registry, "_WARNED", set())
+    monkeypatch.setattr(nc, "_DONORS", {})
+    assert _mono_donor_names() == ["IBMPlexMono-Regular.ttf"]
+
+
+@pytest.mark.parametrize("scale", SCALES)
+@pytest.mark.parametrize("spec_name", ["NAME", "RESET"])
+def test_the_narrow_no_break_space_measures_as_a_no_break_space(spec_name, scale):
+    """Rajdhani's .notdef is 0.600 em where its U+00A0 is 0.220; Share Tech Mono's is one cell either way."""
+    spec, ink = getattr(nc, spec_name), ink_for(scale)
+    for narrow in ("1\u202f234", "4:12\u202fP.\u202fM."):
+        plain = narrow.replace("\u202f", "\u00a0")
+        assert ink.tracking(spec, narrow) == ink.tracking(spec, plain)
+        assert ink.width(narrow, spec) == ink.width(plain, spec)
+
+
+@pytest.mark.parametrize("scale", SCALES)
+def test_a_letter_from_the_donor_is_measured_in_the_donor(scale):
+    """The run is laid out to its true width, each character in the face it is drawn from: Ş from the donor."""
+    ink, text = ink_for(scale), "ŞUB 4:12"
+    font = ink.font(nc.RESET)
+    donors = ink.cv.font_donors(font)
+    assert donors
+    files = [font.path, *(donor.path for donor in donors)]
+    picked = [font.path if ord(ch) in glyphs.codepoints(font.path) else
+              next(path for path in files[1:] if ord(ch) in glyphs.codepoints(path)) for ch in text]
+    assert picked[0] != font.path and picked[1:] == [font.path] * (len(text) - 1)
+    true = sum(nc._em_advance(path, ch) for path, ch in zip(picked, text)) * nc.RESET.size
+    width = ink.width(text, nc.RESET)
+    assert width == pytest.approx(true + len(text) * nc.RESET.tracking, abs=1e-9)
+    assert ink.layer(text, nc.RESET, 10, 20)[1] == width
 
 
 # ── Speed (loose, three times the budget) ─────────────────────────────────────

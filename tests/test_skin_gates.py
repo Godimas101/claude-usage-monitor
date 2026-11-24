@@ -1068,6 +1068,55 @@ def test_unhinted_advances_scale_with_the_size():
     assert a == pytest.approx(b, rel=1e-6)                     # the layout is the same at every scale
 
 
+def _gates_ink(run: tuple[Image.Image, int, int]) -> tuple[int, int, bytes]:
+    """A run's ink as (left of the pen start, top above the baseline, pixels)."""
+    mask, pad, ascent = run
+    box = mask.getbbox()
+    assert box is not None
+    return box[0] - pad, box[1] - pad - ascent, mask.crop(box).tobytes()
+
+
+@pytest.mark.parametrize("face_name", ["Michroma", "Segoe UI Variable"])
+def test_the_narrow_no_break_space_is_measured_and_set_as_a_no_break_space(face_name):
+    """U+202F is measured as U+00A0 (#92): Michroma's .notdef is 0.875 em where its U+00A0 is 0.284, and Segoe UI
+    Variable's own U+202F is 0.137 em against 0.274."""
+    path = theme_registry.family_font_path(face_name)
+    if path is None:
+        pytest.skip(f"{face_name} is not installed on this machine")
+    variable = gates._is_variable(str(path))
+    face = gates.Face(str(path), 30.0, 400 if variable else 0, 30.0 if variable else None, variable)
+    narrow, plain = "1\u202f234 p.\u202fm.", "1\u00a0234 p.\u00a0m."
+    assert gates._text_px(face, narrow) == gates._text_px(face, plain)
+    for frac in (0.0, 0.25):
+        a, b = gates._run(face, narrow, 1.0, frac), gates._run(face, plain, 1.0, frac)
+        assert (a[0].size, a[0].tobytes(), a[1:]) == (b[0].size, b[0].tobytes(), b[1:])
+
+
+def test_gates_measures_and_draws_a_missing_letter_in_the_same_donor():
+    """Gates declares no fallback, but its faces take the switch S3 (#61) will use: _text_px and _run pick alike."""
+    stm = str(engine.font_file("sharetechmono/ShareTechMono-Regular.ttf"))
+    plex = str(engine.font_file("ibmplexmono/IBMPlexMono-Regular.ttf"))
+    face = gates.Face(stm, 30.0, 0, None, False, (engine.Donor(plex),))
+    expected = (2 * gates._em_advance(stm, 0, None, False, "A") + gates._em_advance(plex, 0, None, False, "ğ")) * 30
+    assert gates._text_px(face, "AğA") == pytest.approx(expected)
+    assert gates._text_px(face, "AğA") != gates._text_px(gates.Face(stm, 30.0, 0, None, False), "AğA")
+    assert _gates_ink(gates._run(face, "ğ", 1.0, 0.0)) == \
+        _gates_ink(gates._run(gates.Face(plex, 30.0, 0, None, False), "ğ", 1.0, 0.0))
+    two = gates._run(face, "AğA", 1.0, 0.0)[0]
+    assert two.size[0] == math.ceil(expected) + 2 * (30 // 2 + 2)
+
+
+def test_gates_faces_carry_the_theme_fallback_and_gates_declares_none():
+    fonts = gates._fonts(theme())
+    assert fonts.body.donors == () and fonts.mono.donors == ()
+    nc = dump.load_theme_objects()["night_city"]
+    donors = gates._theme_donors(nc, "mono")
+    assert [Path(donor.path).name for donor in donors][-1:] == ["IBMPlexMono-Regular.ttf"]
+    assert all(not donor.variable for donor in donors)
+    typeface = gates.Typeface(((400, "a.ttf"),), False, donors)
+    assert gates.Ink(288, 128, 1.5, None).face(typeface, 12, 600).donors == donors
+
+
 # ── Performance ───────────────────────────────────────────────────────────────
 
 def _per_call_ms(fn, runs: int = 5) -> float:

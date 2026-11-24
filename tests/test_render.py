@@ -6,6 +6,7 @@ so none of these tests needs USAGE_MONITOR_UI_TESTS=1 and all of them run in CI.
 from __future__ import annotations
 
 import dataclasses
+import logging
 import time
 from dataclasses import replace
 from datetime import datetime, timedelta
@@ -17,6 +18,7 @@ from typing import Any
 import pytest
 from PIL import Image
 
+from usage_monitor import themes as theme_registry
 from usage_monitor.agent import guard as guard_mod
 from usage_monitor.data import usage_api
 from usage_monitor.data.models import (
@@ -28,7 +30,7 @@ from usage_monitor.data.models import (
     PlanInfo,
     UsageSnapshot,
 )
-from usage_monitor.render import dump, engine
+from usage_monitor.render import dump, engine, glyphs
 from usage_monitor.render.model import (
     SEVERITY_CRITICAL,
     SEVERITY_NORMAL,
@@ -856,6 +858,120 @@ def test_wrap_words_gives_the_first_line_its_own_limit_and_never_splits_a_word()
 def test_wrap_words_starts_a_first_word_too_wide_for_the_room_beside_the_lead_on_the_next_line():
     assert engine.wrap_words("aaaaa bbb", len, 10, first_limit=3) == ["", "aaaaa bbb"]   # "FABLE WEEKLY" after a long lead
     assert engine.wrap_words("aaa bbb", len, 10, first_limit=3) == ["aaa", "bbb"]
+
+
+# ── Fonts: the narrow no-break space and the fallback faces (#92) ─────────────
+
+STM = engine.font_file("sharetechmono/ShareTechMono-Regular.ttf")
+PLEX = engine.font_file("ibmplexmono/IBMPlexMono-Regular.ttf")
+
+
+def _text_font_files() -> list[Path]:
+    """Every bundled face, and the Windows faces the skins may draw text with that this machine has."""
+    names = {name for table in theme_registry._SYSTEM_FACES.values() for _weight, name in table}
+    names |= {name for _weight, name in (*gates_skin._STATIC_BODY, *gates_skin._STATIC_MONO)}
+    windows = theme_registry._windows_fonts_dir()
+    present = [path for name in sorted(names - {"SegoeIcons.ttf"}) if (path := windows / name).is_file()]
+    return sorted(engine.bundled_font_root().glob("*/*.ttf")) + present
+
+
+def _run_fields(run: tuple[Image.Image, int, int, float]) -> tuple[Any, ...]:
+    mask, pad, ascent, width = run
+    return mask.size, mask.tobytes(), pad, ascent, width
+
+
+def _ink(mask: Image.Image, pad: int, ascent: int) -> tuple[int, int, bytes]:
+    """A run's ink as (left of the pen start, top above the baseline, pixels): equal for the same glyph in any mask."""
+    box = mask.getbbox()
+    assert box is not None
+    return box[0] - pad, box[1] - pad - ascent, mask.crop(box).tobytes()
+
+
+@pytest.mark.parametrize("path", _text_font_files(), ids=lambda path: path.name)
+def test_the_narrow_no_break_space_is_drawn_and_measured_as_a_no_break_space(path):
+    """No bundled face has U+202F: Michroma would draw its .notdef box 0.875 em wide where U+00A0 is 0.284."""
+    for size in (22.0, 30.0):
+        font = engine.load_font(str(path), size)
+        for tracking in (0.0, 1.5):
+            assert _run_fields(engine._build_run(font, "1\u202f234,5", tracking)) == \
+                _run_fields(engine._build_run(font, "1\u00a0234,5", tracking)), (size, tracking)
+    assert engine.drawn("1\u202f234 p.\u202fm.") == "1\u00a0234 p.\u00a0m."
+
+
+def test_a_letter_the_face_lacks_comes_from_its_donor_with_the_donors_own_advance():
+    stm, plex = engine.load_font(str(STM), 30.0), engine.load_font(str(PLEX), 30.0)
+    donors = (engine.Donor(str(PLEX)),)
+    mask, pad, ascent, width = engine._build_run(stm, "ğ", 0.0, donors)
+    assert width == plex.getlength("ğ") != stm.getlength("ğ")       # Plex's 0.600 em, not the 0.540 box
+    assert _ink(mask, pad, ascent) == _ink(*engine._build_run(plex, "ğ", 0.0)[:3])
+    tracking = 1.5
+    _, _, _, mixed = engine._build_run(stm, "AğA", tracking, donors)
+    assert mixed == pytest.approx(2 * stm.getlength("A") + plex.getlength("ğ") + 3 * tracking)
+
+
+def test_a_run_that_needs_no_donor_is_the_run_without_donors():
+    """Plex's metrics are 23/7 at 22 px against Share Tech Mono's 20/6 and its cell 0.600 em against 0.540: a donor
+    that touched a run of characters the face has would move every one of them."""
+    font = engine.load_font(str(STM), 22.0)
+    for tracking in (0.0, 0.44):
+        assert _run_fields(engine._build_run(font, "RST 11:39 PM", tracking, (engine.Donor(str(PLEX)),))) == \
+            _run_fields(engine._build_run(font, "RST 11:39 PM", tracking))
+
+
+def test_the_donors_are_part_of_the_run_cache_key():
+    helped, plain = engine.Canvas(40, 20, 1.0), engine.Canvas(40, 20, 1.0)
+    font = plain.font("sharetechmono/ShareTechMono-Regular.ttf", 22)
+    helped.donors = {font.path: (engine.Donor(str(PLEX)),)}
+    with_donor = helped.advance("ğğ", font)                         # cached first, with the donor
+    without = plain.advance("ğğ", font)
+    assert with_donor == pytest.approx(2 * engine.load_font(str(PLEX), font.size).getlength("ğ") / plain.k)
+    assert without == pytest.approx(2 * font.getlength("ğ") / plain.k) and without != with_donor
+    _layer, advance = helped.text_layer("ğğ", 0, 15, font)
+    assert advance == with_donor
+
+
+def test_a_donor_with_its_own_characters_draws_them_before_the_runs_face():
+    """S3 (#61) takes two letters from another face although its own face has them (a CSS unicode-range)."""
+    stm, plex = engine.load_font(str(STM), 30.0), engine.load_font(str(PLEX), 30.0)
+    ranged = (engine.Donor(str(PLEX), chars=frozenset("V")),)
+    _, _, _, width = engine._build_run(stm, "VAV", 0.0, ranged)
+    assert width == pytest.approx(2 * plex.getlength("V") + stm.getlength("A"))
+    assert engine.face_index(str(STM), ranged, "A") == 0 and engine.face_index(str(STM), ranged, "ğ") == 0
+
+
+@pytest.mark.parametrize("size", [11.0, 30.0, 44.0])
+@pytest.mark.parametrize("letter", ["İ", "ğ", "Ğ", "ş", "Ş"])
+def test_a_donor_glyph_fits_the_runs_mask(letter, size):
+    """The run keeps Share Tech Mono's metrics and pad; Plex's capitals with a dot and its descenders still fit."""
+    stm, plex = engine.load_font(str(STM), size), engine.load_font(str(PLEX), size)
+    mixed = engine._build_run(stm, letter, 0.0, (engine.Donor(str(PLEX)),))
+    assert _ink(*mixed[:3]) == _ink(*engine._build_run(plex, letter, 0.0)[:3])
+
+
+def test_a_font_whose_character_map_cannot_be_read_is_drawn_in_its_own_face(tmp_path, caplog):
+    """A truncated donor counts as having nothing, and a face whose map points past its end as having everything:
+    either way the run is the one drawn without donors, and the reader logs one warning per file."""
+    data = STM.read_bytes()
+    truncated = tmp_path / "ShareTechMono-Truncated.ttf"
+    truncated.write_bytes(data[:len(data) // 30])
+    cmap_at = glyphs._tables(data)[b"cmap"][0]
+    broken = bytearray(data)
+    for i in range(int.from_bytes(data[cmap_at + 2:cmap_at + 4], "big")):     # each subtable's offset past the end
+        at = cmap_at + 4 + 8 * i + 4
+        broken[at:at + 4] = (len(data) + 1).to_bytes(4, "big")
+    lost = tmp_path / "ShareTechMono-LostMap.ttf"
+    lost.write_bytes(bytes(broken))
+    stm = engine.load_font(str(STM), 22.0)
+    with caplog.at_level(logging.WARNING, logger="usage_monitor.render.glyphs"):
+        for _ in range(2):
+            assert glyphs.codepoints(str(truncated)) is None and glyphs.codepoints(str(lost)) is None
+            assert _run_fields(engine._build_run(stm, "ğA", 0.0, (engine.Donor(str(truncated)),))) == \
+                _run_fields(engine._build_run(stm, "ğA", 0.0))
+            own = engine.load_font(str(lost), 22.0)
+            assert _run_fields(engine._build_run(own, "ğA", 0.0, (engine.Donor(str(PLEX)),))) == \
+                _run_fields(engine._build_run(own, "ğA", 0.0))
+    warnings = [record.getMessage() for record in caplog.records if record.name == "usage_monitor.render.glyphs"]
+    assert len(warnings) == 2 and all("cannot read the character map" in message for message in warnings)
 
 
 # ── Options ───────────────────────────────────────────────────────────────────

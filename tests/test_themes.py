@@ -216,6 +216,16 @@ BREAKAGES: list[tuple[str, Callable[[dict[str, Any]], None], str]] = [
      "does not match the file name 'nostromo'"),
     ("font family missing", lambda d: d["fonts"]["mono"].pop("family"),
      "fonts.mono needs a family name"),
+    ("font fallback not a list", lambda d: d["fonts"]["mono"].update(fallback="Consolas"),
+     "fonts.mono.fallback must be a list of family names"),
+    ("font fallback holding a number", lambda d: d["fonts"]["mono"].update(fallback=["Consolas", 3]),
+     "fonts.mono.fallback must be a list of family names"),
+    ("font fallback holding a blank", lambda d: d["fonts"]["body"].update(fallback=["Consolas", " "]),
+     "fonts.body.fallback must be a list of family names"),
+    ("font fallback naming its own family", lambda d: d["fonts"]["mono"].update(fallback=["Consolas", "vt 323"]),
+     "fonts.mono.fallback must be a list of family names"),
+    ("font fallback naming a family twice", lambda d: d["fonts"]["mono"].update(fallback=["Consolas", "consolas"]),
+     "fonts.mono.fallback must be a list of family names"),
     ("no variants", lambda d: d.update(variants=[]), "variants must be a non-empty list"),
     ("duplicate variant id", lambda d: d["variants"][1].update(id="amber"), "duplicate id"),
     ("variant without colours", lambda d: d["variants"][2].pop("colors"),
@@ -917,6 +927,38 @@ def test_windows_fonts_resolve_by_family_name(family: str, weight: str, file_nam
     assert path.name == file_name
     assert path.parent.name == "Fonts"
     assert path.is_file()
+
+
+def test_fallback_paths_follow_the_json_order_and_skip_a_family_found_nowhere(
+    shipped: dict[str, themes.Theme], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    night_city = shipped["night_city"]
+    assert night_city.fonts["mono"]["fallback"] == ["Consolas", "IBM Plex Mono"]
+    consolas = themes.family_font_path("Consolas")
+    expected = ([consolas] if consolas is not None else []) + [FONTS / "ibmplexmono" / "IBMPlexMono-Regular.ttf"]
+    assert list(themes.fallback_paths(night_city, "mono")) == expected
+    assert themes.fallback_paths(night_city, "body") == ()
+    assert all(themes.fallback_paths(shipped[theme_id], role) == ()
+               for theme_id in ("nostromo", "gates") for role in FONT_ROLES)
+    monkeypatch.setattr(themes, "_windows_fonts_dir", lambda: tmp_path)
+    with caplog.at_level(logging.WARNING, logger="usage_monitor.themes"):
+        for _ in range(2):
+            assert [path.name for path in themes.fallback_paths(night_city, "mono")] == ["IBMPlexMono-Regular.ttf"]
+    notes = [record.getMessage() for record in caplog.records if "'Consolas'" in record.getMessage()]
+    assert len(notes) == 1                                       # logged once
+
+
+def test_night_citys_page_and_widgets_take_missing_letters_from_the_same_face(shipped: dict[str, themes.Theme]) -> None:
+    """The widgets' first fallback is the face the dashboard falls to after Share Tech Mono, in both of its stacks
+    (the server's --font-mono and the stylesheet's --f-data), so both draw Turkish letters from Consolas."""
+    night_city = shipped["night_city"]
+    first = night_city.fonts["mono"]["fallback"][0]
+    stack = themes.css_variables(night_city, night_city.variant(None))["--font-mono"]
+    families = [part.strip().strip('"') for part in stack.split(",")]
+    assert families[:2] == [night_city.fonts["mono"]["family"], first]
+    css = (SHIPPED.parent / "webui" / "themes" / "night_city.css").read_text(encoding="utf-8")
+    data = re.search(r"--f-data:\s*var\(--font-mono,[^)]*\),\s*([^,;]+)", css)
+    assert data is not None and data.group(1).strip().strip('"') == first
 
 
 def test_unknown_families_and_roles_give_none(shipped: dict[str, themes.Theme]) -> None:

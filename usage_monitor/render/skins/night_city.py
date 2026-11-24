@@ -62,7 +62,7 @@ from usage_monitor.render.model import (
     pace_delta,
     unknown_kind_names,
 )
-from usage_monitor.render.skins import RenderOptions, coerce_options
+from usage_monitor.render.skins import RenderOptions, coerce_options, face_donors
 
 log = get_logger(__name__)
 
@@ -159,6 +159,7 @@ _FACE_ROLES = {
     FONT_MONO: ("mono", "regular"),
 }
 _FACES: dict[str, dict[str, Path]] = {}
+_DONORS: dict[tuple[str, tuple[str, ...]], dict[str, tuple[engine.Donor, ...]]] = {}
 
 
 class Type(NamedTuple):
@@ -383,9 +384,18 @@ def _faces(theme: Any) -> dict[str, Path]:
     return _FACES[key]
 
 
+def _donors(theme: Any, faces: Mapping[str, Path]) -> dict[str, tuple[engine.Donor, ...]]:
+    """The fallback faces of each face file (face_donors), resolved once per theme and set of files."""
+    key = (str(getattr(theme, "id", "night_city")), tuple(str(path) for path in faces.values()))
+    if key not in _DONORS:
+        _DONORS[key] = face_donors(theme, _FACE_ROLES, faces)
+    return _DONORS[key]
+
+
 def _canvas(width: float, height: float, scale: float, theme: Any) -> Canvas:
     cv = Canvas(width, height, scale)
     cv.faces = _faces(theme)
+    cv.donors = _donors(theme, cv.faces)
     return cv
 
 
@@ -446,10 +456,11 @@ class _Ink:
         """Letter-spacing for a run of ``text``: the CSS value plus an even share of the gap between the run's
         true width and the one FreeType hints at the buffer size. Hinting rounds every advance to a whole
         buffer pixel, so a run can come out a pixel off the browser's (which lays out true advances)."""
-        path = getattr(self.font(spec), "path", None)
+        font = self.font(spec)
+        path = getattr(font, "path", None)
         if not text or not isinstance(path, str):
             return spec.tracking
-        return spec.tracking + _advance_gap(path, spec.size, self.cv.k, text)
+        return spec.tracking + _advance_gap(path, self.cv.font_donors(font), spec.size, self.cv.k, text)
 
     def width(self, text: str, spec: Type) -> float:
         return self.cv.advance(text, self.font(spec), self.tracking(spec, text))
@@ -521,11 +532,14 @@ def _em_advance(path: str, char: str) -> float:
 
 
 @functools.lru_cache(maxsize=1024)
-def _advance_gap(path: str, size: float, k: float, text: str) -> float:
-    """Per-glyph letter-spacing (logical px) that brings ``text`` to its true width at ``size``."""
-    font = engine.load_font(path, round(size * k, 3))
-    true = sum(_em_advance(path, char) for char in text) * size
-    hinted = sum(font.getlength(char) for char in text) / k
+def _advance_gap(path: str, donors: tuple[engine.Donor, ...], size: float, k: float, text: str) -> float:
+    """Per-glyph letter-spacing (logical px) that brings ``text`` to its true width at ``size``. Each character is
+    measured in the face the engine draws it from (engine.face_index), and as it draws it (engine.drawn)."""
+    text = engine.drawn(text)
+    files = [path, *(donor.path for donor in donors)]
+    picked = [files[engine.face_index(path, donors, char)] for char in text]
+    true = sum(_em_advance(face, char) for face, char in zip(picked, text)) * size
+    hinted = sum(engine.load_font(face, round(size * k, 3)).getlength(char) for face, char in zip(picked, text)) / k
     return (true - hinted) / len(text)
 
 

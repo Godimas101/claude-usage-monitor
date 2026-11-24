@@ -144,6 +144,7 @@ resolve(settings) -> tuple[Theme, Variant]                        # theme_id / t
 migrate_v1(settings) -> bool                                       # v1 "theme" name -> theme_id + theme_variant, once
 css_variables(theme, variant) -> dict[str, str]                    # {"--bg": "#090909", ...} for the webui
 font_path(theme, role: "display" | "body" | "mono", weight: str = "regular") -> Path | None   # bundled or system TTF
+fallback_paths(theme, role, weight: str = "regular") -> tuple[Path, ...]   # fonts.<role>.fallback in order; a missing one left out
 ```
 Gates "system" variants take the live Windows accent and light/dark mode through injected
 callables (defaults read the registry via `ui/platform.py`). v1 map: Default→amber, Red, Blue,
