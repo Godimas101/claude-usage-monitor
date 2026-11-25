@@ -23,13 +23,18 @@ What goes in a box: English as the skins draw it today; each language's longest 
 text where the box holds one (``templates``, the language's day clock where English writes WED), as the skin draws
 them: in capitals in Nostromo and Night City, glued in the guard's statement (which wraps), and a percent or a dollar
 without its space in a box sized for English's figures (``Box.tight``: Chris's decision on #91); the dashboard's money
-boxes take the page's own figures (PAGE_MONEY); and, once the box's text moves to the catalog (#93 to #101), its keys in
-that language. Until then the pseudo-locale measures that English through
-``i18n.pseudo_text``. Counts (the pace points) get no figure: a whole number under 1000 is written alike in all four
-languages.
+boxes take the page's own figures (PAGE_MONEY); and the text of the box's catalog keys (``Box.keys``) in that language.
+The pseudo-locale measures English through ``i18n.pseudo_text``, its keys included. Since #93 the boxes that draw the
+view model's status word carry its key, and the tray tooltip is a composing box (``Box.compose``): it measures every
+worst-case tooltip the code words in the language (tests/widget_words.tooltip_sweep: two limits at 100 % in each
+status, the guard holding at the longest clocks of every format tag and every countdown shape, a dev instance), after
+the drop rule, not its English made pseudo. Only a composing box may hold a key with a placeholder: any other box would
+measure the placeholder as written. The skins' own words get their keys from #94 to #96, the toasts' from #97. Counts
+(the pace points) get no figure: a whole number under 1000 is written alike in all four languages.
 
     python tests/budgets.py [--lang ID]     what a language's text would not fit (default: pseudo)
     python tests/budgets.py --limits        every box's and line's limit, as test_budgets.py pins them
+    python tests/budgets.py --tooltips      each language's longest tray tooltip, as test_budgets.py pins them
 """
 from __future__ import annotations
 
@@ -40,7 +45,7 @@ import re
 import string
 import sys
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -52,6 +57,7 @@ if str(REPO) not in sys.path:
 
 from usage_monitor import casing, i18n  # noqa: E402
 from usage_monitor.render import dump, engine  # noqa: E402
+from usage_monitor.render.model import STATUS_KEYS  # noqa: E402
 from usage_monitor.render.skins import RenderOptions  # noqa: E402
 from usage_monitor.render.skins import gates as g  # noqa: E402
 from usage_monitor.render.skins import night_city as nc  # noqa: E402
@@ -228,8 +234,10 @@ class Box:
     english: tuple[str, ...]        # every English text the skin can put there
     kinds: tuple[str, ...] = ()     # the figures it holds
     templates: tuple[str, ...] = ("{}",)    # how a figure sits in its text
-    keys: tuple[str, ...] = ()      # catalog keys drawn in it, once its text is in the catalog (#93 to #101)
+    keys: tuple[str, ...] = ()      # catalog keys drawn in it (#93 on)
     tight: bool = False             # sized for English's figures: no space beside its "%" or "$" (#91)
+    compose: Callable[[str], Sequence[str]] | None = None   # a composing box: its whole texts, as the code words them
+    note: str = ""                  # its keys' budget note, where the limit is the whole text's, not a phrase's
 
     @property
     def unit(self) -> str:
@@ -350,33 +358,60 @@ _WAIT_N = "12 sessions waiting on the usage guard were let go early."
 
 def _nos(id_: str, font: str, size: float, tracking: float, limit: float, why: str, fit: str = "none", *,
          english: tuple[str, ...], kinds: tuple[str, ...] = (), templates: tuple[str, ...] = ("{}",),
-         canvas: str = "frame", tight: bool = False) -> Box:
-    return Box(id_, nos_run(font, size, tracking, canvas), limit, why, fit, english, kinds, templates, tight=tight)
+         canvas: str = "frame", tight: bool = False, keys: tuple[str, ...] = ()) -> Box:
+    return Box(id_, nos_run(font, size, tracking, canvas), limit, why, fit, english, kinds, templates, keys,
+               tight=tight)
 
 
 def _nc(id_: str, spec: str, limit: float, why: str, fit: str = "none", *, english: tuple[str, ...],
         kinds: tuple[str, ...] = (), templates: tuple[str, ...] = ("{}",), measure: Measure | None = None,
-        tight: bool = False) -> Box:
-    return Box(id_, measure or Measure("night_city", (spec,)), limit, why, fit, english, kinds, templates,
+        tight: bool = False, keys: tuple[str, ...] = ()) -> Box:
+    return Box(id_, measure or Measure("night_city", (spec,)), limit, why, fit, english, kinds, templates, keys,
                tight=tight)
 
 
 def _g(id_: str, role: str, size: float, weight: int, limit: float, why: str, fit: str = "none", *,
        english: tuple[str, ...], kinds: tuple[str, ...] = (), templates: tuple[str, ...] = ("{}",),
-       tight: bool = False) -> Box:
-    return Box(id_, Measure("gates", (role, size, weight)), limit, why, fit, english, kinds, templates, tight=tight)
+       tight: bool = False, keys: tuple[str, ...] = ()) -> Box:
+    return Box(id_, Measure("gates", (role, size, weight)), limit, why, fit, english, kinds, templates, keys,
+               tight=tight)
 
 
 def _chars(id_: str, limit: float, why: str, fit: str, *, english: tuple[str, ...], kinds: tuple[str, ...] = (),
-           templates: tuple[str, ...] = ("{}",), tight: bool = False) -> Box:
-    return Box(id_, Measure("chars"), limit, why, fit, english, kinds, templates, tight=tight)
+           templates: tuple[str, ...] = ("{}",), tight: bool = False, keys: tuple[str, ...] = (),
+           compose: Callable[[str], Sequence[str]] | None = None, note: str = "") -> Box:
+    return Box(id_, Measure("chars"), limit, why, fit, english, kinds, templates, keys, tight=tight, compose=compose,
+               note=note)
+
+
+# The view model's status words (render/model.STATUS_KEYS, #93) by their English, for the boxes that draw them.
+_STATUS_KEY: dict[str, str] = {str(i18n.load_catalog(i18n.DEFAULT).text(key)): key for key in STATUS_KEYS.values()}
+
+
+def _status_keys(*words: str) -> tuple[str, ...]:
+    return tuple(_STATUS_KEY[word] for word in words)
+
+
+# The tray tooltip's keys (app.tray_tooltip, #93): its lead, the two limits, the seven statuses and the guard's forms.
+TOOLTIP_KEYS: tuple[str, ...] = (
+    "tray.tip.lead", "tray.tip.session", "tray.tip.weekly",
+    *(f"tray.tip.status.{key.rsplit('.', 1)[1]}" for key in STATUS_KEYS.values()),
+    "tray.tip.guard_armed", "tray.tip.guard_holding", "tray.tip.guard_until", "tray.tip.guard_until_in")
+
+
+def _tooltips(language: str) -> list[str]:
+    """Every worst-case tray tooltip ``language`` shows, as app.tray_tooltip words it (tests/widget_words.py)."""
+    from widget_words import tooltip_sweep
+
+    return list(tooltip_sweep(language))
 
 
 BOXES: tuple[Box, ...] = (
     # ── Nostromo: the floating widget's header (nostromo._header, _pill, _state_word, _armed_mark) ──
     _nos("nostromo.floating.status_pill", SEMI, 10, 1.2,
          HEADER - 10 - (6 + _AGE_WIDEST) - (_HOLD_WIDEST + 8),
-         "header room less the pill's frame, the widest age and the widest hold chip", english=_STATUS_WORDS),
+         "header room less the pill's frame, the widest age and the widest hold chip", english=_STATUS_WORDS,
+         keys=_status_keys(*_STATUS_WORDS)),
     _nos("nostromo.floating.age", REG, 10, 0.6,
          nos.RIGHT - (_HOLD_WIDEST + 8) - (nos.LEFT + 12 + 10 + _PILL_WIDEST + 6),
          "from the widest pill's end to the widest hold chip", kinds=("age",),
@@ -471,7 +506,8 @@ BOXES: tuple[Box, ...] = (
     _nc("night_city.floating.live_tag", "STATUS", nc.RIGHT - (_NC_HEAD + _NC_BRAND) - 8,
         "right of the brand, its box 8 px wider than the word", english=("LIVE",)),
     _nc("night_city.floating.status_chip", "CHIP", nc.RIGHT - (_NC_HEAD + _NC_BRAND) - 12,
-        "right of the brand, the chip 12 px wider than the word", english=("PAUSED", "LOADING")),
+        "right of the brand, the chip 12 px wider than the word", english=("PAUSED", "LOADING"),
+        keys=_status_keys("PAUSED", "LOADING")),
     _nc("night_city.floating.guard_chip", "CHIP",
         nc.RIGHT - (W_nc("PAUSED", "CHIP") + 12) - 2 * nc.GUARD_GAP - (_NC_HEAD + _NC_BRAND) - 12,
         "between the brand and a status chip, left out where it does not fit", "drop", english=("GUARD",)),
@@ -480,7 +516,7 @@ BOXES: tuple[Box, ...] = (
         english=_COUNTDOWNS),
     # ── Night City: the band (_draw_band, _draw_band_hold) ──
     _nc("night_city.floating.band_text", "BAND_TYPE", nc.BAND_AGE_RIGHT - 10 - nc.BAND_TEXT_X - W_nc("100 D OLD", "RESET"),
-        "the cause, left of the widest age", "ellipsis", english=_NC_CAUSES),
+        "the cause, left of the widest age", "ellipsis", english=_NC_CAUSES, keys=_status_keys("RATE LIMITED")),
     _nc("night_city.floating.band_text_no_age", "BAND_TYPE", nc.BAND_AGE_RIGHT - nc.BAND_TEXT_X,
         "the whole band", "ellipsis", english=("NO LOGIN // OPEN DASHBOARD",)),
     _nc("night_city.floating.band_age", "RESET",
@@ -491,7 +527,7 @@ BOXES: tuple[Box, ...] = (
     _nc("night_city.floating.band_hold_text", "BAND_TYPE",
         nc.BAND_AGE_RIGHT - nc.GUARD_GAP - nc.BAND_TEXT_X - (W_nc("HOLD", "CHIP") + 17),
         "the cause beside the shortest hold chip (the countdown and the age give way first)", "ellipsis",
-        english=_NC_CAUSES),
+        english=_NC_CAUSES, keys=_status_keys("RATE LIMITED")),
     _nc("night_city.floating.band_hold_chip", "CHIP", nc.BAND_AGE_RIGHT - nc.GUARD_GAP - nc.BAND_TEXT_X - 17 - _NC_CAUSE_FLOOR,
         "right-anchored at BAND_AGE_RIGHT, never cut; it may only leave the cause its shortest cut", kinds=("duration",),
         templates=("HOLD {}",), english=_COUNTDOWNS),
@@ -566,25 +602,28 @@ BOXES: tuple[Box, ...] = (
        "left of the guard's capsule and the widest status pill", english=("Claude usage",)),
     _g("gates.floating.status_word", "body", 10, 600,
        g.PILL_RIGHT - _G_PILL_CHROME - g.TITLE_X - g.TITLE_GAP - _G_TITLE - _G_GUARD,
-       "the pill's word, right of the title and the guard's capsule", english=_STATUS_WORDS),
+       "the pill's word, right of the title and the guard's capsule", english=_STATUS_WORDS,
+       keys=_status_keys(*_STATUS_WORDS)),
     _g("gates.floating.status_pill", "body", 10, 600,
        g.PILL_RIGHT - _G_PILL_CHROME - g.TITLE_X - g.TITLE_GAP - _G_TITLE - _G_GUARD,
        "the word and its age; the age is left out where it does not fit", "drop", kinds=("age",),
        templates=("RATE LIMITED · {}",),
        english=("LIVE · 12 s", "STALE · 41 min", "OFFLINE · 2 min", "PAUSED · 12 s", "RATE LIMITED · 6 min",
-                "RATE LIMITED · 44 min", "RATE LIMITED · 59 min", "NO LOGIN · 2 d", "LIVE · 59 s", "STALE · 1 h")),
+                "RATE LIMITED · 44 min", "RATE LIMITED · 59 min", "NO LOGIN · 2 d", "LIVE · 59 s", "STALE · 1 h"),
+       keys=_status_keys("LIVE", "STALE", "OFFLINE", "PAUSED", "RATE LIMITED", "NO LOGIN")),
     _g("gates.tooltip.title", "body", 12, 600,
        g.RIGHT - _G_PILL_CHROME - _G_GUARD - g.TITLE_GAP - g.TITLE_X - _G_WORD_WIDEST,
        "the hover card's header, to RIGHT", english=("Claude usage",)),
     _g("gates.tooltip.status_word", "body", 10, 600,
        g.RIGHT - _G_PILL_CHROME - g.TITLE_X - g.TITLE_GAP - _G_TITLE - _G_GUARD,
-       "the hover card's pill word", english=_STATUS_WORDS),
+       "the hover card's pill word", english=_STATUS_WORDS, keys=_status_keys(*_STATUS_WORDS)),
     _g("gates.tooltip.status_pill", "body", 10, 600,
        g.RIGHT - _G_PILL_CHROME - g.TITLE_X - g.TITLE_GAP - _G_TITLE - _G_GUARD,
        "the hover card's word and age; the age is left out where it does not fit", "drop", kinds=("age",),
        templates=("RATE LIMITED · {}",),
        english=("LIVE · 12 s", "STALE · 41 min", "OFFLINE · 2 min", "PAUSED · 12 s", "RATE LIMITED · 6 min",
-                "RATE LIMITED · 44 min", "RATE LIMITED · 59 min", "NO LOGIN · 59 min", "LOADING · 59 s")),
+                "RATE LIMITED · 44 min", "RATE LIMITED · 59 min", "NO LOGIN · 59 min", "LOADING · 59 s"),
+       keys=_status_keys("LIVE", "STALE", "OFFLINE", "PAUSED", "RATE LIMITED", "NO LOGIN", "LOADING")),
     # ── Gates: the rows (_row, _cap_badge) ──
     _g("gates.floating.row_label", "body", 12, 400, g.RIGHT - g.LEFT - 10 - _G_VALUE_100,
        "left of the widest value; the tag gives way first, then the label is cut", "ellipsis",
@@ -669,8 +708,11 @@ BOXES: tuple[Box, ...] = (
     _chars("dashboard.gates.cost_hero", 6, "fmtUsdHero's six characters; the stylesheet shrinks it to 30 px (40 px "
            "flat on short or 1001 to 1100 px windows)", "shrink", kinds=("money",), english=_HEROES, tight=True),
     # ── The tray (ui/tray.py: TIP_LIMIT, TITLE_LIMIT, BODY_LIMIT) and its toasts ──
-    _chars("app.tray.tooltip", tray.TIP_LIMIT, "TIP_LIMIT (szTip holds 128 UTF-16 units with the terminator)", "ellipsis",
-           kinds=("percent", "clock", "duration"),
+    _chars("app.tray.tooltip", tray.TIP_LIMIT, "TIP_LIMIT (szTip holds 128 UTF-16 units with the terminator); past "
+           "it the guard's countdown, then its resume time, drop (app.tray_tooltip), and only then is it cut", "drop",
+           kinds=("percent", "clock", "duration"), keys=TOOLTIP_KEYS, compose=_tooltips,
+           note=f"the whole tooltip: {tray.TIP_LIMIT} UTF-16 units (app.tray.tooltip, drop); past it the guard's "
+                "countdown, then its resume time, drop",
            english=("Claude usage - loading", "Claude usage - no login", "Claude usage - paused",
                     "Claude usage - session 13% - weekly 2%", "Claude usage - session 13% - weekly 2% - guard armed",
                     "Claude usage - session 13% - weekly 2% - rate limited",
@@ -854,9 +896,12 @@ def _figures(box: Box, kind: str, template: str, language: str) -> tuple[str, ..
 
 def texts(box: Box, language: str) -> list[str]:
     """What ``language`` puts in ``box``: English as drawn today, for the pseudo-locale that English made pseudo,
-    the language's longest figures set in the box's text as its skin draws them, and the text of the box's keys once
-    it has them."""
+    the language's longest figures set in the box's text as its skin draws them, and the text of the box's keys. A
+    composing box takes its whole texts as the code words them in the language (English's listed ones too)."""
     found: list[str] = []
+    if box.compose is not None:
+        found += [*(box.english if language == i18n.DEFAULT else ()), *box.compose(language)]
+        return list(dict.fromkeys(found))
     if language == i18n.DEFAULT:
         found += box.english
     elif language == i18n.PSEUDO:
@@ -869,7 +914,7 @@ def texts(box: Box, language: str) -> list[str]:
                     figure = tight(figure) if box.tight and kind in ("percent", "money") else figure
                     found.append(slot.format(_drawn_as(box, figure, language)))
     if box.keys:
-        catalog = i18n.load_catalog(language)
+        catalog = i18n.app_catalog(language)
         for key in box.keys:
             entry = catalog.lookup(key)
             if entry is not None and isinstance(entry.value, str):
@@ -964,8 +1009,32 @@ def english_overruns() -> set[tuple[str, str]]:
 
 
 def notes() -> dict[str, str]:
-    """The budget note each box key carries beside it in en.json, so translators see the limit."""
-    return {f"_budget.{key}": f"{box.limit:g} {box.unit} ({box.id}, {box.fit})" for box in BOXES for key in box.keys}
+    """The budget note each box key carries just after it in en.json, so translators see the limit: every box the key
+    sits in, by id, each as "<limit> <unit> (<box id>, <fit>)" or the box's own note, joined by "; "."""
+    boxes: dict[str, list[Box]] = {}
+    for box in BOXES:
+        for key in box.keys:
+            boxes.setdefault(key, []).append(box)
+    return {f"_budget.{key}": "; ".join(box.note or f"{box.limit:g} {box.unit} ({box.id}, {box.fit})"
+                                        for box in sorted(found, key=lambda box: box.id))
+            for key, found in boxes.items()}
+
+
+def longest_tooltips() -> dict[str, tuple[int, str]]:
+    """Each language's longest tray tooltip (the composing box's texts) in UTF-16 units, with its text: the tooltip's
+    record (#93). A draft that lengthens one records it again (#104 to #106)."""
+    box = BOX["app.tray.tooltip"]
+    longest: dict[str, tuple[int, str]] = {}
+    for language in i18n.DEV_LANGUAGES:
+        text = min(texts(box, language), key=lambda text: (-box.width(text), text))
+        longest[language] = (int(box.width(text)), text)
+    return longest
+
+
+def tooltips_table() -> str:
+    """The longest tooltips as test_budgets.py's TOOLTIPS holds them, each with its text, to paste there."""
+    return "\n".join(f"    {json.dumps(language)}: {units},   # {text}"
+                     for language, (units, text) in longest_tooltips().items())
 
 
 def limits_table(width: int = 120) -> str:
@@ -1078,9 +1147,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="What a language's text would not fit in the widgets (#89).")
     parser.add_argument("--lang", default=i18n.PSEUDO, choices=i18n.DEV_LANGUAGES)
     parser.add_argument("--limits", action="store_true", help="print every limit, as test_budgets.py pins them")
+    parser.add_argument("--tooltips", action="store_true",
+                        help="print each language's longest tray tooltip, as test_budgets.py pins them")
     args = parser.parse_args(argv)
     if args.limits:
         print(limits_table())
+        return 0
+    if args.tooltips:
+        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+        print(tooltips_table())
         return 0
     rows = over(args.lang)
     print(f"{args.lang}: {len(rows)} texts past their budget, "

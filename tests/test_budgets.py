@@ -104,6 +104,8 @@ FOR_91: dict[str, set[tuple[str, str]]] = {
            for day in _FR_DAYS for time in ("12 H 59\u202fP.M.", "12:59\u202fP.M.")}             # fr-MA's day clocks
     | {(box, f"RST {day} 12 H 59\u202fP.M.") for day in _FR_DAYS                                    # #95: the same
        for box in ("night_city.floating.row_reset", "night_city.tooltip.info_reset")}
+    # #94: the header's status word (its key since #93) beside the widest age and hold chip
+    | {("nostromo.floating.header_line", "RATE LIMITED | 59MIN | HOLD 23H 59MIN")}
     | _COMPACT["fr"],                                                     # #91: the compact tiles (above)
     "es": _COMPACT["es"]                                                  # #91: the compact tiles (above)
     | {("nostromo.tooltip.resets", f"RESETS {day} 12:59\u202f{period}")                       # #94: es-ES's and
@@ -111,8 +113,28 @@ FOR_91: dict[str, set[tuple[str, str]]] = {
     | {("nostromo.floating.age", "100 DÍAS"), ("nostromo.floating.state_chip", "HOLD 23 H 59 MIN"),   # #94: es-CO's
        ("nostromo.floating.state_chip", "HOLD 6 DÍAS 23 H")}                                         # units
     | {("night_city.floating.band_age", "100 DÍAS OLD")}                                            # #95: the same
+    | {("nostromo.floating.header_line", "RATE LIMITED | 100 DÍAS | HOLD 23 H 59 MIN")}             # #94: as in fr
     | {(box, "RATE LIMITED · 100 días") for box in ("gates.floating.status_pill", "gates.tooltip.status_pill")},  # #96
     "tr": _COMPACT["tr"],                                                 # #91: the compact tiles (above)
+}
+
+# Each language's longest tray tooltip in UTF-16 units (#93: "the longest tooltip per language is recorded as the
+# budget"), as `python tests/budgets.py --tooltips` prints them, each with its text. fr, es and tr show English's words
+# while their catalogs are empty; a draft that lengthens one records it here again (#104 to #106).
+TOOLTIPS: dict[str, int] = {
+    "en": 113,       # ... - rate limited - guard holding, resumes Fri 10:00 AM (in 10h 59m) (dev)
+    "fr": 120,       # fr-CA, 12-hour: ... - guard holding, resumes dim. 10 h 00 a.m. (in 10h 59m) (dev)
+    "es": 121,       # es-CO, 12-hour: ... - guard holding, resumes dom, 10:00 a. m. (in 10 h 59 min) (dev)
+    "tr": 113,       # ... - guard holding, resumes Cmt ÖS 10:00 (in 10s 59d) (dev)
+    "pseudo": 121,   # live (no status word), countdown dropped: ... [ğüárd höldıñğ, réşüméş Fri 10:00 AM ...] (dev)
+}
+
+# Boxes that draw a status word that is the skin's own, not the view model's (Night City's, #95), so they carry no
+# status key: the header's live tag (_live_tag(..., "LIVE")) and the strip's status words (STRIP_WORDS).
+OWN_STATUS_WORDS: dict[str, str] = {
+    "night_city.floating.live_tag": "Night City's own LIVE tag (night_city._live_tag), #95",
+    "night_city.strip.status_live": "Night City's own LIVE on the strip, #95",
+    "night_city.strip.status_word": "Night City's STRIP_WORDS, #95",
 }
 
 
@@ -406,7 +428,7 @@ def test_each_languages_longest_figures_are_set_in_the_boxs_text() -> None:
     guard = budgets.texts(budgets.BOX["gates.tooltip.guard_text"], "fr")
     assert {"16\u00a0h\u00a012", "12\u00a0h\u00a059\u202fp.m.", "23h\u00a059min"} <= set(guard)
     assert budgets.texts(budgets.BOX["nostromo.floating.cap_tag"], "tr") == ["CAP %100"]
-    assert budgets.texts(budgets.BOX["nostromo.floating.message"], "fr") == []      # no figure, and no keys until #93
+    assert budgets.texts(budgets.BOX["nostromo.floating.message"], "fr") == []      # no figure; its words are #94's
     assert budgets.texts(body, i18n.PSEUDO) == [i18n.pseudo_text(text) for text in body.english]
     tile = budgets.BOX["dashboard.nostromo.cost_tile"]                      # the page's own figures, tight (#91)
     assert budgets.texts(tile, "fr") == ["99,9\u00a0k$"] and budgets.texts(tile, "tr") == ["99,9\u00a0Mn$"]
@@ -521,14 +543,121 @@ def test_every_box_and_line_is_well_formed() -> None:
 
 
 def test_budget_notes_sit_beside_their_keys() -> None:
-    """Each box key carries its budget beside it in en.json, so translators see the limit (none has keys until #93)."""
+    """Each box key carries its budget just after it in en.json, so translators see the limit; a translator's note
+    (``_note.<key>``) sits just before it (#93)."""
     raw = json.loads((i18n.CATALOG_DIR / "en.json").read_text(encoding="utf-8"))
     notes = {key: value for key, value in raw.items() if key.startswith("_budget.")}
-    assert notes == budgets.notes()
+    assert notes and notes == budgets.notes()
     order = list(raw)
     for note in notes:
         key = note[len("_budget."):]
-        assert key in raw and abs(order.index(note) - order.index(key)) == 1, note
+        assert key in raw and order.index(note) == order.index(key) + 1, note
+
+
+# ── The catalog keys in the boxes (#93) ───────────────────────────────────────────────────────────────────────────
+
+def _english(key: str) -> Any:
+    return json.loads((i18n.CATALOG_DIR / "en.json").read_text(encoding="utf-8"))[key]
+
+
+def test_a_boxs_keys_are_the_words_it_draws() -> None:
+    """A box's key is one of the texts it draws, or the word before " · " (Gates' pill, its age after it); and a box
+    whose text is the view model's status word carries that word's key, but for OWN_STATUS_WORDS, the skins' own words.
+    The tooltip, a composing box, carries every tray.tip key and reads no other (the next test)."""
+    from usage_monitor.render.model import STATUS_KEYS
+
+    status = {_english(key): key for key in STATUS_KEYS.values()}
+    wrong, missing = [], []
+    for box in budgets.BOXES:
+        if box.compose is not None:
+            continue
+        leads = {text.split(" · ")[0] for text in box.english}
+        for key in box.keys:
+            if _english(key) not in leads:
+                wrong.append((box.id, key))
+        for lead in sorted(leads & set(status)):
+            if status[lead] not in box.keys and box.id not in OWN_STATUS_WORDS:
+                missing.append((box.id, lead))
+    assert wrong == [] and missing == []
+    keyed = {box.id for box in budgets.BOXES if box.keys and box.compose is None}
+    assert keyed == {"nostromo.floating.status_pill", "gates.floating.status_word", "gates.tooltip.status_word",
+                     "gates.floating.status_pill", "gates.tooltip.status_pill", "night_city.floating.status_chip",
+                     "night_city.floating.band_text", "night_city.floating.band_hold_text"}
+    for box_id in OWN_STATUS_WORDS:
+        assert not budgets.BOX[box_id].keys and set(budgets.BOX[box_id].english) & set(status), box_id
+    raw = json.loads((i18n.CATALOG_DIR / "en.json").read_text(encoding="utf-8"))
+    assert set(budgets.BOX["app.tray.tooltip"].keys) == {key for key in raw if key.startswith("tray.tip.")}
+
+
+def test_the_tooltip_box_composes_the_tooltips_the_code_words(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The tooltip box's texts (English's listed ones aside) are app.tray_tooltip's, as a dev instance shows them, in
+    each language, worded through keys the box lists: a key the tooltip reads that the box does not list fails here."""
+    from usage_monitor import app
+
+    read: set[str] = set()
+    inside = [0]
+    real_text, real_tip = i18n.Catalog.text, app.tray_tooltip
+
+    def text(self: Any, key: str, *args: Any, **kwargs: Any) -> Any:
+        if inside[0]:
+            read.add(key)
+        return real_text(self, key, *args, **kwargs)
+
+    def tray_tooltip(*args: Any, **kwargs: Any) -> str:
+        inside[0] += 1
+        try:
+            return real_tip(*args, **kwargs)
+        finally:
+            inside[0] -= 1
+
+    monkeypatch.setattr(i18n.Catalog, "text", text)
+    monkeypatch.setattr(app, "tray_tooltip", tray_tooltip)
+    box = budgets.BOX["app.tray.tooltip"]
+    for language in i18n.DEV_LANGUAGES:
+        composed = [text for text in budgets.texts(box, language) if text not in box.english]
+        assert composed and all(text.endswith(" (dev)") for text in composed), language
+    assert read and read <= set(box.keys), sorted(read - set(box.keys))
+
+
+def test_only_a_composing_box_takes_a_key_with_a_placeholder() -> None:
+    """A box measures its keys' text as written, so a key with a placeholder ("session {percent}") would be measured
+    with "{percent}" in it: only a composing box, which measures its whole texts as the code words them, may hold
+    one."""
+    placeholders = [(box.id, key) for box in budgets.BOXES for key in box.keys
+                    if isinstance(_english(key), str) and i18n._placeholders(_english(key))]
+    assert placeholders and all(budgets.BOX[box_id].compose is not None for box_id, _key in placeholders), placeholders
+    assert not any("{" in text for text in budgets.texts(budgets.BOX["app.tray.tooltip"], i18n.PSEUDO))
+
+
+def test_a_key_in_several_boxes_has_one_note_naming_them_all() -> None:
+    """A status word sits in up to seven boxes; its one budget note names every one, by id, with its room and fit."""
+    note = budgets.notes()["_budget.widget.status.rate_limited"]
+    boxes = sorted(box.id for box in budgets.BOXES if "widget.status.rate_limited" in box.keys)
+    assert len(boxes) == 7 and [piece.split("(")[1].split(",")[0] for piece in note.split("; ")] == boxes
+    pill = budgets.BOX["nostromo.floating.status_pill"]
+    assert f"{pill.limit:g} px ({pill.id}, none)" in note.split("; ")
+    tip = budgets.notes()["_budget.tray.tip.lead"]
+    assert tip == budgets.BOX["app.tray.tooltip"].note and tip.startswith("the whole tooltip: 127 UTF-16 units")
+
+
+def test_the_longest_tooltips_are_the_recorded_ones(capsys: pytest.CaptureFixture[str]) -> None:
+    """The longest tooltip per language, from the whole sweep, is TOOLTIPS: a catalog change that lengthens one fails
+    here until it is recorded again (python tests/budgets.py --tooltips)."""
+    assert budgets.main(["--tooltips"]) == 0
+    assert ast.literal_eval("{" + capsys.readouterr().out + "}") == TOOLTIPS
+    assert max(TOOLTIPS.values()) <= tray.TIP_LIMIT
+
+
+def test_the_pseudo_tooltip_fits() -> None:
+    """Composed in the pseudo-locale, past the drop rule, every tooltip fits: the report lists no tooltip, and none is
+    cut. Made pseudo whole, its English would not (153 and more units)."""
+    box = budgets.BOX["app.tray.tooltip"]
+    assert box.fit == "drop" and box.compose is not None
+    assert not [r for r in budgets.over(i18n.PSEUDO) if r.box.id == box.id]
+    found = budgets.texts(box, i18n.PSEUDO)
+    assert found and max(box.width(text) for text in found) <= tray.TIP_LIMIT
+    assert not any("\u2026" in text for text in found)
+    assert max(box.width(i18n.pseudo_text(text)) for text in box.english) > tray.TIP_LIMIT
 
 
 # ── The report ────────────────────────────────────────────────────────────────────────────────────────────────────

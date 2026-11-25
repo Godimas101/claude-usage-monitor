@@ -428,11 +428,30 @@ def test_the_tray_countdown_is_cldrs_outside_english():
     assert countdown(loc("es-CO"), (6 * 24 + 23) * 3600) == "6 días 23 h"
 
 
+def test_the_tooltip_sweep_tries_a_clock_of_every_length():
+    """A tooltip's length, and so whether it fits, drops or is cut, hangs on its resume clock's length alone, so the
+    sweep tries one clock of each length a locale writes (#93): every length is tried, once."""
+    def units(text: str) -> int:
+        return len(text.encode("utf-16-le")) // 2
+
+    several = 0
+    for language in i18n.DEV_LANGUAGES:
+        for locale in widget_words.sweep_locales(language):
+            written = {formats.day_clock(widget_words.SWEEP_MONDAY + timedelta(days=day, hours=hour, minutes=minute),
+                                         locale)
+                       for day in range(7) for hour in widget_words.SWEEP_HOURS for minute in widget_words.SWEEP_MINUTES}
+            tried = widget_words.sweep_clocks(locale)
+            assert set(tried) <= written and sorted(map(units, tried)) == sorted(set(map(units, written))), locale
+            several += len(tried) > 1
+    assert several, "no locale writes clocks of two lengths, so the check above proves nothing"
+
+
 def test_every_language_fits_the_tooltip_in_every_tag():
-    """The worst tooltip each language can show (two limits at 100 %, a status, the guard holding with a resume time
-    on every weekday at the longest clocks and every countdown shape, a dev instance), in every format tag and clock,
-    stays within the shell's 127 UTF-16 units with nothing cut. English, French, Spanish and Turkish (English's words
-    while their catalogs are empty) keep the whole guard phrase; the pseudo-locale, longer, needs the drop rule."""
+    """The worst tooltip each language can show (two limits at 100 % in each status, the guard holding with a resume
+    time on every weekday at the longest clocks and every countdown shape, a dev instance), in every format tag and
+    clock, stays within the shell's 127 UTF-16 units with nothing cut. English, French, Spanish and Turkish (English's
+    words while their catalogs are empty) keep the whole guard phrase; the pseudo-locale, longer, needs the drop
+    rule."""
     longest: dict[str, int] = {}
     for language in i18n.DEV_LANGUAGES:
         texts = list(widget_words.tooltip_sweep(language))
@@ -441,9 +460,10 @@ def test_every_language_fits_the_tooltip_in_every_tag():
             assert all(" (in " in text for text in texts), language
         longest[language] = max(len(text.encode("utf-16-le")) // 2 for text in texts)
     assert max(longest.values()) <= tray.TIP_LIMIT, longest
-    # Today's worst: es-CO and fr-CA on a 12-hour clock with English's words, and the pseudo-locale's "guard holding"
-    # once its resume time has dropped. A draft of fr, es or tr changes its own figure (#104 to #106).
-    assert longest == {"en": 113, "fr": 120, "es": 121, "tr": 113, "pseudo": 118}
+    # Today's worst: es-CO and fr-CA on a 12-hour clock with English's words, and the pseudo-locale live (no status
+    # word), its countdown dropped. A draft of fr, es or tr changes its own figure here and in test_budgets.TOOLTIPS
+    # (#104 to #106).
+    assert longest == {"en": 113, "fr": 120, "es": 121, "tr": 113, "pseudo": 121}
 
 
 # ── The alerts (step 1.8) ─────────────────────────────────────────────────────

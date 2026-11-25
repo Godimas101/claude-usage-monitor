@@ -170,7 +170,7 @@ def words() -> dict[str, Any]:
     return found
 
 
-# The tray tooltip's worst cases (#93): two limits at 100 %, a status, the guard holding with a resume time and a
+# The tray tooltip's worst cases (#93): two limits at 100 %, each status, the guard holding with a resume time and a
 # countdown, a dev instance; every weekday at the hours whose clock text is longest, and every countdown shape.
 SWEEP_MONDAY = datetime(2026, 7, 13)            # a wall-clock Monday: only its weekdays and clocks are written
 SWEEP_HOURS = (0, 1, 9, 10, 11, 12, 13, 21, 22, 23)
@@ -192,25 +192,40 @@ def sweep_locales(language: str) -> list[Any]:
             for tag in tags if i18n.primary(tag) == language for clock in (12, 24)]
 
 
+def sweep_clocks(locale: Any) -> list[str]:
+    """The resume clocks the sweep tries in ``locale``: of its day clocks for every weekday at SWEEP_HOURS and
+    SWEEP_MINUTES, the first (in sorted order) of each length in UTF-16 units."""
+    from usage_monitor import formats
+
+    clocks = {formats.day_clock(SWEEP_MONDAY + timedelta(days=day, hours=hour, minutes=minute), locale)
+              for day in range(7) for hour in SWEEP_HOURS for minute in SWEEP_MINUTES}
+    by_length: dict[int, str] = {}
+    for clock in sorted(clocks):
+        by_length.setdefault(len(clock.encode("utf-16-le")), clock)
+    return list(by_length.values())
+
+
 def tooltip_sweep(language: str) -> Iterator[str]:
-    """Every worst-case tray tooltip ``language`` can show, as a dev instance says it (critic 2 of #93's plan). Pure:
-    the resume times are written from wall clocks, so the process's time zone does not matter."""
-    from usage_monitor import app, formats
+    """Every worst-case tray tooltip ``language`` can show, as a dev instance says it (critic 2 of #93's plan), in each
+    status. A tooltip's length, and so whether it fits, drops or is cut, hangs on its clock's length alone, so of the
+    clocks a locale writes at one length only the first is used. Pure: the resume times are written from wall clocks,
+    so the process's time zone does not matter."""
+    from usage_monitor import app
     from usage_monitor.data.models import ApiStatus
     from usage_monitor.render import dump
     from usage_monitor.render.model import GuardMark, build_model
 
     now = dump.SAMPLE_NOW
-    state = dump._state(now, ApiStatus.RATE_LIMITED, [_limit("session", 100.0, now, "SESSION"),
-                                                      _limit("weekly_all", 100.0, now, "WEEKLY")], 360)
+    limits = [_limit("session", 100.0, now, "SESSION"), _limit("weekly_all", 100.0, now, "WEEKLY")]
     for locale in sweep_locales(language):
-        model = build_model(state, now, locale=locale)
-        clocks = {formats.day_clock(SWEEP_MONDAY + timedelta(days=day, hours=hour, minutes=minute), locale)
-                  for day in range(7) for hour in SWEEP_HOURS for minute in SWEEP_MINUTES}
-        for clock in sorted(clocks):
-            for seconds in SWEEP_COUNTDOWNS:
-                guard = GuardMark(state="holding", over_keys=("session",), resume_clock=clock, resume_seconds=seconds)
-                yield app.tray_tooltip(replace(model, guard=guard), dev=True)
+        clocks = sweep_clocks(locale)
+        for status in ApiStatus:
+            model = build_model(dump._state(now, status, limits, 360), now, locale=locale)
+            for clock in clocks:
+                for seconds in SWEEP_COUNTDOWNS:
+                    guard = GuardMark(state="holding", over_keys=("session",), resume_clock=clock,
+                                      resume_seconds=seconds)
+                    yield app.tray_tooltip(replace(model, guard=guard), dev=True)
 
 
 def collect(repo: str | Path = REPO) -> dict[str, Any]:
