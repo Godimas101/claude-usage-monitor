@@ -222,9 +222,11 @@
     session: "this session", today: "today", week: "the last 7 days", month: "this month",
     cycle: "this billing cycle", all: "all time"
   };
-  var DAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
-  var WEEKDAYS_MON = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
-  var MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+  // The weekdays and months in the page's capitals (#91): English's MON and JAN, else the language's own short names,
+  // cased by its rule (Turkish NİS, EKİ). WEEKDAYS_MON is Monday first; DAYS is Sunday first, as Date.getDay() counts.
+  var WEEKDAYS_MON = [0, 1, 2, 3, 4, 5, 6].map(function (i) { return FMT.upper(FMT.weekday(i)); });
+  var DAYS = [6, 0, 1, 2, 3, 4, 5].map(function (i) { return WEEKDAYS_MON[i]; });
+  var MONTHS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(function (i) { return FMT.upper(FMT.month(i)); });
   var LINKS = {
     repo: "https://github.com/Godimas101/claude-usage-monitor",
     bug: "https://github.com/Godimas101/claude-usage-monitor/issues/new?template=bug_report.md&labels=bug",
@@ -461,10 +463,11 @@
     return markup('<span class="nm-path" lang="en" translate="no">' + esc(text) + "</span>");
   }
 
-  /* A name as given (a model, a plan, a folder, a session, a tool, Claude Code): never translated, cased by English
-   * rules, though still in the theme's capitals. */
+  /* A name as given (a model, a plan, a folder, a session, a tool, Claude Code): never translated. In the theme's capitals
+   * it is cased with the words around it, by the page's language (Chris's decision on #91: Turkish HAİKU), so it carries
+   * no lang of its own. */
   function tName(text) {
-    return markup('<span lang="en" translate="no">' + esc(text) + "</span>");
+    return markup('<span translate="no">' + esc(text) + "</span>");
   }
 
   /* The CLDR plural category of count in language: i18n.plural_category's rules, so the page and the app agree whatever
@@ -689,6 +692,11 @@
     var days = Math.floor(minutes / 1440);
     var hours = Math.floor((minutes % 1440) / 60);
     var mins = minutes % 60;
+    if (!FMT.english) {
+      // CLDR's narrow units in capitals (#91: "2J 3H" in French), with the widgets' parts: no zero tail (countdown_units).
+      var parts = days >= 1 ? [[days, "d"], [hours, "h"]] : hours >= 1 ? [[hours, "h"], [mins, "m"]] : [[mins, "m"]];
+      return FMT.upper(FMT.duration(parts[1] && parts[1][0] === 0 ? parts.slice(0, 1) : parts));
+    }
     if (days >= 1) {
       return days + " D " + hours + " H";
     }
@@ -733,9 +741,20 @@
     return Object.prototype.hasOwnProperty.call(table, code) ? table[code] : "neutral";
   }
 
-  /* An age (fmtAge) written with the given unit words: "3 M", or "--" when there is no age. */
+  // An age's unit as formats.duration takes it (formats.py's age_unit codes).
+  var AGE_CODE = { S: "s", M: "m", H: "h", D: "d" };
+
+  /* An age (fmtAge) written with the given unit words: "3 M", or "--" when there is no age. Other languages write CLDR's
+   * narrow unit (#91), in capitals on a badge (AGE_UNIT) and as is inside a sentence: "3MIN" and "3min" in French. */
   function ageWords(age, units) {
-    return age === null ? "--" : age.n + " " + units[age.unit];
+    if (age === null) {
+      return "--";
+    }
+    if (!FMT.english) {
+      var words = FMT.duration([[age.n, entryOf(AGE_CODE, age.unit, "S")]]);
+      return units === AGE_UNIT ? FMT.upper(words) : words;
+    }
+    return age.n + " " + units[age.unit];
   }
 
   function parseTime(iso) {
@@ -746,25 +765,23 @@
     return isFinite(t) ? t : null;
   }
 
+  /* Dates and times (#91) are the formats' (English as the page always wrote them, else the locale's on the monitor's
+   * clock), in the page's capitals. */
   function clockText(ms) {
     if (ms === null) {
       return "--";
     }
     var d = new Date(ms);
     var now = new Date();
-    var h = d.getHours();
-    var text = (h % 12 || 12) + ":" + pad2(d.getMinutes()) + " " + (h >= 12 ? "PM" : "AM");
     var sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
-    return sameDay ? text : DAYS[d.getDay()] + " " + text;
+    return FMT.upper(sameDay ? FMT.clock(d) : FMT.dayClock(d));
   }
 
   function stampText(ms) {
     if (ms === null) {
       return "--";
     }
-    var d = new Date(ms);
-    var h = d.getHours();
-    return MONTHS[d.getMonth()] + " " + d.getDate() + " " + (h % 12 || 12) + ":" + pad2(d.getMinutes()) + " " + (h >= 12 ? "PM" : "AM");
+    return FMT.upper(FMT.stamp(new Date(ms)));
   }
 
   /* "YYYY-MM-DD" as a local date (new Date("YYYY-MM-DD") would read it as UTC and shift the day). */
@@ -782,20 +799,18 @@
     if (!d) {
       return "--";
     }
-    return DAYS[d.getDay()] + ", " + MONTHS[d.getMonth()] + " " + d.getDate() + (withYear ? ", " + d.getFullYear() : "");
+    return FMT.upper(FMT.dayDate(d, withYear));
   }
 
   function dateText(ms) {
     if (ms === null) {
       return "--";
     }
-    var d = new Date(ms);
-    return MONTHS[d.getMonth()] + " " + d.getDate() + ", " + d.getFullYear();
+    return FMT.upper(FMT.date(new Date(ms)));
   }
 
   function hourText(ms) {
-    var h = new Date(ms).getHours();
-    return (h % 12 || 12) + " " + (h >= 12 ? "PM" : "AM");
+    return FMT.upper(FMT.hour(new Date(ms)));
   }
 
   function accentOf(variantId) {
@@ -815,7 +830,7 @@
    * theme sets a line in sentence case only when all of it is capitals, so a reason left as it came would be shouted in
    * Nostromo and Night City (which upper-case it in CSS) and left half and half in Gates. */
   function failedText(prefix, res) {
-    return prefix + ": " + errorText(res).toUpperCase();
+    return prefix + ": " + FMT.upper(errorText(res), "en");
   }
 
   /* The status line after "Check for updates now". `checked` is false when the monitor could not look (offline, GitHub's rate
@@ -2117,8 +2132,7 @@
     if (a === null || b === null) {
       return "";
     }
-    var da = new Date(a), db = new Date(b);
-    return MONTHS[da.getMonth()] + " " + da.getDate() + " - " + MONTHS[db.getMonth()] + " " + db.getDate();
+    return FMT.upper(FMT.monthDay(new Date(a))) + " - " + FMT.upper(FMT.monthDay(new Date(b)));
   }
 
   /* The last 30 days of cost as columns (one pip is a round dollar amount), with the average as a dashed line. */
@@ -2164,7 +2178,7 @@
 
   function dayLabel(ymd) {
     var d = parseYmd(ymd);
-    return d ? MONTHS[d.getMonth()] + " " + d.getDate() : "";
+    return d ? FMT.upper(FMT.monthDay(d)) : "";
   }
 
   function costCard(n) {
@@ -2175,7 +2189,7 @@
     } else {
       var proj = n.projected !== null ? "At this pace the cycle ends near " + fmtUsd(n.projected) + " (" + fmtMult(n.projected / n.price) + ")." : "";
       planBlock = '<div class="nm-plan"><div class="nm-big m"' + (proj ? ' title="' + esc(proj) + '"' : "") + ">" + esc(fmtMult(n.multiplier)) + '</div><div class="nm-facts"><span>YOUR PLAN</span><span>' +
-        esc((n.planName || "PLAN").toUpperCase()) + " &middot; " + esc(fmtPlanPrice(n.price)) + " / MONTH</span></div></div>";
+        esc(FMT.upper(n.planName || "PLAN")) + " &middot; " + esc(fmtPlanPrice(n.price)) + " / MONTH</span></div></div>";
     }
     var ratio = n.multiplier;
     var note = n.price === null
@@ -2212,7 +2226,7 @@
     var rows = n.models;
     var body = rows.length
       ? rows.map(function (r) {
-        return '<div class="nm-mrow"><span class="k" title="' + esc(r.id) + '">' + esc(r.name.toUpperCase()) + '</span><div class="nm-cells" aria-hidden="true">' +
+        return '<div class="nm-mrow"><span class="k" title="' + esc(r.id) + '">' + esc(FMT.upper(r.name)) + '</span><div class="nm-cells" aria-hidden="true">' +
           cellsHTML(20, r.share) + '</div><span class="v">' + esc(fmtPct(r.share)) + "</span></div>";
       }).join("")
       : '<p class="nm-empty">No model mix yet.</p>';
@@ -2224,7 +2238,7 @@
     var rows = u && u.breakdown ? u.breakdown : [];
     var body = rows.length
       ? rows.map(function (r) {
-        return '<div class="nm-mrow"><span class="k">' + esc(String(r.name || r.key || "").toUpperCase()) + '</span><div class="nm-cells" aria-hidden="true">' +
+        return '<div class="nm-mrow"><span class="k">' + esc(FMT.upper(String(r.name || r.key || ""))) + '</span><div class="nm-cells" aria-hidden="true">' +
           cellsHTML(20, r.percent) + '</div><span class="v">' + esc(fmtPct(r.percent)) + "</span></div>";
       }).join("")
       : '<p class="nm-empty">No surface split reported yet.</p>';
@@ -2501,7 +2515,7 @@
       rows.push(["Allowance", num(limit.allowance_pct) === null ? "--" : fmtPct(limit.allowance_pct) + " of weekly"]);
       rows.push(["Used of weekly", num(limit.used_pct_of_weekly) === null ? "--" : fmtPct(limit.used_pct_of_weekly, 1)]);
     }
-    rows.push(["Severity", SEVERITY_WORD[severityOf(limit)].toLowerCase()]);
+    rows.push(["Severity", FMT.lower(SEVERITY_WORD[severityOf(limit)], "en")]);
     if (limit.locked_reason) {
       rows.push(["Locked", limit.locked_reason]);
     }
@@ -2593,7 +2607,7 @@
       }), { width: 520, height: 16, label: "Share by surface" })
       : '<p class="nm-empty">No surface split yet.</p>';
     var legend = breakdown.map(function (r) {
-      return mixRow(String(r.name || r.key || "").toUpperCase(), r.percent, fmtPct(r.percent));
+      return mixRow(FMT.upper(String(r.name || r.key || "")), r.percent, fmtPct(r.percent));
     }).join("");
     var surfaceCard = card({
       key: "surfaces", title: "Seven-day surface breakdown", meta: "share of the weekly window",
@@ -2618,7 +2632,7 @@
   }
 
   function windowRow(name, w) {
-    var label = WINDOW_LABEL[name] || name.toUpperCase();
+    var label = WINDOW_LABEL[name] || FMT.upper(name, "en");
     var title = w.start ? stampText(parseTime(w.start)) + " to " + (w.end ? stampText(parseTime(w.end)) : "now") : "since the first request";
     if (w.start && w.end && w.start === w.end) {
       return '<tr><td class="lead" title="' + esc(title) + '">' + esc(label) + '</td><td colspan="5" class="r">NOT OPEN</td></tr>';
@@ -2656,7 +2670,7 @@
 
   function monthLabel(ym) {
     var m = /^(\d{4})-(\d{2})$/.exec(String(ym || ""));
-    return m ? MONTHS[+m[2] - 1] + " " + m[1].slice(2) : String(ym || "");
+    return m ? FMT.upper(FMT.monthYear(m[1], +m[2] - 1)) : String(ym || "");
   }
 
   function monthlyCard(d, e) {
@@ -2727,7 +2741,7 @@
     var waiting = winCost === null && !gone;
     return '<div class="nm-toolbar wide"><span class="nm-toolbar-k">Breakdowns for</span>' + seg("cost-window", "Window for the breakdowns", WINDOW_SEG, pick) +
       '<span class="nm-toolbar-n"' + (waiting ? ' data-pending="" aria-hidden="true"' : "") + ">" +
-      esc(gone ? WINDOW_PHRASE[pick] + ", not loaded" : WINDOW_PHRASE[pick] + ", " + (waiting ? "$000.00" : fmtUsd(winCost)) + " " + BASIS.toLowerCase()) + "</span></div>";
+      esc(gone ? WINDOW_PHRASE[pick] + ", not loaded" : WINDOW_PHRASE[pick] + ", " + (waiting ? "$000.00" : fmtUsd(winCost)) + " " + FMT.lower(BASIS, "en")) + "</span></div>";
   }
 
   function costPage() {
@@ -3007,7 +3021,7 @@
       ["INGEST", ingestText],
       ["LAST INGEST", ingest && ingest.last_duration_s !== null && ingest.last_duration_s !== undefined ? FMT.number(num(ingest.last_duration_s).toFixed(2), NO_GROUP) + " S" : "--"],
       ["LAST ERROR", ingest && ingest.last_error ? ingest.last_error : "NONE"],
-      ["PLAN", s && s.plan && s.plan.name ? String(s.plan.name).toUpperCase() : "--"],
+      ["PLAN", s && s.plan && s.plan.name ? FMT.upper(String(s.plan.name)) : "--"],
       ["PRICE", effectivePlanPrice() !== null ? fmtPlanPrice(effectivePlanPrice()) + " / MO" : "UNKNOWN"]
     ];
     return card({ key: "pipeline", title: "Pipeline", meta: "data health", cls: "span-6", body: kvGrid(kv) });
@@ -3161,9 +3175,9 @@
     }
   }
 
+  /* The hour of a column (0 to 23) and the next, local time: "4 PM to 5 PM". */
   function hourRange(c) {
-    var a = c % 12 || 12, b = (c + 1) % 12 || 12;
-    return a + (c < 12 ? " AM" : " PM") + " to " + b + ((c + 1) % 24 < 12 ? " AM" : " PM");
+    return hourText(new Date(2026, 0, 1, c).getTime()) + " to " + hourText(new Date(2026, 0, 1, c + 1).getTime());
   }
 
   function historyPage() {
@@ -3569,8 +3583,9 @@
     return n === null ? "--" : n === Math.round(n) ? fmtPct(n) : fmtPct(n, 1);
   }
 
+  /* "X, Y and Z" (English keeps its join, no Oxford comma; other languages join as Intl does: #91). */
   function listWords(items) {
-    return items.length < 2 ? items.join("") : items.slice(0, -1).join(", ") + " and " + items[items.length - 1];
+    return FMT.list(items);
   }
 
   /* The limits the caps watch, as words: "session at 95%". */
@@ -3602,13 +3617,13 @@
     var parts = [];
     if (mains) { parts.push(plural(mains, "conversation")); }
     if (agents) { parts.push(plural(agents, "agent")); }
-    return (parts.length ? parts.join(", ") : plural(sessions, "session")).toUpperCase();
+    return FMT.upper(parts.length ? parts.join(", ") : plural(sessions, "session"), "en");
   }
 
   function whoWords(w) {
-    if (w.main && w.agents) { return "CONVERSATION + " + plural(w.agents, "agent").toUpperCase(); }
+    if (w.main && w.agents) { return "CONVERSATION + " + FMT.upper(plural(w.agents, "agent"), "en"); }
     if (w.main) { return "CONVERSATION"; }
-    return w.agents ? plural(w.agents, "agent").toUpperCase() + " ONLY" : "SESSION";
+    return w.agents ? FMT.upper(plural(w.agents, "agent"), "en") + " ONLY" : "SESSION";
   }
 
   /* The background work a watched conversation waits for, as words: "1 WORKFLOW, 2 AGENTS" (#41). */
@@ -3618,7 +3633,7 @@
     }
     return Object.keys(work).filter(function (word) {
       return typeof work[word] === "number" && isFinite(work[word]) && work[word] >= 1;
-    }).map(function (word) { return plural(Math.round(work[word]), word).toUpperCase(); }).join(", ");
+    }).map(function (word) { return FMT.upper(plural(Math.round(work[word]), word), "en"); }).join(", ");
   }
 
   /* Off, Armed or Holding. While holding: which limits are over their caps, when the hold ends, the sessions told of it and the
@@ -3651,7 +3666,7 @@
     var rows = [];
     if (v.state === "holding") {
       v.over.forEach(function (item) {
-        rows.push([String(item.label || item.name || "limit").toUpperCase(), pctWords(item.percent) + " OF A " + pctWords(item.cap) + " CAP"]);
+        rows.push([FMT.upper(String(item.label || item.name || "limit"), "en"), pctWords(item.percent) + " OF A " + pctWords(item.cap) + " CAP"]);
       });
       var left = v.resumeAt === null ? null : v.resumeAt - nowMs;
       rows.push(["RESUMES", left === null ? "NO RESET TIME KNOWN" : clockText(v.resumeAt) + (left > 60000 ? " · IN " + fmtRemain(left) : " · NOW")]);
@@ -3667,11 +3682,11 @@
         rows.push(["AND " + (v.told.length - GUARD_LISTED) + " MORE", ""]);
       }
       if (untold) {    // it waits for its agents, so it hears at its next prompt or tool call (#41)
-        rows.push(["NOT TOLD", untold === 1 ? "1 CONVERSATION: ITS AGENTS WERE" : plural(untold, "conversation").toUpperCase() + ": THEIR AGENTS WERE"]);
+        rows.push(["NOT TOLD", untold === 1 ? "1 CONVERSATION: ITS AGENTS WERE" : FMT.upper(plural(untold, "conversation"), "en") + ": THEIR AGENTS WERE"]);
       }
     }
     if (v.state !== "off" && v.watching.length) {   // they wait for their background work: woken when the guard holds (#41)
-      rows.push(["WATCHING", plural(v.watching.length, "conversation").toUpperCase()]);
+      rows.push(["WATCHING", FMT.upper(plural(v.watching.length, "conversation"), "en")]);
       v.watching.slice(0, GUARD_LISTED).forEach(function (w) {
         var work = workWords(w && w.work);
         rows.push([shortId(w && w.session_id) || "unknown session", "SINCE " + clockText(parseTime(w && w.since)) + (work ? " · " + work : "")]);
@@ -3681,7 +3696,7 @@
       }
     }
     if (v.state === "holding" || v.waiting.length) {
-      rows.push(["WAITING", v.waiting.length ? plural(v.waiting.length, "session").toUpperCase() : "NONE"]);
+      rows.push(["WAITING", v.waiting.length ? FMT.upper(plural(v.waiting.length, "session"), "en") : "NONE"]);
       v.waiting.slice(0, GUARD_LISTED).forEach(function (w) {
         var folder = folderName(w.cwd) || "unknown folder";
         rows.push([folder + (w.session_id ? " · " + shortId(w.session_id) : ""), "SINCE " + clockText(parseTime(w.since)), false, w.cwd || ""]);
@@ -3897,7 +3912,7 @@
 
   function accentLabel(theme, accent) {
     var name = accentName(theme, accent);
-    return String(name === null ? accent : name).toUpperCase();
+    return FMT.upper(String(name === null ? accent : name), "en");
   }
 
   /* A name that is not the colour's id is shown, so the id is kept as the tooltip. */
@@ -3929,7 +3944,7 @@
       cards.innerHTML = cardsHtml || '<p class="nm-empty">Themes load with the dashboard.</p>';
     }
     var theme = current ? findTheme(current.id) : null;
-    meta.textContent = current ? current.name.toUpperCase() + " \u00b7 " + String(current.variant_name || current.variant).toUpperCase() : "";
+    meta.textContent = current ? FMT.upper(current.name, "en") + " \u00b7 " + FMT.upper(String(current.variant_name || current.variant), "en") : "";
     var seen = {};
     var accentList = [];
     ((theme && theme.variants) || []).forEach(function (v) {
@@ -3955,7 +3970,7 @@
     if (modes.length) {
       var currentMode = S.settings.theme_mode || "system";
       var modeHtml = '<span class="nm-status nm-mode-k">MODE</span><span class="nm-seg">' + modes.map(function (m) {
-        return '<button type="button" data-mode="' + esc(m) + '" class="' + (currentMode === m ? "on" : "") + '" aria-pressed="' + (currentMode === m ? "true" : "false") + '">' + esc(m.toUpperCase()) + "</button>";
+        return '<button type="button" data-mode="' + esc(m) + '" class="' + (currentMode === m ? "on" : "") + '" aria-pressed="' + (currentMode === m ? "true" : "false") + '">' + esc(FMT.upper(m, "en")) + "</button>";
       }).join("") + "</span>";
       if (mode.getAttribute("data-sig") !== modeHtml) {
         mode.setAttribute("data-sig", modeHtml);
@@ -4391,7 +4406,7 @@
         return true;
       }
       var why = errorText(res);
-      setStatus("NOT SAVED: " + why.toUpperCase(), true);
+      setStatus("NOT SAVED: " + FMT.upper(why, "en"), true);
       if (errKey) {
         fieldError(errKey, "Not saved: " + why + ".");
       }
@@ -4407,14 +4422,14 @@
   }
 
   function labelFor(key) {
-    return GUARD_LABELS[key] || String(key).replace(/_/g, " ").toUpperCase();
+    return GUARD_LABELS[key] || FMT.upper(String(key).replace(/_/g, " "), "en");
   }
 
   function applyThemeChoice(themeId, variantId) {
     var patch = { theme_id: themeId, theme_variant: variantId };
     var theme = findTheme(themeId);
     var name = theme ? theme.name : themeId;
-    saveSettings(patch, name.toUpperCase());
+    saveSettings(patch, FMT.upper(name, "en"));
   }
 
   // A colour button in Settings or the sidebar: save the colour, named on the status line as its button names it.
@@ -4552,7 +4567,7 @@
     }
     if (target.hasAttribute("data-mode")) {
       var mode = target.getAttribute("data-mode");
-      saveSettings({ theme_mode: mode }, "MODE " + mode.toUpperCase());
+      saveSettings({ theme_mode: mode }, "MODE " + FMT.upper(mode, "en"));
       return;
     }
     var action = target.getAttribute("data-action");
@@ -5412,7 +5427,9 @@
       signed: signed, pctWords: pctWords, plural: plural, listWords: listWords, stampText: stampText, dayText: dayText,
       dateText: dateText, hourText: hourText, rangeText: rangeText, hourRange: hourRange, odometerHTML: odometerHTML,
       comparisonList: comparisonList, efficiencyCard: efficiencyCard, efficiencyCards: efficiencyCards,
-      weeklyForecast: weeklyForecast, dailyChart: dailyChart, DAYS: DAYS, WEEKDAYS_MON: WEEKDAYS_MON, MONTHS: MONTHS
+      weeklyForecast: weeklyForecast, dailyChart: dailyChart, DAYS: DAYS, WEEKDAYS_MON: WEEKDAYS_MON, MONTHS: MONTHS,
+      // and the date, word and case sites of steps 2.3 to 2.7
+      dayLabel: dayLabel, monthLabel: monthLabel, whoWords: whoWords, workWords: workWords, surfaceCard: surfaceCard
     };
     return;
   }

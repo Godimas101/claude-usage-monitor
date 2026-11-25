@@ -35,7 +35,12 @@
 
   var doc = root.document;
   var pipsOn = false;
-  var MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+  // The calendar's month and weekday names in the page's capitals: the page's formats (formats.js, loaded first: #91), or
+  // English's where a page has none.
+  var FORMATS = root.MonitorFormats ? root.MonitorFormats.active() : null;
+  var MONTHS = FORMATS ? [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(function (i) { return FORMATS.upper(FORMATS.month(i)); }) :
+    ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+  var ROW_DAYS = FORMATS ? [0, 2, 4].map(function (i) { return FORMATS.upper(FORMATS.weekday(i)); }) : ["MON", "WED", "FRI"];
   // One character of chart text in px, generously: a theme may uppercase and space it (Nostromo's is 7.7). Only the
   // estimate: textWidth() asks the page for the real width and falls back to this where there is no page to ask.
   var CHAR_W = 7.9;
@@ -630,17 +635,19 @@
     }
     var labelEnd = -1e9;        // a month name is dropped when the one before it (a year is added in January) still reaches there
     marks.forEach(function (m) {
-      var name = MONTHS[m.dt.getMonth()] + (m.dt.getMonth() === 0 ? " " + String(m.dt.getFullYear()).slice(2) : "");
+      var january = m.dt.getMonth() === 0;
+      var name = january && FORMATS ? FORMATS.upper(FORMATS.monthYear(m.dt.getFullYear(), 0)) :
+        MONTHS[m.dt.getMonth()] + (january ? " " + String(m.dt.getFullYear()).slice(2) : "");
       var tw = textWidth(name, "mon-calendar", false);
       var x = Math.min(gutter + m.col * pitch, width - tw);          // a month that starts in the last column is pulled back inside
       if (x >= labelEnd + 6) {
         labelEnd = x + tw;
-        out += '<text class="mon-t" x="' + f1(x) + '" y="12">' + name + "</text>";
+        out += '<text class="mon-t" x="' + f1(x) + '" y="12">' + esc(name) + "</text>";
       }
     });
-    ["MON", "WED", "FRI"].forEach(function (name, k) {
+    ROW_DAYS.forEach(function (name, k) {
       var row = k * 2;
-      out += '<text class="mon-t is-end" x="' + (gutter - 8) + '" y="' + f1(top + row * pitch + cell / 2 + 4) + '">' + name + "</text>";
+      out += '<text class="mon-t is-end" x="' + (gutter - 8) + '" y="' + f1(top + row * pitch + cell / 2 + 4) + '">' + esc(name) + "</text>";
     });
     var startAt = days.length - 1;
     days.forEach(function (d, i) {

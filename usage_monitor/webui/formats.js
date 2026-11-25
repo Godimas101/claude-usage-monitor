@@ -1,4 +1,5 @@
-/* formats.js: the dashboard's numbers, percents and money in the monitor's locale (#91), for every page script.
+/* formats.js: the dashboard's numbers, percents, money, dates, times, durations, lists and letter case in the monitor's
+ * locale (#91), for every page script.
  *
  * window.MonitorFormats.make(locale) gives the formats of a locale as the monitor-locale meta holds it ({ language,
  * format, ... }); MonitorFormats.active() gives this page's, from that meta (English when it is missing or cannot be
@@ -20,8 +21,17 @@
  * English's figures; on the page, the money tiles and the big cost figure); the sign keeps its side, and a currency code
  * keeps its space.
  *
- * Intl as WebView2 86 has it (ui/dashboard.py WEBVIEW2_MIN_VERSION): NumberFormat with compact notation, narrowSymbol
- * and formatToParts.
+ * Dates and times are the page's local time. English writes them as the page did, in capitals ("WED 7:39 PM", "OCT 21",
+ * 12-hour with an ASCII space); French, Spanish and Turkish take Intl's for the tag in CLDR's own case ("sam. 16:12"),
+ * on the clock the monitor follows (Windows' 12- or 24-hour setting: the locale's clock), and the page puts them in its
+ * capitals with upper(). Durations (fr, es, tr only, as formats.py's) are CLDR's narrow units ("2j 3h", Turkish "3s
+ * 27d"). Lists are English's "X, Y and Z" (no Oxford comma), else Intl's. upper() and lower() follow the language's rule
+ * (Turkish "HAİKU"), as usage_monitor/casing.py does.
+ *
+ * Intl as WebView2 86 has it (ui/dashboard.py WEBVIEW2_MIN_VERSION): NumberFormat with compact notation, narrowSymbol,
+ * units and formatToParts; DateTimeFormat with hourCycle and timeStyle; ListFormat. Intl.DurationFormat is newer: it is
+ * used where the WebView has it, and the same CLDR units through NumberFormat and ListFormat otherwise (D14 of #91's
+ * plan; by ECMA-402 the two write the same text, and tests/webui_checks.js compares them).
  */
 (function (root) {
   "use strict";
@@ -35,9 +45,43 @@
   var SCALES = { 3: "K", 6: "M", 9: "B" };
   var DIGITS = /^(-?)(\d+)(?:\.(\d+))?$/;
   var NUMERIC = { integer: true, group: true, decimal: true, fraction: true, nan: true, infinity: true };
+  // English's weekday and month names as the page writes them, in capitals. Weekdays count from Monday, as formats.py's
+  // (datetime.weekday()); Date.getDay() counts from Sunday.
+  var WEEKDAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
+  var MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+  var MONDAY = Date.UTC(2026, 9, 19, 12);        // a Monday at noon, UTC: the weekdays Intl names
+  var DAY_MS = 86400000;
+  // formats.py's duration units (countdown_units and age_unit's codes), as Intl's NumberFormat and DurationFormat name them.
+  var UNITS = { d: "day", h: "hour", m: "minute", s: "second" };
+  var DURATION_FIELDS = { d: "days", h: "hours", m: "minutes", s: "seconds" };
+  // Intl.DurationFormat when the WebView has it (D14). Set to false to write every duration through NumberFormat's units.
+  var DURATION_FORMAT = typeof Intl.DurationFormat === "function";
+  // The languages whose capitals and lower case keep the dot on the i (usage_monitor/casing.py's TURKIC).
+  var TURKIC = { tr: true, az: true };
 
   function own(object, key) {
     return Object.prototype.hasOwnProperty.call(object, key);
+  }
+
+  function pad2(n) {
+    return (n < 10 ? "0" : "") + n;
+  }
+
+  /* options with extra's keys over them, as a new object. */
+  function joinedOptions(options, extra) {
+    var out = {};
+    var key;
+    for (key in options) {
+      if (own(options, key)) {
+        out[key] = options[key];
+      }
+    }
+    for (key in extra || {}) {
+      if (own(extra, key)) {
+        out[key] = extra[key];
+      }
+    }
+    return out;
   }
 
   /* The tag Intl is given: the format tag when it is of the language and Intl takes it, else the language's base. */
@@ -101,15 +145,27 @@
     var cldr = own(BASES, language);
     var pseudo = language === PSEUDO;
     var tag = cldr ? tagOf(language, given.format) : "en-US";
+    // The clock the monitor follows (Windows' 12- or 24-hour setting, i18n.clock_hours). English's is always 12-hour.
+    var hours = cldr && given.clock !== 12 ? 24 : 12;
+    var hourCycle = hours === 12 ? "h12" : "h23";
+    var hourWidth = null;
     var made = {};
 
-    /* An Intl.NumberFormat of the tag, made once for each set of options. */
-    function nf(options) {
-      var key = JSON.stringify(options);
+    /* An Intl formatter of the tag (Intl.NumberFormat, Intl.DateTimeFormat, ...), made once for each set of options. */
+    function intl(Kind, name, options) {
+      var key = name + JSON.stringify(options);
       if (!own(made, key)) {
-        made[key] = new Intl.NumberFormat(tag, options);
+        made[key] = new Kind(tag, options);
       }
       return made[key];
+    }
+
+    function nf(options) {
+      return intl(Intl.NumberFormat, "n", options);
+    }
+
+    function dtf(options) {
+      return intl(Intl.DateTimeFormat, "d", options);
     }
 
     /* English's own text, with the pseudo-locale's groups. */
@@ -256,6 +312,194 @@
         .format(Number(text + "e" + scale));
     }
 
+    // ── Dates and times: the page's local time ────────────────────────────────────────────────────────────────
+
+    /* How wide Intl writes the hour on the 24-hour clock: Intl writes it as wide as it is asked, so it is read once from
+     * the tag's own short time ("09:05" in fr-FR and es-MX, "9:05" in es-ES, as CLDR's Hm patterns have it). CLDR's
+     * 12-hour patterns of fr, es and tr all write the hour as is ("9:05 PM"). */
+    function hourDigits() {
+      if (hourWidth === null) {
+        hourWidth = "numeric";
+        if (hours === 24) {
+          try {
+            var parts = dtf({ timeStyle: "short", hourCycle: hourCycle, timeZone: "UTC" })
+              .formatToParts(Date.UTC(2026, 0, 5, 9, 5));
+            for (var i = 0; i < parts.length; i++) {
+              if (parts[i].type === "hour" && parts[i].value.length === 2) {
+                hourWidth = "2-digit";
+              }
+            }
+          } catch (e) {
+            /* a WebView without timeStyle: the hour as is */
+          }
+        }
+      }
+      return hourWidth;
+    }
+
+    /* The tag's time of day with extra fields (a weekday, a date), on the monitor's clock. */
+    function timeOf(extra) {
+      return dtf(joinedOptions({ hour: hourDigits(), minute: "2-digit", hourCycle: hourCycle }, extra));
+    }
+
+    function at(value) {
+      return new Date(+value);
+    }
+
+    /* The time of day: "7:39 PM" in English (always 12-hour, an ASCII space), "16:12" or "4:12 PM" in fr-FR, "16 h 12" in
+     * fr-CA, "ÖS 4:12" in Turkish on the 12-hour clock. */
+    function clock(value) {
+      var d = at(value);
+      if (!cldr) {
+        var h = d.getHours();
+        return (h % 12 || 12) + ":" + pad2(d.getMinutes()) + " " + (h >= 12 ? "PM" : "AM");
+      }
+      return timeOf({}).format(d);
+    }
+
+    /* The weekday and the time: "WED 7:39 PM" in English, "sam. 16:12" in fr-FR, "sáb, 16:12" in es-ES, "Cmt 16:12" in
+     * Turkish. */
+    function dayClock(value) {
+      var d = at(value);
+      return cldr ? timeOf({ weekday: "short" }).format(d) : WEEKDAYS[(d.getDay() + 6) % 7] + " " + clock(d);
+    }
+
+    /* The hour alone, for a chart's axis: "4 PM" in English, "16 h" in fr-FR, "16" in es-ES and Turkish. */
+    function hour(value) {
+      var d = at(value);
+      if (!cldr) {
+        var h = d.getHours();
+        return (h % 12 || 12) + " " + (h >= 12 ? "PM" : "AM");
+      }
+      return dtf({ hour: hourDigits(), hourCycle: hourCycle }).format(d);
+    }
+
+    /* The date and the time: "OCT 21 7:39 PM" in English, "21 oct., 19:39" in fr-FR. */
+    function stamp(value) {
+      var d = at(value);
+      return cldr ? timeOf({ month: "short", day: "numeric" }).format(d) : MONTHS[d.getMonth()] + " " + d.getDate() + " " + clock(d);
+    }
+
+    /* The day and the month: "OCT 21" in English, "21 oct." in French, "21 Eki" in Turkish. */
+    function monthDay(value) {
+      var d = at(value);
+      return cldr ? dtf({ month: "short", day: "numeric" }).format(d) : MONTHS[d.getMonth()] + " " + d.getDate();
+    }
+
+    /* A date with its year: "OCT 21, 2026" in English, "21 oct. 2026" in French. */
+    function date(value) {
+      var d = at(value);
+      return cldr ? dtf({ month: "short", day: "numeric", year: "numeric" }).format(d) :
+        MONTHS[d.getMonth()] + " " + d.getDate() + ", " + d.getFullYear();
+    }
+
+    /* A date with its weekday, and its year when withYear: "WED, OCT 21" or "WED, OCT 21, 2026" in English, "mer. 21
+     * oct." in French. */
+    function dayDate(value, withYear) {
+      var d = at(value);
+      if (!cldr) {
+        return WEEKDAYS[(d.getDay() + 6) % 7] + ", " + MONTHS[d.getMonth()] + " " + d.getDate() + (withYear ? ", " + d.getFullYear() : "");
+      }
+      var options = { weekday: "short", month: "short", day: "numeric" };
+      if (withYear) {
+        options.year = "numeric";
+      }
+      return dtf(options).format(d);
+    }
+
+    /* A month of a year (month 0 is January), the year in two digits: "OCT 26" in English, "oct. 26" in French. */
+    function monthYear(year, month) {
+      return cldr ? dtf({ month: "short", year: "2-digit", timeZone: "UTC" }).format(Date.UTC(+year, month, 15)) :
+        MONTHS[month] + " " + String(year).slice(2);
+    }
+
+    /* A weekday's short name, 0 for Monday: "MON" in English, "lun." in French, "lun" in Spanish, "Pzt" in Turkish. */
+    function weekday(index) {
+      return cldr ? dtf({ weekday: "short", timeZone: "UTC" }).format(MONDAY + index * DAY_MS) : WEEKDAYS[index];
+    }
+
+    /* A month's short name, 0 for January: "JAN" in English, "janv." in French, "ene" in Spanish, "Oca" in Turkish. The
+     * name a date writes (CLDR's format form, as formats.py's month): Intl's month alone is the stand-alone form, which a
+     * few tags write otherwise (es-CL "ene."). */
+    function month(index) {
+      if (!cldr) {
+        return MONTHS[index];
+      }
+      var parts = dtf({ month: "short", day: "numeric", timeZone: "UTC" }).formatToParts(Date.UTC(2026, index, 15));
+      for (var i = 0; i < parts.length; i++) {
+        if (parts[i].type === "month") {
+          return parts[i].value;
+        }
+      }
+      return dtf({ month: "short", timeZone: "UTC" }).format(Date.UTC(2026, index, 15));
+    }
+
+    // ── Durations, lists and case ─────────────────────────────────────────────────────────────────────────────
+
+    /* Time as formats.py's duration takes it, [[2, "d"], [3, "h"]], in CLDR's narrow units: "2j 3h" in French, "3s 27d"
+     * in Turkish (3 hours 27 minutes; one hour is "1 sa"). French, Spanish and Turkish only: English keeps its callers'
+     * own text ("2 D 3 H"), so it throws there, as formats.py's does. No parts give "". */
+    function duration(parts) {
+      if (!cldr) {
+        throw new Error("MonitorFormats.duration serves French, Spanish and Turkish; English keeps its callers' own text");
+      }
+      if (!parts.length) {
+        return "";
+      }
+      var i;
+      if (DURATION_FORMAT) {
+        // Each unit given is shown, a 0 too ("0s", as a unit through NumberFormat writes it); the others are not.
+        var fields = {};
+        var options = { style: "narrow" };
+        for (i = 0; i < parts.length; i++) {
+          fields[DURATION_FIELDS[parts[i][1]]] = parts[i][0];
+          options[DURATION_FIELDS[parts[i][1]] + "Display"] = "always";
+        }
+        return intl(Intl.DurationFormat, "t", options).format(fields);
+      }
+      var words = [];
+      for (i = 0; i < parts.length; i++) {
+        words.push(nf({ style: "unit", unit: UNITS[parts[i][1]], unitDisplay: "narrow" }).format(parts[i][0]));
+      }
+      return intl(Intl.ListFormat, "l", { type: "unit", style: "narrow" }).format(words);
+    }
+
+    /* Words joined as a list: "X, Y and Z" in English (as the page wrote it: no Oxford comma), "X, Y et Z" in French,
+     * "X, Y y Z" in Spanish, "X, Y ve Z" in Turkish. */
+    function list(items) {
+      if (!cldr) {
+        return items.length < 2 ? items.join("") : items.slice(0, -1).join(", ") + " and " + items[items.length - 1];
+      }
+      var words = [];
+      for (var i = 0; i < items.length; i++) {
+        words.push(String(items[i]));
+      }
+      return intl(Intl.ListFormat, "l", { type: "conjunction" }).format(words);
+    }
+
+    /* Whether lang (a language or a tag; this locale's language when it is not given) writes Turkish's i. */
+    function turkic(lang) {
+      var code = lang === undefined || lang === null ? language : String(lang).split(/[-_]/)[0].toLowerCase();
+      return own(TURKIC, code);
+    }
+
+    /* text in capitals by the rule of lang (this locale's language when it is not given): "HAİKU" for "Haiku" in
+     * Turkish, "HAIKU" in English (casing.upper). */
+    function upper(text, lang) {
+      var s = String(text);
+      return (turkic(lang) ? s.replace(/i/g, "\u0130") : s).toUpperCase();
+    }
+
+    /* text in lower case by the rule of lang: "haftalık" for "HAFTALIK" in Turkish, never an i with a combining dot
+     * (casing.lower). */
+    function lower(text, lang) {
+      var s = String(text);
+      if (turkic(lang)) {
+        s = s.replace(/I\u0307/g, "i").replace(/\u0130/g, "i").replace(/I/g, "\u0131");
+      }
+      return s.toLowerCase();
+    }
+
     var signs = nf({}).formatToParts(1234567.5);
     var group = ",";
     var decimal = ".";
@@ -268,8 +512,10 @@
     }
 
     return {
-      language: language, tag: tag, english: !cldr, group: pseudo ? PSEUDO_GROUP : group, decimal: decimal,
-      number: number, percent: percent, percentParts: percentParts, usd: usd, money: money, compact: compact
+      language: language, tag: tag, english: !cldr, hours: hours, group: pseudo ? PSEUDO_GROUP : group, decimal: decimal,
+      number: number, percent: percent, percentParts: percentParts, usd: usd, money: money, compact: compact,
+      clock: clock, dayClock: dayClock, hour: hour, stamp: stamp, monthDay: monthDay, date: date, dayDate: dayDate,
+      monthYear: monthYear, weekday: weekday, month: month, duration: duration, list: list, upper: upper, lower: lower
     };
   }
 

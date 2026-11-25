@@ -164,7 +164,8 @@ def test_the_history_page_has_both_heatmaps_the_odometer_and_the_streaks() -> No
     for needle in ("CHARTS.calendar", "CHARTS.matrix", "odometerHTML", "streak-current", "streak-longest",
                    "busiest-day", "first-use", 'data-action="export"'):
         assert needle in body, needle
-    assert "WEEKDAYS_MON" in APP_CODE and APP_CODE.count('"MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"') >= 1
+    # Monday first: English's names are formats.js's (#91), which app.js's WEEKDAYS_MON takes in the page's language
+    assert "WEEKDAYS_MON" in APP_CODE and read("formats.js").count('"MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"') == 1
 
 
 def test_money_is_labelled_apart_from_list_price_cost() -> None:
@@ -1000,7 +1001,7 @@ def test_the_page_takes_its_text_from_the_catalog_and_marks_english(checks: dict
     assert i["htmlForged"] == "Clé [object Object]"                   # only markup() passes; data never does
     assert i["code"] == '<code class="nm-path" lang="en" translate="no">claude --resume &lt;id&gt;</code>'
     assert i["path"] == '<span class="nm-path" lang="en" translate="no">C:\\Users\\t &amp; co</span>'
-    assert i["name"] == '<span lang="en" translate="no">Opus &lt;4&gt;</span>'
+    assert i["name"] == '<span translate="no">Opus &lt;4&gt;</span>'            # a name: cased by the page's language (#91)
     assert (i["pluralZero"], i["pluralTwo"], i["pluralMillion"]) == ("0 session", "2 sessions", "1000000 de sessions")
     assert i["pluralFallbackZero"] == "0 sessions"                         # English text follows English rules
     assert i["locale"]["format"] == "fr-CA" and i["known"] is True and i["names"] == dict(i18n.NAMES)
@@ -1336,6 +1337,131 @@ def test_the_budgets_measure_the_money_boxes_with_what_the_page_writes(checks: d
         tight = {budgets.tight(figure) for figure in figures}
         assert tight <= written, (language, tight - written)
         assert max(chars.width(text) for text in tight) == max(chars.width(text) for text in written), language
+
+
+# ── Dates, times, durations, lists and case on the page (#91, steps 2.3 to 2.7) ──────────────────────────────────
+
+def folded_spaces(texts: Any) -> Any:
+    """A 12-hour clock with its U+202F as U+0020: Intl's DateTimeFormat writes the one for the other (node and the
+    WebView alike; V2 lists it), so the clock assertions hold either way."""
+    return json.loads(json.dumps(texts).replace("\\u202f", " "))
+
+
+@ui_only
+def test_the_pages_dates_and_times_follow_the_format_tag_and_the_clock(checks: dict[str, Any]) -> None:
+    """#91 step 2.3: the page's clocks, dates, weekdays and months in the locale, on the clock the monitor follows
+    (Windows' 12- or 24-hour setting), and in the page's capitals cased by the language's rule (Turkish NİS, EKİ): fr-CA
+    16 H 12, es-ES SÁB, 16:12, tr 12-hour ÖS 4:12. The calendar's names follow the page; charts.js with no formats layer
+    keeps English's. English and the pseudo-locale keep English's shapes (the record holds them byte for byte)."""
+    d = checks["pageDates"]
+    en, pseudo, fr, fr12, ca, es, mx12, tr, tr12 = (d[name] for name in (
+        "en", "pseudo", "frFR", "frFR12", "frCA", "esES", "esMX12", "trTR", "trTR12"))
+    assert tr["constants"]["MONTHS"] == ["OCA", "ŞUB", "MAR", "N\u0130S", "MAY", "HAZ", "TEM", "AĞU", "EYL", "EK\u0130", "KAS", "ARA"]
+    assert tr["constants"]["WEEKDAYS_MON"] == ["PZT", "SAL", "ÇAR", "PER", "CUM", "CMT", "PAZ"]
+    assert tr["constants"]["DAYS"][:2] == ["PAZ", "PZT"] and fr["constants"]["WEEKDAYS_MON"][0] == "LUN."
+    assert es["constants"]["MONTHS"][8] == "SEPT" and mx12["constants"]["MONTHS"][8] == "SEP"
+    assert fr["clock"] == ["16:12", "09:05", "SAM. 16:12"] and ca["clock"] == ["16 H 12", "09 H 05", "SAM. 16 H 12"]
+    assert es["clock"] == ["16:12", "9:05", "SÁB, 16:12"] and tr["clock"] == ["16:12", "09:05", "CMT 16:12"]
+    assert folded_spaces([fr12["clock"], mx12["clock"], tr12["clock"]]) == [
+        ["4:12 PM", "9:05 AM", "SAM. 4:12 PM"], ["4:12 P.M.", "9:05 A.M.", "SÁB 4:12 P.M."], ["ÖS 4:12", "ÖÖ 9:05", "CMT ÖS 4:12"]]
+    assert (fr["stamp"], fr["day"], fr["date"], fr["hour"]) == (
+        "24 OCT., 16:12", ["SAM. 24 OCT.", "SAM. 24 OCT. 2026"], "24 OCT. 2026", ["16 H", "09 H"])
+    assert (tr["stamp"], tr["date"], tr["range"], tr["labels"]) == (
+        "24 EK\u0130 16:12", "24 EK\u0130 2026", "1 N\u0130S - 24 EK\u0130", ["9 N\u0130S", "EK\u0130 26", "OCA 27"])
+    assert folded_spaces(tr12["hourRange"]) == "ÖS 4 to ÖS 5" and fr["hourRange"] == "16 H to 17 H"
+    assert tr["calendar"] == ["OCA 26", "ŞUB", "MAR", "N\u0130S", "PZT", "ÇAR", "CUM"]
+    assert fr["calendar"] == ["JANV. 26", "FÉVR.", "MARS", "AVR.", "LUN.", "MER.", "VEN."]
+    assert en["calendar"] == ["JAN 26", "FEB", "MAR", "APR", "MON", "WED", "FRI"]
+    assert checks["chartsAlone"] == ["DEC", "JAN 27", "FEB", "MON", "WED", "FRI", "LESS", "MORE"]
+    assert en["constants"] == {"DAYS": ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"],
+                               "WEEKDAYS_MON": ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"],
+                               "MONTHS": ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]}
+    assert (en["clock"], en["stamp"], en["day"], en["hourRange"], en["labels"]) == (
+        ["4:12 PM", "9:05 AM", "SAT 4:12 PM"], "OCT 24 4:12 PM", ["SAT, OCT 24", "SAT, OCT 24, 2026"], "4 PM to 5 PM",
+        ["APR 9", "OCT 26", "JAN 27"])
+    assert {key: value for key, value in pseudo.items() if key != "plural"} == {
+        key: value for key, value in en.items() if key != "plural"}
+    assert "\u0307" not in json.dumps([tr, tr12], ensure_ascii=False)
+
+
+@ui_only
+def test_the_pages_durations_are_the_widgets_countdowns_in_cldrs_narrow_units(checks: dict[str, Any]) -> None:
+    """#91 step 2.4 (D14): fmtRemain and the ages in French, Spanish and Turkish are CLDR's narrow units, in capitals on a
+    badge and as written inside a sentence, with the widgets' parts (no zero tail): the page's countdown is
+    render.model.format_countdown's in every tag. Turkish 3S 27D is 3 hours 27 minutes and one hour is 1 SA. English keeps
+    2 D 3 H, 2 D 0 H and 3 M; NOW stays English's word (its text ticket's)."""
+    d = checks["pageDates"]
+    assert d["trTR"]["remain"] == ["2G 3S", "2G", "3S 27D", "1 SA", "27D", "NOW"]
+    assert d["frFR"]["remain"] == ["2J 3H", "2J", "3H 27MIN", "1H", "27MIN", "NOW"] and d["frCA"]["remain"][2] == "3H 27M"
+    assert d["en"]["remain"] == d["pseudo"]["remain"] == ["2 D 3 H", "2 D 0 H", "3 H 27 M", "1 H 0 M", "27 M", "NOW"]
+    for name, language, tag in (("frFR", "fr", "fr-FR"), ("frCA", "fr", "fr-CA"), ("esES", "es", "es-ES"),
+                                ("esMX12", "es", "es-MX"), ("trTR", "tr", "tr-TR")):
+        locale = locale_of(language, tag)
+        assert d[name]["remain"][:5] == [widget_model.format_countdown(s, locale) for s in (183600, 172800, 12420, 3600, 1620)], name
+    assert d["trTR"]["age"] == [["0SN", "0sn"], ["12SN", "12sn"], ["3D", "3d"], ["1 SA", "1 sa"], ["3S", "3s"], ["2G", "2g"]]
+    assert d["frFR"]["age"][2] == ["3MIN", "3min"] and d["esES"]["age"][5] == ["2D", "2d"]
+    assert d["en"]["age"] == [["0 S", "0 s"], ["12 S", "12 s"], ["3 M", "3 m"], ["1 H", "1 h"], ["3 H", "3 h"], ["2 D", "2 d"]]
+    assert checks["formatsCase"]["englishDuration"].startswith("MonitorFormats.duration serves French, Spanish and Turkish")
+
+
+@ui_only
+def test_lists_keep_englishs_join_and_plurals_their_rules_with_the_locales_number(checks: dict[str, Any]) -> None:
+    """#91 step 2.5 (D12, D13): English joins "X, Y and Z" (no Oxford comma, as the page always did); French, Spanish and
+    Turkish join as Intl.ListFormat does. plural() keeps English's s rule for its English words, and its number is the
+    locale's."""
+    d = checks["pageDates"]
+    assert d["en"]["list"] == d["pseudo"]["list"] == ["", "A", "A and B", "A, B and C"]
+    assert (d["frFR"]["list"][3], d["esES"]["list"][3], d["trTR"]["list"][3]) == ("A, B et C", "A, B y C", "A, B ve C")
+    assert d["frFR"]["list"][:3] == ["", "A", "A et B"]
+    assert d["en"]["plural"] == ["1 session", "1,234 requests"] and d["esES"]["plural"] == ["1 session", "1234 requests"]
+    assert d["frFR"]["plural"][1] == "1\u202f234 requests" and d["trTR"]["plural"][1] == "1.234 requests"
+
+
+@ui_only
+def test_names_in_capitals_follow_the_pages_language_and_english_words_englishs(checks: dict[str, Any]) -> None:
+    """#91 step 2.7 (D7): a name (a model, a surface) in capitals is cased by the page's language, so Haiku is HAİKU on a
+    Turkish page (Chris's decision); English words in capitals keep English's rule (SESSIONS, never SESSİONS) until their
+    text ticket gives them their catalog's language. formats.js's upper and lower take a language or a tag and never
+    leave a combining dot; tName is translate="no" and no lang of its own, so CSS capitals follow the page."""
+    d = checks["pageDates"]
+    assert d["trTR"]["named"] == ["HA\u0130KU 4.5", "CLAUDE \u0130N CHROME"]
+    assert d["en"]["named"] == d["frFR"]["named"] == ["HAIKU 4.5", "CLAUDE IN CHROME"]
+    english = ["2 AGENTS ONLY", "2 SESSIONS", "CHECK FAILED: SIGNING IS MISSING"]
+    assert d["trTR"]["english"] == d["en"]["english"] == d["frFR"]["english"] == english
+    case = checks["formatsCase"]
+    assert case["tr"] == ["\u0130STANBUL ILIK", "istanbul \u0131l\u0131k", "i", "I", "i"]
+    assert case["en"] == ["I", "\u0130", "\u0130", "\u0131", "i\u0307"]               # English is Unicode's own rule, as str.lower()
+    assert case["hours"] == [24, 12, 12, 24, 12]                        # English and the pseudo-locale: always 12-hour
+    assert checks["i18n"]["name"] == '<span translate="no">Opus &lt;4&gt;</span>'
+
+
+# The bare case calls app.js may make: ids, never text people read (D8 of #91's plan). Text goes through the formats:
+# FMT.upper(text) for a name (the page's language) and FMT.upper(text, "en") for English words (English's rule, until
+# the text tickets #98 to #101 give each its catalog's language).
+APP_BARE_CASE_CALLS = {
+    'String(currency || "USD").trim().toUpperCase()': "fmtMoney: the currency's ISO code",
+    'String(limit.severity || "").toLowerCase()': "severityOf: a severity id",
+    "name.toLowerCase() !== accent.toLowerCase()": "accentTitled: a colour's name against its id",
+    "var label = fmt.toUpperCase();": "exportData: the export format's id (CSV, JSON)",
+    "a.slice(0, 3).toUpperCase()": "renderVariants: an accent id's first letters",
+}
+CASE_CALL = re.compile(r"\.to(?:Locale)?(?:Upper|Lower)Case\b")
+
+
+def test_app_js_cases_text_through_the_formats_and_ids_alone_with_the_bare_calls() -> None:
+    """D8 of #91's plan: every bare upper- or lower-case call in app.js is one of the ids listed, each once; text people
+    read is cased through the formats (FMT.upper, FMT.lower), by the page's language for a name and by English's rule
+    for English words."""
+    code = strip_comments(APP_CODE)
+    calls = [m.start() for m in CASE_CALL.finditer(code)]
+    allowed: set[int] = set()
+    for snippet in APP_BARE_CASE_CALLS:
+        assert code.count(snippet) == 1, snippet
+        at = code.index(snippet)
+        allowed |= {m.start() + at for m in CASE_CALL.finditer(snippet)}
+    stray = [code[max(0, i - 60):i + 14].strip().splitlines()[-1] for i in calls if i not in allowed]
+    assert not stray, stray
+    assert len(calls) == len(allowed) == 6
 
 
 def test_the_language_row_is_wired_into_the_settings_page() -> None:
@@ -1803,7 +1929,7 @@ def test_every_failure_status_line_goes_through_failed_text() -> None:
     """The static half of the check above: no line is built as an upper-case prefix plus the monitor's own reason."""
     code = strip_comments(APP_CODE)
     assert not re.search(r'"[A-Z][A-Z ]*: " \+ errorText\(', code)
-    assert function_body(APP_CODE, "failedText").count("toUpperCase()") == 1
+    assert function_body(APP_CODE, "failedText").count('FMT.upper(errorText(res), "en")') == 1      # English's rule (#91)
     for prefix in ("REFRESH FAILED", "CHECK FAILED", "UPDATE FAILED", "COULD NOT SKIP"):
         assert f'failedText("{prefix}", res)' in code, prefix
 

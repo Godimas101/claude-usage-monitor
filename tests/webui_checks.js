@@ -398,6 +398,86 @@ out.fmtUsdUnchanged = [api.fmtUsd(12.5), api.fmtUsd(1234.5)];
   }
 }
 
+// ── the page's dates, times, durations, lists and case in the locale (#91, steps 2.3 to 2.7) ─────────────────
+{
+  const localeMeta = (locale) => (sel) => (sel === 'meta[name="monitor-locale"]'
+    ? { getAttribute: (k) => (k === "content" ? JSON.stringify(locale) : null) } : null);
+  const pageIn = (language, format, clock) => load(localeMeta({ setting: "system", language, system: language, format,
+    clock, offered: ["en", language] }));
+  // Local wall times, so the answers do not depend on the zone the test runs in: today at 16:12 and 9:05 (a same-day clock
+  // has no weekday), and Saturday 2026-10-24 at 16:12.
+  const todayAt = (h, m) => { const d = new Date(); d.setHours(h, m, 0, 0); return d.getTime(); };
+  const SAT = new Date(2026, 9, 24, 16, 12).getTime();
+  const texts = (svg) => Array.from(String(svg).matchAll(/<text[^>]*>([^<]*)<\/text>/g), (m) => m[1]);
+  const dates = (page) => {
+    const a = page.api;
+    const days = [];
+    for (let i = 0; i < 120; i++) {
+      const d = new Date(2026, 0, 1 + i);
+      days.push({ date: d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"), value: i % 5, tip: "t" });
+    }
+    return {
+      constants: { DAYS: a.DAYS, WEEKDAYS_MON: a.WEEKDAYS_MON, MONTHS: a.MONTHS },
+      clock: [a.clockText(todayAt(16, 12)), a.clockText(todayAt(9, 5)), a.clockText(SAT)],
+      stamp: a.stampText(SAT), day: [a.dayText("2026-10-24"), a.dayText("2026-10-24", true)], date: a.dateText(SAT),
+      hour: [a.hourText(new Date(2026, 9, 24, 16).getTime()), a.hourText(new Date(2026, 9, 24, 9).getTime())],
+      range: a.rangeText("2026-04-01T12:00:00", "2026-10-24T12:00:00"), hourRange: a.hourRange(16),
+      labels: [a.dayLabel("2026-04-09"), a.monthLabel("2026-10"), a.monthLabel("2027-01")],
+      calendar: texts(page.charts.calendar(days, { width: 1000, maxCell: 22, legend: ["LESS", "MORE"] })).filter((t) => !/^(LESS|MORE)$/.test(t)),
+      remain: [a.fmtRemain(183600000), a.fmtRemain(172800000), a.fmtRemain(12420000), a.fmtRemain(3600000), a.fmtRemain(1620000),
+        a.fmtRemain(30000)],
+      age: [0, 12000, 180000, 3600000, 10800000, 172800000].map((ms) => [a.ageWords(a.fmtAge(ms), a.AGE_UNIT),
+        a.ageWords(a.fmtAge(ms), a.AGE_UNIT_IN_SENTENCE)]),
+      list: [a.listWords([]), a.listWords(["A"]), a.listWords(["A", "B"]), a.listWords(["A", "B", "C"])],
+      plural: [a.plural(1, "session"), a.plural(1234, "request")],
+      // a name in capitals (the model mix, the surfaces), and English words in capitals (whoWords, a status line)
+      named: [(a.modelMixCard({ models: [{ id: "claude-haiku-4-5", name: "Haiku 4.5", share: 50 }], loaded: true })
+        .match(/<span class="k"[^>]*>([^<]*)</) || [])[1],
+        (a.surfaceCard({ breakdown: [{ key: "chrome", name: "Claude in Chrome", percent: 50 }] }).match(/<span class="k">([^<]*)</) || [])[1]],
+      english: [a.whoWords({ agents: 2 }), a.workWords({ session: 2 }),
+        a.failedText("CHECK FAILED", { ok: false, data: { error: "signing is missing" } })],
+    };
+  };
+  out.pageDates = {};
+  for (const [name, language, format, clock] of [["en", "en", "en-US", 12], ["pseudo", "pseudo", "en-US", 12],
+    ["frFR", "fr", "fr-FR", 24], ["frFR12", "fr", "fr-FR", 12], ["frCA", "fr", "fr-CA", 24], ["esES", "es", "es-ES", 24],
+    ["esMX12", "es", "es-MX", 12], ["trTR", "tr", "tr-TR", 24], ["trTR12", "tr", "tr-TR", 12]]) {
+    out.pageDates[name] = dates(pageIn(language, format, clock));
+  }
+  // charts.js without the formats layer (a page that has none) keeps English's names
+  {
+    const b = { document: { getElementById: () => ({}) } };            // its style is there; no text to measure
+    b.window = b;
+    vm.createContext(b);
+    vm.runInContext(fs.readFileSync(path.join(webui, "charts.js"), "utf8"), b, { filename: "charts.js" });
+    const days = [];
+    for (let i = 0; i < 90; i++) {
+      const d = new Date(2026, 11, 1 + i);
+      days.push({ date: d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"), value: 1, tip: "t" });
+    }
+    out.chartsAlone = texts(b.MonitorCharts.calendar(days, { width: 1000, maxCell: 22, legend: ["LESS", "MORE"] }));
+  }
+  // formats.js's own case rules, by a language or a tag; English has no duration of its own (it throws, as formats.py's)
+  {
+    const F = pageIn("tr", "tr-TR", 24).box.MonitorFormats;
+    const tr = F.make({ language: "tr", format: "tr-TR", clock: 24 });
+    const en = F.make({ language: "en", format: "en-US", clock: 12 });
+    let threw = null;
+    try {
+      en.duration([[1, "h"]]);
+    } catch (e) {
+      threw = e.message;
+    }
+    out.formatsCase = {
+      tr: [tr.upper("istanbul \u0131l\u0131k"), tr.lower("\u0130STANBUL ILIK"), tr.lower("I\u0307"), tr.upper("i", "en"), tr.lower("I", "en")],
+      en: [en.upper("i"), en.upper("i", "tr-TR"), en.upper("i", "az"), en.lower("I", "tr_TR"), en.lower("\u0130")],
+      hours: [tr.hours, en.hours, F.make({ language: "fr", format: "fr-FR", clock: 12 }).hours, F.make({ language: "fr", format: "fr-FR" }).hours,
+        F.make({ language: "pseudo", format: "en-US", clock: 24 }).hours],
+      englishDuration: threw,
+    };
+  }
+}
+
 // ── the plan multiple: a cell a month, or a month per N cells beyond 24 ───────────────────────────────────
 function cells(ratio) {
   const html = api.ratioCells(ratio, "r");
