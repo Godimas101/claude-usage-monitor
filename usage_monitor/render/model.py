@@ -4,10 +4,11 @@ No Win32 and no drawing code here. Skins draw a WidgetModel; the host builds one
 state, the settings or the minute changes. Severity, pace, time windows, local reset times and
 the status wording are decided once here, so every skin tells the same story.
 
-The model carries values and codes beside its English texts (#90): the age in seconds, why the
+The model carries values and codes beside its texts (#90): the age in seconds, why the
 sign-in needs the user, each row's kind and scope, its share and its reset day, and the guard's
 resume time and the kinds of the limits it watches. Each skin words its own text from those, and
-never cuts or matches the English texts to find a value in them.
+never cuts or matches the texts to find a value in them. The texts' words are English; their
+numbers, percents and times are in the model's locale (#91, English by default).
 """
 from __future__ import annotations
 
@@ -20,7 +21,8 @@ from typing import Any, Literal
 from usage_monitor.data.identity import legacy_label, scope_name
 from usage_monitor.data.models import ApiStatus, Limit, MonitorState, UsageSnapshot
 from usage_monitor.data.windows import PACE_BAND_POINTS
-from usage_monitor.i18n import ENGLISH, Locale
+from usage_monitor import casing, formats
+from usage_monitor.i18n import DEFAULT, ENGLISH, Locale
 
 ShowScoped = Literal["auto", "always", "never"]
 SHOW_SCOPED_MODES: tuple[str, ...] = ("auto", "always", "never")
@@ -99,7 +101,6 @@ def lamp_kind(status: ApiStatus) -> str:
     """The lamp kind of a status (see LAMP_KINDS). An unknown status reads as stale: nothing live to show."""
     return LAMP_KINDS.get(status, LAMP_STALE)
 
-_WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 _NORMAL_NAMES = frozenset({"normal", "ok", "none"})
 _WARNING_NAMES = frozenset({"warning", "warn"})
 
@@ -112,7 +113,8 @@ class Row:
     is no data yet. time_fraction is the elapsed share of the limit's window (0..1). pace is
     "ahead", "on_pace" or "behind" (usage against the clock, +/-10 points), or None.
 
-    label, resets_text and share_text are English. The skins word a row from its values instead:
+    label is English, and resets_text and share_text are in the model's locale (share_text's word is
+    English). The skins word a row from its values instead:
     kind is the limit's kind ("session", "weekly_all", "weekly_scoped", or another the usage API
     names), scope_model and scope_name what a scoped limit is named for (scope_name is the model,
     else the surface; None when it has neither), share_pct its share of the weekly limit, and
@@ -125,9 +127,9 @@ class Row:
     time_fraction: float | None
     severity: str                       # "normal" | "warning" | "critical"
     resets_at: datetime | None
-    resets_text: str | None             # local time: "7:39 PM" today, else "Sat 4:00 PM"
+    resets_text: str | None             # local time: "7:39 PM" today, else "Sat 4:00 PM" (format_resets)
     pace: str | None
-    share_text: str | None              # scoped limits only: "50% SHARE"
+    share_text: str | None              # scoped limits only: "50% SHARE" ("50 % SHARE" in French)
     kind: str | None = None
     scope_model: str | None = None
     scope_name: str | None = None
@@ -156,7 +158,8 @@ class GuardMark:
     draws it today (each picks its countdown or resume_clock itself), the dump and the tests read it. resume_in is
     always the countdown ("2D 3H" past a day) and resume_clock always the reset time, for a surface with room for both.
 
-    labels, resume_text and resume_in are English. The values the skins word the guard from: kinds, models and
+    labels are English; resume_text, resume_in and resume_clock are in the model's locale (format_countdown,
+    format_resets). The values the skins word the guard from: kinds, models and
     scope_names give each watched limit's kind, scoped model and scope name (as Row has them) by Row key; a key
     they lack is a limit the reading no longer carries, which keeps the guard's own label. resume_seconds is the
     time left until resume_at in whole seconds (0 once it has passed), which countdown_units words; resume_same_day
@@ -199,7 +202,8 @@ class WidgetModel:
     """Everything a skin needs to draw the floating widget, the strip, the tray and the tooltip.
 
     status_text is the pill wording (LIVE, STALE, OFFLINE, RATE LIMITED, PAUSED, LOADING,
-    NO LOGIN). age_text is "12 S AGO" style, or None before the first fetch. stale is True when
+    NO LOGIN). age_text is "12 S AGO" style (format_age, in the model's locale), or None before
+    the first fetch. stale is True when
     the values are not live (everything except LIVE and PAUSED). stale_message is set when the
     user must act (expired or missing login). blink_on drives the alive mark (animation only).
     guard is the usage guard when it is armed or holding, None while it is off.
@@ -290,13 +294,13 @@ def build_model(
     return WidgetModel(
         status=status,
         status_text=STATUS_TEXT[status],
-        age_text=format_age(fetched_at, now) if fetched_at is not None else None,
-        rows=_rows(usage, now, show_scoped),
+        age_text=format_age(fetched_at, now, locale) if fetched_at is not None else None,
+        rows=_rows(usage, now, show_scoped, locale),
         stale=status not in (ApiStatus.LIVE, ApiStatus.PAUSED),
         stale_message=english_stale_message(reason),
         blink_on=bool(blink_on),
         updated_at=state.updated_at if state is not None else now,
-        guard=_guard_mark(getattr(state, "guard", None), usage, now),
+        guard=_guard_mark(getattr(state, "guard", None), usage, now, locale),
         age_seconds=_age_seconds(fetched_at, now) if fetched_at is not None else None,
         stale_reason=reason,
         locale=locale,
@@ -360,12 +364,12 @@ def pace_delta(percent: float | None, time_fraction: float | None) -> float | No
     return percent - time_fraction * 100.0
 
 
-def format_resets(resets_at: datetime, now: datetime) -> str:
-    """Local reset time: "7:39 PM" on the same local day, otherwise "Sat 4:00 PM"."""
+def format_resets(resets_at: datetime, now: datetime, locale: Locale = ENGLISH) -> str:
+    """Local reset time in ``locale``: the clock on the same local day ("7:39 PM"; "16 h 12" in fr-CA), otherwise the
+    weekday and the clock ("Sat 4:00 PM"; "sam. 16 h 12")."""
     local = resets_at.astimezone()
-    clock = _clock_text(local)
-    same_day, weekday = reset_day(resets_at, now)
-    return clock if same_day else f"{_WEEKDAYS[weekday]} {clock}"
+    same_day, _weekday = reset_day(resets_at, now)
+    return formats.clock(local, locale) if same_day else formats.day_clock(local, locale)
 
 
 def reset_day(moment: datetime, now: datetime) -> tuple[bool, int]:
@@ -387,16 +391,20 @@ def age_unit(seconds: int) -> tuple[int, str]:
     return seconds // _UNIT_S[UNIT_DAYS], UNIT_DAYS
 
 
-def format_age(fetched_at: datetime, now: datetime) -> str:
-    """"12 S AGO", "41 M AGO", "3 H AGO" or "2 D AGO". Never negative."""
+def format_age(fetched_at: datetime, now: datetime, locale: Locale = ENGLISH) -> str:
+    """"12 S AGO", "41 M AGO", "3 H AGO" or "2 D AGO". Never negative. Other languages give CLDR's relative time
+    in capitals ("IL Y A 12 S" in French)."""
     count, unit = age_unit(int((_aware(now) - fetched_at).total_seconds()))
-    return f"{count} {unit.upper()} AGO"
+    if formats.english_shapes(locale):
+        return f"{count} {unit.upper()} AGO"
+    return casing.upper(formats.ago(count, unit, locale), locale.language)
 
 
-def share_text(allowance_pct: float | None) -> str | None:
+def share_text(allowance_pct: float | None, locale: Locale = ENGLISH) -> str | None:
+    """"50% SHARE", its percent rounded with round() and written in ``locale`` ("50 % SHARE" in French)."""
     if allowance_pct is None:
         return None
-    return f"{round(allowance_pct)}% SHARE"
+    return f"{formats.percent(str(round(allowance_pct)), locale)} SHARE"
 
 
 def countdown_units(seconds: float) -> tuple[tuple[int, str], ...]:
@@ -415,9 +423,14 @@ def countdown_units(seconds: float) -> tuple[tuple[int, str], ...]:
     return ((minutes, UNIT_MINUTES),)
 
 
-def format_countdown(seconds: float) -> str:
-    """Time left as "2D 3H", "2H 14M", "9M" or "<1M" (see countdown_units)."""
-    return " ".join(f"{count}{unit.upper()}" for count, unit in countdown_units(seconds)) or "<1M"
+def format_countdown(seconds: float, locale: Locale = ENGLISH) -> str:
+    """Time left as "2D 3H", "2H 14M", "9M" or "<1M" (see countdown_units). Other languages give CLDR's narrow
+    units in capitals ("2J 3H" in French; "<1MIN" in fr-FR under a minute)."""
+    units = countdown_units(seconds)
+    if formats.english_shapes(locale):
+        return " ".join(f"{count}{unit.upper()}" for count, unit in units) or "<1M"
+    text = formats.duration(units, locale) if units else "<" + formats.duration(((1, UNIT_MINUTES),), locale)
+    return casing.upper(text, locale.language)
 
 
 def unknown_kind_names(kind: str) -> tuple[str, str]:
@@ -435,10 +448,12 @@ def english_stale_message(reason: str | None) -> str | None:
 
 # ── Internals ─────────────────────────────────────────────────────────────────
 
-def _rows(usage: UsageSnapshot | None, now: datetime, show_scoped: str) -> list[Row]:
+def _rows(usage: UsageSnapshot | None, now: datetime, show_scoped: str, locale: Locale) -> list[Row]:
     rows = [
-        _limit_row("session", "SESSION", "session", usage.session if usage else None, now, SESSION_WINDOW_S, False),
-        _limit_row("weekly", "WEEKLY", "weekly_all", usage.weekly if usage else None, now, WEEKLY_WINDOW_S, False),
+        _limit_row("session", "SESSION", "session", usage.session if usage else None, now, SESSION_WINDOW_S, False,
+                   locale),
+        _limit_row("weekly", "WEEKLY", "weekly_all", usage.weekly if usage else None, now, WEEKLY_WINDOW_S, False,
+                   locale),
     ]
     if usage is None or show_scoped == "never":
         return rows
@@ -446,9 +461,8 @@ def _rows(usage: UsageSnapshot | None, now: datetime, show_scoped: str) -> list[
         if show_scoped == "auto" and not _auto_shows(limit):
             continue
         name = _scoped_name(limit, index)
-        rows.append(_limit_row(
-            f"scoped:{name}", limit.label or name.upper(), limit.kind, limit, now, WEEKLY_WINDOW_S, True,
-        ))
+        label = limit.label or casing.upper(name, DEFAULT)      # the English label, cased by English rules
+        rows.append(_limit_row(f"scoped:{name}", label, limit.kind, limit, now, WEEKLY_WINDOW_S, True, locale))
     return rows
 
 
@@ -463,7 +477,7 @@ def _scoped_name(limit: Limit, index: int) -> str:
 # and every skin marks the rows it is told about. The mapping matches the guard's identity strings (its name and
 # label never change with the language); the skins word each limit from the kind and scope the mark carries.
 
-def _guard_mark(block: Any, usage: UsageSnapshot | None, now: datetime) -> GuardMark | None:
+def _guard_mark(block: Any, usage: UsageSnapshot | None, now: datetime, locale: Locale) -> GuardMark | None:
     """The guard block of the state as a mark, or None when it is off, missing or empty, and while there is
     no reading (no sign-in, still loading): the guard cannot act on nothing, so no surface says it is armed."""
     if not isinstance(block, Mapping) or block.get("state") not in GUARD_STATES or usage is None:
@@ -514,8 +528,8 @@ def _guard_mark(block: Any, usage: UsageSnapshot | None, now: datetime) -> Guard
     resume_in = resume_clock = resume_text = resume_seconds = resume_same_day = resume_weekday = None
     if resume_at is not None:
         remaining = (resume_at - now).total_seconds()
-        resume_in = format_countdown(remaining)
-        resume_clock = format_resets(resume_at, now)
+        resume_in = format_countdown(remaining, locale)
+        resume_clock = format_resets(resume_at, now, locale)
         resume_text = resume_in if remaining < DAY_S else resume_clock
         resume_seconds = max(0, int(remaining))
         resume_same_day, resume_weekday = reset_day(resume_at, now)
@@ -573,6 +587,7 @@ def _limit_row(
     now: datetime,
     default_window_s: int,
     scoped: bool,
+    locale: Locale,
 ) -> Row:
     if limit is None:
         return Row(key, label, None, None, SEVERITY_NORMAL, None, None, None, None, kind=kind)
@@ -587,9 +602,9 @@ def _limit_row(
         time_fraction=fraction,
         severity=severity_for(limit.severity, percent),
         resets_at=limit.resets_at,
-        resets_text=format_resets(limit.resets_at, now) if limit.resets_at is not None else None,
+        resets_text=format_resets(limit.resets_at, now, locale) if limit.resets_at is not None else None,
         pace=pace_for(percent, fraction),
-        share_text=share_text(limit.allowance_pct) if scoped else None,
+        share_text=share_text(limit.allowance_pct, locale) if scoped else None,
         kind=kind,
         scope_model=limit.scope_model if scoped else None,
         scope_name=scope_name(limit.scope_model, limit.scope_surface) if scoped else None,
@@ -610,12 +625,6 @@ def _stale_reason(status: ApiStatus, refused: int | None = None) -> str | None:
 def _age_seconds(fetched_at: datetime, now: datetime) -> int:
     """The age in whole seconds, as format_age counts it. Never negative."""
     return max(0, int((_aware(now) - fetched_at).total_seconds()))
-
-
-def _clock_text(local: datetime) -> str:
-    hour = local.hour % 12 or 12
-    suffix = "AM" if local.hour < 12 else "PM"
-    return f"{hour}:{local.minute:02d} {suffix}"
 
 
 def _aware(moment: datetime) -> datetime:
