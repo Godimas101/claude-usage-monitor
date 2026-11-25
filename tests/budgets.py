@@ -103,7 +103,9 @@ FIGURES: dict[str, dict[str, tuple[str, ...]]] = {
 # each language the widest the page writes, in any of the language's format tags, at the amounts where English's own
 # figure has six characters at most, as the formats write it with CLDR's spaces (tight() takes the one before the "$", as
 # the page does in these boxes). A compact figure keeps the space before its unit ("99,9 k$"), so it is wider than
-# English's "$99.9K". test_webui.py holds each figure to the page, and the page to the figures' width.
+# English's "$99.9K". test_webui.py holds each figure to the page, and the page to the figures' width. The boxes count
+# characters, so the sign's side does not change the measure: CLDR 48 puts Turkish's compact "$" first ("$99,9 Mn",
+# where CLDR 47 writes "99,9 Mn $"), and test_webui.py takes a figure with its "$" on either side.
 PAGE_MONEY: dict[str, tuple[str, ...]] = {"fr": ("99,9\u00a0k\u00a0$",), "es": ("99,9\u00a0mil\u00a0$",),
                                           "tr": ("99,9\u00a0Mn\u00a0$",)}
 # What each figure is: "duration" a countdown (the time left), "age" how long ago a reading was (one unit), "count" a

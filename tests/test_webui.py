@@ -1196,6 +1196,23 @@ def test_the_pages_english_formats_are_the_recorded_ones() -> None:
 
 
 NB, NNB = "\u00a0", "\u202f"            # what CLDR writes before "%" and "$", and French's group separator
+SPACE_BESIDE_THE_DOLLAR = re.compile(r"\s\$|\$\s")
+
+
+def as_the_cldr_writes(versions: dict[str, Any], forms: dict[str, Any], found: Any) -> None:
+    """found is the form listed for the CLDR version of the node that wrote it (process.versions.cldr), where CLDR's
+    versions write a figure otherwise (CLDR 48 moved Turkish's compact "$" before the number). A version not listed
+    fails with what its page wrote, to be checked against CLDR and listed."""
+    cldr_version = versions["cldr"]
+    assert cldr_version in forms, f"CLDR {cldr_version} is not listed ({', '.join(sorted(forms))}); it wrote {found!r}"
+    assert found == forms[cldr_version], (f"CLDR {cldr_version}", found, forms[cldr_version])
+
+
+def sign_last(text: str) -> str:
+    """A money box's figure with a "$" that comes first (before or after its minus) moved to the end: the boxes count
+    characters, so the side CLDR puts the sign on does not change what they measure (Turkish's compact figures are
+    "99,9 Mn$" on CLDR 47 and "$99,9 Mn" on CLDR 48)."""
+    return re.sub(r"^(-?)\$(-?)(.*)$", r"\1\2\3$", text)
 
 
 @ui_only
@@ -1226,7 +1243,8 @@ def test_the_formats_keep_englishs_shapes_and_the_pseudo_locales_two_changes(che
 def test_the_formats_follow_the_format_tag_in_french_spanish_and_turkish(checks: dict[str, Any]) -> None:
     """#91's cases, as Intl writes them for the format tag: fr 34 % (U+00A0), tr %34, es-ES 1234 but 12.345 (CLDR's
     minimum grouping), fr-FR's U+202F and fr-CA's U+00A0 groups, US dollars as the plain "$" (5,96 $, never $US),
-    fr-CH's currency decimal, Turkish's B for a thousand, and tight: no space before the "$" or the "%"."""
+    fr-CH's currency decimal, Turkish's B for a thousand, and tight: no space before the "$" or the "%". Where CLDR's
+    versions write a figure otherwise, each version's form is listed (as_the_cldr_writes)."""
     fr, ca, ch = checks["formats"]["frFR"], checks["formats"]["frCA"], checks["formats"]["frCH"]
     es, mx, tr = checks["formats"]["esES"], checks["formats"]["esMX"], checks["formats"]["trTR"]
     assert [f["english"] for f in (fr, ca, ch, es, mx, tr)] == [False] * 6
@@ -1242,7 +1260,9 @@ def test_the_formats_follow_the_format_tag_in_french_spanish_and_turkish(checks:
     assert fr["usd"] == [f"5,96{NB}$", f"-5,96{NB}$", f"1{NNB}235{NB}$", f"1{NNB}234,50{NB}$", f"-1{NNB}235{NB}$",
                          f"1,2{NB}k{NB}$", f"-1,2{NB}k{NB}$", "5,96$", f"1,2{NB}k$"]
     assert mx["usd"][:5] == ["$5.96", "-$5.96", "$1,235", "$1,234.50", "-$1,235"] and mx["usd"][7] == "$5.96"
-    assert tr["usd"][:3] == ["$5,96", "-$5,96", "$1.235"] and tr["usd"][7:] == ["$5,96", f"1,2{NB}B$"]
+    assert tr["usd"][:3] == ["$5,96", "-$5,96", "$1.235"] and tr["usd"][7] == "$5,96"
+    # Turkish's compact dollar, tight: CLDR 47 writes its sign last ("1,2 B $"), CLDR 48 first ("$1,2 B", no space).
+    as_the_cldr_writes(checks["versions"], {"47.0": f"1,2{NB}B$", "48.0": f"$1,2{NB}B"}, tr["usd"][8])
     assert es["usd"][2] == f"1235{NB}$" and ch["usd"][0] == f"5.96{NB}$" and ch["number"][0] == f"1{NNB}234,5"
     assert fr["money"] == [f"5,96{NB}$", f"5,96{NB}EUR", f"5,96{NB}EURO", f"1{NNB}234,50{NB}$"]
     assert ch["money"][2] == f"5.96{NB}EURO" and mx["money"][1:3] == [f"EUR{NB}5.96", f"EURO{NB}5.96"]
@@ -1359,17 +1379,23 @@ def test_the_money_boxes_take_the_dollar_without_its_space(checks: dict[str, Any
     """Chris's decision on #91 (Q1 (a)): the cost tiles and the big cost figure are sized for English's six characters,
     so French and Spanish drop the space before "$" there, as usage_monitor/formats.py's money does with tight=True for
     the widgets' boxes; the sign keeps its side (es-MX $5.96, tr $5,96), and a compact figure keeps the space before its
-    unit. Everywhere else the space stays."""
+    unit. Everywhere else the space stays. A compact figure's side is CLDR's, which CLDR 48 moved for Turkish ($1,2 B):
+    the tile is the page's own compact figure without the space beside the "$", on either side."""
     for name, language, tag in (("frFR", "fr", "fr-FR"), ("frCA", "fr", "fr-CA"), ("esES", "es", "es-ES"),
                                 ("esMX", "es", "es-MX"), ("trTR", "tr", "tr-TR")):
         page, locale = checks["pageFormats"][name], locale_of(language, tag)
         assert page["tile"][0] == page["hero"][0] == formats.money(5.96, "USD", locale, tight=True), name
         assert page["tile"][1] == formats.money(-5.96, "USD", locale, tight=True), name
         assert page["usd"][0] == formats.money(5.96, "USD", locale), name
+        assert not [text for text in page["tile"] + page["hero"] if SPACE_BESIDE_THE_DOLLAR.search(text)], name
     fr, tr, mx = checks["pageFormats"]["frFR"], checks["pageFormats"]["trTR"], checks["pageFormats"]["esMX"]
     assert fr["tile"] == ["5,96$", "-5,96$", "123$", f"1,2{NB}k$", f"1,2{NB}M$"]
     assert fr["hero"] == ["5,96$", f"1{NNB}235$", f"12,3{NB}k$", f"1,2{NB}M$"]
-    assert tr["tile"][3:] == [f"1,2{NB}B$", f"1,2{NB}Mn$"] and mx["hero"][:2] == ["$5.96", "$1,235"]
+    # Turkish's compact tiles: the digits and the unit with its space, one "$" at an end, on the side fmtUsdShort's
+    # compact figure has it (1,2 B $ and 1,2 B$ on CLDR 47; $1,2 B on CLDR 48).
+    assert [text.replace("$", "", 1) for text in tr["tile"][3:]] == [f"1,2{NB}B", f"1,2{NB}Mn"]
+    assert all(text.count("$") == 1 and "$" in (text[0], text[-1]) for text in tr["tile"][3:]), tr["tile"]
+    assert tr["tile"][3] == re.sub(r"\s*\$\s*", "$", tr["usd"][4]) and mx["hero"][:2] == ["$5.96", "$1,235"]
 
 
 @ui_only
@@ -1391,8 +1417,10 @@ def test_the_pseudo_pages_figures_are_englishs_with_two_changes(checks: dict[str
 def test_the_budgets_measure_the_money_boxes_with_what_the_page_writes(checks: dict[str, Any]) -> None:
     """tests/budgets.py's PAGE_MONEY is what the cost tiles and the big cost figure write (#91): each figure, tight as
     those boxes take it, is what the page writes there for one of its language's format tags, at an amount where
-    English's own figure has six characters at most; and nothing the page writes there in any of those tags is wider,
-    so budgets.over() measures the widest (test_budgets.py's FOR_91 lists what runs past)."""
+    English's own figure has six characters at most, with its "$" on either side (the boxes count characters, and
+    CLDR 48 puts Turkish's compact "$" first: sign_last); nothing the page writes there in any of those tags is wider,
+    so budgets.over() measures the widest (test_budgets.py's FOR_91 lists what runs past); and none of it has a space
+    beside the "$"."""
     import budgets
 
     money = checks["pageMoney"]
@@ -1402,8 +1430,10 @@ def test_the_budgets_measure_the_money_boxes_with_what_the_page_writes(checks: d
     assert set(budgets.PAGE_MONEY) == {"fr", "es", "tr"}
     for language, figures in budgets.PAGE_MONEY.items():
         written = {text for tag, texts in money["tags"].items() if i18n.primary(tag) == language for text in texts}
+        assert not [text for text in written if SPACE_BESIDE_THE_DOLLAR.search(text)], language
         tight = {budgets.tight(figure) for figure in figures}
-        assert tight <= written, (language, tight - written)
+        missing = {sign_last(text) for text in tight} - {sign_last(text) for text in written}
+        assert not missing, (language, missing)
         assert max(chars.width(text) for text in tight) == max(chars.width(text) for text in written), language
 
 
@@ -1581,21 +1611,34 @@ def python_formats(tag: str) -> dict[str, list[str]]:
     return row
 
 
-def as_intl_writes_a_clock(text: str) -> str:
-    """formats.py's 12-hour clock with the two spaces Intl writes otherwise (KNOWN_CLOCK_SPACES)."""
-    return text.replace("a.\u202fm.", "a.\u00a0m.").replace("p.\u202fm.", "p.\u00a0m.").replace("\u202f", " ")
+# The spaces a 12-hour clock writes inside or beside its day period, and the day periods of fr, es and tr's 12-hour
+# clocks as cldr.py's am_pm and node's Intl write them (AM, a. m. with its space inside, a.m., ÖÖ), with a space on
+# either side: Turkish writes the period before the time.
+_CLOCK_SPACE = "[ \u00a0\u202f]"
+_DAY_PERIOD = re.compile(rf"{_CLOCK_SPACE}?(?<!\w)(?:AM|PM|ÖÖ|ÖS|[ap]\.{_CLOCK_SPACE}?m\.)(?!\w){_CLOCK_SPACE}?")
+
+
+def clock_spaces_folded(text: str) -> str:
+    """A 12-hour clock with each space inside its day period or beside it as U+0020. Which of U+0020, U+00A0 and U+202F
+    sits there is the one difference V2 lets pass in a 12-hour clock, on both sides (KNOWN_CLOCK_SPACES): it is safe,
+    since the widgets draw U+202F as U+00A0 (engine.drawn, #92), as wide as a space, so the clock reads the same. A
+    space missing or added, another period, another digit, or another space anywhere else still differs."""
+    return _DAY_PERIOD.sub(lambda m: re.sub(_CLOCK_SPACE, " ", m.group(0)), text)
 
 
 SEEN = "node v24.13.0, ICU 77.1, CLDR 47.0"
+SEEN_48 = "node v20.20.2, ICU 78.2, CLDR 48.0"            # CI's run 45563782300 (windows-latest)
 TABLE = "cldr.py: CLDR 47, Babel 2.18.0"
-# Two differences in every 12-hour clock, applied to formats.py's text before it is compared (as_intl_writes_a_clock).
+# The two spaces clock_spaces_folded lets differ in every 12-hour clock, each with what the page writes on each CLDR
+# version it was seen on (its example's clock12 at 16:12, checked on that version) and what cldr.py writes.
 KNOWN_CLOCK_SPACES = (
-    {"tags": "every tag", "fields": CLOCKS_12, "page": "4:12 PM", "python": "4:12\u202fPM", "example": "fr-FR",
-     "page_versions": SEEN, "python_version": TABLE,
-     "why": "Intl's DateTimeFormat writes U+0020 where CLDR 47's 12-hour patterns put U+202F beside the day period"},
-    {"tags": "Spanish's", "fields": CLOCKS_12, "page": "4:12 p.\u00a0m.", "python": "4:12\u202fp.\u202fm.", "example": "es-ES",
-     "page_versions": SEEN, "python_version": TABLE,
-     "why": "ICU 77.1's Spanish day periods hold U+00A0 (a.\u00a0m.), Babel 2.18.0's U+202F (a.\u202fm.)"},
+    {"tags": "every tag", "fields": CLOCKS_12, "page": {"47.0": "4:12 PM", "48.0": "4:12 PM"}, "python": "4:12\u202fPM",
+     "example": "fr-FR", "page_versions": (SEEN, SEEN_48), "python_version": TABLE,
+     "why": "Intl's DateTimeFormat writes U+0020 where CLDR's 12-hour patterns put U+202F beside the day period"},
+    {"tags": "Spanish's", "fields": CLOCKS_12, "page": {"47.0": "4:12 p.\u00a0m.", "48.0": "4:12 p. m."},
+     "python": "4:12\u202fp.\u202fm.", "example": "es-ES", "page_versions": (SEEN, SEEN_48), "python_version": TABLE,
+     "why": "the space inside Spanish's day period: Intl writes U+00A0 from ICU 77.1 (CLDR 47.0) and U+0020 from "
+            "ICU 78.2 (CLDR 48.0); Babel 2.18.0's day periods hold U+202F"},
 )
 # Where node's Intl and cldr.py differ beyond those two: (tag, field) -> what each writes for the field's grid row.
 KNOWN_CLDR_DIFFERENCES: dict[tuple[str, str], dict[str, Any]] = {}
@@ -1666,6 +1709,27 @@ def node_versions(page: dict[str, Any]) -> str:
     return f"node {versions['node']}, ICU {versions['icu']}, CLDR {versions['cldr']}"
 
 
+def page_differences(pages: dict[str, dict[str, list[str]]]) -> dict[tuple[str, str], dict[str, list[str]]]:
+    """Each (tag, field) where the page's row is not what python_formats(tag) writes: a 12-hour clock compared after
+    clock_spaces_folded on both sides, every other field as written. Each entry holds both rows as written."""
+    found: dict[tuple[str, str], dict[str, list[str]]] = {}
+    for tag, page in pages.items():
+        for field, values in python_formats(tag).items():
+            if field in CLOCKS_12:
+                differs = list(map(clock_spaces_folded, page[field])) != list(map(clock_spaces_folded, values))
+            else:
+                differs = page[field] != values
+            if differs:
+                found[(tag, field)] = {"page": page[field], "python": values}
+    return found
+
+
+def not_on_the_list(found: dict[tuple[str, str], dict[str, list[str]]]) -> dict[str, dict[str, list[str]]]:
+    """The differences KNOWN_CLDR_DIFFERENCES does not list with exactly these two rows."""
+    listed = {key: {"page": entry["page"], "python": entry["python"]} for key, entry in KNOWN_CLDR_DIFFERENCES.items()}
+    return {f"{tag} {field}": diff for (tag, field), diff in found.items() if listed.get((tag, field)) != diff}
+
+
 @ui_only
 def test_the_pages_formats_are_the_widgets_in_every_format_tag(cldr_page: dict[str, Any]) -> None:
     """V2 of #91's plan (D1): in every format tag of French, Spanish and Turkish, the page's numbers, percents, money,
@@ -1673,27 +1737,60 @@ def test_the_pages_formats_are_the_widgets_in_every_format_tag(cldr_page: dict[s
     node's Intl) are what formats.py and casing.py write from cldr.py, except the differences listed above, each with
     both values and both versions. A difference not on the list fails with its entry: check which side is right first
     (a wrong table is fixed in tests/cldr_gen.py, a wrong page in formats.js), then list it with the versions it was
-    seen with. On the versions the list was made with, a listed difference that is gone fails too."""
+    seen with. On the versions the list was made with, a listed difference that is gone fails too; on each CLDR version
+    a clock rule lists, its example is what that version writes."""
     versions = node_versions(cldr_page)
     print(f"V2: the page's Intl on {versions}; the widgets' {TABLE}")
     assert sorted(cldr_page["tags"]) == CLDR_TAGS
-    found: dict[tuple[str, str], dict[str, list[str]]] = {}
     for tag in CLDR_TAGS:
-        page, python = cldr_page["tags"][tag], python_formats(tag)
-        assert page["tag"] == tag, (tag, page["tag"])
-        for field, values in python.items():
-            written = [as_intl_writes_a_clock(value) for value in values] if field in CLOCKS_12 else values
-            if page[field] != written:
-                found[(tag, field)] = {"page": page[field], "python": values}
-    listed = {key: {"page": entry["page"], "python": entry["python"]} for key, entry in KNOWN_CLDR_DIFFERENCES.items()}
-    unknown = {f"{tag} {field}": diff for (tag, field), diff in found.items() if listed.get((tag, field)) != diff}
+        assert cldr_page["tags"][tag]["tag"] == tag, (tag, cldr_page["tags"][tag]["tag"])
+    found = page_differences(cldr_page["tags"])
+    unknown = not_on_the_list(found)
     assert not unknown, f"{versions} against {TABLE}, not on the list: " + json.dumps(unknown)
     if versions == SEEN:
-        assert sorted(set(listed) - set(found)) == [], "listed, no longer different"
-        for rule in KNOWN_CLOCK_SPACES:
-            assert cldr_page["tags"][rule["example"]]["clock12"][3] == rule["page"], rule
+        assert sorted(set(KNOWN_CLDR_DIFFERENCES) - set(found)) == [], "listed, no longer different"
+    cldr_version = cldr_page["versions"]["cldr"]
     for rule in KNOWN_CLOCK_SPACES:
+        if cldr_version in rule["page"]:
+            assert cldr_page["tags"][rule["example"]]["clock12"][3] == rule["page"][cldr_version], (cldr_version, rule)
         assert python_formats(rule["example"])["clock12"][3] == rule["python"], rule
+
+
+def test_v2s_12_hour_fold_lets_only_the_space_beside_a_day_period_differ() -> None:
+    """V2's one fold in a 12-hour clock (clock_spaces_folded): es-ES's page as CLDR 47 writes it (U+00A0 inside the day
+    period) and as CLDR 48 writes it (U+0020) are the widgets' clocks (U+202F); a page that differs from them by
+    anything else in the same field (the space inside or before the period gone, a space added, the other period, a
+    digit, the space after the weekday) is a difference V2 does not list, so it fails V2. node is not needed: the pages
+    are made from formats.py's own rows."""
+    python = python_formats("es-ES")
+
+    def page_with(change: Any) -> dict[str, dict[str, list[str]]]:
+        rows: dict[str, Any] = {field: list(values) for field, values in python.items()}
+        for field in CLOCKS_12:
+            rows[field] = [change(text) for text in rows[field]]
+        return {"es-ES": {"tag": "es-ES", **rows}}
+
+    def on_47(text: str) -> str:
+        return text.replace("\u202fa.\u202fm.", " a.\u00a0m.").replace("\u202fp.\u202fm.", " p.\u00a0m.")
+
+    def on_48(text: str) -> str:
+        return text.replace("\u202f", " ")
+
+    assert "\u202fp.\u202fm." in python["clock12"][3] and "\u202fa.\u202fm." in python["dayClock12"][7]
+    assert on_47(python["clock12"][3]) == "4:12 p.\u00a0m." and on_48(python["clock12"][3]) == "4:12 p. m."
+    assert page_differences(page_with(on_47)) == page_differences(page_with(on_48)) == {}
+    both = {("es-ES", "clock12"), ("es-ES", "dayClock12")}
+    for change, fields in (
+            (lambda t: on_48(t).replace("a. m.", "a.m.").replace("p. m.", "p.m."), both),      # inside the period: gone
+            (lambda t: on_48(t).replace(" a. m.", "a. m.").replace(" p. m.", "p. m."), both),  # before it: gone
+            (lambda t: on_48(t).replace("p. m.", "p.  m."), both),                              # a space added
+            (lambda t: on_48(t).replace("p. m.", "a. m."), both),                               # the other period
+            (lambda t: on_47(t).replace("4:12", "4:13"), both),                                 # a digit
+            (lambda t: on_48(t).replace(", ", ",\u00a0"), {("es-ES", "dayClock12")})):          # after the weekday
+        found = page_differences(page_with(change))
+        assert set(found) == fields and set(not_on_the_list(found)) == {f"{tag} {field}" for tag, field in fields}
+    for rule in KNOWN_CLOCK_SPACES:
+        assert {clock_spaces_folded(text) for text in rule["page"].values()} == {clock_spaces_folded(rule["python"])}
 
 
 @ui_only

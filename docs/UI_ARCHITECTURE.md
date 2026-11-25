@@ -486,8 +486,9 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   chart's label column grows to its widest label (fr-CA `JUILL. 26`), never under English's 64 px. The cost
   tiles and the big cost figure are the page's boxes sized for English's figures: their dollar is tight. A compact
   figure keeps CLDR's space before its unit, so French's `99,9 k$` has seven characters where English's `$99.9K` has six
-  (`tests/budgets.py` measures them with `PAGE_MONEY`, which `test_webui.py` holds to the page in every format tag;
-  `FOR_91` in `test_budgets.py` lists them until Chris decides). Dates and times are the page's local time: English
+  (`tests/budgets.py` measures them with `PAGE_MONEY`, which `test_webui.py` holds to the page in every format tag,
+  with the `$` on either side, since the boxes count characters; `FOR_91` in `test_budgets.py` lists them until Chris
+  decides). Dates and times are the page's local time: English
   writes them as it always did, in capitals and on the 12-hour clock (`WED 7:39 PM`, `OCT 21`); French, Spanish and
   Turkish take `Intl.DateTimeFormat` for the tag on the monitor's clock (`hourCycle` from `Locale.clock`), the hour as
   wide as the tag's own short time writes it (`09:05` in fr-FR, `9:05` in es-ES, as CLDR's `Hm`), and `app.js` sets
@@ -510,7 +511,13 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   versions. Seen on node 24.13 (ICU 77.1, CLDR 47.0): in every 12-hour clock `Intl` writes U+0020 where CLDR's patterns
   put U+202F, and ICU's Spanish day periods hold U+00A0 where Babel's hold U+202F; ICU's data differs from Babel's for
   es-AR and es-CO (a space after `$`), es-GQ (the sign or code first), fr-MA (a `.` group, `a.m.`) and tr-CY (the day
-  period after the time); and `tight` drops es-PY's space between `$` and the minus on the page only.
+  period after the time); and `tight` drops es-PY's space between `$` and the minus on the page only. On ICU 78.2
+  (CLDR 48.0, CI's node 20.20) the list is the same, but `Intl` writes U+0020 inside Spanish's day period (`p. m.`):
+  V2 lets U+0020, U+00A0 and U+202F differ inside or beside a day period, and nowhere else (the widgets draw U+202F as
+  U+00A0, so the clock reads the same). CLDR 48 also writes the page's compact dollars otherwise: Turkish's and es-MX's
+  `$` first (`$1,2 B`, CLDR 47 `1,2 B $`), Latin American Spanish's thousand as `k` (CLDR 47 `K`) and fr-CA's with a
+  space before the `$` (`1,2 k $`); the tests take the money boxes' sign on either side, and list by CLDR version the
+  forms they pin.
 - **Letter case (#91).** `usage_monitor/casing.py`: `upper`, `lower`, `capitalize` and `cased` by the language's rules,
   so Turkish (and Azerbaijani) give `İ` and `ı` and never a combining dot (U+0307); every other language gets Python's
   own. A name in capitals is cased with the words by the language's rule (`HAİKU` in Turkish, Chris's decision); in

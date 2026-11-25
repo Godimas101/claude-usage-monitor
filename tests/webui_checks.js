@@ -79,6 +79,8 @@ function load(query, globals) {
 }
 
 const out = {};
+// node's ICU and CLDR: test_webui.py keys a figure by the CLDR version that writes it, where versions differ.
+out.versions = { node: process.version, icu: process.versions.icu, cldr: process.versions.cldr };
 const { api, charts, elements, box } = load();
 const S = api.S;
 const NOW = Date.UTC(2026, 9, 21, 16, 12);
