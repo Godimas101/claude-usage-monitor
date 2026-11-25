@@ -20,10 +20,12 @@ runs past it by design (the strip's 100%: KNOWN_ENGLISH_OVERRUNS). A character b
 KNOWN_ENGLISH_OVERRUNS may pass it.
 
 What goes in a box: English as the skins draw it today; each language's longest figures (FIGURES), set in the box's
-text where the box holds one (``templates``), a percent without its space in a box sized for English's figures
-(``Box.tight``: Chris's decision on #91); and, once the box's text moves to the catalog (#93 to #101), its keys in
-that language. Until then the pseudo-locale measures that English through ``i18n.pseudo_text``. Durations and counts
-get figures when #91 gives each language their format.
+text where the box holds one (``templates``, the language's day clock where English writes WED), as the skin draws
+them: in capitals in Nostromo and Night City, glued in the guard's statement (which wraps), and a percent without its
+space in a box sized for English's figures (``Box.tight``: Chris's decision on #91); and, once the box's text moves to
+the catalog (#93 to #101), its keys in that language. Until then the pseudo-locale measures that English through
+``i18n.pseudo_text``. Counts (the pace points) get no figure: a whole number under 1000 is written alike in all four
+languages.
 
     python tests/budgets.py [--lang ID]     what a language's text would not fit (default: pseudo)
     python tests/budgets.py --limits        every box's and line's limit, as test_budgets.py pins them
@@ -47,7 +49,7 @@ REPO = Path(__file__).resolve().parent.parent
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from usage_monitor import i18n  # noqa: E402
+from usage_monitor import casing, i18n  # noqa: E402
 from usage_monitor.render import dump, engine  # noqa: E402
 from usage_monitor.render.skins import RenderOptions  # noqa: E402
 from usage_monitor.render.skins import gates as g  # noqa: E402
@@ -64,16 +66,43 @@ STRIP_SCALES: tuple[float, ...] = tuple(sorted({
     for s in SCALES for h in dump.TASKBAR_HEIGHTS_AT_1X}))
 TRAY_SIZE = 32                      # the tray icon that carries a number (both skins draw it at 32 px)
 
-# Each language's longest figures, as #89 lists them: percents with U+00A0 or with the sign first, clocks in both 12-
-# and 24-hour forms (fr-CA's "16 h 12", es-MX's "4:12 p.m."), and the dollar as formats.money writes it: the plain "$"
-# (Chris's decision on #91; "5,96 $" in fr and es-ES, "$5.96" in es-MX, "$5,96" in tr), with es-MX's grouping
-# ("1,234.5", formats.number).
+
+def _days(names: str, times: tuple[str, ...]) -> tuple[str, ...]:
+    """Each weekday in ``names`` before each of ``times``, as a day clock writes them."""
+    return tuple(f"{day} {time}" for time in times for day in names.split())
+
+
+# Each language's longest figures, as usage_monitor/formats.py writes them for the language's format tags
+# (test_budgets.py holds each to it). As #89 lists them: percents with U+00A0 or with the sign first, and the dollar
+# as the plain "$" (Chris's decision on #91: "5,96 $" in fr and es-ES, "$5.96" in es-MX, "$5,96" in tr) with es-MX's
+# grouping ("1,234.5"). Then every shape the tags write, on either clock, for: a time at 16:12 (24-hour) and at
+# 12:59 PM (12-hour, its widest hour, as English's boxes list it); the same times after each of the seven weekdays (a
+# day clock, which stands where English's boxes write "WED 12:59 PM"); a countdown of 23 h 59 min and of 6 d 23 h
+# (the widest the hold chips list); and an age of 59 s, 59 min, 47 h and 100 d (the widest of each unit the boxes
+# list). English keeps #89's figures: its boxes list its own widest times, countdowns and ages.
 FIGURES: dict[str, dict[str, tuple[str, ...]]] = {
     "percent": {"en": ("100%",), "fr": ("100 %",), "es": ("100 %",), "tr": ("%100",)},
-    "clock": {"en": ("4:12 PM",), "fr": ("16 h 12", "16:12"), "es": ("4:12 p.m.", "16:12"), "tr": ("16:12",)},
+    "clock": {"en": ("4:12 PM",), "fr": ("16:12", "16 h 12", "12:59\u202fPM", "12 h 59\u202fp.m.", "12:59"),
+              "es": ("16:12", "12:59\u202fp.\u202fm.", "12:59\u202fp.m."), "tr": ("16:12", "ÖS\u202f12:59")},
     "money": {"en": ("$5.96",), "fr": ("5,96\u00a0$",), "es": ("$5.96", "5,96\u00a0$", "1,234.5"), "tr": ("$5,96",)},
+    "day_clock": {"fr": _days("lun. mar. mer. jeu. ven. sam. dim.",
+                              ("16:12", "16 h 12", "12:59\u202fPM", "12 h 59\u202fp.m.", "12:59")),
+                  "es": _days("lun, mar, mié, jue, vie, sáb, dom,",
+                              ("16:12", "12:59\u202fp.\u202fm.", "12:59\u202fp.m."))
+                  + _days("lun mar mié jue vie sáb dom", ("16:12", "12:59\u202fp.m.")),
+                  "tr": _days("Pzt Sal Çar Per Cum Cmt Paz", ("16:12", "ÖS\u202f12:59"))},
+    "duration": {"fr": ("23h 59min", "23h 59m", "6j 23h"),
+                 "es": ("23h 59min", "23 h 59 min", "6dd. 23h", "6 días 23 h", "6d. 23h", "6d 23h"),
+                 "tr": ("23s 59d", "6g 23s")},
+    "age": {"fr": ("59s", "59min", "59m", "47h", "100j"),
+            "es": ("59s", "59seg.", "59 s", "59min", "59 min", "47h", "47 h", "100dd.", "100 días", "100d.", "100d"),
+            "tr": ("59sn", "59d", "47s", "100g")},
 }
-_KINDS = ("percent", "clock", "money", "duration", "count")
+# What each figure is: "duration" a countdown (the time left), "age" how long ago a reading was (one unit), "count" a
+# whole number. A "clock" box takes the "day_clock" figures where its template writes English's weekday (_ON_A_DAY).
+_KINDS = ("percent", "clock", "money", "duration", "age", "count")
+_ON_A_DAY = re.compile(r"\b(?:WED|Wed) \{\}")
+CAPITALS = ("nostromo", "night_city")         # the skins that draw their figures in capitals
 _FITS = ("none", "shrink", "ellipsis", "clip", "drop", "wrap")
 
 
@@ -338,7 +367,7 @@ BOXES: tuple[Box, ...] = (
          "header room less the pill's frame, the widest age and the widest hold chip", english=_STATUS_WORDS),
     _nos("nostromo.floating.age", REG, 10, 0.6,
          nos.RIGHT - (_HOLD_WIDEST + 8) - (nos.LEFT + 12 + 10 + _PILL_WIDEST + 6),
-         "from the widest pill's end to the widest hold chip", kinds=("duration",),
+         "from the widest pill's end to the widest hold chip", kinds=("age",),
          english=("12 S", "41 M", "6 M", "59 M", "3 H", "47 H", "2 D")),
     _nos("nostromo.floating.state_word", SEMI, 10, 1.2,
          nos.RIGHT - (nos.LEFT + 12 + 10 + _PILL_WIDEST + 6 + _AGE_WIDEST),
@@ -346,7 +375,7 @@ BOXES: tuple[Box, ...] = (
          english=("NOMINAL", "ADVISORY", "LAST KNOWN", "NO CARRIER", "HOLD", "ACQUIRING", "THROTTLED", "AUTH REQUIRED")),
     _nos("nostromo.floating.state_chip", SEMI, 10, 1.2,
          nos.RIGHT - (nos.LEFT + 12 + 10 + _PILL_WIDEST + 6 + _AGE_WIDEST) - 8,
-         "the state word's room less the chip's 8 px", kinds=("duration",),
+         "the state word's room less the chip's 8 px", kinds=("duration",), templates=("HOLD {}",),
          english=("CRITICAL", "HOLD <1M", "HOLD 9M", "HOLD 2H", "HOLD 2H 14M", "HOLD 23H 59M", "HOLD 1D", "HOLD 2D",
                   "HOLD 2D 3H", "HOLD 6D 23H")),
     _nos("nostromo.floating.armed_guard", SEMI, 10, 1.2, W_nos("[GUARD]", SEMI, 10, 1.2),
@@ -435,7 +464,8 @@ BOXES: tuple[Box, ...] = (
         nc.RIGHT - (W_nc("PAUSED", "CHIP") + 12) - 2 * nc.GUARD_GAP - (_NC_HEAD + _NC_BRAND) - 12,
         "between the brand and a status chip, left out where it does not fit", "drop", english=("GUARD",)),
     _nc("night_city.floating.hold_chip", "CHIP", nc.RIGHT - (_NC_HEAD + _NC_BRAND) - 17,
-        "right of the brand, the chip 17 px wider than its text", kinds=("duration",), english=_COUNTDOWNS),
+        "right of the brand, the chip 17 px wider than its text", kinds=("duration",), templates=("HOLD {}",),
+        english=_COUNTDOWNS),
     # ── Night City: the band (_draw_band, _draw_band_hold) ──
     _nc("night_city.floating.band_text", "BAND_TYPE", nc.BAND_AGE_RIGHT - 10 - nc.BAND_TEXT_X - W_nc("100 D OLD", "RESET"),
         "the cause, left of the widest age", "ellipsis", english=_NC_CAUSES),
@@ -443,7 +473,8 @@ BOXES: tuple[Box, ...] = (
         "the whole band", "ellipsis", english=("NO LOGIN // OPEN DASHBOARD",)),
     _nc("night_city.floating.band_age", "RESET",
         nc.BAND_AGE_RIGHT - 10 - nc.BAND_TEXT_X - W_nc("RELINK // USE CLAUDE CODE", "BAND_TYPE"),
-        "right of the widest whole cause; left out when the cause is cut", "drop", kinds=("duration",),
+        "right of the widest whole cause; left out when the cause is cut", "drop", kinds=("age",),
+        templates=("{} OLD",),
         english=("41 M OLD", "59 S OLD", "47 H OLD", "2 D OLD", "100 D OLD", "2 M OLD", "6 M OLD")),
     _nc("night_city.floating.band_hold_text", "BAND_TYPE",
         nc.BAND_AGE_RIGHT - nc.GUARD_GAP - nc.BAND_TEXT_X - (W_nc("HOLD", "CHIP") + 17),
@@ -451,7 +482,7 @@ BOXES: tuple[Box, ...] = (
         english=_NC_CAUSES),
     _nc("night_city.floating.band_hold_chip", "CHIP", nc.BAND_AGE_RIGHT - nc.GUARD_GAP - nc.BAND_TEXT_X - 17 - _NC_CAUSE_FLOOR,
         "right-anchored at BAND_AGE_RIGHT, never cut; it may only leave the cause its shortest cut", kinds=("duration",),
-        english=_COUNTDOWNS),
+        templates=("HOLD {}",), english=_COUNTDOWNS),
     # ── Night City: the rows (_layout_row, _draw_value) ──
     _nc("night_city.floating.row_name", "NAME",
         (nc.RIGHT - _NC_VALUE_100 - nc.MIN_GAP) - nc.LEFT - 6 - _NC_CAP_CHIP,
@@ -526,7 +557,8 @@ BOXES: tuple[Box, ...] = (
        "the pill's word, right of the title and the guard's capsule", english=_STATUS_WORDS),
     _g("gates.floating.status_pill", "body", 10, 600,
        g.PILL_RIGHT - _G_PILL_CHROME - g.TITLE_X - g.TITLE_GAP - _G_TITLE - _G_GUARD,
-       "the word and its age; the age is left out where it does not fit", "drop", kinds=("duration",),
+       "the word and its age; the age is left out where it does not fit", "drop", kinds=("age",),
+       templates=("RATE LIMITED · {}",),
        english=("LIVE · 12 s", "STALE · 41 min", "OFFLINE · 2 min", "PAUSED · 12 s", "RATE LIMITED · 6 min",
                 "RATE LIMITED · 44 min", "RATE LIMITED · 59 min", "NO LOGIN · 2 d", "LIVE · 59 s", "STALE · 1 h")),
     _g("gates.tooltip.title", "body", 12, 600,
@@ -537,7 +569,8 @@ BOXES: tuple[Box, ...] = (
        "the hover card's pill word", english=_STATUS_WORDS),
     _g("gates.tooltip.status_pill", "body", 10, 600,
        g.RIGHT - _G_PILL_CHROME - g.TITLE_X - g.TITLE_GAP - _G_TITLE - _G_GUARD,
-       "the hover card's word and age; the age is left out where it does not fit", "drop", kinds=("duration",),
+       "the hover card's word and age; the age is left out where it does not fit", "drop", kinds=("age",),
+       templates=("RATE LIMITED · {}",),
        english=("LIVE · 12 s", "STALE · 41 min", "OFFLINE · 2 min", "PAUSED · 12 s", "RATE LIMITED · 6 min",
                 "RATE LIMITED · 44 min", "RATE LIMITED · 59 min", "NO LOGIN · 59 min", "LOADING · 59 s")),
     # ── Gates: the rows (_row, _cap_badge) ──
@@ -784,9 +817,27 @@ def tight(figure: str) -> str:
     return re.sub(r"\s*%\s*", "%", figure)
 
 
+def _drawn_as(box: Box, figure: str, language: str) -> str:
+    """A figure as the box's skin draws it: in capitals by the language's rule in Nostromo and Night City (casing,
+    which #94 and #95 bring to the skins' own .upper()), and glued in a box that wraps (the guard's statement glues a
+    time, a cap or a countdown: engine.glue), so it is measured whole."""
+    if box.id.split(".")[0] in CAPITALS:
+        figure = casing.upper(figure, language)
+    return engine.glue(figure) if box.fit == "wrap" else figure
+
+
+def _figures(box: Box, kind: str, template: str, language: str) -> tuple[str, ...]:
+    """The figures of ``kind`` that ``template`` takes: where English's template writes a weekday before the time
+    ("RESETS WED {}"), another language's whole day clock takes the weekday's place and the time's."""
+    if kind == "clock" and language != i18n.DEFAULT and _ON_A_DAY.search(template):
+        return FIGURES["day_clock"].get(language, ())
+    return FIGURES.get(kind, {}).get(language, ())
+
+
 def texts(box: Box, language: str) -> list[str]:
     """What ``language`` puts in ``box``: English as drawn today, for the pseudo-locale that English made pseudo,
-    the language's longest figures set in the box's text, and the text of the box's keys once it has them."""
+    the language's longest figures set in the box's text as its skin draws them, and the text of the box's keys once
+    it has them."""
     found: list[str] = []
     if language == i18n.DEFAULT:
         found += box.english
@@ -794,9 +845,11 @@ def texts(box: Box, language: str) -> list[str]:
         found += [i18n.pseudo_text(text) for text in box.english]
     if language != i18n.PSEUDO:
         for kind in box.kinds:
-            for figure in FIGURES.get(kind, {}).get(language, ()):
-                figure = tight(figure) if box.tight and kind == "percent" else figure
-                found += [template.format(figure) for template in box.templates]
+            for template in box.templates:
+                slot = _ON_A_DAY.sub("{}", template) if kind == "clock" and language != i18n.DEFAULT else template
+                for figure in _figures(box, kind, template, language):
+                    figure = tight(figure) if box.tight and kind == "percent" else figure
+                    found.append(slot.format(_drawn_as(box, figure, language)))
     if box.keys:
         catalog = i18n.load_catalog(language)
         for key in box.keys:

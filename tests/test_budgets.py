@@ -11,13 +11,14 @@ import re
 import subprocess
 import sys
 from collections import defaultdict
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 import budgets
-from usage_monitor import formats, i18n
+from usage_monitor import cldr, formats, i18n
 from usage_monitor.render import dump
 from usage_monitor.render.skins import night_city as nc
 from usage_monitor.render.skins import nostromo as nos
@@ -80,18 +81,30 @@ STANDS_ON: dict[str, tuple[str, ...]] = {"floating": ("floating", "tooltip"), "t
 # The box the frame dump never draws: [G], since every sample state leaves room for [GUARD].
 NOT_DRAWN_WHOLE = frozenset({"nostromo.floating.armed_guard_short"})
 
-# What still runs past before French or Spanish is offered (#107), each with the ticket that settles it. The dollar is
-# the plain "$" (Chris's decision on #91), which fits the money figures' six characters; the percents are settled too:
-# the boxes sized for English's figures (the strips' values, Gates' cap badge) draw them without the space (Box.tight,
-# Chris's decision on #91), and Turkish's "%100" fits. Recompute with budgets.over() after a change, never by hand.
+# What still runs past before French or Spanish is offered (#107), each with the ticket that settles it: #91's part 2
+# the dashboard's money figures, #94 Nostromo's boxes, #95 Night City's, #96 Gates'. The dollar is the plain "$"
+# (Chris's decision on #91), which fits the money figures' six characters; the percents are settled too: the boxes
+# sized for English's figures (the strips' values, Gates' cap badge) draw them without the space (Box.tight, Chris's
+# decision on #91), and Turkish's "%100" fits. Recompute with budgets.over() after a change, never by hand.
 TIGHT_BOXES = frozenset({"nostromo.strip.value_5h", "nostromo.strip.value_5h_chip", "nostromo.strip.value_7d",
                          "nostromo.strip.value_7d_chip", "night_city.strip.percent", "gates.floating.cap_badge",
                          "gates.tooltip.cap_badge"})
 _MONEY = tuple(f"dashboard.{skin}.cost_{part}" for part in ("tile", "hero")
                for skin in ("nostromo", "night_city", "gates"))
+_FR_DAYS = ("LUN.", "MAR.", "MER.", "JEU.", "VEN.", "SAM.", "DIM.")
+_ES_DAYS = ("LUN,", "MAR,", "MIÉ,", "JUE,", "VIE,", "SÁB,", "DOM,")
 FOR_91: dict[str, set[tuple[str, str]]] = {
-    "fr": set(),
-    "es": {(box, "1,234.5") for box in _MONEY},        # #91 part 2: the dashboard's money figures in es-MX's grouping
+    "fr": {("nostromo.tooltip.resets", f"RESETS {day} 12 H 59\u202fP.M.")                         # #94: fr-CA's
+           for day in _FR_DAYS}                                                                      # day clock
+    | {(box, f"RST {day} 12 H 59\u202fP.M.") for day in _FR_DAYS                                    # #95: the same
+       for box in ("night_city.floating.row_reset", "night_city.tooltip.info_reset")},
+    "es": {(box, "1,234.5") for box in _MONEY}           # #91 part 2: the dashboard's money figures in es-MX's grouping
+    | {("nostromo.tooltip.resets", f"RESETS {day} 12:59\u202f{period}")                       # #94: es-ES's and
+       for day in _ES_DAYS for period in ("P.M.", "P.\u202fM.")}                                # es-419's day clocks
+    | {("nostromo.floating.age", "100 DÍAS"), ("nostromo.floating.state_chip", "HOLD 23 H 59 MIN"),   # #94: es-CO's
+       ("nostromo.floating.state_chip", "HOLD 6 DÍAS 23 H")}                                         # units
+    | {("night_city.floating.band_age", "100 DÍAS OLD")}                                            # #95: the same
+    | {(box, "RATE LIMITED · 100 días") for box in ("gates.floating.status_pill", "gates.tooltip.status_pill")},  # #96
     "tr": set(),
 }
 
@@ -353,15 +366,85 @@ def test_a_wrapping_box_is_measured_by_its_longest_run_without_a_space() -> None
 # ── What goes in a box ────────────────────────────────────────────────────────────────────────────────────────────
 
 def test_each_languages_longest_figures_are_set_in_the_boxs_text() -> None:
+    """Each figure in each of the box's templates, as the skin draws it: the language's whole day clock where English
+    writes WED before the time, capitals in Nostromo and Night City, glued in the guard's statement; English as #89 set
+    it."""
     body = budgets.BOX["app.toast.alert_resets.body"]
-    assert budgets.texts(body, "es") == ["Resets 4:12 p.m.", "Resets Wed 4:12 p.m.", "Resets 16:12", "Resets Wed 16:12"]
-    assert budgets.texts(body, "fr") == ["Resets 16 h 12", "Resets Wed 16 h 12", "Resets 16:12", "Resets Wed 16:12"]
+    assert budgets.texts(body, "en") == ["Resets 12:59 PM", "Resets Wed 12:59 PM", "Resets 4:12 PM",
+                                         "Resets Wed 4:12 PM"]
+    spanish = budgets.texts(body, "es")
+    assert spanish[:3] == ["Resets 16:12", "Resets 12:59\u202fp.\u202fm.", "Resets 12:59\u202fp.m."]
+    assert {"Resets sáb, 16:12", "Resets dom, 12:59\u202fp.\u202fm.", "Resets sáb 12:59\u202fp.m."} <= set(spanish)
+    assert len(spanish) == 3 + 7 * 5 and not any("Wed" in text for text in spanish)
+    french = budgets.texts(body, "fr")
+    assert french[:5] == ["Resets 16:12", "Resets 16 h 12", "Resets 12:59\u202fPM", "Resets 12 h 59\u202fp.m.",
+                          "Resets 12:59"]
+    assert "Resets sam. 12 h 59\u202fp.m." in french and len(french) == 5 + 7 * 5
+    assert "RESETS MER. 12 H 59\u202fP.M." in budgets.texts(budgets.BOX["nostromo.tooltip.resets"], "fr")
+    assert "RST CMT ÖS\u202f12:59" in budgets.texts(budgets.BOX["night_city.floating.row_reset"], "tr")
+    assert budgets.texts(budgets.BOX["nostromo.floating.state_chip"], "fr") == ["HOLD 23H 59MIN", "HOLD 23H 59M",
+                                                                                "HOLD 6J 23H"]
+    assert budgets.texts(budgets.BOX["night_city.floating.band_age"], "tr") == ["59SN OLD", "59D OLD", "47S OLD",
+                                                                                "100G OLD"]
+    assert "RATE LIMITED · 100 días" in budgets.texts(budgets.BOX["gates.floating.status_pill"], "es")
+    guard = budgets.texts(budgets.BOX["gates.tooltip.guard_text"], "fr")
+    assert {"16\u00a0h\u00a012", "12\u00a0h\u00a059\u202fp.m.", "23h\u00a059min"} <= set(guard)
     assert budgets.texts(budgets.BOX["nostromo.floating.cap_tag"], "tr") == ["CAP %100"]
     assert budgets.texts(budgets.BOX["nostromo.floating.message"], "fr") == []      # no figure, and no keys until #93
     assert budgets.texts(body, i18n.PSEUDO) == [i18n.pseudo_text(text) for text in body.english]
     tile = budgets.BOX["dashboard.nostromo.cost_tile"]                      # the plain dollar (Chris, #91)
     assert budgets.texts(tile, "fr") == ["5,96\u00a0$"] and budgets.texts(tile, "tr") == ["$5,96"]
     assert budgets.texts(tile, "es") == ["$5.96", "5,96\u00a0$", "1,234.5"]
+
+
+# What FIGURES samples (budgets.FIGURES says why): a time on each clock, the same after each weekday, the widest
+# countdowns and the widest age of each unit.
+AT_24, AT_12 = datetime(2026, 7, 13, 16, 12), datetime(2026, 7, 13, 12, 59)         # a Monday
+COUNTDOWNS = (((23, "h"), (59, "m")), ((6, "d"), (23, "h")))
+AGES = (((59, "s"),), ((59, "m"),), ((47, "h"),), ((100, "d"),))
+
+
+def _locales(language: str) -> list[i18n.Locale]:
+    """A dev instance's locale for each format tag of ``language`` (its CLDR regions and its base), on each clock."""
+    tags = sorted({tag for tag in cldr.REGIONS if i18n.primary(tag) == language} | {i18n.BASE_FORMATS[language]})
+    return [i18n.Locale(setting="system", language=language, system="en", format=tag, clock=clock, offered=("en",))
+            for tag in tags for clock in (24, 12)]
+
+
+def _written(kind: str, locale: i18n.Locale) -> set[str]:
+    """What formats writes for ``kind`` in ``locale`` at FIGURES' samples."""
+    at = AT_24 if locale.clock == 24 else AT_12
+    if kind == "percent":
+        return {formats.percent("100", locale)}
+    if kind == "money":
+        return {formats.money(5.96, "USD", locale), formats.number("1234.5", locale)}
+    if kind == "clock":
+        return {formats.clock(at, locale)}
+    if kind == "day_clock":
+        return {formats.day_clock(at + timedelta(days=day), locale) for day in range(7)}
+    return {formats.duration(parts, locale) for parts in {"duration": COUNTDOWNS, "age": AGES}[kind]}
+
+
+def test_every_figure_is_what_the_formats_write_for_one_of_the_languages_tags() -> None:
+    """Each figure of French, Spanish and Turkish is what usage_monitor/formats.py writes for one of the language's
+    format tags, on one of the clocks, so a figure and the formats cannot drift apart; and every clock, day clock,
+    countdown and age the tags write at the samples is a figure, so a region with a longer one is measured. English
+    keeps #89's figures, as the formats write them ("4:12 PM" at 16:12); its "$5.96" is the dashboard's own (app.js),
+    which #91's part 2 holds."""
+    assert set(budgets.FIGURES) == {"percent", "clock", "money", "day_clock", "duration", "age"}
+    english = {"percent": {formats.percent("100", i18n.ENGLISH)}, "clock": {formats.clock(AT_24, i18n.ENGLISH)}}
+    for kind, by_language in budgets.FIGURES.items():
+        for language, figures in by_language.items():
+            if language == i18n.DEFAULT:
+                assert kind == "money" or set(figures) == english[kind], kind
+                continue
+            written = set().union(*(_written(kind, locale) for locale in _locales(language)))
+            assert set(figures) <= written, (kind, language, sorted(set(figures) - written))
+            if kind in ("clock", "day_clock", "duration", "age"):
+                assert written <= set(figures), (kind, language, sorted(written - set(figures)))
+            assert len(set(figures)) == len(figures), (kind, language)
+    languages = {language for by_language in budgets.FIGURES.values() for language in by_language}
+    assert languages == {"en", "fr", "es", "tr"}
 
 
 @pytest.mark.parametrize(("kind", "figure"), [("percent", r"%"), ("clock", r"\d:\d\d"), ("money", r"\$|USD")])
