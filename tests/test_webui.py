@@ -1146,6 +1146,48 @@ def test_the_page_formats_in_the_monitors_locale_only() -> None:
         assert not re.search(r"\bIntl\.\w+\(\s*(?:\)|\[\]|undefined|null)", code), name
 
 
+# ── Formats (#91) ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+FORMATS_JS = Path(__file__).resolve().parent / "webui_formats.js"
+FORMATS_ENGLISH = Path(__file__).resolve().parent / "fixtures" / "webui_formats_english.json"
+
+
+def english_formats() -> dict[str, Any]:
+    return json.loads(FORMATS_ENGLISH.read_text(encoding="utf-8"))
+
+
+def test_the_pages_english_formats_record_is_whole() -> None:
+    """So the check below cannot pass on a thin record: every formatter step 2.0 of #91's plan froze has its cases, and
+    the record holds the shapes Chris kept for English ($5.96, CA$, 2 D 3 H, X, Y and Z, 7:39 PM with an ASCII space)."""
+    english = english_formats()
+    assert len(english) == 43 and sum(len(cases) for cases in english.values() if isinstance(cases, dict)) == 3385
+    assert all(english[name] for name in english), [name for name in english if not english[name]]
+    assert english["fmtUsd"]["(5.96)"] == "$5.96" and english["fmtUsd"]["(-1234.5)"] == "-$1,235"
+    assert english["fmtMoney"]['(5.96, "CAD")'] == "CA$5.96" and english["fmtMoney"]['(5.96, "EURO")'] == "5.96 EURO"
+    assert english["fmtRemain"]["(183600000)"] == "2 D 3 H"
+    assert english["listWords"]['(["A","B","C"])'] == "A, B and C"
+    assert english["clockText"][f"({19 * 3600000 + 39 * 60000 + 1792540800000})"] == "7:39 PM"
+    assert english["fmtPct"]["(33.5, 1)"] == "33.5%" and english["fmtUsdTile"]["(1234.5)"] == "$1.2K"
+    assert english["odometerHTML"]["(null, true)"] == ["-- tokens, all time", "0,000,000,000"]
+
+
+@ui_only
+def test_the_pages_english_formats_are_the_recorded_ones() -> None:
+    """Every formatter of the page, run under node on the record's grid (tests/webui_formats.js, TZ=UTC, the page's clock
+    still), writes exactly what it wrote before #91 changed the page: English must not change by a byte."""
+    run = subprocess.run([node_binary(), str(FORMATS_JS), str(WEBUI)], capture_output=True, text=True, timeout=60,
+                         check=False, encoding="utf-8", env={**os.environ, "TZ": "UTC"}, creationflags=NO_WINDOW)
+    assert run.returncode == 0, run.stderr[-800:]
+    found, english = json.loads(run.stdout), english_formats()
+    assert list(found) == list(english)
+    for name, cases in english.items():
+        if isinstance(cases, dict):
+            changed = [(key, cases[key], found[name].get(key)) for key in cases if found[name].get(key) != cases[key]]
+            assert not changed and list(found[name]) == list(cases), (name, changed[:5])
+        else:
+            assert found[name] == cases, name
+
+
 def test_the_language_row_is_wired_into_the_settings_page() -> None:
     """#87: the row is on the Settings page, follows the stored choice, and its button saves it; a new state checks the
     locale before anything else."""

@@ -5392,7 +5392,14 @@
       guardLiveHtml: guardLiveHtml, guardSetupHtml: guardSetupHtml, guardResultHtml: guardResultHtml, syncGuard: syncGuard,
       pollGuard: pollGuard, guardTick: guardTick, statusBanner: statusBanner, limitsOnly: limitsOnly, pageStats: pageStats,
       checkAgain: checkAgain, syncCheck: syncCheck, copyCommand: copyCommand, helpAction: helpAction, renderPage: renderPage, poll: poll,
-      loadStat: loadStat
+      loadStat: loadStat,
+      // The formatters and the sites tests/webui_formats.js holds to today's English (#91).
+      fmtUsdExact: fmtUsdExact, fmtPlanPrice: fmtPlanPrice, fmtUsdShort: fmtUsdShort, fmtUsdTile: fmtUsdTile,
+      fmtUsdHero: fmtUsdHero, fmtCount: fmtCount, fmtInt: fmtInt, fmtRemain: fmtRemain, fmtCompare: fmtCompare,
+      signed: signed, pctWords: pctWords, plural: plural, listWords: listWords, stampText: stampText, dayText: dayText,
+      dateText: dateText, hourText: hourText, rangeText: rangeText, hourRange: hourRange, odometerHTML: odometerHTML,
+      comparisonList: comparisonList, efficiencyCard: efficiencyCard, efficiencyCards: efficiencyCards,
+      weeklyForecast: weeklyForecast, dailyChart: dailyChart, DAYS: DAYS, WEEKDAYS_MON: WEEKDAYS_MON, MONTHS: MONTHS
     };
     return;
   }

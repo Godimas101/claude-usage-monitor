@@ -992,7 +992,10 @@ default browser instead, and the exit code says so (below).
   without starting the page. Nothing else sets it. `tests/webui_checks.js` loads `charts.js` and `app.js` in a
   node `vm` context with a fake DOM and prints what they do as JSON; `tests/test_webui.py` asserts on it. Those
   tests start node, so they need `USAGE_MONITOR_UI_TESTS=1`, and `tests.yml` runs them (and `tests/test_motion.py` and
-  `tests/test_english_left.py`) once more with it set.
+  `tests/test_english_left.py`) once more with it set. `tests/webui_formats.js` runs every formatter of the page
+  (numbers, money, durations, clocks, dates, lists, the odometer, the rolling figures and the sentences and charts that
+  hold a number) on a fixed grid with TZ=UTC and the page's clock still, and `test_webui.py` holds it to
+  `tests/fixtures/webui_formats_english.json`, recorded before #91 changed the page: English never changes by a byte.
 - **Money.** Real money (the extra-usage Spend card) is shown in the account's own currency (`fmtMoney`, an
   `Intl.NumberFormat` with the ISO code the usage API reports; USD where it reports none). API-equivalent cost
   stays dollars. `/api/state.plan` carries the detected plan and price only: `plan_price_override` is a setting,
