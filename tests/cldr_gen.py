@@ -25,6 +25,14 @@ Three fields Babel 2.18 does not keep are rules here, each with its source:
 And two gaps in Babel's copy of the data, filled as CLDR's own inheritance fills them:
 - A short relative-time field Babel leaves empty (Turkish "day") takes the wide field, as CLDR's root aliases it.
 - The unit-narrow list pattern Babel lacks (Turkish) comes from Babel's own fallback (unit-short, then unit).
+
+Where the page's data differs from Babel's, the widgets follow the page (#111): PAGE_RULES below, one rule per field.
+The dashboard writes its formats with Intl (webui/formats.js), so with ICU's CLDR data, the data WebView2 uses. Each
+rule's value is the field as ICU has it, read from what node's Intl writes on ICU 77.1 (node 24.13, CLDR 47.0) and on
+ICU 78.2 (CI's node 20.20 and VS Code's Electron, CLDR 48.0), the same on both; V2 (tests/test_webui.py) holds every tag
+to the page on both. Each rule also names what Babel gives, and a Babel that gives anything else stops the run (Gap),
+so a newer Babel's data is looked at again. Windows' ICU 72.1 (CLDR 42) agrees for all but tr-CY, whose day period it
+writes before the time, as Babel does.
 """
 from __future__ import annotations
 
@@ -32,6 +40,7 @@ import argparse
 import json
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +48,7 @@ import babel
 from babel import Locale, localedata
 from babel.core import get_cldr_version, get_global
 from babel.lists import _resolve_list_style
+from babel.numbers import parse_pattern
 
 REPO = Path(__file__).resolve().parent.parent
 TARGET = REPO / "usage_monitor" / "cldr.py"
@@ -62,6 +72,58 @@ SYMBOLS_UNUSED = frozenset({"approximatelySign", "exponential", "infinity", "lis
 
 class Gap(Exception):
     """Babel's data lacks or reshapes a field the formats read: the generator stops rather than guess."""
+
+
+@dataclass(frozen=True)
+class PageRule:
+    """A field the widgets take from the page's data, where Babel's differs (#111). ``field`` is "group" (the number
+    symbol; currency_group follows it where the tag has no currencyGroup, as ICU's does), "currency" (the standard
+    currency pattern), "am_pm" or one of CLOCK_PATTERNS; ``babel`` is what Babel 2.18.0 gives, ``page`` the value as ICU
+    has it, and ``writes`` what the page writes with it (16:12 on the 12-hour clock, for a day period)."""
+    name: str
+    tags: tuple[str, ...]
+    field: str
+    babel: Any
+    page: Any
+    writes: tuple[str, ...]
+
+
+PAGE_SOURCE = "ICU 77.1 and 78.2 (node), the page's data"
+PAGE_FIELDS = ("group", "currency", "am_pm", *CLOCK_PATTERNS)
+PAGE_RULES = (
+    PageRule("the dollar spaced", ("es_AR", "es_CO"), "currency", "\u00a4#,##0.00", "\u00a4\u00a0#,##0.00",
+             ("$\u00a05,96", "-$\u00a05,96", "EUR\u00a05,96")),
+    PageRule("the sign first", ("es_GQ",), "currency", "#,##0.00\u00a0\u00a4", "\u00a4#,##0.00",
+             ("$5,96", "-$5,96", "$1234,56", "EUR\u00a05,96")),
+    PageRule("a dot group", ("fr_MA",), "group", "\u202f", ".", ("1.234,5", "1.234,56\u00a0$")),
+    PageRule("dotted day periods", ("fr_MA",), "am_pm", ("AM", "PM"), ("a.m.", "p.m."), ("4:12 p.m.",)),
+    PageRule("the day period after the time", ("tr_CY",), "hm", "a\u202fh:mm", "h:mm\u202fa", ("4:12 \u00d6S",)),
+)
+
+
+def page_value(identifier: str, field: str, babel_value: Any) -> Any:
+    """``field`` of a Babel locale as the page has it: a rule's value where PAGE_RULES has one for the tag, else
+    Babel's. A rule whose ``babel`` is not what Babel gives stops the run."""
+    for rule in PAGE_RULES:
+        if identifier in rule.tags and rule.field == field:
+            if babel_value != rule.babel:
+                raise Gap(f"{identifier} {field}: Babel gives {babel_value!r}; the rule {rule.name!r} was made for "
+                          f"{rule.babel!r}")
+            return rule.page
+    return babel_value
+
+
+def check_page_rules(identifiers: list[str]) -> None:
+    """Every rule names a field the generator asks page_value for and tags Babel has, each field of a tag once."""
+    seen: set[tuple[str, str]] = set()
+    for rule in PAGE_RULES:
+        if rule.field not in PAGE_FIELDS:
+            raise Gap(f"rule {rule.name!r}: {rule.field!r} is not one of {PAGE_FIELDS}")
+        for identifier in rule.tags:
+            if identifier not in identifiers or (identifier, rule.field) in seen:
+                raise Gap(f"rule {rule.name!r}: {identifier} is not a region Babel has, or has a rule for "
+                          f"{rule.field!r} already")
+            seen.add((identifier, rule.field))
 
 
 def _tag(identifier: str) -> str:
@@ -108,7 +170,7 @@ def _relative(loc: Locale, unit: str, when: str) -> dict[str, str]:
 
 
 def _clock(loc: Locale, name: str) -> str:
-    pattern = str(loc.datetime_skeletons[name])
+    pattern = page_value(str(loc), name, str(loc.datetime_skeletons[name]))
     for match in CLOCK_FIELDS.finditer(pattern):
         if match.group(2):
             raise Gap(f"{loc} {name} {pattern!r}: field {match.group(2)!r} is not one formats.clock reads")
@@ -138,13 +200,15 @@ def number_symbols(identifier: str, symbols: Any) -> dict[str, str]:
 def table(identifier: str) -> dict[str, Any]:
     """Every field the formats read, for one Babel locale."""
     loc = Locale.parse(identifier)
-    symbols = loc.number_symbols["latn"]
+    symbols = dict(loc.number_symbols["latn"])
+    symbols["group"] = page_value(identifier, "group", symbols["group"])
     if loc.decimal_formats[None].pattern != "#,##0.###":
         raise Gap(f"{identifier}: decimal pattern {loc.decimal_formats[None].pattern!r}")
     signs = number_symbols(identifier, symbols)
     days = loc.days["format"]["abbreviated"]
     months = loc.months["format"]["abbreviated"]
     periods = loc.day_periods["format"]["abbreviated"]
+    currency = page_value(identifier, "currency", loc.currency_formats["standard"].pattern)
     unit_list = dict(_resolve_list_style(loc, "unit-narrow"))
     if set(unit_list) != {"2", "start", "middle", "end"}:
         raise Gap(f"{identifier}: unit-narrow list {unit_list}")
@@ -155,10 +219,10 @@ def table(identifier: str) -> dict[str, Any]:
         **signs,
         "min_grouping": _min_grouping(identifier),
         "percent": _sides(loc.percent_formats[None], "%", symbols["percentSign"], symbols["minusSign"]),
-        "currency": _sides(loc.currency_formats["standard"], "\u00a4", "\u00a4", symbols["minusSign"]),
+        "currency": _sides(parse_pattern(currency), "\u00a4", "\u00a4", symbols["minusSign"]),
         "weekdays": tuple(days[i] for i in range(7)),          # Babel numbers weekdays from Monday, as Python does
         "months": tuple(months[i] for i in range(1, 13)),
-        "am_pm": (periods["am"], periods["pm"]),
+        "am_pm": page_value(identifier, "am_pm", (periods["am"], periods["pm"])),
         **{name: _clock(loc, name) for name in CLOCK_PATTERNS},
         "units": units,
         "unit_list": {key: unit_list[key] for key in ("2", "start", "middle", "end")},
@@ -195,6 +259,7 @@ def _diff(own: dict[str, Any], base: dict[str, Any]) -> dict[str, Any]:
 
 def data() -> dict[str, Any]:
     identifiers = sorted(i for i in localedata.locale_identifiers() if i.split("_")[0] in LANGUAGES and "_" in i)
+    check_page_rules(identifiers)
     bases = {language: table(language) for language in LANGUAGES}
     regions: dict[str, dict[str, Any]] = {}
     for identifier in identifiers:
@@ -235,8 +300,9 @@ def _literal(value: Any, indent: int) -> str:
 HEADER = '''"""CLDR data for the formats (usage_monitor/formats.py, #91): numbers, percents, money, clocks, weekdays, months,
 duration units and relative times for French, Spanish and Turkish, and the plural rules of the app's four languages.
 
-Generated by tests/cldr_gen.py from {source} (CLDR {cldr}). Do not edit by hand: change the generator and run it. Plain
-data, read by the formats only; English never reads it (its formats are today's own).
+Generated by tests/cldr_gen.py from {source} (CLDR {cldr}) and the rules at the end of this text. Do not edit by hand:
+change the generator and run it. Plain data, read by the formats only; English never reads it (its formats are today's
+own).
 
 BASES holds each language's own CLDR data, which is also its base format tag's (fr-FR, es-ES, tr-TR). REGIONS holds every
 CLDR region of the three languages, with only what differs from its language's base, level by level (a dict of strings,
@@ -252,6 +318,10 @@ such as one unit's plural forms, is replaced whole). A field:
   code and plural category.
 
 Rules the generator adds (Babel does not keep these): {rules}
+
+Fields from the page's data where Babel's differs, so the widgets write what the dashboard writes (#111). Source:
+{page_source}.
+{page_rules}
 """
 from __future__ import annotations
 
@@ -271,17 +341,26 @@ RULES = ("minimum grouping digits (Spanish 2 outside Latin America, every other 
          "a missing unit-narrow list Babel's own fallback. Sources are in tests/cldr_gen.py.")
 
 
-def _wrap(text: str, first: int) -> str:
+def _wrap(text: str, first: int, indent: str = "") -> str:
     words, lines, line = text.split(), [], ""
     width = WIDTH - first
     for word in words:
         if line and len(line) + 1 + len(word) > width:
             lines.append(line)
-            line, width = word, WIDTH
+            line, width = word, WIDTH - len(indent)
         else:
             line = f"{line} {word}" if line else word
     lines.append(line)
-    return "\n".join(lines)
+    return ("\n" + indent).join(lines)
+
+
+def page_rule_text(rule: PageRule) -> str:
+    """One rule as the header lists it: its name, tags, field and value, Babel's value, and what the page writes."""
+    tags = ", ".join(_tag(identifier) for identifier in rule.tags)
+    writes = ", ".join(_literal(text, 0) for text in rule.writes)
+    text = (f"{rule.name}: {tags} {rule.field} {_literal(rule.page, 0)} (Babel {_literal(rule.babel, 0)}); "
+            f"the page writes {writes}.")
+    return "- " + _wrap(text, 2, "  ")
 
 
 def render() -> str:
@@ -290,7 +369,8 @@ def render() -> str:
     source, cldr = f"Babel {babel.__version__}", str(get_cldr_version())
     rules_at = len("Rules the generator adds (Babel does not keep these): ")
     out = HEADER.format(source=source, cldr=cldr, rules=_wrap(RULES, rules_at), cldr_literal=json.dumps(cldr),
-                        source_literal=json.dumps(source))
+                        source_literal=json.dumps(source), page_source=PAGE_SOURCE,
+                        page_rules="\n".join(page_rule_text(rule) for rule in PAGE_RULES))
     out += "# Each language's own data.\n"
     out += f"BASES: dict[str, dict[str, Any]] = {_literal(found['bases'], 0)}\n\n"
     out += "# Every CLDR region of the three languages, by canonical tag: what differs from its language's base.\n"

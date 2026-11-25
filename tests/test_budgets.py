@@ -100,8 +100,8 @@ _COMPACT = {language: {(box, budgets.tight(figure)) for box in _MONEY for figure
 _FR_DAYS = ("LUN.", "MAR.", "MER.", "JEU.", "VEN.", "SAM.", "DIM.")
 _ES_DAYS = ("LUN,", "MAR,", "MIÉ,", "JUE,", "VIE,", "SÁB,", "DOM,")
 FOR_91: dict[str, set[tuple[str, str]]] = {
-    "fr": {("nostromo.tooltip.resets", f"RESETS {day} 12 H 59\u202fP.M.")                         # #94: fr-CA's
-           for day in _FR_DAYS}                                                                      # day clock
+    "fr": {("nostromo.tooltip.resets", f"RESETS {day} {time}")                                 # #94: fr-CA's and
+           for day in _FR_DAYS for time in ("12 H 59\u202fP.M.", "12:59\u202fP.M.")}             # fr-MA's day clocks
     | {(box, f"RST {day} 12 H 59\u202fP.M.") for day in _FR_DAYS                                    # #95: the same
        for box in ("night_city.floating.row_reset", "night_city.tooltip.info_reset")}
     | _COMPACT["fr"],                                                     # #91: the compact tiles (above)
@@ -393,9 +393,9 @@ def test_each_languages_longest_figures_are_set_in_the_boxs_text() -> None:
     assert {"Resets sáb, 16:12", "Resets dom, 12:59\u202fp.\u202fm.", "Resets sáb 12:59\u202fp.m."} <= set(spanish)
     assert len(spanish) == 3 + 7 * 5 and not any("Wed" in text for text in spanish)
     french = budgets.texts(body, "fr")
-    assert french[:5] == ["Resets 16:12", "Resets 16 h 12", "Resets 12:59\u202fPM", "Resets 12 h 59\u202fp.m.",
-                          "Resets 12:59"]
-    assert "Resets sam. 12 h 59\u202fp.m." in french and len(french) == 5 + 7 * 5
+    assert french[:6] == ["Resets 16:12", "Resets 16 h 12", "Resets 12:59\u202fPM", "Resets 12 h 59\u202fp.m.",
+                          "Resets 12:59", "Resets 12:59\u202fp.m."]                       # fr-MA's 12-hour clock (#111)
+    assert "Resets sam. 12 h 59\u202fp.m." in french and len(french) == 6 + 7 * 6
     assert "RESETS MER. 12 H 59\u202fP.M." in budgets.texts(budgets.BOX["nostromo.tooltip.resets"], "fr")
     assert "RST CMT ÖS\u202f12:59" in budgets.texts(budgets.BOX["night_city.floating.row_reset"], "tr")
     assert budgets.texts(budgets.BOX["nostromo.floating.state_chip"], "fr") == ["HOLD 23H 59MIN", "HOLD 23H 59M",

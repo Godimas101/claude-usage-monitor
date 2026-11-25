@@ -460,11 +460,16 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   it, and the generator's tests in `tests/test_cldr.py` skip where Babel 2.18.0 is missing (CI). A number symbol the
   generator does not know stops it. Three fields Babel does not keep are rules in the generator, each with its source:
   minimum grouping digits (es-ES `1234` but `12.345`), the plain `$` for US dollars (Chris), and a U+00A0 between a
-  currency code and a digit. An amount with a currency takes the tag's currency decimal and group, which CLDR sets
+  currency code and a digit. Where the page's data differs from Babel's, the widgets follow the page (#111): five more
+  rules (`PAGE_RULES`), each with Babel's value and ICU's, as node's `Intl` writes it on ICU 77.1 and 78.2 (a Babel
+  that gives anything else for one stops the run): es-AR's and es-CO's `$ 5,96` (a U+00A0 after the `$`), es-GQ's sign
+  first (`$5,96`), fr-MA's `.` group and its `a.m.` and `p.m.`, and tr-CY's day period after the time on the 12-hour
+  clock (`4:12 ÖS`). An amount with a currency takes the tag's currency decimal and group, which CLDR sets
   apart for fr-CH (`5.96 $` but `1 234,5`, as Windows' ICU writes them). The pseudo-locale takes English's shapes with
   two changes: numbers grouped with U+202F and a U+00A0 before `%`; it keeps English's 12-hour clock. Rounding stays
   with the caller: `number` and `percent` take the digits the caller rounded to. `tight=True` drops the space beside
-  the sign for the boxes sized for English's figures; a currency code keeps its U+00A0. Nothing reads the process
+  the sign for the boxes sized for English's figures, and the one between a `$` and a minus too (es-PY's `$-5,96`, as
+  the page's tight writes it, #111); a currency code keeps its U+00A0. Nothing reads the process
   locale: `tests/test_formats.py` parses the package, `main.py`, `update_check.py` and `version.py` and fails an
   import of `locale`, a `setlocale`, `getlocale` or `localeconv` call, or a `strftime` format that names a weekday, a
   month, a day period or the zone (the agent modes' English `Mon 09:00` in `agent/status.py` is the one listed
@@ -508,11 +513,11 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   `tests/webui_cldr.js` writes the page's formats in every format tag over a grid (real codes, EUR and CAD, as well as
   one Intl refuses), and `test_webui.py` holds them to
   `formats.py`'s and `casing.py`'s, except a list of known differences, each with its tag, field, both values and both
-  versions. Seen on node 24.13 (ICU 77.1, CLDR 47.0): in every 12-hour clock `Intl` writes U+0020 where CLDR's patterns
-  put U+202F, and ICU's Spanish day periods hold U+00A0 where Babel's hold U+202F; ICU's data differs from Babel's for
-  es-AR and es-CO (a space after `$`), es-GQ (the sign or code first), fr-MA (a `.` group, `a.m.`) and tr-CY (the day
-  period after the time); and `tight` drops es-PY's space between `$` and the minus on the page only. On ICU 78.2
-  (CLDR 48.0, CI's node 20.20) the list is the same, but `Intl` writes U+0020 inside Spanish's day period (`p. m.`):
+  versions. The list is empty since #111: the rows #91 found (es-AR's and es-CO's space after `$`, es-GQ's sign or code
+  first, fr-MA's `.` group and `a.m.`, tr-CY's day period after the time, and es-PY's tight `$-5,96`) follow the page
+  now, the same on ICU 77.1 and 78.2. Seen on node 24.13 (ICU 77.1, CLDR 47.0): in every 12-hour clock `Intl` writes
+  U+0020 where CLDR's patterns put U+202F, and ICU's Spanish day periods hold U+00A0 where Babel's hold U+202F. On
+  ICU 78.2 (CLDR 48.0, CI's node 20.20) `Intl` writes U+0020 inside Spanish's day period too (`p. m.`):
   V2 lets U+0020, U+00A0 and U+202F differ inside or beside a day period, and nowhere else (the widgets draw U+202F as
   U+00A0, so the clock reads the same). CLDR 48 also writes the page's compact dollars otherwise: Turkish's and es-MX's
   `$` first (`$1,2 B`, CLDR 47 `1,2 B $`), Latin American Spanish's thousand as `k` (CLDR 47 `K`) and fr-CA's with a

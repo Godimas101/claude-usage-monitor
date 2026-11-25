@@ -14,9 +14,10 @@ French, Spanish and Turkish only (ValueError otherwise); their English callers k
 tells a caller which it has).
 
 ``tight=True`` (``percent``, ``percent_parts``, ``money``) drops the space between a number and its sign ("%", "$"; a
-currency code keeps its U+00A0), for the boxes sized for English's figures (Chris's decision on #91: Nostromo's strip
-values, Night City's strip percent, the "Cap 100 %" badge on Gates' hover card, the dashboard's money tiles); the sign
-stays on its language's side.
+currency code keeps its U+00A0), and the one beside a "$" where a minus stands between them (es-PY's "$-5,96", as the
+page writes it, #111), for the boxes sized for English's figures (Chris's decision on #91: Nostromo's strip values,
+Night City's strip percent, the "Cap 100 %" badge on Gates' hover card, the dashboard's money tiles); the sign stays on
+its language's side.
 
 Standard library only, and pure: nothing here reads the process locale or Windows.
 """
@@ -37,6 +38,7 @@ _PSEUDO_GROUP = "\u202f"
 _PSEUDO_PERCENT = "\u00a0%"
 _SPACES = " \u00a0\u202f"
 _SYMBOL_SLOT = "\u00a4"
+_SPACES_BESIDE_SLOT = re.compile(f"[{_SPACES}]*{_SYMBOL_SLOT}[{_SPACES}]*")
 _DIGITS = re.compile(r"(-?)([0-9]+)(?:\.([0-9]+))?")
 _FIELD = re.compile(r"'(?:[^']|'')*'|E+|H+|h+|m+|a+|.", re.S)
 WIDTHS: tuple[str, ...] = ("narrow", "short")
@@ -172,7 +174,9 @@ def money(amount: float, currency: str | None, locale: Locale, *, tight: bool = 
     es-MX, "$5,96" in tr), another currency by its code where the language's pattern puts the sign, a U+00A0 between a
     code and a digit ("EUR 5.96" in es-MX). An amount with a currency takes the tag's currency decimal and group, which
     CLDR sets apart for a few tags ("5.96 $" in fr-CH); no currency gives the plain number alone. ``tight`` drops only
-    the pattern's own space: a code keeps its U+00A0 ("5,96 EUR"). English keeps its callers' own text (ValueError)."""
+    the pattern's own spaces: the one beside the digits, and for a sign such as "$" every one beside the sign ("$-5,96"
+    in es-PY, whose negative pattern has a U+00A0 between the sign and the minus, as the page's tight drops it);
+    a code keeps its U+00A0 ("5,96 EUR", "EUR -5,96" in es-PY). English keeps its callers' own text (ValueError)."""
     table = _require(locale, "money")
     text = f"{float(amount):.2f}"
     negative = text.startswith("-")
@@ -185,9 +189,11 @@ def money(amount: float, currency: str | None, locale: Locale, *, tight: bool = 
     symbol = cldr.PLAIN_DOLLAR if code == "USD" else code
     prefix, suffix, negative_prefix, negative_suffix = table["currency"]
     before, after = (negative_prefix, negative_suffix) if negative else (prefix, suffix)
-    before, after = before.replace(_SYMBOL_SLOT, symbol), after.replace(_SYMBOL_SLOT, symbol)
     if tight:
         before, after = _tight(before, after)
+        if not any(map(_spaced, symbol)):
+            before, after = _SPACES_BESIDE_SLOT.sub(_SYMBOL_SLOT, before), _SPACES_BESIDE_SLOT.sub(_SYMBOL_SLOT, after)
+    before, after = before.replace(_SYMBOL_SLOT, symbol), after.replace(_SYMBOL_SLOT, symbol)
     if before.endswith(symbol) and _spaced(symbol[-1]) and body[:1].isdigit():
         before += cldr.CURRENCY_SPACING
     if after.startswith(symbol) and _spaced(symbol[0]) and body[-1:].isdigit():

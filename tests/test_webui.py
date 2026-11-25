@@ -1642,58 +1642,15 @@ KNOWN_CLOCK_SPACES = (
      "why": "the space inside Spanish's day period: Intl writes U+00A0 from ICU 77.1 (CLDR 47.0) and U+0020 from "
             "ICU 78.2 (CLDR 48.0); Babel 2.18.0's day periods hold U+202F"},
 )
-# Where node's Intl and cldr.py differ beyond those two: (tag, field) -> what each writes for the field's grid row.
+# Where node's Intl and cldr.py differ beyond those two: (tag, field) -> what each writes for the field's grid row,
+# with both versions and why (known() adds one). None since #111: the regions #91 listed (es-AR, es-CO, es-GQ, es-PY,
+# fr-MA, tr-CY) follow the page, through tests/cldr_gen.py's PAGE_RULES and formats.money's tight.
 KNOWN_CLDR_DIFFERENCES: dict[tuple[str, str], dict[str, Any]] = {}
 
 
 def known(tag: str, field: str, page: list[str], python: list[str], why: str) -> None:
     KNOWN_CLDR_DIFFERENCES[(tag, field)] = {"page": page, "python": python, "page_versions": SEEN, "python_version": TABLE,
                                            "why": why}
-
-
-_SPACED_DOLLAR = 'node writes a U+00A0 between "$" and the number; Babel 2.18.0\'s currency pattern for the tag is "¤#,##0.00"'
-known("es-AR", "usd", ["$\u00a05,96", "-$\u00a05,96", "$\u00a01.234,56"], ["$5,96", "-$5,96", "$1.234,56"], _SPACED_DOLLAR)
-known("es-AR", "moneyUsd", ["$\u00a05,96", "-$\u00a05,96", "$\u00a01.234,56"], ["$5,96", "-$5,96", "$1.234,56"], _SPACED_DOLLAR)
-known("es-CO", "usd", ["$\u00a05,96", "-$\u00a05,96", "$\u00a01.234,56"], ["$5,96", "-$5,96", "$1.234,56"], _SPACED_DOLLAR)
-known("es-CO", "moneyUsd", ["$\u00a05,96", "-$\u00a05,96", "$\u00a01.234,56"], ["$5,96", "-$5,96", "$1.234,56"], _SPACED_DOLLAR)
-_SIGN_FIRST = 'node writes the currency first; Babel 2.18.0\'s pattern for es-GQ is "#,##0.00\u00a0¤" (es-ES\'s), the sign last'
-known("es-GQ", "usd", ["$5,96", "-$5,96", "$1234,56"], ["5,96\u00a0$", "-5,96\u00a0$", "1234,56\u00a0$"], _SIGN_FIRST)
-known("es-GQ", "moneyUsd", ["$5,96", "-$5,96", "$1234,56"], ["5,96\u00a0$", "-5,96\u00a0$", "1234,56\u00a0$"], _SIGN_FIRST)
-known("es-GQ", "usdTight", ["$5,96", "-$5,96", "$1234,56"], ["5,96$", "-5,96$", "1234,56$"], _SIGN_FIRST)
-known("es-GQ", "moneyCode", ["EURO\u00a05,96", "-EURO\u00a05,96", "EURO\u00a01234,56"],
-      ["5,96\u00a0EURO", "-5,96\u00a0EURO", "1234,56\u00a0EURO"], _SIGN_FIRST)
-known("es-GQ", "moneyIso", ["EUR\u00a05,96", "-EUR\u00a05,96", "EUR\u00a01234,56",
-                               "CAD\u00a05,96", "-CAD\u00a05,96", "CAD\u00a01234,56"],
-      ["5,96\u00a0EUR", "-5,96\u00a0EUR", "1234,56\u00a0EUR",
-       "5,96\u00a0CAD", "-5,96\u00a0CAD", "1234,56\u00a0CAD"], _SIGN_FIRST)
-known("es-PY", "usdTight", ["$5,96", "$-5,96", "$1.234,56"], ["$5,96", "$\u00a0-5,96", "$1.234,56"],
-      'not the data (es-PY\'s negative pattern "¤\u00a0-#,##0.00" on both sides): tight on the page drops a space beside the "$", '
-      "formats.py's only one beside the digits")
-_MA_GROUP = 'node groups fr-MA with "."; Babel 2.18.0\'s fr-MA group is U+202F, French\'s'
-known("fr-MA", "number", ["1.234,5", "12.345", "-1.234.567,25", "0,5", "1.234", "1234,5"],
-      ["1\u202f234,5", "12\u202f345", "-1\u202f234\u202f567,25", "0,5", "1\u202f234", "1234,5"], _MA_GROUP)
-known("fr-MA", "percent", ["34\u00a0%", "-34\u00a0%", "33,5\u00a0%", "1.234\u00a0%", "34%", "100%"],
-      ["34\u00a0%", "-34\u00a0%", "33,5\u00a0%", "1\u202f234\u00a0%", "34%", "100%"], _MA_GROUP)
-known("fr-MA", "usd", ["5,96\u00a0$", "-5,96\u00a0$", "1.234,56\u00a0$"], ["5,96\u00a0$", "-5,96\u00a0$", "1\u202f234,56\u00a0$"], _MA_GROUP)
-known("fr-MA", "moneyUsd", ["5,96\u00a0$", "-5,96\u00a0$", "1.234,56\u00a0$"], ["5,96\u00a0$", "-5,96\u00a0$", "1\u202f234,56\u00a0$"],
-      _MA_GROUP)
-known("fr-MA", "usdTight", ["5,96$", "-5,96$", "1.234,56$"], ["5,96$", "-5,96$", "1\u202f234,56$"], _MA_GROUP)
-known("fr-MA", "moneyCode", ["5,96\u00a0EURO", "-5,96\u00a0EURO", "1.234,56\u00a0EURO"],
-      ["5,96\u00a0EURO", "-5,96\u00a0EURO", "1\u202f234,56\u00a0EURO"], _MA_GROUP)
-known("fr-MA", "moneyIso", ["5,96\u00a0EUR", "-5,96\u00a0EUR", "1.234,56\u00a0EUR",
-                               "5,96\u00a0CAD", "-5,96\u00a0CAD", "1.234,56\u00a0CAD"],
-      ["5,96\u00a0EUR", "-5,96\u00a0EUR", "1\u202f234,56\u00a0EUR",
-       "5,96\u00a0CAD", "-5,96\u00a0CAD", "1\u202f234,56\u00a0CAD"], _MA_GROUP)
-_MA_PERIODS = 'node\'s fr-MA day periods are "a.m." and "p.m."; Babel 2.18.0\'s are French\'s "AM" and "PM"'
-known("fr-MA", "clock12", ["12:05 a.m.", "9:39 a.m.", "12:00 p.m.", "4:12 p.m.", "11:59 p.m."],
-      ["12:05\u202fAM", "9:39\u202fAM", "12:00\u202fPM", "4:12\u202fPM", "11:59\u202fPM"], _MA_PERIODS)
-known("fr-MA", "dayClock12", ["lun. 4:12 p.m.", "mar. 4:12 p.m.", "mer. 4:12 p.m.", "jeu. 4:12 p.m.", "ven. 4:12 p.m.",
-                              "sam. 4:12 p.m.", "dim. 4:12 p.m.", "sam. 9:05 a.m."],
-      ["lun. 4:12\u202fPM", "mar. 4:12\u202fPM", "mer. 4:12\u202fPM", "jeu. 4:12\u202fPM", "ven. 4:12\u202fPM", "sam. 4:12\u202fPM",
-       "dim. 4:12\u202fPM", "sam. 9:05\u202fAM"], _MA_PERIODS)
-known("tr-CY", "clock12", ["12:05 ÖÖ", "9:39 ÖÖ", "12:00 ÖS", "4:12 ÖS", "11:59 ÖS"],
-      ["ÖÖ\u202f12:05", "ÖÖ\u202f9:39", "ÖS\u202f12:00", "ÖS\u202f4:12", "ÖS\u202f11:59"],
-      'node writes tr-CY\'s day period after the time ("h:mm a"); Babel 2.18.0\'s hm for tr-CY is "a h:mm", as tr-TR\'s')
 
 
 @pytest.fixture(scope="module")

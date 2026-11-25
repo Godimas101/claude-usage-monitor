@@ -413,6 +413,76 @@ def test_money_takes_the_currency_decimal_where_cldr_sets_one_apart(monkeypatch)
     assert formats.money(1234.56, None, loc("fr-CH")) == "1\u202f234,56"
 
 
+# ── Where the page's data differs from Babel's (#111) ─────────────────────────
+# What the dashboard writes there (node's Intl, the same on ICU 77.1 and ICU 78.2), so the widgets and the alerts write
+# it too. Each test fails without its rule: one of tests/cldr_gen.py's PAGE_RULES, or for es-PY formats.money's tight.
+# V2 (test_webui.py) holds every tag to the page under node.
+AMOUNTS = (5.96, -5.96, 1234.56)
+
+
+def test_es_ar_and_es_co_write_a_space_after_the_dollar():
+    """The rule "the dollar spaced": ICU's currency pattern for es-AR and es-CO has a U+00A0 after the sign, where Babel
+    gives es-419's "$5,96". tight drops it, and a code keeps one space."""
+    for tag in ("es-AR", "es-CO"):
+        assert [formats.money(a, "USD", loc(tag)) for a in AMOUNTS] == ["$\u00a05,96", "-$\u00a05,96",
+                                                                         "$\u00a01.234,56"], tag
+        assert [formats.money(a, "USD", loc(tag), tight=True) for a in AMOUNTS] == ["$5,96", "-$5,96", "$1.234,56"], tag
+        assert formats.money(-5.96, "EUR", loc(tag)) == "-EUR\u00a05,96", tag                # one space, not two
+    assert formats.money(5.96, "USD", loc("es-419")) == "$5.96"
+
+
+def test_es_gq_writes_the_sign_first():
+    """The rule "the sign first": ICU's es-GQ currency pattern puts the sign first, where Babel gives es-ES's (last)."""
+    gq = loc("es-GQ")
+    assert [formats.money(a, "USD", gq) for a in AMOUNTS] == ["$5,96", "-$5,96", "$1234,56"]      # es-ES's grouping
+    assert [formats.money(a, "EURO", gq) for a in AMOUNTS] == ["EURO\u00a05,96", "-EURO\u00a05,96",
+                                                               "EURO\u00a01234,56"]
+    assert formats.money(5.96, "USD", gq, tight=True) == "$5,96"
+    assert formats.money(5.96, "USD", loc("es-ES")) == "5,96\u00a0$"
+
+
+def test_fr_ma_groups_with_a_dot():
+    """The rule "a dot group": ICU groups fr-MA's numbers with ".", where Babel gives French's U+202F; an amount with a
+    currency takes it too (fr-MA has no currency group of its own)."""
+    ma = loc("fr-MA")
+    assert [formats.number(d, ma) for d in ("1234.5", "12345", "-1234567.25")] == ["1.234,5", "12.345", "-1.234.567,25"]
+    assert formats.percent("1234", ma) == "1.234\u00a0%"
+    assert formats.money(1234.56, "USD", ma) == "1.234,56\u00a0$"
+    assert formats.money(1234.56, "EUR", ma) == "1.234,56\u00a0EUR"
+    assert formats.number("1234.5", loc("fr-FR")) == "1\u202f234,5"
+
+
+def test_fr_ma_writes_dotted_day_periods():
+    """The rule "dotted day periods": ICU's fr-MA writes a.m. and p.m., where Babel gives French's AM and PM."""
+    ma = loc("fr-MA", 12)
+    assert formats.clock(MONDAY.replace(hour=16, minute=12), ma) == "4:12\u202fp.m."
+    assert formats.clock(MONDAY.replace(hour=0, minute=5), ma) == "12:05\u202fa.m."
+    assert formats.day_clock(MONDAY.replace(day=18, hour=9, minute=5), ma) == "sam. 9:05\u202fa.m."
+    assert formats.clock(MONDAY.replace(hour=16, minute=12), loc("fr-FR", 12)) == "4:12\u202fPM"
+
+
+def test_tr_cy_writes_the_day_period_after_the_time():
+    """The rule "the day period after the time": ICU's tr-CY 12-hour clock is h:mm a, where Babel gives tr-TR's a h:mm.
+    Its day clock keeps the period first (E a h:mm), in ICU as in Babel."""
+    cy = loc("tr-CY", 12)
+    assert formats.clock(MONDAY.replace(hour=16, minute=12), cy) == "4:12\u202fÖS"
+    assert formats.clock(MONDAY.replace(hour=9, minute=39), cy) == "9:39\u202fÖÖ"
+    assert formats.day_clock(MONDAY.replace(day=18, hour=16, minute=12), cy) == "Cmt ÖS\u202f4:12"
+    assert formats.clock(MONDAY.replace(hour=16, minute=12), loc("tr-TR", 12)) == "ÖS\u202f4:12"
+    assert formats.clock(MONDAY.replace(hour=16, minute=12), loc("tr-CY")) == "16:12"
+
+
+def test_tight_drops_every_space_beside_the_dollar_a_minus_between_them_too():
+    """es-PY's negative pattern has a U+00A0 between the sign and the minus, in ICU and in Babel alike. The page's tight
+    drops every space beside the "$" ("$-5,96"), so formats.money's does: the pattern's spaces beside a sign go, in any
+    tag whose pattern has one. A code keeps its U+00A0."""
+    py = loc("es-PY")
+    assert formats.money(-5.96, "USD", py) == "$\u00a0-5,96"
+    assert [formats.money(a, "USD", py, tight=True) for a in AMOUNTS] == ["$5,96", "$-5,96", "$1.234,56"]
+    assert formats.money(-5.96, "EUR", py, tight=True) == "EUR\u00a0-5,96"
+    assert formats.money(-5.96, "USD", loc("es-CL"), tight=True) == "$-5,96"             # no space in the pattern
+
+
 def test_ago_uses_cldrs_relative_time():
     assert formats.ago(12, "s", loc("fr-FR")) == "il y a 12\u00a0s"
     assert formats.ago(12, "s", loc("es-ES")) == "hace 12 s"

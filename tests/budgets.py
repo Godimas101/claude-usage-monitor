@@ -83,11 +83,13 @@ def _days(names: str, times: tuple[str, ...]) -> tuple[str, ...]:
 # list). English keeps #89's figures: its boxes list its own widest times, countdowns and ages.
 FIGURES: dict[str, dict[str, tuple[str, ...]]] = {
     "percent": {"en": ("100%",), "fr": ("100 %",), "es": ("100 %",), "tr": ("%100",)},
-    "clock": {"en": ("4:12 PM",), "fr": ("16:12", "16 h 12", "12:59\u202fPM", "12 h 59\u202fp.m.", "12:59"),
-              "es": ("16:12", "12:59\u202fp.\u202fm.", "12:59\u202fp.m."), "tr": ("16:12", "ÖS\u202f12:59")},
+    "clock": {"en": ("4:12 PM",), "fr": ("16:12", "16 h 12", "12:59\u202fPM", "12 h 59\u202fp.m.", "12:59",
+                                        "12:59\u202fp.m."),
+              "es": ("16:12", "12:59\u202fp.\u202fm.", "12:59\u202fp.m."),
+              "tr": ("16:12", "ÖS\u202f12:59", "12:59\u202fÖS")},
     "money": {"en": ("$5.96",), "fr": ("5,96\u00a0$",), "es": ("$5.96", "5,96\u00a0$", "1,234.5"), "tr": ("$5,96",)},
     "day_clock": {"fr": _days("lun. mar. mer. jeu. ven. sam. dim.",
-                              ("16:12", "16 h 12", "12:59\u202fPM", "12 h 59\u202fp.m.", "12:59")),
+                              ("16:12", "16 h 12", "12:59\u202fPM", "12 h 59\u202fp.m.", "12:59", "12:59\u202fp.m.")),
                   "es": _days("lun, mar, mié, jue, vie, sáb, dom,",
                               ("16:12", "12:59\u202fp.\u202fm.", "12:59\u202fp.m."))
                   + _days("lun mar mié jue vie sáb dom", ("16:12", "12:59\u202fp.m.")),

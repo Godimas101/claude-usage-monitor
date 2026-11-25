@@ -2,6 +2,7 @@
 
 - What WebView2 wrote for the same tags (#88's spike, spike-88-results.md), with the plain dollar in place of "$US".
 - Spanish's minimum grouping (1234 but 12.345), which Babel alone does not give.
+- The fields the tables take from the page's data where Babel's differs (#111), and the header that names them.
 - The plural categories and rules usage_monitor.i18n uses, against the samples Babel worked out.
 - The shape of the tables: canonical tags, a base for every region, seven weekdays from Monday, twelve months.
 - That tests/cldr_gen.py still writes the committed file and keeps the currency symbols, where Babel 2.18.0 with
@@ -10,6 +11,7 @@
 from __future__ import annotations
 
 import ast
+import dataclasses
 import re
 from pathlib import Path
 from typing import Any
@@ -62,6 +64,55 @@ def test_spanish_groups_five_digits_but_not_four():
         assert table(tag)["min_grouping"] == 1, tag
     for tag in ("fr-FR", "fr-CA", "tr-TR"):
         assert table(tag)["min_grouping"] == 1, tag
+
+
+# ── The page's data (#111) ────────────────────────────────────────────────────
+
+# Each field tests/cldr_gen.py's PAGE_RULES takes from the page's data: (tag, field) -> (the value as ICU has it, read
+# from what node's Intl writes on ICU 77.1 and 78.2; Babel 2.18.0's, which the table held before). fr-MA's
+# currency_group follows its group, as ICU's does: fr-MA has no currency group of its own.
+PAGE_VALUES: dict[tuple[str, str], tuple[Any, Any]] = {
+    ("es-AR", "currency"): (("\u00a4\u00a0", "", "-\u00a4\u00a0", ""), ("\u00a4", "", "-\u00a4", "")),
+    ("es-CO", "currency"): (("\u00a4\u00a0", "", "-\u00a4\u00a0", ""), ("\u00a4", "", "-\u00a4", "")),
+    ("es-GQ", "currency"): (("\u00a4", "", "-\u00a4", ""), ("", "\u00a0\u00a4", "-", "\u00a0\u00a4")),
+    ("fr-MA", "group"): (".", "\u202f"),
+    ("fr-MA", "currency_group"): (".", "\u202f"),
+    ("fr-MA", "am_pm"): (("a.m.", "p.m."), ("AM", "PM")),
+    ("tr-CY", "hm"): ("h:mm\u202fa", "a\u202fh:mm"),
+}
+
+
+@pytest.mark.parametrize(("tag", "field"), sorted(PAGE_VALUES))
+def test_a_field_the_page_rules_cover_is_the_pages(tag: str, field: str) -> None:
+    """Where Babel's data for es-AR, es-CO, es-GQ, fr-MA and tr-CY differs from what the dashboard writes, the table
+    holds the page's (the widgets follow the page, #111), not Babel's."""
+    page, babel = PAGE_VALUES[(tag, field)]
+    assert table(tag)[field] == page != babel
+
+
+def test_the_page_rules_change_only_their_fields():
+    """The rest of the six tags is Babel's: fr-MA keeps French's decimal comma, tr-CY's day clock keeps the day period
+    first (E a h:mm, in ICU as in Babel), and es-PY's pattern, the same in ICU and Babel, is Babel's."""
+    assert table("fr-MA")["decimal"] == table("fr-MA")["currency_decimal"] == ","
+    assert table("tr-CY")["Ehm"] == table("tr-TR")["Ehm"] == "E a\u202fh:mm"
+    assert table("tr-CY")["Hm"] == table("tr-TR")["Hm"]
+    assert table("es-PY")["currency"] == ("\u00a4\u00a0", "", "\u00a4\u00a0-", "")
+    assert table("es-419")["currency"] == ("\u00a4", "", "-\u00a4", "")
+    assert table("es-ES")["currency"] == ("", "\u00a0\u00a4", "-", "\u00a0\u00a4")
+
+
+def test_the_header_names_each_rule_from_the_page_with_its_source():
+    """usage_monitor/cldr.py says which fields come from the page's data, and the source: an item for each rule, with
+    its tags and field."""
+    doc = cldr.__doc__ or ""
+    _, source, listed = doc.partition("the widgets write what the dashboard writes (#111). Source:\nICU 77.1 and 78.2 "
+                                      "(node), the page's data.\n")
+    rules = [rule.removeprefix("- ") for rule in listed.split("\n\n")[0].split("\n- ")]
+    assert source and all("(Babel " in rule for rule in rules)
+    assert len(rules) == 5
+    for tag, field in PAGE_VALUES:
+        if field != "currency_group":
+            assert [rule for rule in rules if tag in rule.split(":")[1] and f" {field} " in rule], (tag, field)
 
 
 # ── Plural rules ──────────────────────────────────────────────────────────────
@@ -169,3 +220,42 @@ def test_the_generator_keeps_the_currency_symbols_and_stops_on_one_it_does_not_k
         cldr_gen.number_symbols("xx", {**plain, "currencyMinusSign": "-"})
     assert table("fr-CH")["currency_decimal"] == "." and table("fr-CH")["decimal"] == ","
     assert table("fr-FR")["currency_decimal"] == ","
+
+
+def test_the_page_rules_are_the_fields_the_tables_hold():
+    """Each rule of tests/cldr_gen.py's PAGE_RULES gives the value PAGE_VALUES above holds the table to, and what
+    Babel 2.18.0 gives for it (a currency rule as the pattern's sides): the two lists cannot drift apart."""
+    cldr_gen = _generator()
+    from babel.numbers import parse_pattern
+
+    def sides(rule: Any, value: Any) -> Any:
+        return cldr_gen._sides(parse_pattern(value), "\u00a4", "\u00a4", "-") if rule.field == "currency" else value
+
+    covered = {(cldr_gen._tag(identifier), rule.field): (sides(rule, rule.page), sides(rule, rule.babel))
+               for rule in cldr_gen.PAGE_RULES for identifier in rule.tags}
+    assert covered == {key: value for key, value in PAGE_VALUES.items() if key[1] != "currency_group"}
+    assert cldr_gen.PAGE_SOURCE == "ICU 77.1 and 78.2 (node), the page's data"
+
+
+def test_a_page_rule_stops_the_run_when_babel_gives_something_else(monkeypatch):
+    """A rule was made for what Babel 2.18.0 gives: a Babel that gives anything else for the field stops the run (Gap),
+    so the rule is looked at again. So does a rule for a tag Babel does not have, a field the generator never asks
+    about, or a second rule for the same field of a tag. A field no rule covers is Babel's."""
+    cldr_gen = _generator()
+    assert cldr_gen.page_value("es_AR", "currency", "\u00a4#,##0.00") == "\u00a4\u00a0#,##0.00"
+    assert cldr_gen.page_value("es_AR", "hm", "h:mm\u202fa") == "h:mm\u202fa"
+    assert cldr_gen.page_value("es_MX", "currency", "\u00a4#,##0.00") == "\u00a4#,##0.00"
+    with pytest.raises(cldr_gen.Gap, match="the dollar spaced"):
+        cldr_gen.page_value("es_AR", "currency", "\u00a4\u00a0#,##0.00")
+    with pytest.raises(cldr_gen.Gap):
+        cldr_gen.page_value("tr_CY", "hm", "h:mm a")
+    identifiers = ["es_AR", "es_CO", "es_GQ", "fr_MA", "tr_CY"]
+    cldr_gen.check_page_rules(identifiers)
+    rule = cldr_gen.PAGE_RULES[0]
+    for broken in (dataclasses.replace(rule, tags=("es_XX",)), dataclasses.replace(rule, field="decimal")):
+        monkeypatch.setattr(cldr_gen, "PAGE_RULES", (broken,))
+        with pytest.raises(cldr_gen.Gap):
+            cldr_gen.check_page_rules(identifiers)
+    monkeypatch.setattr(cldr_gen, "PAGE_RULES", (rule, rule))
+    with pytest.raises(cldr_gen.Gap):
+        cldr_gen.check_page_rules(identifiers)
