@@ -6,7 +6,8 @@
                                          exit code 1 when it cannot be written or the build has no VERSION)
     main.py --remove-setup [FILE]        take this app's hooks and MCP tool out of Claude Code (the uninstaller runs this;
                                          what could not be done goes to FILE, and the exit code is 1)
-    main.py --dump-frames DIR            render every theme, variant, state and scale to PNGs
+    main.py --dump-frames DIR [--lang ID]  render every theme, variant, state and scale to PNGs, in English or
+                                         the language ID (en, fr, es, tr or pseudo; a dev instance's locale)
     main.py --smoke-test SECONDS FILE    run the real app for SECONDS, exercise it, write a report
     main.py --status [--json]            print the plan usage for a Claude session (see docs/AGENT_HOOK.md)
     main.py --hook [--threshold N] [--always]   a Claude Code hook that adds the usage to the context
@@ -61,6 +62,7 @@ class Command:
     session_cap: float | None = None  # --gate --session N / --weekly N; None is the gate's default
     weekly_cap: float | None = None
     session_id: str | None = None    # --wait --session ID
+    lang: str | None = None          # --dump-frames --lang ID; None is English
 
 
 def _values(args: list[str], flag: str, count: int) -> list[str] | None:
@@ -120,7 +122,14 @@ def parse_args(argv: Sequence[str]) -> Command:
         words = _values(args, "--dump-frames", 1)
         if words is None:
             return Command("error", error="--dump-frames needs an output folder")
-        return Command("dump_frames", path=words[0])
+        if "--lang" not in args:
+            return Command("dump_frames", path=words[0])
+        from usage_monitor import i18n  # only here: every hook call parses its command line
+
+        lang = _values(args, "--lang", 1)
+        if lang is None or lang[0] not in i18n.DEV_LANGUAGES:
+            return Command("error", error=f"--lang needs one of {', '.join(i18n.DEV_LANGUAGES)}")
+        return Command("dump_frames", path=words[0], lang=lang[0])
     if "--smoke-test" in args:
         words = _values(args, "--smoke-test", 2)
         try:
@@ -205,11 +214,19 @@ def _fail(message: str) -> int:
     return 1
 
 
-def _dump_frames(folder: str) -> int:
+def _dump_frames(folder: str, lang: str | None = None) -> int:
+    """The frame dump, in English or in ``lang``: the locale a dev instance shows for it (i18n.dev_locale), built here
+    because nothing under render/ builds a locale (#87)."""
     from usage_monitor.render.dump import dump_frames
 
-    report = dump_frames(folder)
-    _say(f"wrote {report.files} frames and {len(report.sheets)} contact sheets to {report.out_dir}")
+    if lang is None:
+        report = dump_frames(folder)
+    else:
+        from usage_monitor import i18n
+
+        report = dump_frames(folder, locale=i18n.dev_locale(lang))
+    where = f" in the language {lang}" if lang else ""
+    _say(f"wrote {report.files} frames and {len(report.sheets)} contact sheets to {report.out_dir}{where}")
     return 0
 
 
@@ -292,7 +309,7 @@ def run_command(command: Command, argv: Sequence[str]) -> int:
     if command.kind == "dashboard":
         return _dashboard(argv)
     if command.kind == "dump_frames":
-        return _dump_frames(command.path or "")
+        return _dump_frames(command.path or "", command.lang)
     if command.kind == "smoke_test":
         return _smoke_test(command.seconds, command.path or "")
     if command.kind in AGENT_KINDS:

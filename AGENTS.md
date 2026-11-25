@@ -98,8 +98,8 @@ python main.py            (console: Ctrl+C quits, errors print)     or    launch
 - `python main.py --smoke-test 45 report.json` runs the real app for 45 s (real server, dashboard,
   widgets; the data service never pauses) and exits 0 when clean. The first run backfills your
   transcripts into the dev database.
-- `python main.py --dump-frames <dir>` renders every theme, variant, state and scale to PNGs plus a
-  contact sheet per theme. Screen capture can be blocked, so check visuals through these.
+- `python main.py --dump-frames <dir> [--lang en|fr|es|tr|pseudo]` renders every theme, variant, state and scale to
+  PNGs plus a contact sheet per theme. Screen capture can be blocked, so check visuals through these.
 
 ## Tests
 

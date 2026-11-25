@@ -449,6 +449,65 @@ def test_parse_args_mode_precedence():
     assert entry.parse_args(["--smoke-test", "5", "r", "--dump-frames", "d"]).kind == "dump_frames"
 
 
+def test_parse_args_carries_the_dump_language():
+    """--dump-frames DIR --lang ID (#93): any id a dev instance may show, the flag before or after; none is English."""
+    assert entry.parse_args(["--dump-frames", "d"]) == entry.Command("dump_frames", path="d")
+    for lang in i18n.DEV_LANGUAGES:
+        assert entry.parse_args(["--dump-frames", "d", "--lang", lang]) == entry.Command("dump_frames", path="d",
+                                                                                         lang=lang)
+    assert entry.parse_args(["--lang", "pseudo", "--dump-frames", "d"]).lang == "pseudo"
+    for bad in (["--lang", "xx"], ["--lang", "FR"], ["--lang"], ["--lang", "--port"]):
+        assert entry.parse_args(["--dump-frames", "d", *bad]) == entry.Command(
+            "error", error="--lang needs one of en, fr, es, tr, pseudo"), bad
+
+
+def test_only_a_frame_dump_in_a_language_imports_the_languages(monkeypatch):
+    """parse_args runs on every hook call (--gate is a PreToolUse hook), so it imports usage_monitor.i18n only to check
+    a --dump-frames --lang id (#93)."""
+    import builtins
+
+    real = builtins.__import__
+    imported: list[str] = []
+
+    def spy(name, globals=None, locals=None, fromlist=(), level=0):  # type: ignore[no-untyped-def]
+        if name == "usage_monitor.i18n" or (name == "usage_monitor" and "i18n" in (fromlist or ())):
+            imported.append(name)
+        return real(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", spy)
+    for argv in ([], ["--gate"], ["--hook", "--always"], ["--status", "--json"], ["--mcp"], ["--wait"], ["--watch"],
+                 ["--dump-frames", "d"], ["--gate", "--lang", "fr"], ["--smoke-test", "5", "r"]):
+        entry.parse_args(argv)
+    assert imported == []
+    entry.parse_args(["--dump-frames", "d", "--lang", "fr"])
+    assert imported, "the spy saw no import, so the check above proves nothing"
+
+
+def test_the_frame_dump_draws_in_the_language_asked(monkeypatch, tmp_path, capsys):
+    """--lang reaches the dump as the dev instance's locale for it (i18n.dev_locale), built in main.py, since nothing
+    under render/ builds a locale (#87). No flag calls the dump as before."""
+    import usage_monitor.render.dump as dump_mod
+
+    asked: list[tuple[str, dict[str, Any]]] = []
+
+    class Report:
+        files, sheets, out_dir = 12, [1], tmp_path
+
+    def spy(folder, **options):  # type: ignore[no-untyped-def]
+        asked.append((folder, options))
+        return Report()
+
+    monkeypatch.setattr(dump_mod, "dump_frames", spy)
+    assert entry.main(["--dump-frames", "out", "--lang", "pseudo"]) == 0
+    assert "in the language pseudo" in capsys.readouterr().out
+    assert entry.main(["--dump-frames", "out", "--lang", "fr"]) == 0
+    assert entry.main(["--dump-frames", "out"]) == 0
+    assert "in the language" not in capsys.readouterr().out.splitlines()[-1]
+    assert asked == [("out", {"locale": i18n.dev_locale("pseudo")}), ("out", {"locale": i18n.dev_locale("fr")}),
+                     ("out", {})]
+    assert i18n.dev_locale("pseudo").language == i18n.PSEUDO and i18n.dev_locale("fr").format == "fr-FR"
+
+
 def run_remove_setup(monkeypatch, tmp_path, result):
     """--remove-setup with setup.remove() answering ``result``. Returns (exit code, the report file)."""
     from usage_monitor.agent import setup

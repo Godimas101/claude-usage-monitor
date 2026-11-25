@@ -16,10 +16,13 @@ commands so); an unmarked name, id or path is reported, for the ticket that word
 of text as the page or the frame holds it, digits as "#" and spaces collapsed, so the same words with other figures are
 one entry; the pseudo-locale's number shapes (#91: groups set off by U+202F, a U+00A0 before "%") are English's there.
 
-The widgets: the frame dump (``render/dump.py``) at scale 1.0, every theme, variant, state, strip height and tray size,
-with nothing saved, and the tray tooltip of each sample state. Other scales draw the same words. Text drawn on the
-dump's contact sheet (a developer's overview, not the widgets) is left out. The widgets take no language until #93, so
-for now this lists all their words.
+The widgets: the frame dump (``render/dump.py``) at scale 1.0 in the pseudo-locale (a dev instance's, i18n.dev_locale),
+every theme, variant, state, strip height and tray size, with nothing saved; the tray tooltip of each sample state, as
+an installed monitor and as a dev instance show it; and the tray menu with every row shown (#93). Other scales draw the
+same words. Text drawn on the dump's contact sheet (a developer's overview, not the widgets) is left out. Besides the
+names, the widget half takes out the dev instance's "(dev)" mark and, as whole words, the pseudo-locale's format words
+(its weekday names and AM/PM, English's since #91): they are formats, as numbers are. A wrap gives a glued U+00A0 back
+as a plain space, so a digit, a space and "%" fold as a digit and "%" do.
 
 The dashboard: tests/english_scan.js runs the page (index.html, formats.js, the catalog, charts.js and app.js, from the
 dev server) on a small DOM, for every scenario of the dev server under the pseudo-locale, in the passes PASSES lists:
@@ -76,6 +79,7 @@ PRODUCT = "Claude Usage Monitor"
 # in two pieces. Night City's NC//USAGE and Usage // Monitor sit in its stylesheet and boot script, outside this scan.
 DASHBOARD_MARKS: tuple[str, ...] = ("CLAUDE USAGE MONITOR", "// ONBOARD COMPUTER")
 WIDGET_MARKS: tuple[str, ...] = ("CLAUDE//USAGE", "Claude usage")          # Night City's widget, Gates' widget
+DEV_MARK = "(dev)"          # a dev instance's tray tooltip ends with it (app.DEV_MARK): a developer's mark, not a word
 ATTRIBUTES = ("aria-label", "title", "data-tip", "placeholder", "alt")
 # The dev server's scenarios each pass runs in (english_scan.js says what a pass does). Every scenario is seen as an
 # installed monitor and as a dev instance; the actions in the scenarios that have their own (the sign-in help, the
@@ -103,10 +107,13 @@ def _kind(word: str) -> str | None:
     return "either" if re.search(r"[A-Za-z]{2}", word) else None
 
 
-def _english_runs(runs: Sequence[str], names: Iterable[str]) -> list[str]:
+def _english_runs(runs: Sequence[str], names: Iterable[str], format_words: Iterable[str] = ()) -> list[str]:
     """The runs of one block that hold English, as given. A word that reads the same both ways is English only outside
-    a bracketed string with a pseudo word in it; the brackets are followed from run to run."""
+    a bracketed string with a pseudo word in it; the brackets are followed from run to run. ``names`` are taken out
+    wherever they stand, ``format_words`` only as whole words ("Mon" is no part of "Monthly")."""
     names = sorted(set(names), key=len, reverse=True)          # a longer name first: "Claude Code" before "Claude"
+    words_out = sorted(set(format_words), key=len, reverse=True)
+    as_words = re.compile(r"(?<!\w)(?:" + "|".join(map(re.escape, words_out)) + r")(?!\w)") if words_out else None
     spans: list[bool] = []                                     # for each bracketed string: has it a pseudo word?
     open_: list[int] = []
     words: list[list[tuple[str, tuple[int, ...]]]] = []
@@ -114,6 +121,8 @@ def _english_runs(runs: Sequence[str], names: Iterable[str]) -> list[str]:
         rest = run
         for name in names:
             rest = rest.replace(name, " ")
+        if as_words is not None:
+            rest = as_words.sub(" ", rest)
         found = []
         for token in re.finditer(r"\[|\]|[^\s\[\]]+", rest):
             text = token.group(0)
@@ -140,15 +149,18 @@ def _english_runs(runs: Sequence[str], names: Iterable[str]) -> list[str]:
 def entry(text: str) -> str:
     """A run of text as the record holds it: digits as "#", spaces collapsed. The pseudo-locale's number shapes fold to
     English's first (#91, D15 of its plan): a U+202F between digits is a ",", a U+00A0 before "%" is nothing, so a figure
-    the page's formats write the pseudo way is the entry it always was."""
+    the page's formats write the pseudo way is the entry it always was. A plain space between a digit and "%" is
+    nothing too: it is a U+00A0 that a widget's wrap gave back as a space (engine.wrap_words); English writes no space
+    there (#93)."""
     text = re.sub(r"(?<=\d)\u202f(?=\d)", ",", text).replace("\u00a0%", "%")
+    text = re.sub(r"(?<=\d) %", "%", text)
     return re.sub(r"\s+", " ", re.sub(r"\d", "#", text)).strip()
 
 
-def english(texts: Iterable[str], names: Iterable[str] = (PRODUCT,)) -> set[str]:
+def english(texts: Iterable[str], names: Iterable[str] = (PRODUCT,), format_words: Iterable[str] = ()) -> set[str]:
     """The entries of the texts that hold English, each text judged on its own."""
-    names = tuple(names)
-    return {entry(text) for text in texts if _english_runs([text], names)}
+    names, format_words = tuple(names), tuple(format_words)
+    return {entry(text) for text in texts if _english_runs([text], names, format_words)}
 
 
 # ── Reading the dashboard's markup ───────────────────────────────────────────────────────────────────────────────
@@ -310,16 +322,55 @@ def skin_names() -> tuple[str, ...]:
     return ("Claude Code", "CLAUDE CODE", *sorted(models), *sorted(model.upper() for model in models))
 
 
+def widget_names() -> tuple[str, ...]:
+    """What the widget half takes out of a run before judging it: the product, #86's widget marks, the dev mark and the
+    names the skins draw."""
+    return (PRODUCT, *WIDGET_MARKS, DEV_MARK, *skin_names())
+
+
+def pseudo_format_words() -> tuple[str, ...]:
+    """The pseudo-locale's format words: its weekday names and its AM and PM, as written and in capitals (the skins draw
+    both). They are English's, since #91 gives the pseudo-locale English's formats. The widget half treats them as
+    formats, as it treats numbers (#93); the dashboard half's record still lists the date names the page shows."""
+    from usage_monitor import casing, formats
+
+    locale = i18n.dev_locale(i18n.PSEUDO)
+    words = [formats.weekday(day, locale) for day in range(7)]
+    words += [formats.clock(datetime(2026, 1, 1, hour), locale).split()[-1] for hour in (0, 12)]
+    return tuple(dict.fromkeys([*words, *(casing.upper(word, locale.language) for word in words)]))
+
+
+def _menu_labels(locale: i18n.Locale) -> list[str]:
+    """The tray menu's labels in ``locale`` with every row shown: sessions waiting (one, then two) and an update on
+    offer."""
+    from usage_monitor import app
+
+    def nothing() -> None:
+        return None
+
+    labels: list[str] = []
+    for waiting in (1, 2):
+        items = app.menu_items(floating_on=True, taskbar_on=True, guard_on=True, waiting=waiting,
+                               update_version="2.1.0", open_dashboard=nothing, toggle_floating=nothing,
+                               toggle_taskbar=nothing,
+                               toggle_guard=nothing, resume_waiting=nothing, refresh=nothing, report_bug=nothing,
+                               update=nothing, quit_app=nothing, locale=locale)
+        labels += [item.label for item in items if not item.separator]
+    return labels
+
+
 def _drawn() -> dict[str, str]:
-    """Every run of text the frame dump draws at scale 1.0, and each sample state's tray tooltip, each with where it was
-    first drawn (in this process). Text reaches the frames through engine.Canvas.text_layer, gates' Ink.put, or
-    Pillow's ImageDraw.text (a skin may draw with it directly); all three are listened to."""
+    """Every run of text the frame dump draws at scale 1.0 in the pseudo-locale, each sample state's tray tooltip there
+    (plain and with the dev mark) and the tray menu's labels, each with where it was first drawn (in this process).
+    Text reaches the frames through engine.Canvas.text_layer, gates' Ink.put, or Pillow's ImageDraw.text (a skin may
+    draw with it directly); all three are listened to."""
     from PIL import ImageDraw
 
     from usage_monitor import app
     from usage_monitor.render import dump, engine
     from usage_monitor.render.skins import gates
 
+    pseudo = i18n.dev_locale(i18n.PSEUDO)
     seen: dict[str, str] = {}
     where = [""]
     state = [""]
@@ -366,20 +417,24 @@ def _drawn() -> dict[str, str]:
     dump.sample_model, dump.get_skin = model, (lambda theme_id: Told(real[6](theme_id)))
     try:
         with tempfile.TemporaryDirectory(prefix="english-left-") as folder:
-            dump.dump_frames(folder, scales=(1.0,))
+            dump.dump_frames(folder, scales=(1.0,), locale=pseudo)
     finally:
         (engine.Canvas.text_layer, gates.Ink.put, ImageDraw.ImageDraw.text, dump._save, dump._contact_sheet,
          dump.sample_model, dump.get_skin) = real
     for name in dump.DUMP_STATE_NAMES:
-        seen.setdefault(app.tray_tooltip(dump.sample_model(name)), f"tray tooltip, state {name}")
+        model = dump.sample_model(name, locale=pseudo)
+        for dev in (False, True):
+            seen.setdefault(app.tray_tooltip(model, dev=dev), f"tray tooltip, state {name}" + (", dev" if dev else ""))
+    for label in _menu_labels(pseudo):
+        seen.setdefault(label, "tray menu")
     return seen
 
 
 def _widgets_english() -> dict[str, str]:
-    names = (PRODUCT, *WIDGET_MARKS, *skin_names())
+    names, format_words = widget_names(), pseudo_format_words()
     found: dict[str, str] = {}
     for text, where in _drawn().items():
-        for hit in english([text], names):
+        for hit in english([text], names, format_words):
             found.setdefault(hit, where)
     return dict(sorted(found.items()))
 

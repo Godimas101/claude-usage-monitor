@@ -108,6 +108,14 @@ def test_the_pseudo_locales_number_shapes_are_englishs_entries() -> None:
     assert english(["Resets 4:12\u202fPM", "Used 34\u00a0of 50"]) == {"Resets #:## PM", "Used ## of ##"}
 
 
+def test_a_wrapped_percent_folds_as_a_glued_one() -> None:
+    """A widget's wrap gives the pseudo-locale's U+00A0 before "%" back as a plain space (engine.wrap_words), so a
+    digit, a space and "%" are the entry a digit and "%" are (#93). A space before "%" with no digit before it stays."""
+    assert entry("SESSION 13 %") == entry("SESSION 13\u00a0%") == entry("SESSION 13%") == "SESSION ##%"
+    assert entry("(CAP 90 %). RESUMES") == "(CAP ##%). RESUMES"
+    assert entry("CAP %") == "CAP %" and entry("13  %") == "## %"
+
+
 def test_names_are_taken_out_before_a_run_is_judged() -> None:
     dashboard = (PRODUCT, *DASHBOARD_MARKS)
     assert english(["Claude Usage Monitor", "CLAUDE USAGE MONITOR", "// ONBOARD COMPUTER"], dashboard) == set()
@@ -117,6 +125,71 @@ def test_names_are_taken_out_before_a_run_is_judged() -> None:
     assert {"Claude Code", "CLAUDE CODE", "Fable", "FABLE"} <= set(widget)    # the sample states' scoped model
     assert english(["FABLE", "CLAUDE//USAGE", "Send Claude Code a message.", "FABLE WEEKLY"], widget) == {
         "Send Claude Code a message.", "FABLE WEEKLY"}
+
+
+def test_the_pseudo_locales_format_words_and_the_dev_mark_are_no_english_on_the_widgets() -> None:
+    """#91 gives the pseudo-locale English's formats, so its weekday names and AM/PM are English's: the widget half
+    treats them as formats, as it treats numbers, and takes them out as whole words only. The dev instance's "(dev)" is
+    a developer's mark (#93). The dashboard half's record keeps the date names the page shows."""
+    from usage_monitor import app
+
+    days = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+    words = english_left.pseudo_format_words()
+    assert set(words) == {*days, *(day.upper() for day in days), "AM", "PM"}
+    names = english_left.widget_names()
+    assert english_left.DEV_MARK == app.DEV_MARK.strip() and english_left.DEV_MARK in names
+    held = P("guard holding, resumes {clock} (in {countdown})").replace("{clock}", "Fri 9:59 PM").replace(
+        "{countdown}", "2d 3h")
+    assert english([held, P("RESETS {clock}").replace("{clock}", "SAT 4:00 AM")], names, words) == set()
+    assert english([held], names) == {entry(held)}                         # without the format words it is English
+    assert english([P("live") + " (dev)"], names, words) == set()
+    assert english([P("live") + " (dev)"], (PRODUCT, *WIDGET_MARKS), words) == {entry(P("live") + " (dev)")}
+    assert english(["AMP", "Monk", "SUNK", "Friday", P("weekly") + " Monday"], names, words) == {
+        "AMP", "Monk", "SUNK", "Friday", entry(P("weekly") + " Monday")}    # whole words only
+    page = {"shell": '<html lang="pseudo"><body></body></html>',
+            "snapshots": [{"pass": "dev", "step": "cost", "title": "", "body": "<body><p>FRI</p></body>"}]}
+    assert scan_english(page) == {"FRI": "dev/cost"}                        # the dashboard half is as it was
+
+
+def test_the_widget_half_draws_in_the_pseudo_locale_and_reads_the_menu(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The frames, every sample state's tooltip (plain and as a dev instance) and the tray menu with every row are read
+    in the pseudo-locale a dev instance shows (#93)."""
+    from usage_monitor import app
+    from usage_monitor.render import dump
+
+    pseudo = i18n.dev_locale(i18n.PSEUDO)
+    dumped: list[Any] = []
+    tips: list[tuple[str, bool]] = []
+    menus: list[tuple[Any, int]] = []
+    real_tip, real_menu = app.tray_tooltip, app.menu_items
+
+    def dump_frames(folder: Any, **options: Any) -> None:
+        dumped.append(options.get("locale"))
+
+    def tray_tooltip(model: Any, **options: Any) -> str:
+        tips.append((model.locale, options.get("dev", False)))
+        return real_tip(model, **options)
+
+    def menu_items(**options: Any) -> Any:
+        menus.append((options.get("locale"), options["waiting"]))
+        return real_menu(**options)
+
+    monkeypatch.setattr(dump, "dump_frames", dump_frames)
+    monkeypatch.setattr(app, "tray_tooltip", tray_tooltip)
+    monkeypatch.setattr(app, "menu_items", menu_items)
+    seen = english_left._drawn()
+    assert dumped == [pseudo]
+    assert sorted(tips, key=repr) == sorted([(pseudo, dev) for _ in dump.DUMP_STATE_NAMES for dev in (False, True)],
+                                            key=repr)
+    assert menus and all(locale == pseudo for locale, _waiting in menus) and {w for _l, w in menus} == {1, 2}
+    rows = {item.id: item.label for waiting in (1, 2) for item in real_menu(
+        floating_on=True, taskbar_on=True, guard_on=True, waiting=waiting, update_version="2.1.0",
+        **{name: (lambda: None) for name in ("open_dashboard", "toggle_floating", "toggle_taskbar", "toggle_guard",
+                                             "resume_waiting", "refresh", "report_bug", "update", "quit_app")},
+        locale=pseudo) if not item.separator}
+    assert {"resume_waiting", "update", "exit"} <= set(rows)
+    assert all(seen.get(label) == "tray menu" for label in rows.values())
+    assert any(where.endswith(", dev") for where in seen.values())
 
 
 # ── Reading the dashboard's markup ───────────────────────────────────────────────────────────────────────────────
