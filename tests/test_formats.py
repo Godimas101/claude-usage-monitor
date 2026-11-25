@@ -10,8 +10,10 @@ HELPERS names each recorded helper and how it is called; a step that reshapes on
 """
 from __future__ import annotations
 
+import ast
 import json
 import math
+import re
 import os
 import subprocess
 import sys
@@ -456,3 +458,94 @@ def test_no_format_reads_the_process_locale():
                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     assert run.returncode == 0, run.stderr[-2000:]
     assert json.loads(run.stdout) == json.loads(json.dumps(here["result"]))
+
+
+# The process locale is one for the whole process, and strftime's names come from it: the formats are the only way to a
+# weekday, a month or a day period. %Z is here because Windows names the zone in its display language.
+REPO = Path(__file__).resolve().parent.parent
+NAMED_DIRECTIVE = re.compile(r"%[aAbBhpcxXZ]")
+FORMAT_FIELD = re.compile(r"[{][^{}]*:[^{}]*%[aAbBhpcxXZ][^{}]*[}]")      # "{:%a}".format(moment)
+LOCALE_MODULES = frozenset({"locale", "_locale"})
+LOCALE_CALLS = frozenset({"setlocale", "getlocale", "localeconv", "getdefaultlocale"})
+# (file, enclosing function, format): agent/status.py writes the agent modes' English ("Mon 09:00"), which no
+# language changes (#90); nothing sets the process locale, so its %a is the C locale's English.
+NAMED_STRFTIME_ALLOWED = {("usage_monitor/agent/status.py", "when", "%a %H:%M")}
+
+
+def _strings(node: ast.AST) -> list[str]:
+    return [part.value for part in ast.walk(node) if isinstance(part, ast.Constant) and isinstance(part.value, str)]
+
+
+def locale_reads(source: str) -> list[tuple[str, str]]:
+    """(enclosing function, what) for each import of the locale module, each call that sets or reads the process
+    locale, and each strftime or strptime format (or format spec) that names a weekday, a month, a day period or the
+    zone. A format that is not a literal cannot be checked, so it is listed too."""
+    found: list[tuple[str, str]] = []
+
+    def visit(node: ast.AST, where: str) -> None:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            where = f"{where}.{node.name}" if where else node.name
+        if isinstance(node, ast.Import):
+            found.extend((where, f"import {alias.name}") for alias in node.names if alias.name in LOCALE_MODULES)
+        elif isinstance(node, ast.ImportFrom) and node.module in LOCALE_MODULES:
+            found.append((where, f"from {node.module} import"))
+        elif isinstance(node, ast.Call):
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else func.id if isinstance(func, ast.Name) else ""
+            if name in LOCALE_CALLS:
+                found.append((where, f"{name}()"))
+            elif name in ("__import__", "import_module") and set(_strings(node)) & LOCALE_MODULES:
+                found.append((where, f"{name}(locale)"))
+            elif name in ("strftime", "strptime"):
+                given = [text for arg in node.args for text in _strings(arg)]
+                if not given:
+                    found.append((where, f"{name}(not a literal)"))
+                found.extend((where, text) for text in given if NAMED_DIRECTIVE.search(text))
+            elif name == "format" and any(NAMED_DIRECTIVE.search(text)
+                                          for arg in node.args[1:] for text in _strings(arg)):
+                found.append((where, "format(%)"))
+        elif isinstance(node, ast.FormattedValue) and node.format_spec is not None:
+            found.extend((where, f"{{:{text}}}") for text in _strings(node.format_spec) if NAMED_DIRECTIVE.search(text))
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str) and FORMAT_FIELD.search(node.value):
+            found.append((where, node.value))
+        for child in ast.iter_child_nodes(node):
+            visit(child, where)
+
+    visit(ast.parse(source), "")
+    return found
+
+
+LOCALE_SAMPLE = '''
+import locale
+import _locale as raw
+from locale import setlocale
+def f(d, fmt, locale):
+    locale.setlocale(locale.LC_ALL, "")
+    getlocale()
+    raw.localeconv()
+    __import__("locale")
+    d.strftime("%H:%M")
+    d.strftime("%d %b")
+    d.strftime(fmt)
+    time.strftime("%p", d)
+    datetime.strptime(fmt, "%A")
+    format(d, "%x")
+    return f"{d:%Y}" + f"{d:%a}" + "{:%B}".format(d) + str(locale.clock)
+'''
+
+
+def test_the_locale_scan_finds_every_way_to_the_process_locale():
+    assert locale_reads(LOCALE_SAMPLE) == [
+        ("", "import locale"), ("", "import _locale"), ("", "from locale import"), ("f", "setlocale()"),
+        ("f", "getlocale()"), ("f", "localeconv()"), ("f", "__import__(locale)"), ("f", "%d %b"),
+        ("f", "strftime(not a literal)"), ("f", "%p"), ("f", "%A"), ("f", "format(%)"), ("f", "{:%a}"), ("f", "{:%B}")]
+
+
+def test_nothing_sets_or_reads_the_process_locale_or_names_days_through_strftime():
+    """No import of the locale module, no setlocale, getlocale or localeconv, and strftime with a named directive only
+    where the agent modes write their English. Parsed, so a docstring that names locale.getlocale() is no call."""
+    files = sorted({*(REPO / "usage_monitor").rglob("*.py"), REPO / "main.py", REPO / "update_check.py",
+                    REPO / "version.py"})
+    found = {(path.relative_to(REPO).as_posix(), where, what) for path in files
+             for where, what in locale_reads(path.read_text(encoding="utf-8"))}
+    assert found == NAMED_STRFTIME_ALLOWED
