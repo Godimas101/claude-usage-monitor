@@ -242,4 +242,41 @@ for (const theme of ["nostromo", "night_city", "gates"]) {
   out.nightCityDecoration = { added, hiddenAtFirst, afterOff, afterOn: nav.children.length, thrown: w.thrown.slice() };
 }
 
+// Gates sets the percent sign of a big figure smaller (splitPercent), on the side the page's language writes it, with its
+// space (#91). The figure is a page's text node that changed, as the observer hears of it.
+{
+  class Figure {
+    constructor(text) { this.nodeType = 1; this.tagName = "DIV"; this.childNodes = []; this.isConnected = true; this.textContent = text; }
+    get classList() { return { contains: (name) => name === "nm-big" }; }
+    get firstChild() { return this.childNodes[0] || null; }
+    get textContent() { return this.childNodes.map((n) => (n.nodeType === 3 ? n.nodeValue : n.textContent)).join(""); }
+    set textContent(value) {
+      this.childNodes = [{ nodeType: 3, nodeValue: String(value), parentNode: this, parentElement: this, isConnected: true, previousSibling: null }];
+    }
+    appendChild(n) { this.childNodes.push(n); n.parentNode = this; return n; }
+    insertBefore(n, ref) {
+      const at = ref ? this.childNodes.indexOf(ref) : -1;
+      if (at >= 0) { this.childNodes.splice(at, 0, n); } else { this.childNodes.push(n); }
+      n.parentNode = this;
+      return n;
+    }
+    closest() { return null; }
+    matches() { return false; }
+  }
+  const gates = run("gates", {});
+  const w = gates.w;
+  const screen = w.sandbox.document.getElementById("screen");
+  const watching = w.observers.filter((o) => o.watching === screen);
+  w.thrown.length = 0;
+  out.gatesPercent = { observers: watching.length, split: {} };
+  for (const text of ["13%", "100%", "34\u00a0%", "33,5\u00a0%", "1\u202f234\u00a0%", "%34", "%33,5", "13 %x", "Mon", "-%34", "34\u00a0",
+    "34\u00a0\u00a0%"]) {
+    const figure = new Figure(text);
+    watching.forEach((o) => attempt(w, o.cb, [{ type: "characterData", target: figure.firstChild }]));
+    out.gatesPercent.split[text] = figure.childNodes.map((n) => [n.nodeType === 3 ? "text" : n.tagName.toLowerCase(),
+      n.nodeType === 3 ? n.nodeValue : n.textContent]);
+  }
+  out.gatesPercent.thrown = w.thrown.slice();
+}
+
 console.log(JSON.stringify(out));

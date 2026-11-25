@@ -677,6 +677,34 @@ const out = {};
   };
 }
 
+// the rolling figures in the page's signs (#91): a page with a locale reads its figures in that locale's group and decimal
+// signs (a sign-first percent too) and writes them back the same way
+{
+  const page = (language, format) => world({ locale: { setting: "system", language, system: language, format, clock: 24,
+    offered: ["en", language] } });
+  const read = (w, texts, values) => texts.map((text) => {
+    const p = w.FX.text.parseNum(text);
+    return p === null ? null : [[p.pre, p.val, p.dec, p.comma, p.post], values.map((v) => w.FX.text.fmtNum(p, v))];
+  });
+  const VALUES = [0, 17.25, 1234.5];
+  out.localeFigures = {
+    frFR: read(page("fr", "fr-FR"), ["34,5\u00a0%", "1\u202f234,50\u00a0$", "6,0×", "12\u202f345 tokens", "5,96$"], VALUES),
+    frCA: read(page("fr", "fr-CA"), ["34\u00a0%", "1\u00a0234\u00a0567"], VALUES),
+    esES: read(page("es", "es-ES"), ["1234,5", "12.345", "34\u00a0%", "12.345."], VALUES),
+    trTR: read(page("tr", "tr-TR"), ["%34", "%33,5", "1.234,5", "$5,96"], VALUES),
+    pseudo: read(page("pseudo", "en-US"), ["1\u202f234.5", "34\u00a0%"], VALUES),
+    en: read(page("en", "en-US"), ["$1,107.50 x", "13%", "6.0×", "1,234,567", "12, 13"], VALUES),
+    none: read(world(), ["$1,107.50 x", "13%", "6.0×", "1,234,567", "12, 13"], VALUES)
+  };
+  // a French figure rolls through its value (34,5 % once counted to 345: its comma was read as a group sign)
+  const w = page("fr", "fr-FR");
+  const el = figure("34,5\u00a0%");
+  const job = w.FX.roller("o", el, 0, 500, null);
+  const first = el._a["data-fx"];
+  job.update(250);
+  out.localeRoll = { first, mid: el._a["data-fx"], done: job.update(600), text: el.firstChild.nodeValue };
+}
+
 // roller
 {
   const { FX } = world();
@@ -1184,6 +1212,47 @@ def test_a_page_with_a_locale_has_the_formats_layer_before_motion_js(engine: dic
     layer = engine["formatsLayer"]
     assert (layer["fr"], layer["en"], layer["none"]) == ("34\u00a0%", "34%", "undefined")
     assert layer["english"] == [engine["formats"]["money"], engine["formats"]["moneyHalf"]]
+
+
+NB, NNB = "\u00a0", "\u202f"
+
+
+@ui_only
+def test_a_rolling_figure_is_read_and_written_in_the_pages_signs(engine: dict[str, Any]) -> None:
+    """#91 step 2.6: parseNum reads a figure in the page's group and decimal signs, a sign-first percent too, and fmtNum
+    writes it back the same way: French 34,5 % is 34.5 (it once counted to 345) and rolls through 33,3 %, Spanish 12.345
+    is twelve thousand, Turkish %34 keeps its sign first. A group sign counts only between digits, so fr-CA's 34 %
+    keeps the U+00A0 it groups with. English (and a page without formats.js) reads and writes as it always did."""
+    f = engine["localeFigures"]
+    assert f["frFR"][0] == [["", 34.5, 1, False, f"{NB}%"], [f"0,0{NB}%", f"17,3{NB}%", f"1234,5{NB}%"]]
+    assert f["frFR"][1] == [["", 1234.5, 2, True, f"{NB}$"], [f"0,00{NB}$", f"17,25{NB}$", f"1{NNB}234,50{NB}$"]]
+    assert f["frFR"][2][0] == ["", 6, 1, False, "×"] and f["frFR"][3][0] == ["", 12345, 0, True, " tokens"]
+    assert f["frCA"][0][0] == ["", 34, 0, False, f"{NB}%"] and f["frCA"][1][1][2] == f"1{NB}235"
+    assert f["esES"][0][0] == ["", 1234.5, 1, False, ""] and f["esES"][1] == [["", 12345, 0, True, ""], ["0", "17", "1235"]]
+    assert f["esES"][3][0] == ["", 12345, 0, True, "."]                  # a full stop after a figure is not its group
+    assert f["trTR"][0] == [["%", 34, 0, False, ""], ["%0", "%17", "%1235"]] and f["trTR"][1][0][1:3] == [33.5, 1]
+    assert f["trTR"][2][1][2] == "1.234,5" and f["pseudo"][0][1][2] == f"1{NNB}234.5"
+    assert f["en"] == f["none"]
+    assert f["en"][0] == [["$", 1107.5, 2, True, " x"], ["$0.00 x", "$17.25 x", "$1,234.50 x"]]
+    assert f["en"][4][0] == ["", 12, 0, True, " 13"]                     # English's own reading, kept: "12," is 12, grouped
+    roll = engine["localeRoll"]
+    assert roll == {"first": f"0,0{NB}%", "mid": f"33,3{NB}%", "done": True, "text": f"34,5{NB}%"}
+
+
+@ui_only
+def test_gates_sets_a_big_percents_sign_smaller_on_the_side_its_language_writes_it(theme_scripts: dict[str, Any]) -> None:
+    """#91 step 2.6: Gates' small percent sign (splitPercent) stays where the page's language writes it, with its space:
+    13% in English, 34 % in French (U+00A0, grouped digits too), %34 in Turkish. Anything else is left as it is."""
+    found = theme_scripts["gatesPercent"]
+    assert found["observers"] == 1 and found["thrown"] == []
+    split = found["split"]
+    assert split["13%"] == [["text", "13"], ["small", "%"]] and split["100%"] == [["text", "100"], ["small", "%"]]
+    assert split[f"34{NB}%"] == [["text", "34"], ["small", f"{NB}%"]]
+    assert split[f"33,5{NB}%"] == [["text", "33,5"], ["small", f"{NB}%"]]
+    assert split[f"1{NNB}234{NB}%"] == [["text", f"1{NNB}234"], ["small", f"{NB}%"]]
+    assert split["%34"] == [["small", "%"], ["text", "34"]] and split["%33,5"] == [["small", "%"], ["text", "33,5"]]
+    for text in ("13 %x", "Mon", "-%34", f"34{NB}", f"34{NB}{NB}%"):
+        assert split[text] == [["text", text]], text
 
 
 @ui_only

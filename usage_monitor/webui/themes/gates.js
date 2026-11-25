@@ -178,20 +178,29 @@
     }
   }
 
-  /* "13%" in a big figure: the sign is set smaller, as in the approved design. */
+  /* "13%" in a big figure: the sign is set smaller, as in the approved design. It stays on the side the page's language
+   * writes it, with its space (#91: "34 %" in French, "%34" in Turkish); a space inside the digits is a group sign. */
   function splitPercent(el) {
     if (!el.classList.contains("nm-big") || el.classList.contains("m") || el.classList.contains("s") || el.childNodes.length !== 1) {
       return;
     }
-    var m = /^(\d[\d.,]*)%$/.exec(el.textContent);
-    if (!m) {
+    var text = el.textContent;
+    var after = /^(\d(?:[\d.,]|[\u00a0\u202f](?=\d))*)([\u00a0\u202f]?%)$/.exec(text);
+    var before = after ? null : /^(%[\u00a0\u202f]?)(\d(?:[\d.,]|[\u00a0\u202f](?=\d))*)$/.exec(text);
+    if (!after && !before) {
       return;
     }
-    remember(el, el.textContent);
-    el.textContent = m[1];
+    remember(el, text);
     var sign = document.createElement("small");
-    sign.textContent = "%";
-    el.appendChild(sign);
+    if (after) {
+      el.textContent = after[1];
+      sign.textContent = after[2];
+      el.appendChild(sign);
+    } else {
+      el.textContent = before[2];
+      sign.textContent = before[1];
+      el.insertBefore(sign, el.firstChild);
+    }
   }
 
   /* The tone is app.js's, from the status the chip shows (data-tone), never from its words. */
