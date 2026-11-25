@@ -50,7 +50,7 @@ from typing import Any
 
 import update_check
 import version
-from usage_monitor import i18n, paths, themes
+from usage_monitor import formats, i18n, paths, themes
 from usage_monitor.agent import sessions as agent_sessions
 from usage_monitor.data.alerts import AlertEngine
 from usage_monitor.data.models import ApiStatus, MonitorState
@@ -197,9 +197,9 @@ def show_scoped(settings: Any) -> str:
 
 # ── Text and menu (pure) ──────────────────────────────────────────────────────
 
-def _percent_text(percent: float) -> str:
-    """Whole percent, rounded the way the widgets round it."""
-    return f"{int(percent + 0.5) if percent >= 0 else 0}%"
+def _percent_text(percent: float, locale: i18n.Locale) -> str:
+    """Whole percent, rounded the way the widgets round it, in ``locale``: "13%", "13 %" in French, "%13" in Turkish."""
+    return formats.percent(str(int(percent + 0.5) if percent >= 0 else 0), locale)
 
 
 # The tray tooltip's words for the view model's values (#90): the two limits it reads, by kind; the status after them
@@ -220,12 +220,12 @@ TRAY_UNITS: dict[str, str] = {UNIT_MINUTES: "m", UNIT_HOURS: "h", UNIT_DAYS: "d"
 def tray_tooltip(model: WidgetModel, *, dev: bool = False) -> str:
     """"Claude usage - session 13% - weekly 2%", with the status after it when the numbers are not
     live ("... - stale"), the usage guard while it is on ("... - guard armed") and " (dev)" for a dev
-    instance."""
+    instance. The percents and the guard's resume time are in the model's locale; the words are English (#93)."""
     parts = ["Claude usage"]
     for kind, word in TRAY_LIMITS:
         row = next((row for row in model.rows if row.kind == kind), None)
         if row is not None and row.percent is not None:
-            parts.append(f"{word} {_percent_text(row.percent)}")
+            parts.append(f"{word} {_percent_text(row.percent, model.locale)}")
     if len(parts) == 1 or model.status not in (ApiStatus.LIVE, ApiStatus.PAUSED):
         parts.append(TRAY_STATUS[model.status])
     if model.guard is not None:

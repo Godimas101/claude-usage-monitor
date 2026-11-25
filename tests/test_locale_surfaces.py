@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from usage_monitor import formats, i18n
+from usage_monitor import app, cldr, formats, i18n
 from usage_monitor.data.alerts import AlertEngine
 from usage_monitor.data.models import ApiStatus, Limit
 from usage_monitor.render import dump, engine
@@ -22,6 +22,7 @@ from usage_monitor.render import model as view
 from usage_monitor.render.model import build_model
 from usage_monitor.render.skins import gates, get_skin
 from usage_monitor.settings import Settings
+from usage_monitor.ui import tray
 from usage_monitor.ui.widgets import steady
 
 EN = i18n.ENGLISH
@@ -362,3 +363,35 @@ def test_the_skins_numbers_follow_the_locale_where_they_are_drawn(runs):
     held = dump.sample_model("guard_hold_session", locale=fr)
     statement = " ".join(texts(drawn(runs, "nostromo", "tooltip", held)))
     assert "96 % (CAP 95 %)" in statement.replace("\u00a0", " ")
+
+
+# ── The tray's percent (step 1.7) ─────────────────────────────────────────────
+
+def test_the_tray_tooltip_writes_its_percents_in_the_locale():
+    assert app.tray_tooltip(dump.sample_model("normal3")) == "Claude usage - session 13% - weekly 2%"
+    assert (app.tray_tooltip(dump.sample_model("normal3", locale=loc("fr-FR")))
+            == "Claude usage - session 13\u00a0% - weekly 2\u00a0%")
+    turkish = app.tray_tooltip(dump.sample_model("normal3", locale=loc("tr-TR")))
+    assert turkish == "Claude usage - session %13 - weekly %2"
+    assert (app.tray_tooltip(dump.sample_model("stale", locale=PSEUDO))
+            == "Claude usage - session 13\u00a0% - weekly 2\u00a0% - stale")
+
+
+def _every_tag() -> list[i18n.Locale]:
+    tags = sorted({*cldr.REGIONS, *(i18n.BASE_FORMATS[language] for language in cldr.BASES)})
+    return [EN, PSEUDO] + [loc(tag, clock) for tag in tags for clock in (12, 24)]
+
+
+def test_the_longest_tray_tooltip_fits_the_shells_127_units_in_every_format():
+    """The worst case the tray can say (two full limits, a status, the guard holding with a resume time a week away,
+    a dev instance) stays within the 127 UTF-16 units the shell keeps, for every format tag and clock."""
+    now = wall(datetime(2026, 10, 21, 22, 0))
+    resume = wall(datetime(2026, 10, 28, 21, 59))
+    limits = [limit("session", 100.0, resume), limit("weekly_all", 100.0, resume)]
+    block = {"state": "holding", "resume_at": resume.isoformat(), "policy": {"session_cap": 95, "weekly_cap": 90},
+             "over": [{"name": "session", "label": "session", "percent": 100.0, "cap": 95}]}
+    state = dataclasses.replace(dump._state(now, ApiStatus.RATE_LIMITED, limits, 360), guard=block)
+    longest = max((app.tray_tooltip(build_model(state, now, locale=locale), dev=True) for locale in _every_tag()),
+                  key=lambda text: len(text.encode("utf-16-le")))
+    assert "guard holding, resumes" in longest and longest.endswith(" (dev)")
+    assert len(longest.encode("utf-16-le")) // 2 <= tray.TIP_LIMIT, longest

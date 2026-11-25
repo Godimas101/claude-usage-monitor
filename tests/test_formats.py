@@ -63,7 +63,7 @@ def scoped_row(share: float | None) -> Row:
 # Each recorded helper as today's callers call it.
 HELPERS: dict[str, dict[str, Callable[[Any], str]]] = {
     "percent": {
-        "app._percent_text": app._percent_text,
+        "app._percent_text": lambda p: app._percent_text(p, i18n.ENGLISH),
         "nostromo._percent_text": lambda p: nostromo._percent_text(p, i18n.ENGLISH),
         "nostromo._exact_percent_text": lambda p: nostromo._exact_percent_text(p, i18n.ENGLISH),
         "gates._percent_text": lambda p: gates._percent_text(p, i18n.ENGLISH),
