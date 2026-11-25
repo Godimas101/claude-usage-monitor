@@ -66,7 +66,7 @@ usage_monitor/
                           fonts/<family>/*.ttf + OFL.txt — bundled fonts, used by BOTH the
                           dashboard (@font-face via /static/fonts) and the Pillow skins,
                           i18n/<lang>.json — the catalogs of text (#87), read by the page and by
-                          Python (the server today, the widgets from #93)
+                          Python (the server, and since #93 the view model, the tray tooltip and the tray menu)
 ```
 
 ## UI thread behaviour
@@ -176,7 +176,7 @@ icons, links and selection and never draws "normal" bars in the critical red.
                       kind ("session" | "weekly_all" | "weekly_scoped" | another kind; None on a row built by hand),
                       scope_model, scope_name (the model, else the surface), share_pct,
                       resets_same_day, resets_weekday (0 is Monday)
-@dataclass class WidgetModel: status: ApiStatus, status_text, age_text, rows: list[Row],
+@dataclass class WidgetModel: status: ApiStatus, status_text (i18n.Text), age_text, rows: list[Row],
                               stale: bool, stale_message: str | None, blink_on: bool, updated_at,
                               guard: GuardMark | None,     # the usage guard (#27); None while it is off
                               age_seconds (None exactly when age_text is),
@@ -200,6 +200,8 @@ format_age(fetched_at, now, locale=ENGLISH) -> "12 S AGO"                       
 share_text(allowance_pct, locale=ENGLISH) -> "50% SHARE" | None                   # fr: "50 % SHARE"
 reset_day(moment, now) -> (on now's local day, local weekday)
 english_stale_message(reason) -> STALE_MESSAGE_EXPIRED | STALE_MESSAGE_REFUSED | STALE_MESSAGE_NO_LOGIN | None
+stale_message(reason, locale=ENGLISH) -> i18n.Text | None     # widget.stale.* in the locale's language (#93)
+STATUS_KEYS {ApiStatus: "widget.status.<code>"}               # the status word's key (#93)
 SURFACE_FLOATING | SURFACE_TASKBAR | SURFACE_TOOLTIP          # the surfaces the optional skin methods name
 Insets = (left, top, right, bottom); NO_INSETS = (0, 0, 0, 0)  # transparent margin of a frame, in its own pixels
 @dataclass(frozen) class HoverPlay: frames, delays_ms, hold=False, leave=(), leave_ms=40   # plain data, see below
@@ -223,9 +225,9 @@ which a test keeps equal) read it.
 
 **Values, not English (#90).** The model keeps its texts (`label`, `age_text`, `stale_message`, `share_text`,
 `resets_text`, and the guard's `labels`, `resume_text`, `resume_in` and `resume_clock`), and the dump and the tests read
-them. Their words are English; their times, ages, countdowns and percents are in the model's locale (#91). The skins and
-the tray tooltip word their own text from the values beside them, and never cut, split or match those texts to find a
-value:
+them. Their words come from the catalog in the model's language (#93, see "Widget and tray words" under "Languages");
+their times, ages, countdowns and percents are in the model's locale (#91). The skins and the tray tooltip word their
+own text from the values beside them, and never cut, split or match those texts to find a value:
 - A row is named from its `kind`: session and weekly by the skin's own words, a scoped limit for its `scope_name`
   ("FABLE WEEKLY", Night City's "FABLE", Gates' "Fable weekly"), or "WEEKLY SCOPED" when it has neither. A kind a skin
   has no words for, and a row built without a kind, keep their label whole. Gates puts the name in capitals before
@@ -240,8 +242,8 @@ value:
   as the guard does.
 - Every countdown (the HOLD chips, the hover card, Gates' footer, the tray) is `resume_seconds` through
   `countdown_units`, in the skin's units ("2H 14M", Gates' and the tray's "2h 14m").
-- The tray tooltip names the session and weekly rows by kind and words its status from the status itself
-  (`app.TRAY_STATUS`).
+- The tray tooltip names the session and weekly rows by kind (`app.TRAY_LIMITS`) and words its status from the status
+  itself (`app.TRAY_STATUS`), each a catalog key (#93).
 
 `age_seconds` and `resume_seconds` are whole seconds, never negative. The reset and resume times are still drawn from
 `resets_text` and `resume_clock`; `resets_same_day`, `resets_weekday`, `resume_same_day` and `resume_weekday` carry
@@ -323,7 +325,8 @@ pill beside the shield. Without a reading (no sign-in, still loading) no surface
 nothing.
 
 Sign-in copy. `WidgetModel.stale_reason` says why the user must act (`expired`, `refused`, `no_login`), and
-`stale_message` is its neutral wording ("LOGIN EXPIRED - USE CLAUDE CODE"). Each skin picks its copy by the reason,
+`stale_message` is its neutral wording ("LOGIN EXPIRED - USE CLAUDE CODE", `widget.stale.*` in the model's language
+since #93). Each skin picks its copy by the reason,
 as its approved mockup words it, and never reads the neutral text. Nostromo: the dashed auth box reads
 "AUTH LINK LOST." / "USE CLAUDE CODE TO RESTORE." (`AUTH_LINES`, by reason). Night City: the hazard band reads "RELINK // USE CLAUDE CODE"
 (`theme.extras.copy.stale_auth`). Gates: the footer reads "Hmm, we lost touch. Send Claude Code a message."
@@ -360,7 +363,9 @@ class LayeredWindow:                            # layered.py
 platform.py: taskbar_info(), work_areas(), dpi_for_point(x, y), is_fullscreen_foreground(),
              is_locked(), screensaver_running(), windows_accent_hex(), apps_use_light_theme(),
              clamp_to_work_area(x, y, w, h)
-menu.py:     show_menu(host, items: list[MenuItem], x, y)        # MenuItem(label, action, checked, enabled, separator)
+menu.py:     show_menu(host, items: list[MenuItem], x, y)        # MenuItem(label, action, checked, enabled, separator,
+                                                                 #   id): id names the row in every language (#93)
+             run_chosen(item)        # runs the chosen row; a failure is logged by its id, never its label
 tray.py:     TrayIcon(host, tooltip, on_left_click, on_menu): set_images({16: img, 24: img, 32: img}),
              set_tooltip(text), notify(title, body) -> bool, remove()    # re-adds itself on TaskbarCreated
 ```
@@ -372,12 +377,16 @@ that was lost is never counted as shown (the update announcement is then offered
 ### Dev isolation
 `USAGE_MONITOR_APPDATA_DIR=<dir>` puts settings, DB and log in `<dir>`. `USAGE_MONITOR_DEV_INSTANCE=1` uses the
 mutex `Global\ClaudeUsageMonitor-dev`, its own controller window class, and tags the tray
-tooltip "(dev)", so a test build runs alongside an installed copy. `main.py --dump-frames <dir>`
-renders every theme × variant × state × scale to PNGs without opening windows;
+tooltip "(dev)", so a test build runs alongside an installed copy. `main.py --dump-frames <dir> [--lang <id>]`
+renders every theme × variant × state × scale to PNGs without opening windows, in English, or with `--lang` in what a
+dev instance shows for `USAGE_MONITOR_LANG=<id>` (en, fr, es, tr or pseudo: `i18n.dev_locale`, built in `main.py`, which
+imports `i18n` only for that flag, since every hook call parses the command line);
 `--smoke-test <seconds> <report.json>` runs the real app, exercises the API server (state with its
 `update` block, themes, live settings, the dashboard child, every statistics route and both exports), then exits
 with a report. The report holds statuses, sizes and timings, never usage content; it also says whether the
-six-hourly update re-check timer is armed (`update_recheck`).
+six-hourly update re-check timer is armed (`update_recheck`). It names the tray tooltip and the menu's labels in the
+app's language (`tray_tooltip`, `menu_labels`, #93), and the run fails when a tooltip phrase or a label is a whole
+catalog key (`i18n._KEY`), which is what a build without its catalog files would show.
 
 - **The sign-in entry belongs to the installed copy.** A dev instance never reads, writes or
   repairs the HKCU Run entry (`ClaudeUsageMonitor`): its *Start with Windows* switch lives in
@@ -474,7 +483,8 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   import of `locale`, a `setlocale`, `getlocale` or `localeconv` call, or a `strftime` format that names a weekday, a
   month, a day period or the zone (the agent modes' English `Mon 09:00` in `agent/status.py` is the one listed
   exception). The widgets, the tray tooltip and the alerts write their numbers, percents, clocks and weekdays this
-  way; their words stay English until #93 to #101. The alerts read the app's locale on each evaluation
+  way. The view model's, the tray tooltip's and the tray menu's words come from the catalog since #93; the skins' own
+  words stay English until #94 to #96, the toasts' until #97. The alerts read the app's locale on each evaluation
   (`AlertEngine(settings, locale_provider=)`, English without one or when it fails); English alerts keep their trailing
   `USD`, other languages write each amount with the plain `$` (US dollars) or the currency's code. The dashboard has its
   own: `webui/formats.js` (`window.MonitorFormats`: `make(locale)`, and `active()` from the `monitor-locale` meta),
@@ -592,7 +602,29 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   the golden frames are drawn in English. Nothing under `render/` (or `tests/frame_digests.py`) may reach
   `LocaleSource` or the Windows calls, and one eighth of the golden frames, drawn on a French Windows (fr-CA format,
   24-hour clock) with French offered and a dev instance asking for French, give the same digests as drawn plain
-  (`tests/test_i18n.py` checks both). #93 adds `--dump-frames --lang` and the English scan's pseudo-locale pass.
+  (`tests/test_i18n.py` checks both). `main.py --dump-frames <dir> --lang <id>` builds its locale in `main.py`
+  (`i18n.dev_locale`) and passes it in (#93).
+- **Widget and tray words (#93).** The view model, the tray tooltip and the tray menu read the shared catalogs through
+  `i18n.app_catalog(language)`, which reads each language once per process (the tooltip is worded on every blink); a
+  `Catalog` logs a missing key once, not on every call. The agent modes read no catalog (#90; the test refuses
+  `app_catalog` too). The keys: `widget.status.*`, `widget.stale.*`, `widget.limit.*`, `widget.share` and
+  `widget.guard.*` (the model's words; only the status word is drawn today, by every skin; the rest are fallbacks for a
+  skin with no words of its own, and their notes say so), `tray.tip.*` and `tray.menu.*`. The case is the surface's
+  (`LIVE` on a widget, `live` in the tooltip), never made by re-casing; names, commands, numbers and times are
+  placeholders. English keeps its text where it is data: a scoped row's label is the limit's own (the identity string),
+  a guard label with no model is the limit's label in lower case, and a limit gone from the reading keeps the guard's
+  English label in every language (identity text: `test_english_keeps_the_labels_that_are_data`). The tooltip's lead
+  "Claude usage" is `tray.tip.lead`, kept as written in every language as #86's brand mark (Chris may override it);
+  its " - " joins and its " (dev)" mark stay code. Its drop rule (`app.tray_tooltip(model, dev=, limit=TIP_LIMIT)`):
+  past 127 UTF-16 units the guard's countdown goes, then its resume time, each form a whole phrase
+  (`tray.tip.guard_until_in`, `.guard_until`, `.guard_holding`); the percents, the status word and the dev mark stay,
+  and only a tooltip still too long is cut (`tray.clip`). English never comes near (113 units at worst); the countdown
+  is English's letters in English and the pseudo-locale and CLDR's narrow units in their own case elsewhere. Each menu
+  row has an id (`MenuItem.id`: `open_dashboard`, `floating`, `taskbar`, `guard`, `resume_waiting`, `refresh`,
+  `report_bug`, `update`, `exit`), and the menu's count has no group sign. The tray icon stays digits only. In
+  `en.json` a translator's note `_note.<key>` sits just before its key and the budget note `_budget.<key>` just after
+  it. `tests/fixtures/widget_words_english.json`, recorded before #93 moved a word, holds the English of all three
+  byte for byte (`tests/test_widget_words.py`, worked out in a fresh Python with the time zone pinned).
 - **Test tools (#89).** The pseudo-locale (`i18n.PSEUDO`, `pseudo`) is `en.json` made longer (about 40%), accented
   (`İ ı ğ ş é ñ` among the look-alikes) and bracketed (`i18n.pseudo_text`), so English left over, a missing glyph
   and a cut end all show. A dev instance shows it with `USAGE_MONITOR_LANG=pseudo`, and the dev server with
@@ -611,18 +643,29 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   character box's budget is its limit. Each language's longest figures go in too, as `formats` writes them for every
   format tag (`100 %`, `%100`, `5,96 $`, each tag's times and day clocks on either clock, the widest countdowns and
   ages), in capitals in Nostromo and Night City and glued in the guard's statement, as the skins draw them; the
-  dashboard's money boxes take the page's own widest figures (`PAGE_MONEY`), tight as the page draws them.
+  dashboard's money boxes take the page's own widest figures (`PAGE_MONEY`), tight as the page draws them. A box's
+  catalog keys (`Box.keys`) are measured in each language too; since #93 the boxes that draw the view model's status
+  word carry its key, and each key's `_budget.<key>` note in `en.json` names every box it sits in. The tray tooltip is
+  a composing box: it measures every worst-case tooltip `app.tray_tooltip` words in the language
+  (`tests/widget_words.tooltip_sweep`: two limits at 100 % in each status, the guard holding at the longest clocks of
+  every format tag and every countdown shape, a dev instance), after the drop rule, and only a composing box may hold a
+  key with a placeholder. `python tests/budgets.py --tooltips` prints each language's longest tooltip, which
+  `test_budgets.py` pins as `TOOLTIPS` (en 113, fr 120, es 121, tr 113, pseudo 121 units today).
   `tests/test_budgets.py` holds each box's measure to the widths the skins work out as the frame dump draws, and every
   drawn run to a box. It pins every room (`python tests/budgets.py --limits` prints them after a skin
   change), fails English that runs past a room it did not run past before, and fails an offered language past a box
   that has no fallback or only shrinks; `python tests/budgets.py --lang <id>` reports any language. The "no English
-  left" scan (`tests/english_left.py`) lists the English the frame dump, the tray tooltip and the dashboard show under
-  the pseudo-locale. The dashboard runs on a small DOM (`tests/mini_dom.js`, `tests/english_scan.js`) through every
+  left" scan (`tests/english_left.py`) lists the English the frame dump, the tray tooltip, the tray menu and the
+  dashboard show under the pseudo-locale. Since #93 the widget half draws in the pseudo-locale a dev instance shows,
+  reads each sample state's tooltip plain and with the dev mark, and the menu with every row. The dashboard runs on a
+  small DOM (`tests/mini_dom.js`, `tests/english_scan.js`) through every
   dev-server scenario, as an installed monitor and as a dev instance, and in some scenarios with its actions, its
   update banner and its loading and failed states. The scan leaves out numbers (the pseudo-locale's U+202F groups and
   U+00A0 before `%` read as English's), what the page marks as data
   (`translate="no"`, or a `lang` other than the page's), the names the skins draw, the product name and #86's brand
-  marks.
+  marks. On the widgets it also leaves out the dev instance's "(dev)" mark and, as whole words, the pseudo-locale's
+  weekday names and AM/PM, which are English's formats (#91), and it reads a digit, a plain space and `%` as a digit and
+  `%` (a wrap gives the glued U+00A0 back as a space).
   `tests/test_english_left.py` holds the result to `tests/fixtures/english_left.json`, which each extraction ticket
   (#93 to #101) shrinks by recording again (`python tests/english_left.py --record`, which adds new English only with
   `--allow-new`).

@@ -1333,8 +1333,14 @@ class MonitorApp:
 
     # ── Diagnostics ──
 
+    def _tray_text(self) -> str:
+        """The tray tooltip as the tray was last given it: the shown state's, or the first one before any state."""
+        model = self._ctx.model if self._ctx is not None else build_model(None, self._clock(), locale=self.locale())
+        return tray_tooltip(model, dev=self.dev)
+
     def describe(self) -> dict[str, Any]:
-        """A snapshot of the live UI for the smoke report. UI thread only."""
+        """A snapshot of the live UI for the smoke report. UI thread only. ``tray_tooltip`` and ``menu_labels`` are
+        the tray's words in the app's language (#93), so a run in a dev instance's language shows them."""
         def window_info(widget: Any) -> dict[str, Any] | None:
             if widget is None:
                 return None
@@ -1351,6 +1357,8 @@ class MonitorApp:
             "taskbar": window_info(self.taskbar),
             "taskbar_hostable": bool(taskbar is not None and strip_supported(taskbar)),   # a taskbar the strip can sit in
             "tray": {"added": bool(self.tray and self.tray.added), "icon_px": self.tray.icon_size if self.tray else 0},
+            "tray_tooltip": self._tray_text(),
+            "menu_labels": [item.label for item in self.menu_items() if not item.separator],
             "tooltip_visible": bool(self.tooltip and self.tooltip.visible),
             "frames": self.stats.snapshot(),
             "blink": {"running": bool(self.blinker and self.blinker.running),
@@ -1637,7 +1645,11 @@ class SmokeTest:
         problem = self._strip_problem(before)
         if problem:
             raise RuntimeError(problem)
+        keys = self._keys_shown(before)
+        if keys:
+            raise RuntimeError(f"the tray shows catalog keys, not their words (are the catalog files there?): {keys}")
         self.report["windows"] = before
+        self.report["tray_tooltip"], self.report["menu_labels"] = before.get("tray_tooltip"), before.get("menu_labels")
         strip = before.get("taskbar")
         return {"tooltip_shown": shown, "frames_before": before["frames"], "frames_after": after["frames"],
                 "strip_in_taskbar": bool(strip is not None and strip.get("parent") is not None)}
@@ -1650,6 +1662,14 @@ class SmokeTest:
         if strip is not None and snap.get("taskbar_hostable") and strip.get("parent") is None:
             return "the taskbar strip floats over the taskbar instead of sitting in it"
         return None
+
+    @staticmethod
+    def _keys_shown(snap: Mapping[str, Any]) -> list[str]:
+        """The tray tooltip's phrases and the menu's labels that are a whole catalog key: what a missing catalog shows,
+        since Catalog.text gives the key for a key it lacks (#93: the installed copy's widgets read the catalog files).
+        Only a whole phrase counts: "Update to v2.1.0" holds the key-shaped "v2.1.0" and is no key."""
+        phrases = str(snap.get("tray_tooltip") or "").removesuffix(DEV_MARK).split(TIP_JOIN)
+        return [text for text in (*phrases, *(snap.get("menu_labels") or ())) if i18n._KEY.fullmatch(text)]
 
     def _show_tooltip(self) -> bool:
         """Show the tooltip the way a hover dwell does, then hide it again."""

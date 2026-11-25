@@ -3527,6 +3527,55 @@ def test_describe_summarises_the_live_ui(wired):
     assert info["gdi_objects"] >= 0 and info["user_objects"] >= 0
 
 
+def test_describe_reports_the_trays_words_in_the_apps_language(wired, monkeypatch):
+    """#93: the smoke report names the tray tooltip and the menu's labels as the app words them, in keys of their own
+    beside "tray" (whose shape the test above holds): the first tooltip before any state, then the shown state's."""
+    assert wired.app.describe()["tray_tooltip"] == wired.tray.tooltips[-1] == "Claude usage - loading (dev)"
+    wired.service.publish(sample_state("normal3", NOW))
+    wired.host.run_posted()
+    info = wired.app.describe()
+    assert info["tray_tooltip"] == wired.tray.tooltips[-1] == "Claude usage - session 13% - weekly 2% (dev)"
+    assert info["menu_labels"] == ["Open dashboard", "Floating widget", "Taskbar widget", "Usage guard", "Refresh now",
+                                   "Report a bug", "Exit"]
+    pseudo = i18n.dev_locale(i18n.PSEUDO)
+    monkeypatch.setattr(wired.app, "locale", lambda: pseudo)
+    wired.service.publish(sample_state("warning", NOW))
+    wired.host.run_posted()
+    info = wired.app.describe()
+    assert info["tray_tooltip"] == wired.tray.tooltips[-1] and info["tray_tooltip"].startswith("[")
+    assert len(info["menu_labels"]) == 7 and all(label.startswith("[") for label in info["menu_labels"])
+    json.dumps(info)
+
+
+def test_the_smoke_run_fails_when_the_tray_shows_a_catalog_key(tmp_path):
+    """A catalog the build did not ship shows its keys as text (Catalog.text gives the key it lacks). The windows step
+    fails on a tooltip phrase or a menu label that is a whole key, and puts the tray's words at the report's top level.
+    A whole phrase must match: "Update to v2.1.0" holds the key-shaped "v2.1.0" (#93)."""
+    keys = SmokeTest._keys_shown
+    assert i18n._KEY.search("Update to v2.1.0") and not i18n._KEY.fullmatch("Update to v2.1.0")
+    assert keys({"tray_tooltip": "Claude usage - session 13% - weekly 2% (dev)",
+                 "menu_labels": ["Open dashboard", "Update to v2.1.0", "Exit"]}) == []
+    assert keys({"tray_tooltip": "Claude usage - session 13% - tray.tip.status.stale (dev)",
+                 "menu_labels": ["Open dashboard", "tray.menu.exit"]}) == ["tray.tip.status.stale", "tray.menu.exit"]
+    assert keys({"tray_tooltip": "tray.tip.lead - loading", "menu_labels": []}) == ["tray.tip.lead"]
+
+    def stub(tooltip: str) -> types.SimpleNamespace:
+        info = {"floating": {"visible": True}, "taskbar": None, "tray": {"added": True}, "frames": {},
+                "update_recheck": True, "tray_tooltip": tooltip, "menu_labels": ["Open dashboard", "Exit"]}
+        widget = types.SimpleNamespace(show_tooltip=lambda: None, hide_tooltip=lambda: None)
+        return types.SimpleNamespace(call_on_ui=lambda fn: fn(), describe=lambda: info, floating=widget, taskbar=None,
+                                     tooltip=types.SimpleNamespace(visible=True))
+
+    smoke = SmokeTest(45, tmp_path / "r.json")
+    smoke._app = stub("Claude usage - loading (dev)")
+    smoke._step_windows()
+    assert (smoke.report["tray_tooltip"], smoke.report["menu_labels"]) == ("Claude usage - loading (dev)",
+                                                                           ["Open dashboard", "Exit"])
+    smoke._app = stub("tray.tip.lead - tray.tip.status.loading (dev)")
+    with pytest.raises(RuntimeError, match="catalog keys"):
+        smoke._step_windows()
+
+
 # ── Dashboard window helper, smoke report ─────────────────────────────────────
 
 def test_closing_a_dashboard_that_has_no_window_is_a_no_op():
