@@ -23,7 +23,8 @@ Privacy, everywhere: never print, store or log message text, prompts, file conte
 | `usage_monitor/render/` | Pillow renderers: view model, drawing engine, one skin per theme |
 | `usage_monitor/themes/` | Theme tokens (`<id>.json`) and their loader |
 | `usage_monitor/agent/` | Plan-usage awareness for Claude sessions (#24): `state.json`, `--status`, `--hook`, `--gate`, the MCP server, and the usage guard (#27): `guard.py`, `sessions.py`, `--wait`, `--watch`, and `setup.py` (its one-click setup). Setup: [`docs/AGENT_HOOK.md`](docs/AGENT_HOOK.md) |
-| `usage_monitor/i18n.py` | The app's language (#87): Windows' display language when offered, else English; the catalogs (`webui/i18n/<lang>.json`), formats and plural forms. No UI imports. See `docs/UI_ARCHITECTURE.md`, "Languages" |
+| `usage_monitor/i18n.py` | The app's language (#87): Windows' display language when offered, else English; the locale (language, format tag, clock), the catalogs (`webui/i18n/<lang>.json`) and plural forms. No UI imports. See `docs/UI_ARCHITECTURE.md`, "Languages" |
+| `usage_monitor/formats.py`, `casing.py`, `cldr.py` | The locale's numbers, percents, money, clocks, weekdays and durations, and letter case by the language's rules (#91). English keeps today's US formats byte for byte; French, Spanish and Turkish read `cldr.py`, CLDR 47 data that `tests/cldr_gen.py` generates. Standard library only |
 | `usage_monitor/webui/` | Dashboard HTML/CSS/JS, the motion layer (`motion.js`, `motion.css`, `themes/<id>.motion.css`) and the bundled OFL fonts (the Pillow skins read them too) |
 | `update_check.py`, `version.py` | GitHub release check and self-update; version read from `VERSION` |
 | `tests/` | pytest, offline, synthetic fixtures only |
@@ -121,6 +122,13 @@ python main.py            (console: Ctrl+C quits, errors print)     or    launch
   `python tests/english_left.py --record` (it needs node); new English text goes through the catalog instead.
 - **Widget rooms are pinned.** A skin change that moves a room fails `tests/test_budgets.py` until the table that
   `python tests/budgets.py --limits` prints replaces its `LIMITS`; English that runs past a room it fit fails it too.
+- **Formats and case (#91).** `usage_monitor/cldr.py` is generated, never edited by hand: `python tests/cldr_gen.py`
+  writes it from Babel 2.18.0 (CLDR 47) on a dev PC, and `--check` exits 1 when the file differs. Babel is a dev tool
+  only: the app never imports it, and the regeneration test skips where Babel 2.18.0 is missing (CI). English formats
+  are held to `tests/fixtures/formats_english.json`. Text people read is cased with `usage_monitor/casing.py`;
+  `tests/test_casing_sites.py` lists every bare `upper()`/`lower()` allowed outside the skins, and
+  `tests/test_formats.py` fails any read of the process locale (`import locale`, `setlocale`, a `strftime` weekday,
+  month or day period).
 - **Hover effects play once per entry of the pointer.** A hover rule that animates, moves or clips its own target must not
   hang on `:hover` alone (it restarts itself under a pointer resting at the target's edge); it hangs on `[data-fx-play]`
   (a one-shot) or `[data-fx-hot]` (a state), which `motion.js` sets from `pointerenter`. After touching a hover rule or that

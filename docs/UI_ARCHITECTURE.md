@@ -29,7 +29,10 @@ ClaudeUsageMonitor (main process)
 ```
 usage_monitor/
   app.py                  MonitorApp: wires settings, DataService, UI host, server; run()/quit()
-  i18n.py                 the app's language and formats (#87): detection, the locale, catalogs, plural forms
+  i18n.py                 the app's language (#87): detection, the locale, catalogs, plural forms
+  formats.py              numbers, percents, money, clocks, weekdays and durations in the locale (#91)
+  casing.py               letter case by the language's rules: Turkish's dotted and dotless i (#91)
+  cldr.py                 CLDR 47 data for French, Spanish and Turkish, written by tests/cldr_gen.py (#91)
   ui/
     win32.py              typed ctypes bindings (every function has argtypes/restype) + constants
     host.py               UIHost: window classes, controller window, message loop, timers,
@@ -176,7 +179,8 @@ icons, links and selection and never draws "normal" bars in the critical red.
                               stale: bool, stale_message: str | None, blink_on: bool, updated_at,
                               guard: GuardMark | None,     # the usage guard (#27); None while it is off
                               age_seconds (None exactly when age_text is),
-                              stale_reason ("expired" | "refused" | "no_login"; None exactly when stale_message is)
+                              stale_reason ("expired" | "refused" | "no_login"; None exactly when stale_message is),
+                              locale: Locale     # i18n.ENGLISH unless build_model is given one (#91)
                               .lamp -> "live" | "paused" | "stale" | "offline" | "limited" | "loading"   # LAMP_KINDS
 @dataclass class GuardMark: state ("armed" | "holding"), over_keys (Row keys at or past their caps),
                             caps {key: %}, labels {key: "Fable weekly"}, readings {key: %}, resume_at,
@@ -184,10 +188,15 @@ icons, links and selection and never draws "normal" bars in the critical red.
                             countdown), resume_clock (always the time), resume_seconds, resume_same_day,
                             resume_weekday, kinds {key: kind}, models {key: scoped model}, scope_names {key: model,
                             else surface}; .holding, .over_limits(), .watched()
-build_model(state: MonitorState | None, now, *, show_scoped="auto", blink_on=True) -> WidgetModel
+build_model(state: MonitorState | None, now, *, show_scoped="auto", blink_on=True, locale=ENGLISH) -> WidgetModel
 age_unit(seconds) -> (12, "s") | (41, "m") | (3, "h") | (2, "d")   # the unit an age is told in: UNIT_* codes
 countdown_units(seconds) -> ((2, "d"), (3, "h")) | ((2, "h"), (14, "m")) | ((9, "m"),) | ()   # () under a minute
-format_countdown(seconds) -> "2D 3H" | "2H 14M" | "9M" | "<1M"     # whole minutes, rounded down
+# the texts below are in the locale given (English by default): other languages' times from formats, their ages and
+# countdowns from CLDR's units in capitals (the examples' spaces may be CLDR's no-break ones)
+format_countdown(seconds, locale=ENGLISH) -> "2D 3H" | "2H 14M" | "9M" | "<1M"     # whole minutes, rounded down
+format_resets(resets_at, now, locale=ENGLISH) -> "7:39 PM" | "Sat 4:00 PM"        # fr-CA: "16 h 12" | "sam. 16 h 12"
+format_age(fetched_at, now, locale=ENGLISH) -> "12 S AGO"                         # fr: "IL Y A 12 S"
+share_text(allowance_pct, locale=ENGLISH) -> "50% SHARE" | None                   # fr: "50 % SHARE"
 reset_day(moment, now) -> (on now's local day, local weekday)
 english_stale_message(reason) -> STALE_MESSAGE_EXPIRED | STALE_MESSAGE_REFUSED | STALE_MESSAGE_NO_LOGIN | None
 SURFACE_FLOATING | SURFACE_TASKBAR | SURFACE_TOOLTIP          # the surfaces the optional skin methods name
@@ -211,10 +220,11 @@ ahead when usage − time > 10 points, behind when < −10, else on pace. The 10
 `windows.PACE_BAND_POINTS`: the pacing report, every widget and the dashboard (`PACE_BAND` in `app.js`,
 which a test keeps equal) read it.
 
-**Values, not English (#90).** The model keeps its English texts (`label`, `age_text`, `stale_message`, `share_text`,
-`resets_text`, and the guard's `labels`, `resume_text` and `resume_in`), and the dump and the tests read them. The skins
-and the tray tooltip word their own text from the values beside them, and never cut, split or match those texts to find
-a value:
+**Values, not English (#90).** The model keeps its texts (`label`, `age_text`, `stale_message`, `share_text`,
+`resets_text`, and the guard's `labels`, `resume_text`, `resume_in` and `resume_clock`), and the dump and the tests read
+them. Their words are English; their times, ages, countdowns and percents are in the model's locale (#91). The skins and
+the tray tooltip word their own text from the values beside them, and never cut, split or match those texts to find a
+value:
 - A row is named from its `kind`: session and weekly by the skin's own words, a scoped limit for its `scope_name`
   ("FABLE WEEKLY", Night City's "FABLE", Gates' "Fable weekly"), or "WEEKLY SCOPED" when it has neither. A kind a skin
   has no words for, and a row built without a kind, keep their label whole. Gates puts the name in capitals before
@@ -235,6 +245,13 @@ a value:
 `age_seconds` and `resume_seconds` are whole seconds, never negative. The reset and resume times are still drawn from
 `resets_text` and `resume_clock`; `resets_same_day`, `resets_weekday`, `resume_same_day` and `resume_weekday` carry
 their day as values, and no skin reads them yet.
+
+**Numbers in the locale (#91).** Each skin rounds a value as it always has (half up, `round()` for a share, one decimal
+for an exact value) and writes the digits with `formats.number` and `formats.percent` in `model.locale`; Night City
+draws its small percent sign on the side `formats.percent_parts` gives (before the numerals in Turkish). The boxes
+sized for English's figures (Nostromo's strip values, Night City's strip percent, Gates' cap badge) take the percent
+without its space ("100%"; Turkish "%100", Chris's decision on #91). The tray icons' numbers stay digits. The skins' own
+words, units and case calls are #94 to #96's.
 
 **Lamp kinds.** A status with no room for words (the strip, the tray icon) is drawn by `WidgetModel.lamp`
 (`model.LAMP_KINDS`): `live`, `paused`, `stale` (sign-in lost or missing: the user acts), `offline` (no connection),
@@ -431,6 +448,27 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   No test depends on this PC's language: an autouse fixture in `tests/conftest.py` gives every test a reader that
   knows nothing and drops `USAGE_MONITOR_LANG`. One smoke test reads the real Windows calls and checks only their
   shape.
+- **Formats (#91).** `usage_monitor/formats.py`, standard library only. English keeps today's US formats byte for byte:
+  each English branch is the code its callers had (`tests/fixtures/formats_english.json` holds both), and English never
+  reads the CLDR data. French, Spanish and Turkish follow `Locale.format` through `usage_monitor/cldr.py`: CLDR 47 from
+  Babel 2.18.0 for every CLDR region of the three languages, each region kept as its differences from the language's
+  base, and a tag with no region of its own takes the base. `Locale.clock` picks CLDR's 24-hour or 12-hour pattern.
+  Three fields Babel does not keep are rules in the generator, each with its source: minimum grouping digits (es-ES
+  `1234` but `12.345`), the plain `$` for US dollars (Chris), and a U+00A0 between a currency code and a digit. The
+  pseudo-locale takes English's shapes with two changes: numbers grouped with U+202F and a U+00A0 before `%`; it keeps
+  English's 12-hour clock. Rounding stays with the caller: `number` and `percent` take the digits the caller rounded
+  to. `tight=True` drops the space beside the sign for the boxes sized for English's figures. Nothing reads the
+  process locale. The widgets, the tray tooltip and the alerts write their numbers, percents, clocks and weekdays this
+  way; their words stay English until #93 to #101. The alerts read the app's locale on each evaluation
+  (`AlertEngine(settings, locale_provider=)`, English without one or when it fails); English alerts keep their trailing
+  `USD`, other languages write each amount with the plain `$` (US dollars) or the currency's code.
+- **Letter case (#91).** `usage_monitor/casing.py`: `upper`, `lower`, `capitalize` and `cased` by the language's rules,
+  so Turkish (and Azerbaijani) give `İ` and `ı` and never a combining dot (U+0307); every other language gets Python's
+  own. A name in capitals is cased with the words by the language's rule (`HAİKU` in Turkish, Chris's decision); in
+  lower or sentence case it keeps its own letters (`Claude Instant`, never `ınstant`). English keeps its old quirks byte
+  for byte. Ids (limit kinds, keys, the guard's identity strings, tags, currency codes) keep the plain calls:
+  `tests/test_casing_sites.py` lists every bare call allowed outside the skins, whose own calls move to `casing` in #94
+  to #96. `tests/test_locale_surfaces.py` draws every theme, state and surface in Turkish and finds no U+0307.
 - **Catalogs.** `webui/i18n/<lang>.json`, shared by Python and the page. `en.json` is the source of truth: a key missing
   from another catalog shows its English text, and the lookup says it came from English (`Catalog.text()` and
   `plural()` return an `i18n.Text`, a `str` that knows its `.language`), so the caller marks it `lang="en"` and cases it
@@ -470,16 +508,19 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   `toLocaleUpperCase(lang)` for SVG text; Gates will show strings as stored, and its own wordings (the `VOCAB` link
   states, "Tokens / min", "Updated {age} ago") get theme keys. Today `app.js` still writes many labels in capitals, and
   `gates.js` re-cases them through `VOCAB` and `PHRASES`.
-- **Rendering never reads Windows.** The widgets, the frame dump and the golden frames take no language yet and draw
-  English. Nothing under `render/` (or `tests/frame_digests.py`) may reach `LocaleSource` or the Windows calls, and one
-  eighth of the golden frames, drawn on a French Windows (fr-CA format, 24-hour clock) with French offered and a dev
-  instance asking for French, give the same digests as drawn plain (`tests/test_i18n.py` checks both). When the
-  widgets are worded (#93), their language comes in as an argument.
+- **Rendering never reads Windows.** The locale rides on the view model (#91, not #93: it is the first ticket in which
+  the widgets draw something that depends on the language): `build_model(..., locale=)` fills `WidgetModel.locale`,
+  English by default, and the app passes `MonitorApp.locale()`. A locale change redraws, since the frame caches key on
+  the model. `dump.sample_model`, `dump.dump_frames` and `tests/frame_digests.digests` take the locale as an argument;
+  the golden frames are drawn in English. Nothing under `render/` (or `tests/frame_digests.py`) may reach
+  `LocaleSource` or the Windows calls, and one eighth of the golden frames, drawn on a French Windows (fr-CA format,
+  24-hour clock) with French offered and a dev instance asking for French, give the same digests as drawn plain
+  (`tests/test_i18n.py` checks both). #93 adds `--dump-frames --lang` and the English scan's pseudo-locale pass.
 - **Test tools (#89).** The pseudo-locale (`i18n.PSEUDO`, `pseudo`) is `en.json` made longer (about 40%), accented
   (`İ ı ğ ş é ñ` among the look-alikes) and bracketed (`i18n.pseudo_text`), so English left over, a missing glyph
   and a cut end all show. A dev instance shows it with `USAGE_MONITOR_LANG=pseudo`, and the dev server with
-  `--lang pseudo` (or any catalog language, offered or not); it is never offered and never a setting, and it keeps
-  English's formats and clock until #91 gives it its own. `python -m usage_monitor.i18n` runs the catalog check
+  `--lang pseudo` (or any catalog language, offered or not); it is never offered and never a setting, and its formats
+  are English's with #91's two changes (see "Formats"). `python -m usage_monitor.i18n` runs the catalog check
   (`i18n.check_catalog`) on every catalog language. It fails on a key `en.json` lacks, a key that is not a dotted name,
   text that is not plain NFC, a placeholder that is not a plain `{name}` or differs from English's, a command
   (`i18n.COMMANDS`) inside a string, plural forms other than the language's CLDR categories, and a Save-dialog filter
@@ -490,9 +531,11 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   Night City through its ink and its fit function (a box that shrinks its text is measured at the size it shrinks to),
   Gates in its own faces, the tray numbers in device px, and the money figures, the tray tooltip and the toasts in
   UTF-16 units. A pixel box's budget is its room, or what English already takes where it runs past by design; a
-  character box's budget is its limit. Each language's longest figures (`100 %`, `%100`, `16 h 12`, `5,96 $ US`) go
-  in too. `tests/test_budgets.py` holds each box's measure to the widths the skins work out as the frame dump draws,
-  and every drawn run to a box. It pins every room (`python tests/budgets.py --limits` prints them after a skin
+  character box's budget is its limit. Each language's longest figures go in too, as `formats` writes them for every
+  format tag (`100 %`, `%100`, `5,96 $`, each tag's times and day clocks on either clock, the widest countdowns and
+  ages), in capitals in Nostromo and Night City and glued in the guard's statement, as the skins draw them.
+  `tests/test_budgets.py` holds each box's measure to the widths the skins work out as the frame dump draws, and every
+  drawn run to a box. It pins every room (`python tests/budgets.py --limits` prints them after a skin
   change), fails English that runs past a room it did not run past before, and fails an offered language past a box
   that has no fallback or only shrinks; `python tests/budgets.py --lang <id>` reports any language. The "no English
   left" scan (`tests/english_left.py`) lists the English the frame dump, the tray tooltip and the dashboard show under

@@ -1,11 +1,12 @@
-"""The app's languages: which one to show, how to format for it, and the catalogs of text (#87, epic #49).
+"""The app's languages: which one to show, its format tag and clock, and the catalogs of text (#87, epic #49).
 
 Chris's rule (2026-11-21): English by default, plus French, Spanish and Turkish. The app follows the Windows display
 language when it is one the app offers, and falls back to English. A language is offered only once its native check is
 signed off (#107): until then ``OFFERED`` holds English alone, so Windows' language can never pick a half-done catalog.
 
 No UI imports. Windows is read through a small reader object, so everything here is pure under test: the resolver,
-the format tag and the clock take what Windows said as arguments, and ``LocaleSource`` takes the reader it uses.
+the format tag and the clock take what Windows said as arguments, and ``LocaleSource`` takes the reader it uses. The
+formats themselves are usage_monitor/formats.py and letter case usage_monitor/casing.py (#91).
 
 Catalogs are JSON files in ``webui/i18n`` (``<lang>.json``), shared with the dashboard, which gets them through the
 local server (``/static/i18n/<lang>.js``, built from the JSON). ``en.json`` is the source of truth: a key missing from
@@ -137,7 +138,8 @@ def format_tag(language: str, regional: str | None) -> str:
 def clock_hours(language: str, short_time: str | None) -> int:
     """12 or 24. English keeps today's 12-hour clock (#86's default); French, Spanish and Turkish follow Windows' own
     short-time pattern (``H`` is a 24-hour hour, ``h`` a 12-hour one), so the strip matches the taskbar clock beside
-    it, and fall back to their own 24-hour clock. The pseudo-locale keeps English's until L6 (#91) gives it one."""
+    it, and fall back to their own 24-hour clock. The pseudo-locale keeps English's: #91 gave it English's formats with
+    two changes, and the 12-hour clock is the longer."""
     if language in (DEFAULT, PSEUDO):
         return 12
     if short_time:
