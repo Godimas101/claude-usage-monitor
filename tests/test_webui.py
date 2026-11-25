@@ -1166,9 +1166,10 @@ def test_the_pages_english_formats_record_is_whole() -> None:
     """So the check below cannot pass on a thin record: every formatter step 2.0 of #91's plan froze has its cases, and
     the record holds the shapes Chris kept for English ($5.96, CA$, 2 D 3 H, X, Y and Z, 7:39 PM with an ASCII space)."""
     english = english_formats()
-    assert len(english) == 43 and sum(len(cases) for cases in english.values() if isinstance(cases, dict)) == 3385
+    assert len(english) == 43 and sum(len(cases) for cases in english.values() if isinstance(cases, dict)) == 3454
     assert all(english[name] for name in english), [name for name in english if not english[name]]
     assert english["fmtUsd"]["(5.96)"] == "$5.96" and english["fmtUsd"]["(-1234.5)"] == "-$1,235"
+    assert english["fmtUsd"]["(999.995)"] == "$1000.00" and english["fmtUsd"]["(-999.995)"] == "-$1000.00"  # no group
     assert english["fmtMoney"]['(5.96, "CAD")'] == "CA$5.96" and english["fmtMoney"]['(5.96, "EURO")'] == "5.96 EURO"
     assert english["fmtRemain"]["(183600000)"] == "2 D 3 H"
     assert english["listWords"]['(["A","B","C"])'] == "A, B and C"
@@ -1243,7 +1244,7 @@ def test_the_formats_follow_the_format_tag_in_french_spanish_and_turkish(checks:
     assert mx["usd"][:5] == ["$5.96", "-$5.96", "$1,235", "$1,234.50", "-$1,235"] and mx["usd"][7] == "$5.96"
     assert tr["usd"][:3] == ["$5,96", "-$5,96", "$1.235"] and tr["usd"][7:] == ["$5,96", f"1,2{NB}B$"]
     assert es["usd"][2] == f"1235{NB}$" and ch["usd"][0] == f"5.96{NB}$" and ch["number"][0] == f"1{NNB}234,5"
-    assert fr["money"] == [f"5,96{NB}$", f"5,96{NB}€", f"5,96{NB}EURO", f"1{NNB}234,50{NB}$"]
+    assert fr["money"] == [f"5,96{NB}$", f"5,96{NB}EUR", f"5,96{NB}EURO", f"1{NNB}234,50{NB}$"]
     assert ch["money"][2] == f"5.96{NB}EURO" and mx["money"][1:3] == [f"EUR{NB}5.96", f"EURO{NB}5.96"]
     assert tr["compact"][0] == f"1,5{NB}B" and fr["compact"] == [f"1,5{NB}k", f"1,5{NB}M", f"-1,5{NB}k"]
     assert es["compact"][0] == f"1,5{NB}mil"
@@ -1275,7 +1276,7 @@ def test_the_pages_figures_follow_the_format_tag(checks: dict[str, Any]) -> None
     assert tr["count"][:2] == [f"1,5{NB}B", f"1,5{NB}Mn"] and fr["count"][:3] == [f"1,5{NB}k", f"1,5{NB}M", "999"]
     assert fr["count"][3:] == [f"1{NNB}234", f"12{NNB}345", "6,0×", f"1{NNB}235", "12", "-3,3", f"1{NNB}234 requests"]
     assert ca["count"][3] == f"1{NB}234"
-    assert fr["money"] == [f"5,96{NB}$", f"5,96{NB}€", f"5,96{NB}EURO"] and mx["money"][1] == f"EUR{NB}5.96"
+    assert fr["money"] == [f"5,96{NB}$", f"5,96{NB}EUR", f"5,96{NB}EURO"] and mx["money"][1] == f"EUR{NB}5.96"
     assert fr["prose"] == ["You are using this window 12,3 points faster than an even pace.",
                            f"<b>ENDS ~33{NB}%</b> &middot; BUDGET 14{NB}%/DAY", f"33,5{NB}%", "1,2"]
     assert tr["prose"][1] == "<b>ENDS ~%33</b> &middot; BUDGET %14/DAY"
@@ -1284,6 +1285,73 @@ def test_the_pages_figures_follow_the_format_tag(checks: dict[str, Any]) -> None
                               ["-- tokens, all time", f"0{NNB}000{NNB}000{NNB}000", 3]]
     assert ca["odometer"][0] == [f"1{NB}234{NB}567 tokens, all time", f"1{NB}234{NB}567", 2]
     assert es["odometer"][1] == ["-- tokens, all time", "0.000.000.000", 3]
+
+
+@ui_only
+def test_a_count_in_the_billions_keeps_its_own_digits_in_every_language(checks: dict[str, Any]) -> None:
+    """#91's review: Spanish has no unit for 10^9 to 10^10 and writes those counts in millions, so fmtCount's two decimals
+    of a billion would read "2250,00 M" for 2,254,000,000 tokens; the page writes the unrounded count in millions
+    instead ("2254 M"). From 10^10 Spanish has its unit ("12,50 mil M"); French, Turkish and English are as they were."""
+    billions = checks["review"]["billions"]
+    assert billions["es-ES"] == [f"2254{NB}M", f"9995{NB}M", f"1500{NB}M", f"12,50{NB}mil{NB}M", f"-2254{NB}M"]
+    assert billions["es-MX"] == billions["es-US"] == [f"2254{NB}M", f"9995{NB}M", f"1500{NB}M", f"12.50{NB}mil{NB}M",
+                                                      f"-2254{NB}M"]
+    assert billions["fr-FR"] == [f"2,25{NB}Md", f"9,99{NB}Md", f"1,50{NB}Md", f"12,50{NB}Md", f"-2,25{NB}Md"]
+    assert billions["tr-TR"][:2] == [f"2,25{NB}Mr", f"9,99{NB}Mr"] and billions["fr-CA"][0] == f"2,25{NB}G"
+    assert billions["en-US"] == ["2.25B", "9.99B", "1.50B", "12.50B", "-2.25B"]
+
+
+@ui_only
+def test_money_in_another_currency_is_written_with_its_code(checks: dict[str, Any]) -> None:
+    """#91's review: in French, Spanish and Turkish a currency other than US dollars is written with its code, as the
+    widgets' and the alerts' formats.py writes it, never with a local symbol: fr-CA's own symbol for CAD and es-MX's for
+    MXN are the plain "$" the page's US-dollar figures use. English keeps Intl's en-US symbols (CA$5.96)."""
+    money = checks["review"]["money"]
+    assert money["fr-CA"] == [f"5,96{NB}CAD", f"5,96{NB}MXN", f"-1{NB}234,50{NB}EUR", f"5,96{NB}$"]
+    assert money["es-MX"] == [f"CAD{NB}5.96", f"MXN{NB}5.96", f"-EUR{NB}1,234.50", "$5.96"]
+    assert money["fr-FR"][2] == f"-1{NNB}234,50{NB}EUR" and money["es-ES"][0] == f"5,96{NB}CAD"
+    assert money["tr-TR"][:2] == [f"CAD{NB}5,96", f"MXN{NB}5,96"]
+    assert all(row[0] != row[3] and row[1] != row[3] for row in money.values())       # never the US dollars' text
+    assert money["en-US"] == ["CA$5.96", "MX$5.96", "-€1,234.50", "$5.96"]
+
+
+@ui_only
+def test_the_alert_levels_percents_follow_the_format_tag(checks: dict[str, Any]) -> None:
+    """#91's review: Settings' alert levels and the error for a level set twice write their percent through the formats
+    (Turkish %80, French 80 %); the remove buttons' names keep the plain number until their words' text ticket."""
+    levels = checks["review"]["levels"]
+    assert levels["en-US"] == {"chips": ["50%", "80%"], "error": "80% is already a level.",
+                               "labels": ["Remove the 50 percent level", "Remove the 80 percent level"]}
+    assert (levels["tr-TR"]["chips"], levels["tr-TR"]["error"]) == (["%50", "%80"], "%80 is already a level.")
+    assert (levels["fr-FR"]["chips"], levels["fr-FR"]["error"]) == ([f"50{NB}%", f"80{NB}%"], f"80{NB}% is already a level.")
+    assert levels["es-ES"]["chips"] == [f"50{NB}%", f"80{NB}%"] and levels["es-MX"]["chips"] == ["50%", "80%"]
+    assert all(row["labels"] == levels["en-US"]["labels"] for row in levels.values())
+
+
+@ui_only
+def test_a_pending_money_note_takes_the_locales_shape(checks: dict[str, Any]) -> None:
+    """#91's review: the daily chart's "TOP $00.00" and the cost toolbar's "$000.00", shown until their figure comes, are
+    the locale's money with zeros for digits, so the note keeps its shape when the figure lands (English as it was)."""
+    pending = checks["review"]["pending"]
+    note = "the last 7 days, {} api-equivalent at list prices"
+    assert pending["en-US"] == ["TOP $00.00", note.format("$000.00"), note.format("$123.45")]
+    assert pending["fr-FR"] == [f"TOP 00,00{NB}$", note.format(f"000,00{NB}$"), note.format(f"123,45{NB}$")]
+    assert pending["tr-TR"] == ["TOP $00,00", note.format("$000,00"), note.format("$123,45")]
+    assert pending["es-MX"] == pending["en-US"]
+
+
+@ui_only
+def test_no_month_label_is_cut_and_englishs_column_stays(checks: dict[str, Any]) -> None:
+    """#91's review: the month-by-month chart's label column grows to its widest label (fr-CA JUILL. 26), measured here
+    with charts.js's own estimate, which is wider than the themes' fonts; English's column stays 64 px (its bars start at
+    74, the column and the gap), as before."""
+    months = checks["review"]["months"]
+    for tag, row in months.items():
+        assert row["labels"] == row["full"] and len(row["full"]) == 12, (tag, row["labels"])
+        assert not any(ELLIPSIS in label for label in row["labels"]), tag
+    assert months["en-US"]["bars"] == months["en-US"]["plain"] == "74"
+    assert "JUILL. 26" in months["fr-CA"]["full"] and float(months["fr-CA"]["bars"]) > float(months["fr-CA"]["plain"])
+    assert months["tr-TR"]["bars"] == months["es-ES"]["bars"] == "74"
 
 
 @ui_only
@@ -1435,7 +1503,8 @@ def test_names_in_capitals_follow_the_pages_language_and_english_words_englishs(
     assert checks["i18n"]["name"] == '<span translate="no">Opus &lt;4&gt;</span>'
 
 
-# The bare case calls app.js may make: ids, never text people read (D8 of #91's plan). Text goes through the formats:
+# The bare case calls app.js may make: ids, never words (D8 of #91's plan); some reach the page as id-derived text (an
+# export format, an accent's letters, an unknown currency code). Words go through the formats:
 # FMT.upper(text) for a name (the page's language) and FMT.upper(text, "en") for English words (English's rule, until
 # the text tickets #98 to #101 give each its catalog's language).
 APP_BARE_CASE_CALLS = {
@@ -1472,7 +1541,7 @@ CLDR_JS = Path(__file__).resolve().parent / "webui_cldr.js"
 CLDR_GRID: dict[str, Any] = {
     "numbers": ["1234.5", "12345", "-1234567.25", "0.5", "1234"], "ungrouped": ["1234.5"],
     "percents": ["34", "-34", "33.5", "1234"], "tight": ["34", "100"],
-    "amounts": [5.96, -5.96, 1234.56], "code": "EURO",
+    "amounts": [5.96, -5.96, 1234.56], "code": "EURO", "codes": ["EUR", "CAD"],
     "times": [[0, 5], [9, 39], [12, 0], [16, 12], [23, 59]],
     "dayTimes": [[day, 16, 12] for day in range(7)] + [[5, 9, 5]],
     "durations": [[[2, "d"], [3, "h"]], [[1, "d"]], [[21, "d"], [1, "h"]], [[1, "h"]], [[3, "h"], [27, "m"]],
@@ -1500,6 +1569,7 @@ def python_formats(tag: str) -> dict[str, list[str]]:
             row["usd"] = row["moneyUsd"] = [formats.money(a, "USD", locale) for a in g["amounts"]]
             row["usdTight"] = [formats.money(a, "USD", locale, tight=True) for a in g["amounts"]]
             row["moneyCode"] = [formats.money(a, g["code"], locale) for a in g["amounts"]]
+            row["moneyIso"] = [formats.money(a, code, locale) for code in g["codes"] for a in g["amounts"]]
             row["weekday"] = [formats.weekday(i, locale) for i in range(7)]
             row["month"] = [formats.month(i, locale) for i in range(12)]
             row["duration"] = row["durationUnits"] = [
@@ -1547,6 +1617,10 @@ known("es-GQ", "moneyUsd", ["$5,96", "-$5,96", "$1234,56"], ["5,96\u00a0$", "-5,
 known("es-GQ", "usdTight", ["$5,96", "-$5,96", "$1234,56"], ["5,96$", "-5,96$", "1234,56$"], _SIGN_FIRST)
 known("es-GQ", "moneyCode", ["EURO\u00a05,96", "-EURO\u00a05,96", "EURO\u00a01234,56"],
       ["5,96\u00a0EURO", "-5,96\u00a0EURO", "1234,56\u00a0EURO"], _SIGN_FIRST)
+known("es-GQ", "moneyIso", ["EUR\u00a05,96", "-EUR\u00a05,96", "EUR\u00a01234,56",
+                               "CAD\u00a05,96", "-CAD\u00a05,96", "CAD\u00a01234,56"],
+      ["5,96\u00a0EUR", "-5,96\u00a0EUR", "1234,56\u00a0EUR",
+       "5,96\u00a0CAD", "-5,96\u00a0CAD", "1234,56\u00a0CAD"], _SIGN_FIRST)
 known("es-PY", "usdTight", ["$5,96", "$-5,96", "$1.234,56"], ["$5,96", "$\u00a0-5,96", "$1.234,56"],
       'not the data (es-PY\'s negative pattern "¤\u00a0-#,##0.00" on both sides): tight on the page drops a space beside the "$", '
       "formats.py's only one beside the digits")
@@ -1561,6 +1635,10 @@ known("fr-MA", "moneyUsd", ["5,96\u00a0$", "-5,96\u00a0$", "1.234,56\u00a0$"], [
 known("fr-MA", "usdTight", ["5,96$", "-5,96$", "1.234,56$"], ["5,96$", "-5,96$", "1\u202f234,56$"], _MA_GROUP)
 known("fr-MA", "moneyCode", ["5,96\u00a0EURO", "-5,96\u00a0EURO", "1.234,56\u00a0EURO"],
       ["5,96\u00a0EURO", "-5,96\u00a0EURO", "1\u202f234,56\u00a0EURO"], _MA_GROUP)
+known("fr-MA", "moneyIso", ["5,96\u00a0EUR", "-5,96\u00a0EUR", "1.234,56\u00a0EUR",
+                               "5,96\u00a0CAD", "-5,96\u00a0CAD", "1.234,56\u00a0CAD"],
+      ["5,96\u00a0EUR", "-5,96\u00a0EUR", "1\u202f234,56\u00a0EUR",
+       "5,96\u00a0CAD", "-5,96\u00a0CAD", "1\u202f234,56\u00a0CAD"], _MA_GROUP)
 _MA_PERIODS = 'node\'s fr-MA day periods are "a.m." and "p.m."; Babel 2.18.0\'s are French\'s "AM" and "PM"'
 known("fr-MA", "clock12", ["12:05 a.m.", "9:39 a.m.", "12:00 p.m.", "4:12 p.m.", "11:59 p.m."],
       ["12:05\u202fAM", "9:39\u202fAM", "12:00\u202fPM", "4:12\u202fPM", "11:59\u202fPM"], _MA_PERIODS)

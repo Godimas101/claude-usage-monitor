@@ -2,11 +2,11 @@
 /* Today's English page formats (#91, step 2.0 of its plan), as one JSON object: tests/fixtures/webui_formats_english.json.
  *
  * Runs the dashboard's real scripts under node, as tests/webui_checks.js does (formats.js, charts.js and app.js in a vm
- * context with the test hook set, so app.js hands back its helpers and does not start; motion.js in a context of its
- * own), and calls every formatter of the page on a fixed grid of inputs: the numbers, percents and money, the counts and
- * compact figures, the durations and ages, the clocks, dates and weekdays, the plurals and lists, the odometer and the
- * rolling figures, and the sites that write a number into a sentence, a card or a chart (their text only, not their
- * markup).
+ * context with the test hook set, so app.js hands back its helpers and does not start; formats.js and motion.js in a
+ * context of their own, with English's monitor-locale meta, as index.html loads them), and calls every formatter of the
+ * page on a fixed grid of inputs: the numbers, percents and money, the counts and compact figures, the durations and
+ * ages, the clocks, dates and weekdays, the plurals and lists, the odometer and the rolling figures, and the sites that
+ * write a number into a sentence, a card or a chart (their text only, not their markup).
  * tests/test_webui.py runs it with TZ=UTC and compares what it prints with the fixture, which was recorded before #91
  * changed the page: English must not change by a byte. The page's clock stands still at NOW. CALLS names each recorded
  * formatter and how it is called; a later step that reshapes one changes its entry here, never the fixture. An output is
@@ -103,12 +103,22 @@ function loadPage() {
   return { api: box.__USAGE_MONITOR_TEST__.api, charts: box.MonitorCharts, elements };
 }
 
+/* motion.js as the page runs it: formats.js loaded first, with English's locale in the monitor-locale meta, so the rolling
+ * figures read and write through the formats layer. (test_motion.py holds the page without the layer to the same.) */
 function loadMotion() {
   const root = { getAttribute: () => null, setAttribute() {}, removeAttribute() {} };
-  const box = { console, document: { documentElement: root, visibilityState: "visible" } };
+  const english = { setting: "system", language: "en", system: "en", format: "en-US", clock: 12, offered: ["en"] };
+  const meta = { getAttribute: (k) => (k === "content" ? JSON.stringify(english) : null) };
+  const box = { console, document: { documentElement: root, visibilityState: "visible",
+    querySelector: (sel) => (sel === 'meta[name="monitor-locale"]' ? meta : null) } };
   box.window = box;
   stillContext(box);
-  vm.runInContext(fs.readFileSync(path.join(webui, "motion.js"), "utf8"), box, { filename: "motion.js" });
+  for (const name of ["formats.js", "motion.js"]) {
+    vm.runInContext(fs.readFileSync(path.join(webui, name), "utf8"), box, { filename: name });
+  }
+  if (!box.MonitorFormats || box.MonitorFormats.active().language !== "en") {
+    throw new Error("motion.js's formats layer is missing or not English's");
+  }
   return box.USAGE_MONITOR_FX;
 }
 
@@ -179,15 +189,16 @@ function drawn(width) {
 // ── The grid ──────────────────────────────────────────────────────────────────────────────────────────────────
 
 // Every threshold the formatters branch at, each side of it, the halves that round one way or the other, and what
-// num() turns away.
+// num() turns away. 999.995, 999.999 and -999.995 (cents that round up to 1000.00) came with #91's review: their cases
+// were recorded from the page at 1193edb, the one the rest was recorded from.
 const NUMBERS = [
   null, undefined, "", "x", "5.96", "1,234", 0, -0, 0.004, 0.005, 0.0049, 0.04, 0.05, 0.25, 0.5, 0.95, 1, 1.005, 1.15,
   1.25, 1.5, 2.5, 5.96, 9.94, 9.95, 9.994, 9.995, 9.999, 10, 12.345, 12.5, 33.35, 33.5, 49.95, 99.4, 99.5, 99.94,
-  99.95, 99.99, 99.995, 100, 100.4, 100.5, 123.456, 999, 999.4, 999.5, 999.6, 1000, 1149.99, 1150, 1234.5, 1234.567,
-  9949, 9950, 9999, 9999.5, 10000, 12345.678, 99949, 99950, 99999, 100000, 123456.7, 999949, 999950, 999999, 1e6,
-  1234567.89, 9.94e6, 9.95e6, 99.94e6, 99.95e6, 999.9e6, 999.95e6, 1e9, 1.5e9, 1234567890, 9.995e9, 1e12, 1e21,
-  -0.004, -0.4, -0.5, -1, -2.5, -5.96, -9.99, -9.995, -10, -99.99, -100, -123.5, -999, -999.5, -1000, -1234.5, -9999,
-  -10000, -99999, -1e6, -9.95e6, -1e9, Infinity, NaN,
+  99.95, 99.99, 99.995, 100, 100.4, 100.5, 123.456, 999, 999.4, 999.5, 999.6, 999.995, 999.999, 1000, 1149.99, 1150,
+  1234.5, 1234.567, 9949, 9950, 9999, 9999.5, 10000, 12345.678, 99949, 99950, 99999, 100000, 123456.7, 999949, 999950,
+  999999, 1e6, 1234567.89, 9.94e6, 9.95e6, 99.94e6, 99.95e6, 999.9e6, 999.95e6, 1e9, 1.5e9, 1234567890, 9.995e9, 1e12,
+  1e21, -0.004, -0.4, -0.5, -1, -2.5, -5.96, -9.99, -9.995, -10, -99.99, -100, -123.5, -999, -999.5, -999.995, -1000,
+  -1234.5, -9999, -10000, -99999, -1e6, -9.95e6, -1e9, Infinity, NaN,
 ];
 const DIGITS = [undefined, 0, 1, 2];
 const AMOUNTS = [null, 0, 5.96, -5.96, 0.005, 99.995, 1234.5, -1234.5, 1234567.891];

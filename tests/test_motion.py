@@ -693,6 +693,8 @@ const out = {};
     esES: read(page("es", "es-ES"), ["1234,5", "12.345", "34\u00a0%", "12.345."], VALUES),
     trTR: read(page("tr", "tr-TR"), ["%34", "%33,5", "1.234,5", "$5,96"], VALUES),
     pseudo: read(page("pseudo", "en-US"), ["1\u202f234.5", "34\u00a0%"], VALUES),
+    // fr-CH writes an amount with the currency's decimal point and a number with a comma (#91's review)
+    frCH: read(page("fr", "fr-CH"), ["1\u202f107.50\u00a0$", "5.96\u00a0$", "5.96$", "34,5\u00a0%", "1\u202f234,5", "21.10.2026"], VALUES),
     en: read(page("en", "en-US"), ["$1,107.50 x", "13%", "6.0×", "1,234,567", "12, 13"], VALUES),
     none: read(world(), ["$1,107.50 x", "13%", "6.0×", "1,234,567", "12, 13"], VALUES)
   };
@@ -703,6 +705,17 @@ const out = {};
   const first = el._a["data-fx"];
   job.update(250);
   out.localeRoll = { first, mid: el._a["data-fx"], done: job.update(600), text: el.firstChild.nodeValue };
+  // an fr-CH amount rolls too, in its own decimal point (it once stayed still: "1 107.50 $" read as 1107, ".50 $" after)
+  const ch = page("fr", "fr-CH");
+  const amount = figure("1\u202f107.50\u00a0$");
+  const roll = ch.FX.roller("o", amount, 0, 500, null);           // null: the figure would not roll
+  const start = amount._a["data-fx"];
+  if (roll) {
+    roll.update(250);
+  }
+  const signs = ch.sandbox.MonitorFormats.active();
+  out.localeRollCH = { first: start, mid: amount._a["data-fx"], done: roll ? roll.update(600) : null,
+    text: amount.firstChild.nodeValue, signs: [signs.decimal, signs.currencyDecimal] };
 }
 
 // roller
@@ -1237,6 +1250,38 @@ def test_a_rolling_figure_is_read_and_written_in_the_pages_signs(engine: dict[st
     assert f["en"][4][0] == ["", 12, 0, True, " 13"]                     # English's own reading, kept: "12," is 12, grouped
     roll = engine["localeRoll"]
     assert roll == {"first": f"0,0{NB}%", "mid": f"33,3{NB}%", "done": True, "text": f"34,5{NB}%"}
+
+
+@ui_only
+def test_an_amount_in_its_currencys_own_decimal_sign_rolls_and_is_written_back_so(engine: dict[str, Any]) -> None:
+    """#91's review: fr-CH writes an amount with a decimal point ("5.96 $", CLDR's currency decimal) and a number with a
+    comma ("34,5 %"). parseNum reads either, and fmtNum writes the figure back with the sign it was read with, so fr-CH's
+    money rolls in its own sign ("1 107.50 $" counts up through values like "369.17 $") and ends on its own text; a date
+    is still not a figure."""
+    f = engine["localeFigures"]["frCH"]
+    assert f[0] == [["", 1107.5, 2, True, f"{NB}$"], [f"0.00{NB}$", f"17.25{NB}$", f"1{NNB}234.50{NB}$"]]
+    assert f[1] == [["", 5.96, 2, False, f"{NB}$"], [f"0.00{NB}$", f"17.25{NB}$", f"1234.50{NB}$"]]
+    assert f[2][0] == ["", 5.96, 2, False, "$"]
+    assert f[3] == [["", 34.5, 1, False, f"{NB}%"], [f"0,0{NB}%", f"17,3{NB}%", f"1234,5{NB}%"]]
+    assert f[4][0] == ["", 1234.5, 1, True, ""] and f[4][1][2] == f"1{NNB}234,5"
+    assert f[5][0] == ["", 21.1, 2, False, ".2026"]                     # the roller leaves it: digits after the figure
+    roll = engine["localeRollCH"]
+    assert roll["signs"] == [",", "."] and roll["first"] == f"0.00{NB}$" and roll["done"] is True
+    assert re.fullmatch(rf"\d+\.\d\d{NB}\$", roll["mid"].replace(NNB, "")) and roll["mid"] != roll["first"]
+    assert roll["text"] == f"1{NNB}107.50{NB}$"
+
+
+@ui_only
+def test_gates_keeps_a_magnitudes_capital_after_the_no_break_space_of_a_localized_figure(theme_scripts: dict[str, Any]) -> None:
+    """#91's review: Gates' sentence case keeps K, M, B and T after a figure's digits, as it did for English's "1.5M", and
+    after the no-break space the page's formats put before them in French, Spanish and Turkish ("1,5 M", Turkish "1,5 B"
+    for a thousand, es-US "$1.2 K"): lowered, millions would read as milli. Other words after a figure are lowered as
+    before ("3 min")."""
+    found = theme_scripts["gatesCase"]
+    assert found.pop("thrown") == []
+    assert found.pop(f"3{NB}MIN") == f"3{NB}min" and found.pop("12 M") == "12 m"
+    assert found == {text: text for text in found}, {k: v for k, v in found.items() if k != v}
+    assert {"1.5M", "$1.2K", f"1,5{NB}M", f"1,5{NB}B", f"$1.2{NB}K", f"1{NNB}234{NB}M", f"1,5{NNB}M"} <= set(found)
 
 
 @ui_only

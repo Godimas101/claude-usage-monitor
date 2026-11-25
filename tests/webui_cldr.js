@@ -62,6 +62,7 @@ for (const tag of tags) {
       row.usdTight = grid.amounts.map((a) => F.usd(a.toFixed(2), { tight: true }));
       row.moneyUsd = grid.amounts.map((a) => F.money(a, "USD"));
       row.moneyCode = grid.amounts.map((a) => F.money(a, grid.code));
+      row.moneyIso = grid.codes.flatMap((code) => grid.amounts.map((a) => F.money(a, code)));
       row.weekday = [0, 1, 2, 3, 4, 5, 6].map((i) => F.weekday(i));
       row.month = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((i) => F.month(i));
       row.duration = grid.durations.map((parts) => F.duration(parts));

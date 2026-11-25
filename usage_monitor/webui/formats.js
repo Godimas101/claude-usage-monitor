@@ -31,7 +31,8 @@
  * Intl as WebView2 86 has it (ui/dashboard.py WEBVIEW2_MIN_VERSION): NumberFormat with compact notation, narrowSymbol,
  * units and formatToParts; DateTimeFormat with hourCycle and timeStyle; ListFormat. Intl.DurationFormat is newer: it is
  * used where the WebView has it, and the same CLDR units through NumberFormat and ListFormat otherwise (D14 of #91's
- * plan; by ECMA-402 the two write the same text, and tests/webui_checks.js compares them).
+ * plan; by ECMA-402 the two write the same text: tests/webui_cldr.js writes both, and test_webui.py's D14 test compares
+ * them).
  */
 (function (root) {
   "use strict";
@@ -217,7 +218,9 @@
 
     /* (before, number, after) of the caller's digits as a percent, so a figure can set the sign apart: ("", "34", "%")
      * in English (the digits as given), ("", "34", "\u00a0%") in French and Spanish, ("%", "34", "") in Turkish. A minus
-     * is part of before. opts.tight drops the space beside the sign. */
+     * stays with the digits in English and the pseudo-locale (English's ("", "-34", "%")); in French, Spanish and Turkish
+     * it is part of before (("-", "34", "\u00a0%"), Turkish ("-%", "34", "")). opts.tight drops the space beside
+     * the sign. */
     function percentParts(value, opts) {
       var text = String(value);
       var m = DIGITS.exec(text);
@@ -274,12 +277,14 @@
 
     /* An amount in a currency by its ISO code (fmtMoney: real money in the account's own currency). English writes it
      * as Intl's en-US does ("CA$5.96", as the page had it), and a code Intl refuses after the number ("5.96 EURO").
-     * French, Spanish and Turkish write it as their tag does, with the plain "$" for US dollars, and a code Intl refuses
-     * where the tag puts a code, as it writes US dollars by their code ("5,96 EURO" in fr, "EURO 5.96" in es-MX). */
+     * French, Spanish and Turkish write US dollars with the plain "$" and every other currency by its code, where the
+     * tag puts a code, as usage_monitor/formats.py's money does ("5,96 CAD" in fr-CA, "MXN 5.96" in es-MX): a local
+     * symbol can be a plain "$" too (fr-CA's CAD, es-MX's MXN), which the page's US-dollar figures use. A code Intl
+     * refuses goes in the same place ("5,96 EURO" in fr, "EURO 5.96" in es-MX). */
     function money(value, code) {
       var options = { style: "currency", currency: code };
-      if (cldr && code === "USD") {
-        options.currencyDisplay = "narrowSymbol";
+      if (cldr) {
+        options.currencyDisplay = code === "USD" ? "narrowSymbol" : "code";
       }
       var format;
       try {
@@ -300,16 +305,36 @@
     }
 
     /* A count in compact notation, from the caller's digits counted in 10^scale: "1.2K" in English, "1,2 k" in French,
-     * "1,2 B" (a thousand) in Turkish, "1,2 mil" in Spanish. */
-    function compact(value, scale) {
+     * "1,2 B" (a thousand) in Turkish, "1,2 mil" in Spanish. Where the tag's unit is smaller than the caller's (Spanish
+     * has none for 10^9 to 10^10 and writes those in millions, "2254 M"), the digits would claim a precision the
+     * caller rounded away ("2250,00 M"): the figure is then written from exact, the unrounded count, with as many fewer
+     * decimals as the tag writes more whole digits. */
+    function compact(value, scale, exact) {
       var text = String(value);
       var m = DIGITS.exec(text);
       if (!cldr || !m) {
         return text + SCALES[scale];
       }
       var d = fraction(m);
+      var extra = typeof exact === "number" && isFinite(exact) ? compactDigits(m[2].length + scale - 1) - m[2].length : 0;
+      if (extra > 0) {
+        var kept = Math.max(0, d - extra);
+        return nf({ notation: "compact", minimumFractionDigits: kept, maximumFractionDigits: kept }).format(exact);
+      }
       return nf({ notation: "compact", minimumFractionDigits: d, maximumFractionDigits: d })
         .format(Number(text + "e" + scale));
+    }
+
+    /* How many whole digits the tag's compact notation writes at 10^power: 1 in "1 Md", 4 in Spanish's "1000 M". */
+    function compactDigits(power) {
+      var parts = nf({ notation: "compact", maximumFractionDigits: 0 }).formatToParts(Number("1e" + power));
+      var count = 0;
+      for (var i = 0; i < parts.length; i++) {
+        if (parts[i].type === "integer") {
+          count += parts[i].value.length;
+        }
+      }
+      return count;
     }
 
     // ── Dates and times: the page's local time ────────────────────────────────────────────────────────────────
@@ -510,9 +535,18 @@
         decimal = signs[i].value;
       }
     }
+    // An amount's decimal sign, which CLDR sets apart from a number's for a few tags (fr-CH: "5.96 $", but "1 234,5").
+    var currencyDecimal = decimal;
+    var amount = nf({ style: "currency", currency: "USD", currencyDisplay: "narrowSymbol" }).formatToParts(1234567.5);
+    for (i = 0; i < amount.length; i++) {
+      if (amount[i].type === "decimal") {
+        currencyDecimal = amount[i].value;
+      }
+    }
 
     return {
       language: language, tag: tag, english: !cldr, hours: hours, group: pseudo ? PSEUDO_GROUP : group, decimal: decimal,
+      currencyDecimal: currencyDecimal,
       number: number, percent: percent, percentParts: percentParts, usd: usd, money: money, compact: compact,
       clock: clock, dayClock: dayClock, hour: hour, stamp: stamp, monthDay: monthDay, date: date, dayDate: dayDate,
       monthYear: monthYear, weekday: weekday, month: month, duration: duration, list: list, upper: upper, lower: lower

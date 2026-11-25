@@ -173,20 +173,24 @@
   }
 
   /* The page's number signs, from its formats (formats.js, loaded before this file: #91), read once: the group and
-   * decimal signs, and the pattern of a figure. English's (and a page without formats.js) is the pattern the page always
-   * had; in another locale a group sign counts only between digits, so French's "34 %" (fr-CA groups with that U+00A0)
-   * keeps its space. */
+   * decimal signs, an amount's decimal sign where CLDR sets it apart (fr-CH writes "5.96 $" but "34,5 %"), and the
+   * pattern of a figure. English's (and a page without formats.js) is the pattern the page always had; in another locale
+   * a group sign counts only between digits, so French's "34 %" (fr-CA groups with that U+00A0) keeps its space. */
   var numbers = null;
   function numberSigns() {
     if (numbers === null) {
       var F = window.MonitorFormats ? window.MonitorFormats.active() : null;
       var group = F ? F.group : ",";
       var decimal = F ? F.decimal : ".";
+      var money = F && F.currencyDecimal ? F.currencyDecimal : decimal;
       var g = group.replace(/[\\^$.*+?()[\]{}|-]/g, "\\$&");
       var d = decimal.replace(/[\\^$.*+?()[\]{}|-]/g, "\\$&");
+      if (money !== decimal) {
+        d = "(?:" + d + "|" + money.replace(/[\\^$.*+?()[\]{}|-]/g, "\\$&") + ")";
+      }
       numbers = {
-        formats: F, group: group, decimal: decimal,
-        pattern: group === "," && decimal === "." ? /^([^\d]*)(\d[\d,]*(?:\.\d+)?)([\s\S]*)$/ :
+        formats: F, group: group, decimal: decimal, money: money,
+        pattern: group === "," && decimal === "." && money === "." ? /^([^\d]*)(\d[\d,]*(?:\.\d+)?)([\s\S]*)$/ :
           new RegExp("^([^\\d]*)(\\d(?:" + g + "?\\d)*(?:" + d + "\\d+)?)([\\s\\S]*)$")
       };
     }
@@ -195,7 +199,8 @@
 
   /* "$1,107.50 x" -> { pre: "$", val: 1107.5, dec: 2, comma: true, post: " x" }, in the page's signs: "34,5 %" in French
    * is { pre: "", val: 34.5, dec: 1, comma: false, post: " %" }, Turkish "%34" { pre: "%", val: 34, ... }. comma: the
-   * figure is grouped. */
+   * figure is grouped. An amount written with the currency's own decimal sign (fr-CH "5.96 $") also has money: that
+   * sign, so fmtNum writes it back with it. */
   function parseNum(s) {
     var signs = numberSigns();
     var m = signs.pattern.exec(s);
@@ -203,17 +208,26 @@
       return null;
     }
     var raw = m[2];
-    var dot = raw.indexOf(signs.decimal);
-    var plain = raw.split(signs.group).join("").replace(signs.decimal, ".");
-    return { pre: m[1], val: parseFloat(plain), dec: dot >= 0 ? raw.length - dot - 1 : 0, comma: raw.indexOf(signs.group) >= 0, post: m[3] };
+    var sign = signs.money !== signs.decimal && raw.indexOf(signs.money) >= 0 ? signs.money : signs.decimal;
+    var dot = raw.indexOf(sign);
+    var plain = raw.split(signs.group).join("").replace(sign, ".");
+    var p = { pre: m[1], val: parseFloat(plain), dec: dot >= 0 ? raw.length - dot - 1 : 0, comma: raw.indexOf(signs.group) >= 0, post: m[3] };
+    if (sign !== signs.decimal) {
+      p.money = sign;
+    }
+    return p;
   }
 
   /* A figure parseNum read, with the value v, written back in the same signs: grouped as the locale groups when it was. */
   function fmtNum(p, v) {
-    var F = numberSigns().formats;
+    var signs = numberSigns();
+    var F = signs.formats;
     var s;
     if (F) {
       s = p.comma ? F.number(v, { digits: p.dec }) : F.number(v.toFixed(p.dec), { group: false });
+      if (p.money) {
+        s = s.replace(signs.decimal, p.money);
+      }
     } else {
       s = p.comma ? v.toLocaleString("en-US", { minimumFractionDigits: p.dec, maximumFractionDigits: p.dec }) : v.toFixed(p.dec);
     }

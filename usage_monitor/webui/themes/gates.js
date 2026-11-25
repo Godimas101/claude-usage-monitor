@@ -68,8 +68,9 @@
       if (NAMES[word]) {
         return NAMES[word];
       }
-      // 2.6K, 1.5M, 3.2B: a magnitude written straight after its digits keeps its capital
-      return /^[KMBT]$/.test(word) && /[\d.]/.test(text.charAt(at - 1)) ? word : word.toLowerCase();
+      // 2.6K, 1.5M, 3.2B: a magnitude written straight after its digits keeps its capital, and so does one after a
+      // no-break space, as the page's formats write it in French, Spanish and Turkish (#91: "1,5 M", Turkish "1,5 B")
+      return /^[KMBT]$/.test(word) && /[\d.][\u00a0\u202f]?$/.test(text.slice(0, at)) ? word : word.toLowerCase();
     });
   }
 

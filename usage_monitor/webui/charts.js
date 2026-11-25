@@ -488,14 +488,20 @@
 
   // ── hbars: labelled horizontal bars ──────────────────────────────────────────
 
-  /* rows: [{label, value, text, tip, alt}]. opts: width, rowHeight, labelWidth, valueWidth, max, pips, label.
-   * `text` is the right-hand value; `tip` is the tooltip and the accessible name; `alt` uses the second colour. */
+  /* rows: [{label, value, text, tip, alt}]. opts: width, rowHeight, labelWidth, fitLabels, valueWidth, max, pips, label.
+   * `text` is the right-hand value; `tip` is the tooltip and the accessible name; `alt` uses the second colour.
+   * With fitLabels, labelWidth is the least the label column takes: it grows to the widest label, so none is cut (the
+   * month labels, which a language can write longer than English's: fr-CA "JUILL. 26"). */
   function hbars(rows, opts) {
     opts = opts || {};
     rows = rows || [];
     var w = Math.max(220, num(opts.width, 560)), rowH = num(opts.rowHeight, 24), barH = num(opts.barHeight, 10);
     var longest = rows.reduce(function (a, r) { return Math.max(a, textWidth(r.text || "", "mon-hbars", true)); }, 0);
     var labelW = num(opts.labelWidth, clamp(Math.round(w * 0.34), 96, 230)), gap = 10;
+    if (opts.fitLabels) {
+      var widest = rows.reduce(function (a, r) { return Math.max(a, textWidth(r.label, "mon-hbars", false)); }, 0);
+      labelW = Math.max(labelW, Math.ceil(widest) + 2);              // fitLabel cuts a label wider than labelW - 2
+    }
     var valueW = Math.max(num(opts.valueWidth, 84), Math.ceil(longest) + 2);             // the value text never runs into the bar
     var barW = Math.max(24, w - labelW - valueW - gap * 2);
     var h = Math.max(rowH, rows.length * rowH + 2);

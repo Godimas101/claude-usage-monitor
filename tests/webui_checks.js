@@ -478,6 +478,62 @@ out.fmtUsdUnchanged = [api.fmtUsd(12.5), api.fmtUsd(1234.5)];
   }
 }
 
+// ── #91's review: billions, other currencies, the alert levels, the pending money notes, the month labels ───
+{
+  const meta = (locale) => ({ getAttribute: (k) => (k === "content" ? JSON.stringify(locale) : null) });
+  // A page in a format tag; input stands for the alert level field (#alert-add) the Settings page has.
+  const pageIn = (tag, input) => {
+    const found = meta({ setting: "system", language: tag.split("-")[0], system: tag.split("-")[0], format: tag, clock: 24,
+      offered: ["en", tag.split("-")[0]] });
+    return load((sel) => (sel === 'meta[name="monitor-locale"]' ? found : sel === "#alert-add" ? input || null : null));
+  };
+  const TAGS = ["en-US", "fr-FR", "fr-CA", "es-ES", "es-MX", "es-US", "tr-TR"];
+  out.review = { billions: {}, money: {}, levels: {}, pending: {}, months: {} };
+  const MONTHS_OF = (year) => Array.from({ length: 12 }, (_, i) => year + "-" + String(i + 1).padStart(2, "0"));
+  const labelsIn = (svg) => [...String(svg).matchAll(/<text class="mon-t" x="0" y="[\d.]+">([^<]*)<\/text>/g)].map((m) => m[1]);
+  for (const tag of TAGS) {
+    const input = { value: "80" };
+    const page = pageIn(tag, input);
+    const a = page.api;
+    // a count in the billions: Spanish writes it in millions ("2254 M"), with the digits of the unrounded count
+    out.review.billions[tag] = [2.254e9, 9.995e9, 1.5e9, 1.25e10, -2.254e9].map(a.fmtCount);
+    // real money in another currency is written with its code, never with the plain "$" of the US-dollar figures
+    out.review.money[tag] = [a.fmtMoney(5.96, "cad"), a.fmtMoney(5.96, "MXN"), a.fmtMoney(-1234.5, "EUR"), a.fmtUsd(5.96)];
+    // the alert levels' chips and the error for a level that is set already
+    a.S.settings = { alert_thresholds: [80, 50], alerts_enabled: true };
+    const chips = element("alert-chips");
+    a.syncAlerts({ querySelector: (sel) => (sel === "#alert-chips" ? chips : null), querySelectorAll: () => [] });
+    page.elements["err-alert_thresholds"] = element("err-alert_thresholds");
+    a.addLevel();
+    out.review.levels[tag] = {
+      chips: [...chips.innerHTML.matchAll(/<b>([^<]*)<\/b>/g)].map((m) => m[1]),
+      labels: [...chips.innerHTML.matchAll(/aria-label="([^"]*)"/g)].map((m) => m[1]),
+      error: page.elements["err-alert_thresholds"].textContent,
+    };
+    // the money a pending note shows until its figure comes, beside the figure that comes
+    a.S.stats = {};
+    a.S.nextCharts = {};
+    out.review.pending[tag] = [(a.dailyChart(null).match(/<span class="nm-meta-t"[^>]*>([^<]*)</) || [])[1],
+      (a.costToolbar("week", null, false).match(/<span class="nm-toolbar-n"[^>]*>([^<]*)</) || [])[1],
+      (a.costToolbar("week", 123.45, false).match(/<span class="nm-toolbar-n"[^>]*>([^<]*)</) || [])[1]];
+    // the month-by-month chart's labels, measured with charts.js's own estimate (7.9 px a character, wider than the
+    // themes' fonts): none is cut, and English's label column stays 64 px
+    pxPerChar = 7.9;
+    page.charts.refresh();
+    a.S.nextCharts = {};
+    const monthly = MONTHS_OF(2026).map((month, i) => ({ month, cost_usd: 100 + i, multiplier: 1.5, requests: 10, tokens: 1e6 }));
+    a.monthlyCard({ monthly }, { digest: "d" });
+    const built = Object.keys(a.S.nextCharts).map((id) => a.S.nextCharts[id].build(500))[0];
+    const rows = monthly.map((m) => ({ label: a.monthLabel(m.month), value: m.cost_usd, text: "x" }));
+    out.review.months[tag] = { labels: labelsIn(built), full: rows.map((r) => r.label),
+      bars: (String(built).match(/<rect class="mon-(?:track|mark)[^"]*" x="([\d.]+)"/) || [])[1],
+      plain: (page.charts.hbars(rows, { width: 500, labelWidth: 64 })
+        .match(/<rect class="mon-(?:track|mark)[^"]*" x="([\d.]+)"/) || [])[1] };
+    pxPerChar = 6;
+    page.charts.refresh();
+  }
+}
+
 // ── the plan multiple: a cell a month, or a month per N cells beyond 24 ───────────────────────────────────
 function cells(ratio) {
   const html = api.ratioCells(ratio, "r");

@@ -171,6 +171,10 @@
   var TIGHT_M = { scale: 6, tight: true };
   // Ten zeros, the width a typical all-time total has, grouped as the locale groups them.
   var ODOMETER_PLACEHOLDER = FMT.number(1e9).replace(/\d/g, "0");
+  // The money a pending note shows until its figure comes, in the locale's shape: the cost toolbar's "$000.00" and the
+  // daily chart's "TOP $00.00" in English.
+  var COST_NOTE_PLACEHOLDER = FMT.usd("123.45").replace(/\d/g, "0");
+  var TOP_PLACEHOLDER = FMT.usd("12.34").replace(/\d/g, "0");
   var LOCALE_RELOAD_MARK = "usage-monitor-locale-reload:";
   // A reload that brought the page into the locale it was for is done: its mark goes (reloadForLocale).
   if (LOCALE_KNOWN && window.name === localeMark(LOCALE)) {
@@ -576,7 +580,11 @@
       return "--";
     }
     var a = Math.abs(n);
-    return a >= 1000 ? FMT.usd(n < 0 ? -Math.round(a) : Math.round(a), { digits: 0 }) : FMT.usd((n < 0 ? "-" : "") + a.toFixed(2));
+    if (a >= 1000) {
+      return FMT.usd(n < 0 ? -Math.round(a) : Math.round(a), { digits: 0 });
+    }
+    // English keeps its own text: an amount that rounds up to 1000.00 has no group ("$1000.00").
+    return FMT.english ? (n < 0 ? "-$" : "$") + a.toFixed(2) : FMT.usd((n < 0 ? "-" : "") + a.toFixed(2));
   }
 
   function fmtUsdExact(value) {
@@ -665,13 +673,13 @@
     }
     var a = Math.abs(n);
     if (a >= 1e9) {
-      return FMT.compact((n / 1e9).toFixed(2), 9);
+      return FMT.compact((n / 1e9).toFixed(2), 9, n);
     }
     if (a >= 1e6) {
-      return FMT.compact((n / 1e6).toFixed(1), 6);
+      return FMT.compact((n / 1e6).toFixed(1), 6, n);
     }
     if (a >= 1e3) {
-      return FMT.compact((n / 1e3).toFixed(1), 3);
+      return FMT.compact((n / 1e3).toFixed(1), 3, n);
     }
     return FMT.number(String(Math.round(n)), NO_GROUP);
   }
@@ -2172,7 +2180,7 @@
         label: "Daily API-equivalent cost, last 30 days, average " + fmtUsd(avg) + " a day"
       });
     }, [he.digest, pipsOn, cycleStart], "nm-daily", waiting);
-    return '<div class="nm-card-t nm-chart-t"><span class="nm-ttl">DAILY &middot; LAST 30 DAYS</span><span class="nm-meta-t"' + (waiting ? ' data-pending=""' : "") + ">" + esc(waiting ? "TOP $00.00" : meta) + "</span></div>" +
+    return '<div class="nm-card-t nm-chart-t"><span class="nm-ttl">DAILY &middot; LAST 30 DAYS</span><span class="nm-meta-t"' + (waiting ? ' data-pending=""' : "") + ">" + esc(waiting ? "TOP " + TOP_PLACEHOLDER : meta) + "</span></div>" +
       '<div class="nm-chart">' + host + "</div>";
   }
 
@@ -2683,7 +2691,7 @@
     });
     var body = rows.length
       ? chartHost(function (w) {
-        return CHARTS.hbars(rows, { width: w, labelWidth: 64, valueWidth: 118, label: "API-equivalent cost by month" });
+        return CHARTS.hbars(rows, { width: w, labelWidth: 64, fitLabels: true, valueWidth: 118, label: "API-equivalent cost by month" });
       }, [e.digest, "monthly"], "nm-hbars") + '<p class="nm-note">The bar is the month&rsquo;s API-equivalent cost; the multiple is against the plan price.</p>'
       : '<p class="nm-empty">No monthly history yet.</p>';
     return card({ key: "monthly", title: "Month by month", meta: "API-equivalent, with the plan multiple", cls: "span-7", body: body });
@@ -2741,7 +2749,7 @@
     var waiting = winCost === null && !gone;
     return '<div class="nm-toolbar wide"><span class="nm-toolbar-k">Breakdowns for</span>' + seg("cost-window", "Window for the breakdowns", WINDOW_SEG, pick) +
       '<span class="nm-toolbar-n"' + (waiting ? ' data-pending="" aria-hidden="true"' : "") + ">" +
-      esc(gone ? WINDOW_PHRASE[pick] + ", not loaded" : WINDOW_PHRASE[pick] + ", " + (waiting ? "$000.00" : fmtUsd(winCost)) + " " + FMT.lower(BASIS, "en")) + "</span></div>";
+      esc(gone ? WINDOW_PHRASE[pick] + ", not loaded" : WINDOW_PHRASE[pick] + ", " + (waiting ? COST_NOTE_PLACEHOLDER : fmtUsd(winCost)) + " " + FMT.lower(BASIS, "en")) + "</span></div>";
   }
 
   function costPage() {
@@ -3493,7 +3501,7 @@
     var chips = $("#alert-chips", main);
     if (chips) {
       var html = alertLevels().map(function (v) {
-        return '<span class="nm-tchip" role="listitem"><b>' + v + '%</b><button type="button" data-action="alert-remove" data-level="' + v + '" data-fid="alert-rm-' + v +
+        return '<span class="nm-tchip" role="listitem"><b>' + esc(FMT.percent(String(v))) + '</b><button type="button" data-action="alert-remove" data-level="' + v + '" data-fid="alert-rm-' + v +
           '" aria-label="Remove the ' + v + ' percent level"' + (enabled ? "" : " disabled") + ' data-needs-alerts="1">&times;</button></span>';
       }).join("") || '<span class="nm-note">No levels set</span>';
       if (chips.getAttribute("data-sig") !== html) {
@@ -4469,7 +4477,7 @@
     }
     var n = parseInt(raw, 10);
     if (levels.indexOf(n) >= 0) {
-      fieldError("alert_thresholds", n + "% is already a level.");
+      fieldError("alert_thresholds", FMT.percent(String(n)) + " is already a level.");
       return;
     }
     if (levels.length >= 5) {
@@ -5429,7 +5437,9 @@
       comparisonList: comparisonList, efficiencyCard: efficiencyCard, efficiencyCards: efficiencyCards,
       weeklyForecast: weeklyForecast, dailyChart: dailyChart, DAYS: DAYS, WEEKDAYS_MON: WEEKDAYS_MON, MONTHS: MONTHS,
       // and the date, word and case sites of steps 2.3 to 2.7
-      dayLabel: dayLabel, monthLabel: monthLabel, whoWords: whoWords, workWords: workWords, surfaceCard: surfaceCard
+      dayLabel: dayLabel, monthLabel: monthLabel, whoWords: whoWords, workWords: workWords, surfaceCard: surfaceCard,
+      // and #91's review: the alert levels, the pending money notes and the month-by-month chart
+      syncAlerts: syncAlerts, addLevel: addLevel, costToolbar: costToolbar, monthlyCard: monthlyCard
     };
     return;
   }

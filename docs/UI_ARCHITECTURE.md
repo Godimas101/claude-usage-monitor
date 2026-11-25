@@ -475,10 +475,15 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   own: `webui/formats.js` (`window.MonitorFormats`: `make(locale)`, and `active()` from the `monitor-locale` meta),
   loaded before every other page script. English keeps the page's own shapes (`tests/fixtures/webui_formats_english.json`
   holds them), the pseudo-locale takes them with the same two changes, and French, Spanish and Turkish go through `Intl`
-  with the format tag, so the WebView's own CLDR data; US dollars are the plain `$` (`narrowSymbol`). Its `number`,
-  `percent`, `usd` and `compact` take the caller's digits too, and `tight` drops the space beside `%` and `$`. `app.js`
-  writes every number, percent and dollar through it (`FMT`), the figures in its sentences and charts too; English keeps
-  its own text where it was odd (a tile's `$-123`), and the odometer's separators are the locale's group sign. The cost
+  with the format tag, so the WebView's own CLDR data; US dollars are the plain `$` (`narrowSymbol`), and any other
+  currency is written with its code, as `formats.py` writes it (`5,96 CAD` in fr-CA, where the local symbol would be the
+  same `$`; English keeps Intl's `CA$5.96`). Its `number`, `percent`, `usd` and `compact` take the caller's digits too,
+  and `tight` drops the space beside `%` and `$`; where Spanish has no compact unit for a count (10^9 to 10^10, written
+  in millions) `compact` writes the unrounded count (`2254 M`, never `2250,00 M`). `app.js` writes every number, percent
+  and dollar through it (`FMT`), the figures in its sentences, charts, alert levels and pending notes too (`TOP 00,00 $`
+  until the daily chart's figure comes); English keeps its own text where it was odd (a tile's `$-123`, `$1000.00` for
+  cents that round up to a thousand), and the odometer's separators are the locale's group sign. The month-by-month
+  chart's label column grows to its widest label (fr-CA `JUILL. 26`), never under English's 64 px. The cost
   tiles and the big cost figure are the page's boxes sized for English's figures: their dollar is tight. A compact
   figure keeps CLDR's space before its unit, so French's `99,9 k$` has seven characters where English's `$99.9K` has six
   (`tests/budgets.py` measures them with `PAGE_MONEY`, which `test_webui.py` holds to the page in every format tag;
@@ -496,14 +501,16 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   them all the second way). English keeps `2 D 3 H`. Lists are English's `X, Y and Z` (no Oxford comma), else
   `Intl.ListFormat`'s; `plural()` keeps English's `s` rule for its English words, with the locale's number. `motion.js`
   reads and writes a rolling figure in the page's group and decimal signs, a sign-first percent too (`34,5 %` rolls as
-  34.5; outside English a group sign counts only between digits), and Gates sets the small percent sign on the side the
-  language writes it (`%34`). V2:
-  `tests/webui_cldr.js` writes the page's formats in every format tag over a grid, and `test_webui.py` holds them to
+  34.5; outside English a group sign counts only between digits), and an amount in the currency's own decimal sign
+  where CLDR sets it apart (fr-CH's `1 107.50 $` rolls and ends on its point); Gates sets the small percent sign on the
+  side the language writes it (`%34`). V2:
+  `tests/webui_cldr.js` writes the page's formats in every format tag over a grid (real codes, EUR and CAD, as well as
+  one Intl refuses), and `test_webui.py` holds them to
   `formats.py`'s and `casing.py`'s, except a list of known differences, each with its tag, field, both values and both
   versions. Seen on node 24.13 (ICU 77.1, CLDR 47.0): in every 12-hour clock `Intl` writes U+0020 where CLDR's patterns
   put U+202F, and ICU's Spanish day periods hold U+00A0 where Babel's hold U+202F; ICU's data differs from Babel's for
-  es-AR and es-CO (a space after `$`), es-GQ (the sign first), fr-MA (a `.` group, `a.m.`) and tr-CY (the day period
-  after the time); and `tight` drops es-PY's space between `$` and the minus on the page only.
+  es-AR and es-CO (a space after `$`), es-GQ (the sign or code first), fr-MA (a `.` group, `a.m.`) and tr-CY (the day
+  period after the time); and `tight` drops es-PY's space between `$` and the minus on the page only.
 - **Letter case (#91).** `usage_monitor/casing.py`: `upper`, `lower`, `capitalize` and `cased` by the language's rules,
   so Turkish (and Azerbaijani) give `İ` and `ı` and never a combining dot (U+0307); every other language gets Python's
   own. A name in capitals is cased with the words by the language's rule (`HAİKU` in Turkish, Chris's decision); in
@@ -516,8 +523,10 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   same rule (for a language or a tag; the page's language when none is given): `app.js` cases a name in capitals by the
   page's language (`FMT.upper(name)`: a model, a plan, a surface), English words by English's (`FMT.upper(text, "en")`,
   until the text tickets #98 to #101 give each its catalog's language), and theme and accent names English's until
-  #102. `test_webui.py` lists each bare case call `app.js` may make, none on text the page shows (a currency code, a
-  severity, a colour's name against its id, an export format, an accent id).
+  #102. `test_webui.py` lists each bare case call `app.js` may make. Each one cases an id, never words, by the plain
+  mapping on purpose: a currency code, a severity, a colour's name against its id, an export format, an accent id. Three
+  of them reach the page as text made from an id: `PREPARING CSV…`, an accent button's three letters, and a currency
+  code Intl does not know.
 - **Catalogs.** `webui/i18n/<lang>.json`, shared by Python and the page. `en.json` is the source of truth: a key missing
   from another catalog shows its English text, and the lookup says it came from English (`Catalog.text()` and
   `plural()` return an `i18n.Text`, a `str` that knows its `.language`), so the caller marks it `lang="en"` and cases it
@@ -557,8 +566,11 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   case: Nostromo's and Night City's capitals will come from CSS `text-transform` under `lang`, or
   `toLocaleUpperCase(lang)` for SVG text; Gates will show strings as stored, and its own wordings (the `VOCAB` link
   states, "Tokens / min", "Updated {age} ago") get theme keys. Today `app.js` still writes many labels in capitals, and
-  `gates.js` re-cases them through `VOCAB` and `PHRASES`. That re-casing lowers ASCII letters only, by English's rule,
-  so on a Turkish page it turns the formats' `24 EKİ` into `24 ekİ`; it goes with those tickets.
+  `gates.js` re-cases them through `VOCAB` and `PHRASES`. It keeps a compact figure's magnitude in capitals (`1.5M`, and
+  `1,5 M` or Turkish `1,5 B` after the formats' no-break space). That re-casing lowers ASCII letters only, by English's
+  rule, so on a non-English page it breaks words the page writes in its language's capitals: the formats' dates (Turkish
+  `24 ekİ`, `AĞu 9`; Spanish `SÁb, 16:12`, `MiÉ`) and, on a Turkish page, the model and product names in the model rows
+  (`Haİku 4.5`, `Claude İn Chrome`, where English capitals gave `Haiku`). It goes with those tickets (#101 for Gates).
 - **Rendering never reads Windows.** The locale rides on the view model (#91, not #93: it is the first ticket in which
   the widgets draw something that depends on the language): `build_model(..., locale=)` fills `WidgetModel.locale`,
   English by default, and the app passes `MonitorApp.locale()`. A locale change redraws, since the frame caches key on
@@ -1037,13 +1049,16 @@ default browser instead, and the exit code says so (below).
   tests start node, so they need `USAGE_MONITOR_UI_TESTS=1`, and `tests.yml` runs them (and `tests/test_motion.py` and
   `tests/test_english_left.py`) once more with it set. `tests/webui_formats.js` runs every formatter of the page
   (numbers, money, durations, clocks, dates, lists, the odometer, the rolling figures and the sentences and charts that
-  hold a number) on a fixed grid with TZ=UTC and the page's clock still, and `test_webui.py` holds it to
-  `tests/fixtures/webui_formats_english.json`, recorded before #91 changed the page: English never changes by a byte.
+  hold a number) on a fixed grid with TZ=UTC and the page's clock still, `motion.js` behind `formats.js` with English's
+  locale as on the page, and `test_webui.py` holds it to `tests/fixtures/webui_formats_english.json`, recorded from the
+  page before #91 changed it (three amounts that round up to $1000.00 were added in #91's review, recorded from the
+  same page): English never changes by a byte.
   `tests/webui_cldr.js` runs `formats.js` alone in every format tag of French, Spanish and Turkish over the grid
   `test_webui.py` gives it, with TZ=UTC, and prints node's ICU and CLDR versions with the result (V2, in Formats above).
 - **Money.** Real money (the extra-usage Spend card) is shown in the account's own currency (`fmtMoney`, an
   `Intl.NumberFormat` with the ISO code the usage API reports; USD where it reports none), through `formats.js`: US
-  dollars are the plain `$` in French, Spanish and Turkish. API-equivalent cost stays dollars. `/api/state.plan` carries the detected plan and price only: `plan_price_override` is a setting,
+  dollars are the plain `$` in French, Spanish and Turkish, and another currency is written with its code there
+  (`5,96 CAD`), as the alerts write it. API-equivalent cost stays dollars. `/api/state.plan` carries the detected plan and price only: `plan_price_override` is a setting,
   applied where a price is used (the reports, and `effectivePlanPrice()` in the page), so setting or clearing it
   never rewrites state. The hint beside the override names the detected plan and price, and `syncHints` keeps it
   to the latest state: loaded on `#settings` the page is drawn before the first state, and a first sign-in or a new

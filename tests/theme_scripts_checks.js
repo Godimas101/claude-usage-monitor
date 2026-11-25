@@ -277,6 +277,17 @@ for (const theme of ["nostromo", "night_city", "gates"]) {
       n.nodeType === 3 ? n.nodeValue : n.textContent]);
   }
   out.gatesPercent.thrown = w.thrown.slice();
+  // its sentence case keeps a magnitude's capital after its digits, and after the no-break space the page's formats put
+  // there in French, Spanish and Turkish (#91's review: "1,5 M" is millions, "1,5 m" would read as milli); node's ICU
+  // puts a U+00A0 there, and a U+202F (French's narrow space) is taken too
+  out.gatesCase = {};
+  for (const text of ["1.5M", "$1.2K", "$1.2M", "1.50B", "1,2\u00a0M$", "1,5\u00a0M", "2254\u00a0M", "1,5\u00a0B", "1,2\u00a0B$",
+    "$1.2\u00a0K", "1.2\u00a0M$", "1\u202f234\u00a0M", "1,5\u202fM", "3\u00a0MIN", "12 M"]) {
+    const figure = new Figure(text);
+    watching.forEach((o) => attempt(w, o.cb, [{ type: "characterData", target: figure.firstChild }]));
+    out.gatesCase[text] = figure.textContent;
+  }
+  out.gatesCase.thrown = w.thrown.slice();
 }
 
 console.log(JSON.stringify(out));
