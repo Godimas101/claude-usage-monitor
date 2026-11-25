@@ -12,6 +12,7 @@ import pytest
 
 from usage_monitor.data import alerts, identity
 from usage_monitor.data.models import Limit
+from usage_monitor.i18n import ENGLISH
 from usage_monitor.data.usage_api import _label
 
 RESETS = datetime(2026, 11, 25, 16, 0, tzinfo=timezone.utc)
@@ -57,13 +58,13 @@ def limit(kind: str, label: str, *, model: str | None = None, surface: str | Non
     (limit("monthly_all", "MONTHLY ALL"), "Monthly all"),
 ])
 def test_a_title_is_worded_from_the_kind_and_scope(item, title):
-    assert alerts._name(item) == title
+    assert alerts._name(item, ENGLISH) == title
 
 
 def test_a_title_does_not_read_its_label_when_it_has_one():
     """The words come from the kind and the model; whatever the label says, the title is the same."""
-    assert alerts._name(limit("weekly_scoped", "WHATEVER", model="Fable")) == "Fable weekly"
-    assert alerts._name(limit("session", "anything at all")) == "Session"
+    assert alerts._name(limit("weekly_scoped", "WHATEVER", model="Fable"), ENGLISH) == "Fable weekly"
+    assert alerts._name(limit("session", "anything at all"), ENGLISH) == "Session"
 
 
 @pytest.mark.parametrize(("item", "title"), [
@@ -72,4 +73,4 @@ def test_a_title_does_not_read_its_label_when_it_has_one():
     (limit("weekly_all", "   "), "Weekly"),
 ])
 def test_a_limit_with_no_label_falls_back_to_its_kind_then_its_model(item, title):
-    assert alerts._name(item) == title
+    assert alerts._name(item, ENGLISH) == title

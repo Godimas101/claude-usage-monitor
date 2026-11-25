@@ -21,17 +21,18 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone, tzinfo
 from typing import Any
 
+from usage_monitor import casing, formats
 from usage_monitor.data.identity import scope_name
 from usage_monitor.data.models import ApiStatus, Limit, MonitorState, Spend
-from usage_monitor.i18n import ENGLISH, Locale
+from usage_monitor.i18n import DEFAULT, ENGLISH, PSEUDO, Locale
 from usage_monitor.log import get_logger
 from usage_monitor.settings import DEFAULTS, Settings, parse_clock
 
 log = get_logger(__name__)
 
-_DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 _SAME_WINDOW = timedelta(seconds=60)  # resets_at jitter below this is the same window (as in analytics)
 _FALLBACK_NAMES = {"session": "Session", "weekly_all": "Weekly"}
+_KIND_WORDS = {"session": "session", "weekly_all": "weekly"}    # the same, for casing.cased (other languages)
 
 
 @dataclass(slots=True)
@@ -69,7 +70,8 @@ class AlertEngine:
     """Turns successive MonitorStates into the alerts that should be shown.
 
     ``locale_provider`` gives the app's locale (i18n.LocaleSource, #91); it is read on every evaluation, as the
-    settings are. Without one the alerts are English."""
+    settings are. Without one the alerts are English. The words stay English until #97; the numbers, the reset
+    times (as the widgets write them) and the case of the names follow the locale."""
 
     def __init__(self, settings: Settings, *, tz: tzinfo | None = None,
                  locale_provider: Callable[[], Locale] | None = None) -> None:
@@ -95,20 +97,21 @@ class AlertEngine:
         if state.status is not ApiStatus.LIVE or state.usage is None:
             return []
         cfg = self._config()
+        locale = self._locale()
         now = state.updated_at
         candidates: list[Alert] = []
         with self._lock:
             for limit in state.usage.limits:
                 try:
-                    candidates.extend(self._limit(limit, cfg, now))
+                    candidates.extend(self._limit(limit, cfg, now, locale))
                 except Exception:
                     log.exception("alert check failed for limit %r", getattr(limit, "label", None))
             try:
-                candidates.extend(self._expire(cfg, now))
+                candidates.extend(self._expire(cfg, now, locale))
             except Exception:
                 log.exception("alert check failed for ended windows")
             try:
-                candidates.extend(self._credits(state.usage.spend, now))
+                candidates.extend(self._credits(state.usage.spend, now, locale))
             except Exception:
                 log.exception("alert check failed for usage credits")
         if suppressed or not cfg.enabled or _in_quiet_hours(cfg.quiet, now, self._tz):
@@ -116,7 +119,7 @@ class AlertEngine:
         allowed = {"threshold": cfg.on_threshold, "reset": cfg.on_reset, "credits": cfg.on_credits}
         return [alert for alert in candidates if allowed.get(alert.kind, False)]
 
-    def _limit(self, limit: Limit, cfg: _Config, now: datetime) -> list[Alert]:
+    def _limit(self, limit: Limit, cfg: _Config, now: datetime, locale: Locale) -> list[Alert]:
         percent = limit.percent
         if not _finite(percent) or not isinstance(limit.resets_at, datetime):
             return []  # nothing to judge without a percent and a reset time
@@ -130,9 +133,10 @@ class AlertEngine:
             # First sight of this limit, or its first window since a reset that was announced when the old one ran
             # out: whatever level it is at now is baseline, not news.
             self._tracks[lid] = _Track(_window_key(resets_at), resets_at, float(percent), float(percent),
-                                       {t for t in cfg.thresholds if t <= percent}, _name(limit), closed=ended)
+                                       {t for t in cfg.thresholds if t <= percent}, _name(limit, locale),
+                                       closed=ended)
             return []
-        track.name = _name(limit)
+        track.name = _name(limit, locale)
         if ended:
             return []  # a window that is over has no thresholds left; _expire() announces its reset
 
@@ -144,8 +148,8 @@ class AlertEngine:
                     key=f"reset:{lid[0]}:{lid[1]}:{resets}",
                     kind="reset",
                     severity="info",
-                    title=f"{_name(limit)} limit reset",
-                    message=_reset_text(limit, self._tz),
+                    title=f"{_name(limit, locale)} limit reset",
+                    message=_reset_text(limit, self._tz, locale),
                 ))
             track.key = resets
             track.high = 0.0
@@ -165,12 +169,12 @@ class AlertEngine:
                 key=f"threshold:{lid[0]}:{lid[1]}:{track.key}:{top}",
                 kind="threshold",
                 severity="critical" if top >= 100 else "warning",
-                title=f"{_name(limit)} limit at {top}%",
-                message=_reset_text(limit, self._tz),
+                title=f"{_name(limit, locale)} limit at {formats.percent(str(top), locale)}",
+                message=_reset_text(limit, self._tz, locale),
             ))
         return out
 
-    def _expire(self, cfg: _Config, now: datetime) -> list[Alert]:
+    def _expire(self, cfg: _Config, now: datetime, locale: Locale) -> list[Alert]:
         """Reset alerts for the windows whose time has run out, whatever the usage API still shows.
 
         A window that ended is closed here, once: its level and thresholds are cleared and the next window that appears
@@ -190,11 +194,11 @@ class AlertEngine:
                     kind="reset",
                     severity="info",
                     title=f"{track.name or 'Usage'} limit reset",
-                    message="Usage is back to 0%.",
+                    message=f"Usage is back to {formats.percent('0', locale)}.",
                 ))
         return out
 
-    def _credits(self, spend: Spend | None, now: datetime) -> list[Alert]:
+    def _credits(self, spend: Spend | None, now: datetime, locale: Locale) -> list[Alert]:
         if spend is None or not _finite(spend.used):
             return []
         used = float(spend.used)
@@ -210,7 +214,7 @@ class AlertEngine:
             kind="credits",
             severity="info",
             title="Usage credits in use",
-            message=_credits_text(spend),
+            message=_credits_text(spend, locale),
         )]
 
     # ── Settings ──
@@ -277,16 +281,36 @@ def _window_key(resets_at: datetime) -> str:
     return resets_at.astimezone(timezone.utc).replace(second=0, microsecond=0).isoformat()
 
 
-def _name(limit: Limit) -> str:
+def _name(limit: Limit, locale: Locale) -> str:
     """The limit's name for a title, sentence case: "Fable weekly", "Weekly scoped", "Session" (#90). It is worded from the
     kind and the scope, not from the label. A limit with no label (none comes from the API) is named by its kind, else
-    by its model."""
+    by its model. English (and the pseudo-locale) cases the name with the words, as it always has ("Claude opus 5
+    weekly"). Another language puts the name in as written, with its first letter in capitals by the language's
+    rule where it starts the title (#91): "Claude Opus 5 weekly", and "İstanbul weekly" for "istanbul" in Turkish."""
+    if locale.language not in (DEFAULT, PSEUDO):
+        template, names = _title_words(limit)
+        return " ".join(casing.cased(template, "sentence", locale.language, **names).split())
     if (limit.label or "").strip() and limit.kind:
         text = _kind_words(limit)
     else:
         text = _FALLBACK_NAMES.get(limit.kind) or (limit.scope_model or "Scoped")
     text = " ".join(text.split())
     return text[:1].upper() + text[1:].lower()
+
+
+def _title_words(limit: Limit) -> tuple[str, dict[str, str]]:
+    """A title's words for a language other than English (English words until #97, in lower case for casing.cased)
+    and the name they hold: ("{name} weekly", {"name": "Fable"}). A kind the app has no words for is the API's name."""
+    if (limit.label or "").strip() and limit.kind:
+        if limit.kind in _KIND_WORDS:
+            return _KIND_WORDS[limit.kind], {}
+        if limit.kind == "weekly_scoped":
+            scope = scope_name(limit.scope_model, limit.scope_surface)
+            return ("{name} weekly", {"name": scope}) if scope else ("weekly scoped", {})
+        return "{name}", {"name": limit.kind.replace("_", " ")}
+    if limit.kind in _KIND_WORDS:
+        return _KIND_WORDS[limit.kind], {}
+    return ("{name}", {"name": limit.scope_model}) if limit.scope_model else ("scoped", {})
 
 
 def _kind_words(limit: Limit) -> str:
@@ -301,18 +325,25 @@ def _kind_words(limit: Limit) -> str:
     return limit.kind.replace("_", " ").upper()
 
 
-def _reset_text(limit: Limit, tz: tzinfo | None) -> str:
+def _reset_text(limit: Limit, tz: tzinfo | None, locale: Locale) -> str:
+    """"Resets 4:40 PM" for the session, "Resets Tue 4:00 PM" for the others: the reset time in ``locale``, as the
+    widgets write it (formats.clock and formats.day_clock)."""
     local = limit.resets_at.astimezone(tz)
-    clock = f"{local.hour % 12 or 12}:{local.minute:02d} {'AM' if local.hour < 12 else 'PM'}"
     if limit.kind == "session":
-        return f"Resets {clock}"
-    return f"Resets {_DAYS[local.weekday()]} {clock}"
+        return f"Resets {formats.clock(local, locale)}"
+    return f"Resets {formats.day_clock(local, locale)}"
 
 
-def _credits_text(spend: Spend) -> str:
-    text = f"Used {spend.used:,.2f}"
+def _credits_text(spend: Spend, locale: Locale) -> str:
+    """"Used 1,234.56 of 10,000.00 USD" in English, as always. Another language writes each amount in its own way, US
+    dollars as the plain "$" and another currency by its code, and no code after them: "Used 1 234,56 $ of
+    10 000,00 $" in French (#91)."""
+    if formats.english_shapes(locale):
+        text = f"Used {formats.number(f'{spend.used:.2f}', locale)}"
+        if _finite(spend.limit):
+            text += f" of {formats.number(f'{spend.limit:.2f}', locale)}"
+        return text + (f" {spend.currency}" if spend.currency else "")
+    text = f"Used {formats.money(spend.used, spend.currency, locale)}"
     if _finite(spend.limit):
-        text += f" of {spend.limit:,.2f}"
-    if spend.currency:
-        text += f" {spend.currency}"
+        text += f" of {formats.money(spend.limit, spend.currency, locale)}"
     return text

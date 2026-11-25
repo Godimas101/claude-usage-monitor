@@ -140,11 +140,12 @@ def test_the_widgets_numbers_are_the_recorded_ones(english, group, name):
 
 def test_the_alerts_names_reset_texts_and_credits_are_the_recorded_ones(english):
     for kind, scope_model, surface, label, text in english["alerts._name"]:
-        assert alerts._name(limit(kind, model=scope_model, surface=surface, label=label)) == text
+        assert alerts._name(limit(kind, model=scope_model, surface=surface, label=label), i18n.ENGLISH) == text
     for kind, at, text in english["alerts._reset_text"]:
-        assert alerts._reset_text(limit(kind, resets_at=utc(at)), timezone.utc) == text, (kind, at)
+        assert alerts._reset_text(limit(kind, resets_at=utc(at)), timezone.utc, i18n.ENGLISH) == text, (kind, at)
     for used, limit_value, currency, text in english["alerts._credits_text"]:
-        assert alerts._credits_text(Spend(enabled=True, used=used, limit=limit_value, currency=currency)) == text
+        spend = Spend(enabled=True, used=used, limit=limit_value, currency=currency)
+        assert alerts._credits_text(spend, i18n.ENGLISH) == text
 
 
 def test_the_alerts_clock_is_the_recorded_clock_for_every_minute(english):
@@ -152,8 +153,8 @@ def test_the_alerts_clock_is_the_recorded_clock_for_every_minute(english):
     for day in range(7):
         for minute, clock in enumerate(english["clock"]):
             at = utc(f"{MONDAY + timedelta(days=day, minutes=minute):%Y-%m-%dT%H:%M}")
-            assert alerts._reset_text(limit("session", resets_at=at), timezone.utc) == f"Resets {clock}"
-            weekly = alerts._reset_text(limit("weekly_all", resets_at=at), timezone.utc)
+            assert alerts._reset_text(limit("session", resets_at=at), timezone.utc, i18n.ENGLISH) == f"Resets {clock}"
+            weekly = alerts._reset_text(limit("weekly_all", resets_at=at), timezone.utc, i18n.ENGLISH)
             assert weekly == f"Resets {english['weekdays'][day]} {clock}"
 
 

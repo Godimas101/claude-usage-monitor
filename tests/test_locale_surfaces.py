@@ -14,9 +14,10 @@ from typing import Any
 
 import pytest
 
-from usage_monitor import app, cldr, formats, i18n
+from usage_monitor import app, casing, cldr, formats, i18n
+from usage_monitor.data import alerts
 from usage_monitor.data.alerts import AlertEngine
-from usage_monitor.data.models import ApiStatus, Limit
+from usage_monitor.data.models import ApiStatus, Limit, Spend
 from usage_monitor.render import dump, engine
 from usage_monitor.render import model as view
 from usage_monitor.render.model import build_model
@@ -395,3 +396,109 @@ def test_the_longest_tray_tooltip_fits_the_shells_127_units_in_every_format():
                   key=lambda text: len(text.encode("utf-16-le")))
     assert "guard holding, resumes" in longest and longest.endswith(" (dev)")
     assert len(longest.encode("utf-16-le")) // 2 <= tray.TIP_LIMIT, longest
+
+
+# ── The alerts (step 1.8) ─────────────────────────────────────────────────────
+
+ALERT_NOW = datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc)
+ALERT_TZ = timezone(timedelta(hours=-5))                 # 7:00 AM local on Thursday 22 October 2026
+SESSION_AT = datetime(2026, 10, 22, 21, 40, tzinfo=timezone.utc)    # 4:40 PM local
+WEEK_AT = datetime(2026, 10, 24, 21, 0, tzinfo=timezone.utc)        # Saturday 4:00 PM local
+
+
+def scoped(model: str | None = "Fable", surface: str | None = None, percent: float = 10.0, **extra: Any) -> Limit:
+    return limit("weekly_scoped", percent, WEEK_AT, label=extra.pop("label", "X WEEKLY"), scope_model=model,
+                 scope_surface=surface, **extra)
+
+
+def alerts_in(settings: Any, locale: i18n.Locale, *steps: list[Limit]) -> list[list[Any]]:
+    """The alerts an engine reading ``locale`` gives for each step's limits, a minute apart (the first is the
+    baseline)."""
+    engine = AlertEngine(settings, tz=ALERT_TZ, locale_provider=lambda: locale)
+    return [engine.evaluate(dump._state(ALERT_NOW + timedelta(minutes=index), ApiStatus.LIVE, limits, 0))
+            for index, limits in enumerate(steps)]
+
+
+def test_the_alerts_write_their_percents_and_reset_times_in_the_locale(settings):
+    fr = loc("fr-FR")
+    found = alerts_in(settings, fr, [limit("session", 10.0, SESSION_AT), limit("weekly_all", 10.0, WEEK_AT)],
+                      [limit("session", 91.0, SESSION_AT), limit("weekly_all", 81.0, WEEK_AT)])[-1]
+    assert [(alert.title, alert.message) for alert in found] == [
+        ("Session limit at 90\u00a0%", "Resets 16:40"), ("Weekly limit at 80\u00a0%", "Resets sam. 16:00")]
+    turkish = alerts_in(settings, loc("tr-TR", 12), [limit("session", 10.0, SESSION_AT)],
+                        [limit("session", 91.0, SESSION_AT)])[-1]
+    assert [(alert.title, alert.message) for alert in turkish] == [("Session limit at %90", "Resets ÖS\u202f4:40")]
+    english = alerts_in(settings, EN, [limit("session", 10.0, SESSION_AT)], [limit("session", 91.0, SESSION_AT)])[-1]
+    assert [(alert.title, alert.message) for alert in english] == [("Session limit at 90%", "Resets 4:40 PM")]
+
+
+def test_a_reset_announced_when_its_window_ends_writes_zero_and_the_name_in_the_locale(settings):
+    """The reset of a window that ran out is worded from the name kept since its last reading."""
+    ended = SESSION_AT + timedelta(minutes=2) - ALERT_NOW
+    engine = AlertEngine(settings, tz=ALERT_TZ, locale_provider=lambda: loc("fr-FR"))
+    for minutes, percent in ((0, 10.0), (1, 91.0), (ended.total_seconds() / 60, 91.0)):
+        now = ALERT_NOW + timedelta(minutes=minutes)
+        limits = [limit("session", percent, SESSION_AT),
+                  limit("weekly_scoped", percent, SESSION_AT, label="X WEEKLY", scope_model="Claude Instant")]
+        found = engine.evaluate(dump._state(now, ApiStatus.LIVE, limits, 0))
+    zero = "Usage is back to 0\u00a0%."
+    assert [(alert.title, alert.message) for alert in found] == [("Session limit reset", zero),
+                                                                 ("Claude Instant weekly limit reset", zero)]
+
+
+@pytest.mark.parametrize("locale", LOCALES, ids=ids)
+def test_the_alerts_reset_time_is_the_widgets_for_every_hour(locale):
+    """The alerts and the view model write a reset time with the same formats, so the two never drift apart. Both read
+    this PC's zone here (the alerts with no zone given), so the moments are its wall times."""
+    for hour in range(24):
+        at = wall(SATURDAY_1612.replace(hour=hour, minute=0))
+        earlier, same_day = at - timedelta(days=2), wall(SATURDAY_1612.replace(hour=0, minute=0))
+        weekly = alerts._reset_text(limit("weekly_all", 40.0, at), None, locale)
+        session = alerts._reset_text(limit("session", 40.0, at), None, locale)
+        assert weekly == f"Resets {view.format_resets(at, earlier, locale)}", hour
+        assert session == f"Resets {view.format_resets(at, same_day, locale)}", hour
+    assert alerts._reset_text(limit("weekly_all", 40.0, WEEK_AT), ALERT_TZ, loc("fr-FR")) == "Resets sam. 16:00"
+
+
+def test_french_credits_are_in_plain_dollars_with_no_code():
+    spend = Spend(enabled=True, used=1234.56, limit=10000.0, currency="USD")
+    fr, es_mx = loc("fr-FR"), loc("es-MX")
+    assert alerts._credits_text(spend, fr) == "Used 1\u202f234,56\u00a0$ of 10\u202f000,00\u00a0$"
+    assert "USD" not in alerts._credits_text(spend, fr)
+    assert alerts._credits_text(spend, es_mx) == "Used $1,234.56 of $10,000.00"
+    euros = Spend(enabled=True, used=5.96, limit=None, currency="EUR")
+    assert alerts._credits_text(euros, fr) == "Used 5,96\u00a0EUR"
+    assert alerts._credits_text(euros, es_mx) == "Used EUR\u00a05.96"
+    assert alerts._credits_text(Spend(enabled=True, used=5.96, currency=None), loc("tr-TR")) == "Used 5,96"
+    assert alerts._credits_text(spend, EN) == "Used 1,234.56 of 10,000.00 USD"
+    assert alerts._credits_text(spend, PSEUDO) == "Used 1\u202f234.56 of 10\u202f000.00 USD"
+
+
+def test_a_turkish_title_keeps_a_name_as_written_and_never_writes_a_combining_dot(settings):
+    """Turkish capitals of "Haiku" are "HAİKU" (Chris); a title is in sentence case, so the name stays "Haiku", and
+    lowering what Turkish capitals made never leaves an i with a dot above (U+0307)."""
+    tr = loc("tr-TR")
+    for model, expected in (("Haiku", "Haiku weekly"), ("Claude Instant", "Claude Instant weekly"),
+                            ("istanbul", "İstanbul weekly"), ("İzmir", "İzmir weekly")):
+        title = alerts._name(scoped(model), tr)
+        assert title == expected and "\u0307" not in title, (model, title)
+        assert "\u0307" not in casing.lower(casing.upper(title, "tr"), "tr")
+    assert casing.upper(alerts._name(scoped("Haiku"), tr), "tr") == "HAİKU WEEKLY"
+    names = ("Haiku", "Claude Instant")
+    found = alerts_in(settings, tr, [scoped(name, percent=10.0, label=name.upper()) for name in names],
+                      [scoped(name, percent=91.0, label=name.upper()) for name in names])[-1]
+    assert [alert.title for alert in found] == ["Haiku weekly limit at %90", "Claude Instant weekly limit at %90"]
+    assert alerts._name(scoped("Claude Instant"), EN) == "Claude instant weekly"         # English keeps its quirk
+
+
+def test_other_languages_name_every_kind_of_limit_from_its_scope():
+    fr = loc("fr-FR")
+    assert alerts._name(limit("session", 1.0, WEEK_AT), fr) == "Session"
+    assert alerts._name(limit("weekly_all", 1.0, WEEK_AT), fr) == "Weekly"
+    assert alerts._name(scoped(None, "claude_code"), fr) == "Claude_code weekly"
+    assert alerts._name(scoped(None, None), fr) == "Weekly scoped"
+    assert alerts._name(limit("design_weekly", 1.0, WEEK_AT, label="DESIGN WEEKLY"), fr) == "Design weekly"
+    assert alerts._name(scoped("Fable", label=""), fr) == "Fable"                # no label: named by its model
+    assert alerts._name(limit("session", 1.0, WEEK_AT, label=""), fr) == "Session"
+    assert alerts._name(scoped("", label=""), fr) == "Scoped"
+    assert alerts._name(scoped(" Spaced  Out ", label=""), fr) == "Spaced Out"
