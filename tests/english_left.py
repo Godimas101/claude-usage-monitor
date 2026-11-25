@@ -14,7 +14,7 @@ a frame has no markup to mark them. On the dashboard, an element marked ``transl
 than the page's, is skipped with all inside it (``tName``, ``tPath`` and ``tCode`` in app.js mark names, paths and
 commands so); an unmarked name, id or path is reported, for the ticket that words its card to mark. An entry is a run
 of text as the page or the frame holds it, digits as "#" and spaces collapsed, so the same words with other figures are
-one entry.
+one entry; the pseudo-locale's number shapes (#91: groups set off by U+202F, a U+00A0 before "%") are English's there.
 
 The widgets: the frame dump (``render/dump.py``) at scale 1.0, every theme, variant, state, strip height and tray size,
 with nothing saved, and the tray tooltip of each sample state. Other scales draw the same words. Text drawn on the
@@ -138,7 +138,10 @@ def _english_runs(runs: Sequence[str], names: Iterable[str]) -> list[str]:
 
 
 def entry(text: str) -> str:
-    """A run of text as the record holds it: digits as "#", spaces collapsed."""
+    """A run of text as the record holds it: digits as "#", spaces collapsed. The pseudo-locale's number shapes fold to
+    English's first (#91, D15 of its plan): a U+202F between digits is a ",", a U+00A0 before "%" is nothing, so a figure
+    the page's formats write the pseudo way is the entry it always was."""
+    text = re.sub(r"(?<=\d)\u202f(?=\d)", ",", text).replace("\u00a0%", "%")
     return re.sub(r"\s+", " ", re.sub(r"\d", "#", text)).strip()
 
 

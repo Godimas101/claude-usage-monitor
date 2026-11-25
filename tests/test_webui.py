@@ -32,7 +32,7 @@ from typing import Any
 
 import pytest
 
-from usage_monitor import i18n, paths, themes
+from usage_monitor import cldr, formats, i18n, paths, themes
 from usage_monitor.data import analytics, windows
 from usage_monitor.render import model as widget_model
 from usage_monitor.themes import colour
@@ -648,11 +648,15 @@ class Markup(HTMLParser):
         return [attrs for name, attrs in self.tags if name == tag]
 
 
+# Every format tag of French, Spanish and Turkish (#91): webui_checks.js writes the page's money boxes in each.
+CLDR_TAGS = sorted(set(cldr.REGIONS) | {i18n.BASE_FORMATS[language] for language in cldr.BASES})
+
+
 @pytest.fixture(scope="module")
 def checks() -> dict[str, Any]:
-    """What tests/webui_checks.js found out by running charts.js and app.js (one node run for the module)."""
-    run = subprocess.run([node_binary(), str(CHECKS_JS), str(WEBUI)], capture_output=True, text=True, timeout=60,
-                         check=False, encoding="utf-8", creationflags=NO_WINDOW)
+    """What tests/webui_checks.js found out by running formats.js, charts.js and app.js (one node run for the module)."""
+    run = subprocess.run([node_binary(), str(CHECKS_JS), str(WEBUI), json.dumps(CLDR_TAGS)], capture_output=True,
+                         text=True, timeout=60, check=False, encoding="utf-8", creationflags=NO_WINDOW)
     assert run.returncode == 0, run.stderr[-800:]
     return json.loads(run.stdout)
 
@@ -1249,6 +1253,89 @@ def test_the_page_takes_its_formats_from_the_monitor_locale_meta(checks: dict[st
     """MonitorFormats.active() reads the meta the server fills in, once; with no meta, one it cannot read, one with no
     language, or no page at all, the page formats in English (as app.js's LOCALE falls back)."""
     assert checks["formatsActive"] == [["tr-TR", "%34", True]] + [["en-US", "34%", True]] * 5
+
+
+def locale_of(language: str, tag: str) -> i18n.Locale:
+    return i18n.Locale(setting="system", language=language, system="en", format=tag, clock=24, offered=("en",))
+
+
+@ui_only
+def test_the_pages_figures_follow_the_format_tag(checks: dict[str, Any]) -> None:
+    """#91 step 2.2: the page's numbers, percents, money and compact figures in the locale: fr 33,5 % (U+00A0), tr %34,
+    fr 5,96 $ (the plain dollar), es-ES 1234 (CLDR's minimum grouping), tr 1,5 B (a thousand); the odometer's separators
+    are the locale's group sign; the figures the page writes into sentences, cards and charts follow it too."""
+    fr, ca, es, mx, tr = (checks["pageFormats"][name] for name in ("frFR", "frCA", "esES", "esMX", "trTR"))
+    assert fr["percent"] == [f"33,5{NB}%", f"34{NB}%", f"33,5{NB}%", f"34,5{NB}%", f"0{NB}%"]
+    assert tr["percent"] == ["%33,5", "%34", "%33,5", "%34,5", "%0"]
+    assert fr["usd"] == [f"5,96{NB}$", f"-5,96{NB}$", f"1{NNB}235{NB}$", f"1{NNB}234,50{NB}$", f"1,2{NB}k{NB}$",
+                         f"100{NB}$", f"17,50{NB}$"]                 # outside the money boxes, CLDR's spaces stay
+    assert mx["usd"][:4] == ["$5.96", "-$5.96", "$1,235", "$1,234.50"] and tr["usd"][:3] == ["$5,96", "-$5,96", "$1.235"]
+    assert es["count"][3:5] == ["1234", "12.345"] and es["usd"][2] == f"1235{NB}$" and mx["count"][3] == "1,234"
+    assert tr["count"][:2] == [f"1,5{NB}B", f"1,5{NB}Mn"] and fr["count"][:3] == [f"1,5{NB}k", f"1,5{NB}M", "999"]
+    assert fr["count"][3:] == [f"1{NNB}234", f"12{NNB}345", "6,0×", f"1{NNB}235", "12", "-3,3", f"1{NNB}234 requests"]
+    assert ca["count"][3] == f"1{NB}234"
+    assert fr["money"] == [f"5,96{NB}$", f"5,96{NB}€", f"5,96{NB}EURO"] and mx["money"][1] == f"EUR{NB}5.96"
+    assert fr["prose"] == ["You are using this window 12,3 points faster than an even pace.",
+                           f"<b>ENDS ~33{NB}%</b> &middot; BUDGET 14{NB}%/DAY", f"33,5{NB}%", "1,2"]
+    assert tr["prose"][1] == "<b>ENDS ~%33</b> &middot; BUDGET %14/DAY"
+    assert tr["ticks"] == ["%0", "%25", "%50", "%75", "%100", "%140"] and fr["ticks"][4] == f"100{NB}%"
+    assert fr["odometer"] == [[f"1{NNB}234{NNB}567 tokens, all time", f"1{NNB}234{NNB}567", 2],
+                              ["-- tokens, all time", f"0{NNB}000{NNB}000{NNB}000", 3]]
+    assert ca["odometer"][0] == [f"1{NB}234{NB}567 tokens, all time", f"1{NB}234{NB}567", 2]
+    assert es["odometer"][1] == ["-- tokens, all time", "0.000.000.000", 3]
+
+
+@ui_only
+def test_the_money_boxes_take_the_dollar_without_its_space(checks: dict[str, Any]) -> None:
+    """Chris's decision on #91 (Q1 (a)): the cost tiles and the big cost figure are sized for English's six characters,
+    so French and Spanish drop the space before "$" there, as usage_monitor/formats.py's money does with tight=True for
+    the widgets' boxes; the sign keeps its side (es-MX $5.96, tr $5,96), and a compact figure keeps the space before its
+    unit. Everywhere else the space stays."""
+    for name, language, tag in (("frFR", "fr", "fr-FR"), ("frCA", "fr", "fr-CA"), ("esES", "es", "es-ES"),
+                                ("esMX", "es", "es-MX"), ("trTR", "tr", "tr-TR")):
+        page, locale = checks["pageFormats"][name], locale_of(language, tag)
+        assert page["tile"][0] == page["hero"][0] == formats.money(5.96, "USD", locale, tight=True), name
+        assert page["tile"][1] == formats.money(-5.96, "USD", locale, tight=True), name
+        assert page["usd"][0] == formats.money(5.96, "USD", locale), name
+    fr, tr, mx = checks["pageFormats"]["frFR"], checks["pageFormats"]["trTR"], checks["pageFormats"]["esMX"]
+    assert fr["tile"] == ["5,96$", "-5,96$", "123$", f"1,2{NB}k$", f"1,2{NB}M$"]
+    assert fr["hero"] == ["5,96$", f"1{NNB}235$", f"12,3{NB}k$", f"1,2{NB}M$"]
+    assert tr["tile"][3:] == [f"1,2{NB}B$", f"1,2{NB}Mn$"] and mx["hero"][:2] == ["$5.96", "$1,235"]
+
+
+@ui_only
+def test_the_pseudo_pages_figures_are_englishs_with_two_changes(checks: dict[str, Any]) -> None:
+    """The pseudo-locale's page writes English's figures with U+202F groups and a U+00A0 before "%", and nothing else
+    changes: a tile, which has no group and no space, is English's; English is English."""
+    pseudo, english = checks["pageFormats"]["pseudo"], checks["pageFormats"]["en"]
+    assert pseudo["percent"] == [f"33.5{NB}%", f"34{NB}%", f"33.5{NB}%", f"34.5{NB}%", f"0{NB}%"]
+    assert english["percent"] == ["33.5%", "34%", "33.5%", "34.5%", "0%"]
+    assert pseudo["count"][3:5] == [f"1{NNB}234", f"12{NNB}345"] and english["count"][3:5] == ["1,234", "12,345"]
+    assert pseudo["tile"] == english["tile"] == ["$5.96", "-$5.96", "$123", "$1.2K", "$1.2M"]
+    assert pseudo["odometer"][1] == ["-- tokens, all time", f"0{NNB}000{NNB}000{NNB}000", 3]
+    assert english["odometer"] == [["1,234,567 tokens, all time", "1,234,567", 2], ["-- tokens, all time", "0,000,000,000", 3]]
+    folded = json.dumps(pseudo, ensure_ascii=False).replace(NNB, ",").replace(NB + "%", "%")
+    assert json.loads(folded) == english
+
+
+@ui_only
+def test_the_budgets_measure_the_money_boxes_with_what_the_page_writes(checks: dict[str, Any]) -> None:
+    """tests/budgets.py's PAGE_MONEY is what the cost tiles and the big cost figure write (#91): each figure, tight as
+    those boxes take it, is what the page writes there for one of its language's format tags, at an amount where
+    English's own figure has six characters at most; and nothing the page writes there in any of those tags is wider,
+    so budgets.over() measures the widest (test_budgets.py's FOR_91 lists what runs past)."""
+    import budgets
+
+    money = checks["pageMoney"]
+    assert money["english"] and max(len(text) for text in money["english"]) <= 6
+    assert sorted(money["tags"]) == CLDR_TAGS
+    chars = budgets.Measure("chars")
+    assert set(budgets.PAGE_MONEY) == {"fr", "es", "tr"}
+    for language, figures in budgets.PAGE_MONEY.items():
+        written = {text for tag, texts in money["tags"].items() if i18n.primary(tag) == language for text in texts}
+        tight = {budgets.tight(figure) for figure in figures}
+        assert tight <= written, (language, tight - written)
+        assert max(chars.width(text) for text in tight) == max(chars.width(text) for text in written), language
 
 
 def test_the_language_row_is_wired_into_the_settings_page() -> None:

@@ -348,6 +348,56 @@ out.fmtUsdUnchanged = [api.fmtUsd(12.5), api.fmtUsd(1234.5)];
   });
 }
 
+// ── the page's figures in the locale (#91): numbers, percents, money, compact figures, the odometer ──────────
+{
+  const localeMeta = (locale) => (sel) => (sel === 'meta[name="monitor-locale"]'
+    ? { getAttribute: (k) => (k === "content" ? JSON.stringify(locale) : null) } : null);
+  const pageIn = (language, format) => load(localeMeta({ setting: "system", language, system: language, format,
+    clock: 24, offered: ["en", language] })).api;
+  const odometer = (html) => [(html.match(/aria-label="([^"]*)"/) || [])[1],
+    Array.from(html.matchAll(/data-d="([^"]*)"|<span class="nm-od-sep"[^>]*>([^<]*)</g), (m) => (m[1] !== undefined ? m[1] : m[2])).join(""),
+    (html.match(/class="nm-od-sep"/g) || []).length];
+  const figures = (a) => {
+    a.S.nextCharts = {};
+    a.pacingChart({ window_start: "2026-10-15T16:00:00Z", resets_at: "2026-10-22T16:00:00Z", percent: 40, verdict: "AHEAD",
+      points: [["2026-10-16T16:00:00Z", 10], ["2026-10-20T16:00:00Z", 133.3]] }, "weekly", NOW, "d", false);
+    const ticks = Object.keys(a.S.nextCharts).map((id) => Array.from(String(a.S.nextCharts[id].build(500))
+      .matchAll(/<text[^>]*>([^<]*%[^<]*)<\/text>/g), (m) => m[1]))[0];
+    return {
+      percent: [a.fmtPct(33.5, 1), a.fmtPct(34), a.fmtRate(0.335), a.pctWords(34.5), a.fmtPct(-0.4)],
+      usd: [a.fmtUsd(5.96), a.fmtUsd(-5.96), a.fmtUsd(1234.5), a.fmtUsdExact(1234.5), a.fmtUsdShort(1234.5),
+        a.fmtPlanPrice(100), a.fmtPlanPrice(17.5)],
+      tile: [a.fmtUsdTile(5.96), a.fmtUsdTile(-5.96), a.fmtUsdTile(123), a.fmtUsdTile(1234.5), a.fmtUsdTile(1234567)],
+      hero: [a.fmtUsdHero(5.96), a.fmtUsdHero(1234.5), a.fmtUsdHero(12345), a.fmtUsdHero(1234567)],
+      money: [a.fmtMoney(5.96, "usd"), a.fmtMoney(5.96, "EUR"), a.fmtMoney(5.96, "EURO")],
+      count: [a.fmtCount(1500), a.fmtCount(1.5e6), a.fmtCount(999), a.fmtInt(1234), a.fmtInt(12345), a.fmtMult(6.04),
+        a.fmtCompare(1234.5), a.fmtCompare(12.34), a.signed(-3.25, 1), a.plural(1234, "request")],
+      prose: [a.weeklyStory({ verdict: "AHEAD", pace_delta_pp: 12.345 }).text,
+        a.weeklyForecast({ percent: 40, projected_end_pct: 33.3, daily_budget_pct: 14.28 }),
+        (a.efficiencyCard({ hit: 0.3345, thinking: 0.125, saved: 5.96, loaded: true }).match(/class="nm-big m">([^<]*)</) || [])[1],
+        a.comparisonList({ comparisons: [{ key: "page_stack_m", value: 1234.5 }] })[0].n],
+      ticks: ticks,
+      odometer: [odometer(a.odometerHTML(1234567, false)), odometer(a.odometerHTML(null, true))],
+    };
+  };
+  out.pageFormats = {};
+  for (const [name, language, format] of [["frFR", "fr", "fr-FR"], ["frCA", "fr", "fr-CA"], ["esES", "es", "es-ES"],
+    ["esMX", "es", "es-MX"], ["trTR", "tr", "tr-TR"], ["pseudo", "pseudo", "en-US"], ["en", "en", "en-US"]]) {
+    out.pageFormats[name] = figures(pageIn(language, format));
+  }
+  // The money boxes sized for English's figures (fmtUsdTile, fmtUsdHero), at the amounts where English's own figure has
+  // six characters at most, in every format tag the test names (tests/budgets.py's PAGE_MONEY is held to these).
+  const TILE_AT = [0, 5.96, 99.99, 100, 999, 1000, 9949, 99949, 1e6, 99.94e6, -9.99, -100, -999, -1000, -9949, -1e6, -9.94e6];
+  const HERO_AT = [0, 5.96, 99.99, 100, 999, 9999, 10000, 99949, 1e6, 99.94e6, -9.99, -100, -999];
+  const tags = process.argv[3] ? JSON.parse(process.argv[3]) : ["fr-FR", "es-ES", "tr-TR"];
+  const english = pageIn("en", "en-US");
+  out.pageMoney = { english: TILE_AT.map(english.fmtUsdTile).concat(HERO_AT.map(english.fmtUsdHero)), tags: {} };
+  for (const tag of tags) {
+    const a = pageIn(tag.split("-")[0], tag);
+    out.pageMoney.tags[tag] = TILE_AT.map(a.fmtUsdTile).concat(HERO_AT.map(a.fmtUsdHero));
+  }
+}
+
 // ── the plan multiple: a cell a month, or a month per N cells beyond 24 ───────────────────────────────────
 function cells(ratio) {
   const html = api.ratioCells(ratio, "r");

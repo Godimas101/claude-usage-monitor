@@ -81,31 +81,38 @@ STANDS_ON: dict[str, tuple[str, ...]] = {"floating": ("floating", "tooltip"), "t
 # The box the frame dump never draws: [G], since every sample state leaves room for [GUARD].
 NOT_DRAWN_WHOLE = frozenset({"nostromo.floating.armed_guard_short"})
 
-# What still runs past before French or Spanish is offered (#107), each with the ticket that settles it: #91's part 2
-# the dashboard's money figures, #94 Nostromo's boxes, #95 Night City's, #96 Gates'. The dollar is the plain "$"
-# (Chris's decision on #91), which fits the money figures' six characters; the percents are settled too: the boxes
-# sized for English's figures (the strips' values, the cap badge on Gates' hover card) draw them without the space
-# (Box.tight, Chris's decision on #91), and Turkish's "%100" fits. Gates' floating badge has room for "Cap 100 %" and
-# keeps the space. Recompute with budgets.over() after a change, never by hand.
-TIGHT_BOXES = frozenset({"nostromo.strip.value_5h", "nostromo.strip.value_5h_chip", "nostromo.strip.value_7d",
-                         "nostromo.strip.value_7d_chip", "night_city.strip.percent", "gates.tooltip.cap_badge"})
+# What still runs past before French or Spanish is offered (#107), each with the ticket that settles it: #91 the
+# dashboard's money figures, #94 Nostromo's boxes, #95 Night City's, #96 Gates'. The dollar is the plain "$" (Chris's
+# decision on #91), and the boxes sized for English's figures (the strips' values, the cap badge on Gates' hover card,
+# the dashboard's cost tiles and big cost figure) draw their percents and dollars without the space beside the sign
+# (Box.tight, Chris's decision on #91): Turkish's "%100" fits, and so do the cents and whole dollars of every language.
+# Gates' floating badge has room for "Cap 100 %" and keeps the space. Recompute with budgets.over() after a change,
+# never by hand.
 _MONEY = tuple(f"dashboard.{skin}.cost_{part}" for part in ("tile", "hero")
                for skin in ("nostromo", "night_city", "gates"))
+TIGHT_BOXES = frozenset({"nostromo.strip.value_5h", "nostromo.strip.value_5h_chip", "nostromo.strip.value_7d",
+                         "nostromo.strip.value_7d_chip", "night_city.strip.percent", "gates.tooltip.cap_badge",
+                         *_MONEY})
+# #91: a compact figure keeps CLDR's space before its unit, even tight ("99,9 k$", 7 characters where English's "$99.9K"
+# has 6); Chris's decision covered the space beside the sign only, so the compact tiles wait on his call.
+_COMPACT = {language: {(box, budgets.tight(figure)) for box in _MONEY for figure in budgets.PAGE_MONEY[language]}
+            for language in ("fr", "es", "tr")}
 _FR_DAYS = ("LUN.", "MAR.", "MER.", "JEU.", "VEN.", "SAM.", "DIM.")
 _ES_DAYS = ("LUN,", "MAR,", "MIÉ,", "JUE,", "VIE,", "SÁB,", "DOM,")
 FOR_91: dict[str, set[tuple[str, str]]] = {
     "fr": {("nostromo.tooltip.resets", f"RESETS {day} 12 H 59\u202fP.M.")                         # #94: fr-CA's
            for day in _FR_DAYS}                                                                      # day clock
     | {(box, f"RST {day} 12 H 59\u202fP.M.") for day in _FR_DAYS                                    # #95: the same
-       for box in ("night_city.floating.row_reset", "night_city.tooltip.info_reset")},
-    "es": {(box, "1,234.5") for box in _MONEY}           # #91 part 2: the dashboard's money figures in es-MX's grouping
+       for box in ("night_city.floating.row_reset", "night_city.tooltip.info_reset")}
+    | _COMPACT["fr"],                                                     # #91: the compact tiles (above)
+    "es": _COMPACT["es"]                                                  # #91: the compact tiles (above)
     | {("nostromo.tooltip.resets", f"RESETS {day} 12:59\u202f{period}")                       # #94: es-ES's and
        for day in _ES_DAYS for period in ("P.M.", "P.\u202fM.")}                                # es-419's day clocks
     | {("nostromo.floating.age", "100 DÍAS"), ("nostromo.floating.state_chip", "HOLD 23 H 59 MIN"),   # #94: es-CO's
        ("nostromo.floating.state_chip", "HOLD 6 DÍAS 23 H")}                                         # units
     | {("night_city.floating.band_age", "100 DÍAS OLD")}                                            # #95: the same
     | {(box, "RATE LIMITED · 100 días") for box in ("gates.floating.status_pill", "gates.tooltip.status_pill")},  # #96
-    "tr": set(),
+    "tr": _COMPACT["tr"],                                                 # #91: the compact tiles (above)
 }
 
 
@@ -278,16 +285,23 @@ def test_what_91_has_to_settle_is_all_that_runs_past() -> None:
         assert {(r.box.id, r.text) for r in budgets.over(language)} == expected, language
 
 
-def test_the_boxes_sized_for_englishs_figures_take_their_percents_tight() -> None:
-    """Chris's decision on #91: French and Spanish drop the space before "%" only in the boxes sized for English's
-    figures, and the sign keeps its side. budgets.tight writes each language's percent figure as formats.percent does
-    with tight=True for the language's base format, so the budgets measure what the skins draw (test_locale_surfaces.py
-    holds the skins to it); every other box takes the figure with its space."""
+def test_the_boxes_sized_for_englishs_figures_take_their_percents_and_dollars_tight() -> None:
+    """Chris's decision on #91: French and Spanish drop the space before "%" and "$" only in the boxes sized for
+    English's figures, and the sign keeps its side. budgets.tight writes each language's percent and dollar figure as
+    formats.percent and formats.money do with tight=True for the language's base format, so the budgets measure what the
+    skins draw (test_locale_surfaces.py holds the skins to it) and what the page draws in its money boxes
+    (test_webui.py holds the page to it); a currency code keeps its space; every other box takes the figure with its
+    space."""
     assert {box.id for box in budgets.BOXES if box.tight} == TIGHT_BOXES
     for language, figures in budgets.FIGURES["percent"].items():
         tag = i18n.BASE_FORMATS[language]
         locale = i18n.Locale(setting="system", language=language, system="en", format=tag, clock=24, offered=("en",))
         assert [budgets.tight(figure) for figure in figures] == [formats.percent("100", locale, tight=True)], language
+        if language != i18n.DEFAULT:
+            assert budgets.tight(formats.money(5.96, "USD", locale)) == formats.money(5.96, "USD", locale, tight=True)
+            assert budgets.tight(formats.money(5.96, "EUR", locale)) == formats.money(5.96, "EUR", locale, tight=True)
+    assert budgets.tight("5,96\u00a0$") == "5,96$" and budgets.tight("99,9\u00a0k\u00a0$") == "99,9\u00a0k$"
+    assert budgets.tight("5,96\u00a0EUR") == "5,96\u00a0EUR" and budgets.tight("$ 5") == "$5"
     assert budgets.texts(budgets.BOX["gates.tooltip.cap_badge"], "fr") == ["Cap 100%"]
     assert budgets.texts(budgets.BOX["nostromo.strip.value_5h"], "es") == ["100%"]
     assert budgets.texts(budgets.BOX["night_city.strip.percent"], "tr") == ["%100"]
@@ -308,7 +322,8 @@ def test_a_box_that_shrinks_its_text_is_measured_at_the_size_it_shrinks_to(monke
 def test_a_character_limit_stays_the_budget_where_english_runs_past() -> None:
     """A pixel box where English already runs past its room budgets what English takes there (the strip's 100%). A
     character box's limit is a contract or a hard cut (the money figures' six characters, the tray's 127 units), so it
-    stays the budget: es-MX's "1,234.5" fails a tile, and only the English in KNOWN_ENGLISH_OVERRUNS passes one."""
+    stays the budget: Spanish's compact "99,9 mil$" fails a tile, and only the English in KNOWN_ENGLISH_OVERRUNS passes
+    one."""
     strip = budgets.BOX["nostromo.strip.value_5h"]
     assert strip.width("100%") > strip.limit
     for scale in strip.scales:
@@ -316,7 +331,7 @@ def test_a_character_limit_stays_the_budget_where_english_runs_past() -> None:
     tile = budgets.BOX["dashboard.nostromo.cost_tile"]
     assert (tile.unit, tile.limit, budgets.budget(tile)) == ("chars", 6, 6)
     assert (tile.id, "$100.00") in budgets.KNOWN_ENGLISH_OVERRUNS
-    assert (tile.id, "1,234.5") in {(r.box.id, r.text) for r in budgets.over("es")}
+    assert (tile.id, "99,9\u00a0mil$") in {(r.box.id, r.text) for r in budgets.over("es")}
     tip = budgets.BOX["app.tray.tooltip"]
     assert (tip.unit, tip.limit, budgets.budget(tip)) == ("chars", tray.TIP_LIMIT, tray.TIP_LIMIT)
 
@@ -393,9 +408,12 @@ def test_each_languages_longest_figures_are_set_in_the_boxs_text() -> None:
     assert budgets.texts(budgets.BOX["nostromo.floating.cap_tag"], "tr") == ["CAP %100"]
     assert budgets.texts(budgets.BOX["nostromo.floating.message"], "fr") == []      # no figure, and no keys until #93
     assert budgets.texts(body, i18n.PSEUDO) == [i18n.pseudo_text(text) for text in body.english]
-    tile = budgets.BOX["dashboard.nostromo.cost_tile"]                      # the plain dollar (Chris, #91)
-    assert budgets.texts(tile, "fr") == ["5,96\u00a0$"] and budgets.texts(tile, "tr") == ["$5,96"]
-    assert budgets.texts(tile, "es") == ["$5.96", "5,96\u00a0$", "1,234.5"]
+    tile = budgets.BOX["dashboard.nostromo.cost_tile"]                      # the page's own figures, tight (#91)
+    assert budgets.texts(tile, "fr") == ["99,9\u00a0k$"] and budgets.texts(tile, "tr") == ["99,9\u00a0Mn$"]
+    assert budgets.texts(tile, "es") == ["99,9\u00a0mil$"] and budgets.texts(tile, "en") == list(tile.english)
+    toast = budgets.BOX["app.toast.alert_credits.body"]                     # the alerts keep the formats' money
+    assert budgets.texts(toast, "es") == ["Used $5.96 of 10,000.00 USD", "Used 5,96\u00a0$ of 10,000.00 USD",
+                                          "Used 1,234.5 of 10,000.00 USD"]
 
 
 # What FIGURES samples (budgets.FIGURES says why): a time on each clock, the same after each weekday, the widest
@@ -431,7 +449,8 @@ def test_every_figure_is_what_the_formats_write_for_one_of_the_languages_tags() 
     format tags, on one of the clocks, so a figure and the formats cannot drift apart; and every clock, day clock,
     countdown and age the tags write at the samples is a figure, so a region with a longer one is measured. English
     keeps #89's figures, as the formats write them ("4:12 PM" at 16:12); its "$5.96" is the dashboard's own (app.js),
-    which #91's part 2 holds."""
+    which tests/fixtures/webui_formats_english.json holds, and the dashboard's money boxes take budgets.PAGE_MONEY,
+    which test_webui.py holds to the page."""
     assert set(budgets.FIGURES) == {"percent", "clock", "money", "day_clock", "duration", "age"}
     english = {"percent": {formats.percent("100", i18n.ENGLISH)}, "clock": {formats.clock(AT_24, i18n.ENGLISH)}}
     for kind, by_language in budgets.FIGURES.items():
@@ -529,5 +548,6 @@ def test_any_language_can_be_reported_and_only_an_offered_one_fails(monkeypatch:
         assert budgets.main(["--lang", language]) == 0, language
     monkeypatch.setattr(i18n, "OFFERED", ("en", "es", "tr"))
     assert budgets.main(["--lang", "es"]) == 1                             # what #107 runs before it offers Spanish
-    assert budgets.main(["--lang", "tr"]) == 0                             # offered, and it fits
+    assert budgets.main(["--lang", "tr"]) == 1                             # offered: its compact tiles run past (#91)
+    assert budgets.main(["--lang", "en"]) == 0                             # offered, and it fits
     assert budgets.main(["--lang", "fr"]) == 0                             # not offered: a report

@@ -476,7 +476,13 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   loaded before every other page script. English keeps the page's own shapes (`tests/fixtures/webui_formats_english.json`
   holds them), the pseudo-locale takes them with the same two changes, and French, Spanish and Turkish go through `Intl`
   with the format tag, so the WebView's own CLDR data; US dollars are the plain `$` (`narrowSymbol`). Its `number`,
-  `percent`, `usd` and `compact` take the caller's digits too, and `tight` drops the space beside `%` and `$`.
+  `percent`, `usd` and `compact` take the caller's digits too, and `tight` drops the space beside `%` and `$`. `app.js`
+  writes every number, percent and dollar through it (`FMT`), the figures in its sentences and charts too; English keeps
+  its own text where it was odd (a tile's `$-123`), and the odometer's separators are the locale's group sign. The cost
+  tiles and the big cost figure are the page's boxes sized for English's figures: their dollar is tight. A compact
+  figure keeps CLDR's space before its unit, so French's `99,9 k$` has seven characters where English's `$99.9K` has six
+  (`tests/budgets.py` measures them with `PAGE_MONEY`, which `test_webui.py` holds to the page in every format tag;
+  `FOR_91` in `test_budgets.py` lists them until Chris decides).
 - **Letter case (#91).** `usage_monitor/casing.py`: `upper`, `lower`, `capitalize` and `cased` by the language's rules,
   so Turkish (and Azerbaijani) give `İ` and `ı` and never a combining dot (U+0307); every other language gets Python's
   own. A name in capitals is cased with the words by the language's rule (`HAİKU` in Turkish, Chris's decision); in
@@ -550,7 +556,8 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   UTF-16 units. A pixel box's budget is its room, or what English already takes where it runs past by design; a
   character box's budget is its limit. Each language's longest figures go in too, as `formats` writes them for every
   format tag (`100 %`, `%100`, `5,96 $`, each tag's times and day clocks on either clock, the widest countdowns and
-  ages), in capitals in Nostromo and Night City and glued in the guard's statement, as the skins draw them.
+  ages), in capitals in Nostromo and Night City and glued in the guard's statement, as the skins draw them; the
+  dashboard's money boxes take the page's own widest figures (`PAGE_MONEY`), tight as the page draws them.
   `tests/test_budgets.py` holds each box's measure to the widths the skins work out as the frame dump draws, and every
   drawn run to a box. It pins every room (`python tests/budgets.py --limits` prints them after a skin
   change), fails English that runs past a room it did not run past before, and fails an offered language past a box
@@ -558,7 +565,8 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   left" scan (`tests/english_left.py`) lists the English the frame dump, the tray tooltip and the dashboard show under
   the pseudo-locale. The dashboard runs on a small DOM (`tests/mini_dom.js`, `tests/english_scan.js`) through every
   dev-server scenario, as an installed monitor and as a dev instance, and in some scenarios with its actions, its
-  update banner and its loading and failed states. The scan leaves out numbers, what the page marks as data
+  update banner and its loading and failed states. The scan leaves out numbers (the pseudo-locale's U+202F groups and
+  U+00A0 before `%` read as English's), what the page marks as data
   (`translate="no"`, or a `lang` other than the page's), the names the skins draw, the product name and #86's brand
   marks.
   `tests/test_english_left.py` holds the result to `tests/fixtures/english_left.json`, which each extraction ticket
@@ -1004,8 +1012,8 @@ default browser instead, and the exit code says so (below).
   hold a number) on a fixed grid with TZ=UTC and the page's clock still, and `test_webui.py` holds it to
   `tests/fixtures/webui_formats_english.json`, recorded before #91 changed the page: English never changes by a byte.
 - **Money.** Real money (the extra-usage Spend card) is shown in the account's own currency (`fmtMoney`, an
-  `Intl.NumberFormat` with the ISO code the usage API reports; USD where it reports none). API-equivalent cost
-  stays dollars. `/api/state.plan` carries the detected plan and price only: `plan_price_override` is a setting,
+  `Intl.NumberFormat` with the ISO code the usage API reports; USD where it reports none), through `formats.js`: US
+  dollars are the plain `$` in French, Spanish and Turkish. API-equivalent cost stays dollars. `/api/state.plan` carries the detected plan and price only: `plan_price_override` is a setting,
   applied where a price is used (the reports, and `effectivePlanPrice()` in the page), so setting or clearing it
   never rewrites state. The hint beside the override names the detected plan and price, and `syncHints` keeps it
   to the latest state: loaded on `#settings` the page is drawn before the first state, and a first sign-in or a new

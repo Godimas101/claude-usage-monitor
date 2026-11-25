@@ -21,9 +21,10 @@ KNOWN_ENGLISH_OVERRUNS may pass it.
 
 What goes in a box: English as the skins draw it today; each language's longest figures (FIGURES), set in the box's
 text where the box holds one (``templates``, the language's day clock where English writes WED), as the skin draws
-them: in capitals in Nostromo and Night City, glued in the guard's statement (which wraps), and a percent without its
-space in a box sized for English's figures (``Box.tight``: Chris's decision on #91); and, once the box's text moves to
-the catalog (#93 to #101), its keys in that language. Until then the pseudo-locale measures that English through
+them: in capitals in Nostromo and Night City, glued in the guard's statement (which wraps), and a percent or a dollar
+without its space in a box sized for English's figures (``Box.tight``: Chris's decision on #91); the dashboard's money
+boxes take the page's own figures (PAGE_MONEY); and, once the box's text moves to the catalog (#93 to #101), its keys in
+that language. Until then the pseudo-locale measures that English through
 ``i18n.pseudo_text``. Counts (the pace points) get no figure: a whole number under 1000 is written alike in all four
 languages.
 
@@ -98,6 +99,13 @@ FIGURES: dict[str, dict[str, tuple[str, ...]]] = {
             "es": ("59s", "59seg.", "59 s", "59min", "59 min", "47h", "47 h", "100dd.", "100 días", "100d.", "100d"),
             "tr": ("59sn", "59d", "47s", "100g")},
 }
+# The dashboard's money figures (app.js's fmtUsdTile and fmtUsdHero, written through webui/formats.js, #91 part 2): in
+# each language the widest the page writes, in any of the language's format tags, at the amounts where English's own
+# figure has six characters at most, as the formats write it with CLDR's spaces (tight() takes the one before the "$", as
+# the page does in these boxes). A compact figure keeps the space before its unit ("99,9 k$"), so it is wider than
+# English's "$99.9K". test_webui.py holds each figure to the page, and the page to the figures' width.
+PAGE_MONEY: dict[str, tuple[str, ...]] = {"fr": ("99,9\u00a0k\u00a0$",), "es": ("99,9\u00a0mil\u00a0$",),
+                                          "tr": ("99,9\u00a0Mn\u00a0$",)}
 # What each figure is: "duration" a countdown (the time left), "age" how long ago a reading was (one unit), "count" a
 # whole number. A "clock" box takes the "day_clock" figures where its template writes English's weekday (_ON_A_DAY).
 _KINDS = ("percent", "clock", "money", "duration", "age", "count")
@@ -217,7 +225,7 @@ class Box:
     kinds: tuple[str, ...] = ()     # the figures it holds
     templates: tuple[str, ...] = ("{}",)    # how a figure sits in its text
     keys: tuple[str, ...] = ()      # catalog keys drawn in it, once its text is in the catalog (#93 to #101)
-    tight: bool = False             # sized for English's figures: its percent has no space before the sign (#91)
+    tight: bool = False             # sized for English's figures: no space beside its "%" or "$" (#91)
 
     @property
     def unit(self) -> str:
@@ -356,8 +364,8 @@ def _g(id_: str, role: str, size: float, weight: int, limit: float, why: str, fi
 
 
 def _chars(id_: str, limit: float, why: str, fit: str, *, english: tuple[str, ...], kinds: tuple[str, ...] = (),
-           templates: tuple[str, ...] = ("{}",)) -> Box:
-    return Box(id_, Measure("chars"), limit, why, fit, english, kinds, templates)
+           templates: tuple[str, ...] = ("{}",), tight: bool = False) -> Box:
+    return Box(id_, Measure("chars"), limit, why, fit, english, kinds, templates, tight=tight)
 
 
 BOXES: tuple[Box, ...] = (
@@ -643,16 +651,19 @@ BOXES: tuple[Box, ...] = (
         "the ring's hole at the number's baseline on a 32 px icon, in device px", "none",
         ("--", "0", "13", "99", "100", "999")),
 
-    # ── The dashboard's money figures (fmtUsdTile, fmtUsdHero in app.js): "six characters at most" ──
-    _chars("dashboard.nostromo.cost_tile", 6, "fmtUsdTile's six characters", "none", kinds=("money",), english=_TILES),
-    _chars("dashboard.night_city.cost_tile", 6, "fmtUsdTile's six characters", "none", kinds=("money",), english=_TILES),
-    _chars("dashboard.gates.cost_tile", 6, "fmtUsdTile's six characters", "none", kinds=("money",), english=_TILES),
+    # ── The dashboard's money figures (fmtUsdTile, fmtUsdHero in app.js): "six characters at most", tight (#91) ──
+    _chars("dashboard.nostromo.cost_tile", 6, "fmtUsdTile's six characters", "none", kinds=("money",), english=_TILES,
+           tight=True),
+    _chars("dashboard.night_city.cost_tile", 6, "fmtUsdTile's six characters", "none", kinds=("money",), english=_TILES,
+           tight=True),
+    _chars("dashboard.gates.cost_tile", 6, "fmtUsdTile's six characters", "none", kinds=("money",), english=_TILES,
+           tight=True),
     _chars("dashboard.nostromo.cost_hero", 6, "fmtUsdHero's six characters; the stylesheet shrinks the figure with its "
-           "length down to 52 px", "shrink", kinds=("money",), english=_HEROES),
+           "length down to 52 px", "shrink", kinds=("money",), english=_HEROES, tight=True),
     _chars("dashboard.night_city.cost_hero", 6, "fmtUsdHero's six characters; the stylesheet does not shrink it", "none",
-           kinds=("money",), english=_HEROES),
+           kinds=("money",), english=_HEROES, tight=True),
     _chars("dashboard.gates.cost_hero", 6, "fmtUsdHero's six characters; the stylesheet shrinks it to 30 px (40 px "
-           "flat on short or 1001 to 1100 px windows)", "shrink", kinds=("money",), english=_HEROES),
+           "flat on short or 1001 to 1100 px windows)", "shrink", kinds=("money",), english=_HEROES, tight=True),
     # ── The tray (ui/tray.py: TIP_LIMIT, TITLE_LIMIT, BODY_LIMIT) and its toasts ──
     _chars("app.tray.tooltip", tray.TIP_LIMIT, "TIP_LIMIT (szTip holds 128 UTF-16 units with the terminator)", "ellipsis",
            kinds=("percent", "clock", "duration"),
@@ -811,10 +822,11 @@ def budget(box: Box, scale: float = 1.0) -> float:
 
 
 def tight(figure: str) -> str:
-    """A percent figure as a box sized for English's figures takes it: no space between the number and the sign,
-    which stays on its language's side ("100%" for French's "100 %", Turkish's "%100" as it is), as
-    formats.percent(..., tight=True) writes it."""
-    return re.sub(r"\s*%\s*", "%", figure)
+    """A percent or dollar figure as a box sized for English's figures takes it: no space between the number and its
+    "%" or "$", which stays on its language's side ("100%" for French's "100 %", Turkish's "%100" as it is, "5,96$"
+    for "5,96 $", "99,9 k$" for "99,9 k $"), as formats.percent and formats.money write it with tight=True and as
+    formats.js does in the page's money boxes. A currency code keeps its space."""
+    return re.sub(r"\s*([%$])\s*", r"\1", figure)
 
 
 def _drawn_as(box: Box, figure: str, language: str) -> str:
@@ -831,6 +843,8 @@ def _figures(box: Box, kind: str, template: str, language: str) -> tuple[str, ..
     ("RESETS WED {}"), another language's whole day clock takes the weekday's place and the time's."""
     if kind == "clock" and language != i18n.DEFAULT and _ON_A_DAY.search(template):
         return FIGURES["day_clock"].get(language, ())
+    if kind == "money" and box.id.startswith("dashboard."):
+        return PAGE_MONEY.get(language, ())
     return FIGURES.get(kind, {}).get(language, ())
 
 
@@ -848,7 +862,7 @@ def texts(box: Box, language: str) -> list[str]:
             for template in box.templates:
                 slot = _ON_A_DAY.sub("{}", template) if kind == "clock" and language != i18n.DEFAULT else template
                 for figure in _figures(box, kind, template, language):
-                    figure = tight(figure) if box.tight and kind == "percent" else figure
+                    figure = tight(figure) if box.tight and kind in ("percent", "money") else figure
                     found.append(slot.format(_drawn_as(box, figure, language)))
     if box.keys:
         catalog = i18n.load_catalog(language)

@@ -98,6 +98,16 @@ def test_digits_fold_and_spaces_collapse() -> None:
                                                                                          "Resets ##:## PM"}
 
 
+def test_the_pseudo_locales_number_shapes_are_englishs_entries() -> None:
+    """#91 (D15 of its plan): the page writes the pseudo-locale's numbers with U+202F groups and a U+00A0 before "%",
+    which fold to English's entries, so the record never grows for them; a U+202F that is not between digits, and a
+    U+00A0 that is not before "%", stay spaces."""
+    assert english(["Session 34\u00a0% used", "1\u202f234 requests", "1\u202f234\u202f567 tokens"]) == {
+        "Session ##% used", "#,### requests", "#,###,### tokens"}
+    assert english(["Session 34% used", "1,234 requests"]) == {"Session ##% used", "#,### requests"}
+    assert english(["Resets 4:12\u202fPM", "Used 34\u00a0of 50"]) == {"Resets #:## PM", "Used ## of ##"}
+
+
 def test_names_are_taken_out_before_a_run_is_judged() -> None:
     dashboard = (PRODUCT, *DASHBOARD_MARKS)
     assert english(["Claude Usage Monitor", "CLAUDE USAGE MONITOR", "// ONBOARD COMPUTER"], dashboard) == set()

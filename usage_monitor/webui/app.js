@@ -160,6 +160,17 @@
   // never reloads for a locale: it would not know that it already shows the right one.
   var LOCALE_KNOWN = LOCALE_META !== null;
   var LOCALE = LOCALE_META || { setting: "system", language: "en", system: "en", format: "en-US", clock: 12, offered: ["en"] };
+  // Its numbers, percents and money (#91): formats.js, loaded before this file. English keeps the page's own shapes.
+  var FMT = window.MonitorFormats.make(LOCALE);
+  var NO_GROUP = { group: false };
+  // The money boxes sized for English's figures, the cost tiles and the big cost figure, take the "$" without its space
+  // (Chris's decision on #91; tests/budgets.py measures them so).
+  var TIGHT = { tight: true };
+  var TIGHT_WHOLE = { digits: 0, tight: true };
+  var TIGHT_K = { scale: 3, tight: true };
+  var TIGHT_M = { scale: 6, tight: true };
+  // Ten zeros, the width a typical all-time total has, grouped as the locale groups them.
+  var ODOMETER_PLACEHOLDER = FMT.number(1e9).replace(/\d/g, "0");
   var LOCALE_RELOAD_MARK = "usage-monitor-locale-reload:";
   // A reload that brought the page into the locale it was for is done: its mark goes (reloadForLocale).
   if (LOCALE_KNOWN && window.name === localeMark(LOCALE)) {
@@ -547,7 +558,7 @@
     if (n === null) {
       return "--";
     }
-    return (digits ? n.toFixed(digits) : String(Math.round(n))) + "%";
+    return FMT.percent(digits ? n.toFixed(digits) : String(Math.round(n)));
   }
 
   /* A ratio 0..1 as a percentage; "--" when there is none. */
@@ -562,29 +573,23 @@
       return "--";
     }
     var a = Math.abs(n);
-    var body = a >= 1000 ? Math.round(a).toLocaleString("en-US") : a.toFixed(2);
-    return (n < 0 ? "-$" : "$") + body;
+    return a >= 1000 ? FMT.usd(n < 0 ? -Math.round(a) : Math.round(a), { digits: 0 }) : FMT.usd((n < 0 ? "-" : "") + a.toFixed(2));
   }
 
   function fmtUsdExact(value) {
     var n = num(value);
-    return n === null ? "--" : (n < 0 ? "-$" : "$") + Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return n === null ? "--" : FMT.usd(n, { digits: 2 });
   }
 
   /* Real money (usage credits) in the currency the account is billed in, which the usage API reports. The figures
    * of API-equivalent cost stay dollars (fmtUsd). An account that reports no currency is read as USD, and a code
-   * the browser does not know is shown as the number and the code. */
+   * the browser does not know is shown as the number and the code (formats.js's money). */
   function fmtMoney(value, currency) {
     var n = num(value);
     if (n === null) {
       return "--";
     }
-    var code = String(currency || "USD").trim().toUpperCase();
-    try {
-      return new Intl.NumberFormat("en-US", { style: "currency", currency: code }).format(n);
-    } catch (e) {
-      return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " " + code;
-    }
+    return FMT.money(n, String(currency || "USD").trim().toUpperCase());
   }
 
   function fmtPlanPrice(value) {
@@ -592,7 +597,10 @@
     if (n === null) {
       return "--";
     }
-    return n % 1 === 0 ? "$" + Math.round(n).toLocaleString("en-US") : fmtUsd(n);
+    if (n % 1 !== 0) {
+      return fmtUsd(n);
+    }
+    return FMT.english ? "$" + FMT.number(Math.round(n)) : FMT.usd(Math.round(n), { digits: 0 });
   }
 
   function fmtUsdShort(value) {
@@ -600,10 +608,11 @@
     if (n === null) {
       return "--";
     }
-    return Math.abs(n) >= 1000 ? "$" + (n / 1000).toFixed(1) + "K" : fmtUsd(n);
+    return Math.abs(n) >= 1000 ? FMT.usd((n / 1000).toFixed(1), { scale: 3 }) : fmtUsd(n);
   }
 
-  /* A cost for a tile: at most six characters, so three tiles fit a narrow card. */
+  /* A cost for a tile: at most six characters, so three tiles fit a narrow card. The "$" goes without its space
+   * (TIGHT); English keeps its own text. */
   function fmtUsdTile(value) {
     var n = num(value);
     if (n === null) {
@@ -611,15 +620,18 @@
     }
     var a = Math.abs(n);
     if (a >= 1e6) {
-      return "$" + (n / 1e6).toFixed(1) + "M";
+      return FMT.usd((n / 1e6).toFixed(1), TIGHT_M);
     }
     if (a >= 1000) {
-      return "$" + (n / 1000).toFixed(1) + "K";
+      return FMT.usd((n / 1000).toFixed(1), TIGHT_K);
     }
-    return a >= 100 ? "$" + Math.round(n) : fmtUsd(n);
+    if (a >= 100) {
+      return FMT.english ? "$" + Math.round(n) : FMT.usd(String(Math.round(n)), TIGHT);
+    }
+    return FMT.usd((n < 0 ? "-" : "") + a.toFixed(2), TIGHT);
   }
 
-  /* The big cost figure: cents under $100, whole dollars to $10,000, then K. Six characters at most. */
+  /* The big cost figure: cents under $100, whole dollars to $10,000, then K. Six characters at most, tight as a tile. */
   function fmtUsdHero(value) {
     var n = num(value);
     if (n === null) {
@@ -627,12 +639,12 @@
     }
     var a = Math.abs(n);
     if (a >= 1e6) {
-      return "$" + (n / 1e6).toFixed(1) + "M";
+      return FMT.usd((n / 1e6).toFixed(1), TIGHT_M);
     }
     if (a >= 10000) {
-      return "$" + (n / 1000).toFixed(1) + "K";
+      return FMT.usd((n / 1000).toFixed(1), TIGHT_K);
     }
-    return a >= 100 ? (n < 0 ? "-$" : "$") + Math.round(a).toLocaleString("en-US") : fmtUsd(n);
+    return a >= 100 ? FMT.usd(n < 0 ? -Math.round(a) : Math.round(a), TIGHT_WHOLE) : FMT.usd((n < 0 ? "-" : "") + a.toFixed(2), TIGHT);
   }
 
   function fmtMult(value) {
@@ -640,7 +652,7 @@
     if (n === null) {
       return "--";
     }
-    return (n >= 100 ? String(Math.round(n)) : n.toFixed(1)) + "×";
+    return FMT.number(n >= 100 ? String(Math.round(n)) : n.toFixed(1), NO_GROUP) + "×";
   }
 
   function fmtCount(value) {
@@ -650,20 +662,20 @@
     }
     var a = Math.abs(n);
     if (a >= 1e9) {
-      return (n / 1e9).toFixed(2) + "B";
+      return FMT.compact((n / 1e9).toFixed(2), 9);
     }
     if (a >= 1e6) {
-      return (n / 1e6).toFixed(1) + "M";
+      return FMT.compact((n / 1e6).toFixed(1), 6);
     }
     if (a >= 1e3) {
-      return (n / 1e3).toFixed(1) + "K";
+      return FMT.compact((n / 1e3).toFixed(1), 3);
     }
-    return String(Math.round(n));
+    return FMT.number(String(Math.round(n)), NO_GROUP);
   }
 
   function fmtInt(value) {
     var n = num(value);
-    return n === null ? "--" : Math.round(n).toLocaleString("en-US");
+    return n === null ? "--" : FMT.number(Math.round(n));
   }
 
   function fmtRemain(ms) {
@@ -1290,9 +1302,9 @@
     }
     var end = num(blk.projected_end_pct);
     var budget = num(blk.daily_budget_pct);
-    var parts = [end === null ? "PROJECTION NEEDS MORE TIME" : "<b>ENDS ~" + Math.round(end) + "%</b>"];
+    var parts = [end === null ? "PROJECTION NEEDS MORE TIME" : "<b>ENDS ~" + FMT.percent(String(Math.round(end))) + "</b>"];
     if (budget !== null) {
-      parts.push("BUDGET " + Math.round(budget) + "%/DAY");
+      parts.push("BUDGET " + FMT.percent(String(Math.round(budget))) + "/DAY");
     }
     return parts.join(" &middot; ");
   }
@@ -2137,7 +2149,8 @@
     var tips = days.map(function (x) {
       return dayText(x.date) + ": " + fmtUsd(x.cost_usd) + " API-equivalent, " + plural(x.requests, "request");
     });
-    var avgText = avg >= 1000 ? fmtUsdShort(avg) : avg >= 10 ? "$" + Math.round(avg) : fmtUsd(avg);
+    var avgText = avg >= 1000 ? fmtUsdShort(avg) : avg < 10 ? fmtUsd(avg) :
+      FMT.english ? "$" + Math.round(avg) : FMT.usd(String(Math.round(avg)));
     var host = chartHost(function (w) {
       return CHARTS.columns(costs, {
         width: w, height: 132, gutterRight: 68, step: step, labels: labels, tips: tips, current: days.length - 1,
@@ -2187,7 +2200,7 @@
     var thinking = n.thinking === null ? null : n.thinking * 100;
     return '<section class="nm-card" id="efficiency" aria-label="Cache and thinking" data-card="efficiency"><div class="nm-card-in">' +
       '<div class="nm-card-t"><h2 class="nm-ttl">Cache &amp; thinking</h2><span class="nm-meta-t">' + (n.loaded ? "this cycle" : "this month") + "</span></div>" +
-      '<div class="nm-kpi"><div class="nm-kl">Cache hit rate</div><div class="nm-big m">' + esc(hit === null ? "--" : hit.toFixed(1) + "%") +
+      '<div class="nm-kpi"><div class="nm-kl">Cache hit rate</div><div class="nm-big m">' + esc(hit === null ? "--" : FMT.percent(hit.toFixed(1))) +
       '</div><div class="nm-cells" aria-hidden="true">' + cellsHTML(20, hit || 0) + "</div></div>" +
       '<div class="nm-kpi"><div class="nm-kl">Thinking share of output</div><div class="nm-big m">' + esc(thinking === null ? "--" : fmtPct(thinking)) +
       '</div><div class="nm-cells" aria-hidden="true">' + cellsHTML(20, thinking || 0) + "</div></div>" +
@@ -2312,7 +2325,7 @@
     if (v === null) {
       return "--";
     }
-    return (v > 0 ? "+" : v < 0 ? "-" : "") + Math.abs(v).toFixed(digits === undefined ? 1 : digits);
+    return (v > 0 ? "+" : v < 0 ? "-" : "") + FMT.number(Math.abs(v).toFixed(digits === undefined ? 1 : digits), NO_GROUP);
   }
 
   function sessionStory(blk) {
@@ -2340,9 +2353,9 @@
     var delta = blk ? num(blk.pace_delta_pp) : null;
     var text;
     if (v === "AHEAD") {
-      text = "You are using this window " + Math.abs(delta).toFixed(1) + " points faster than an even pace.";
+      text = "You are using this window " + FMT.number(Math.abs(delta).toFixed(1), NO_GROUP) + " points faster than an even pace.";
     } else if (v === "BEHIND") {
-      text = "You are " + Math.abs(delta).toFixed(1) + " points under an even pace, so there is room to spare.";
+      text = "You are " + FMT.number(Math.abs(delta).toFixed(1), NO_GROUP) + " points under an even pace, so there is room to spare.";
     } else if (v === "ON_PACE") {
       text = "You are keeping step with the clock.";
     } else {
@@ -2411,9 +2424,9 @@
     var pct = num(blk.percent);
     var top = Math.max.apply(null, pts.map(function (p) { return p[1]; }).concat([pct || 0, 100]));
     var yMax = Math.ceil(top / 10) * 10;
-    var yTicks = [0, 25, 50, 75, 100].map(function (v) { return { v: v, label: v + "%", limit: v === 100 }; });
+    var yTicks = [0, 25, 50, 75, 100].map(function (v) { return { v: v, label: FMT.percent(String(v)), limit: v === 100 }; });
     if (yMax > 100) {
-      yTicks.push({ v: yMax, label: yMax + "%" });
+      yTicks.push({ v: yMax, label: FMT.percent(String(yMax)) });
     }
     var series = [];
     if (kind !== "session") {
@@ -2881,7 +2894,7 @@
         key: "compactions", title: "Compactions", meta: "conversation summaries", cls: "span-4",
         body: '<div class="nm-stats">' +
           statTile("compactions", "Compactions", fmtInt(cp.count), { big: true, sub: fmtInt(cp.auto) + " auto · " + fmtInt(cp.manual) + " manual", cls: "is-wide" }) +
-          statTile("compactions-day", "Per active day", num(cp.per_active_day) === null ? "--" : cp.per_active_day.toFixed(2)) +
+          statTile("compactions-day", "Per active day", num(cp.per_active_day) === null ? "--" : FMT.number(cp.per_active_day.toFixed(2), NO_GROUP)) +
           statTile("active-days", "Active days", fmtInt(d.active_days)) +
           // Claude Code's own count when it compacted, not the API's per-request count under Context size: the two can differ.
           statTile("compact-pre", "Size at compaction", cp.avg_pre_tokens === null ? "--" : fmtCount(cp.avg_pre_tokens), { sub: "tokens, average, Claude Code's own count" }) + "</div>"
@@ -2992,7 +3005,7 @@
       ["FETCHED", s && s.usage_fetched_at ? stampText(parseTime(s.usage_fetched_at)) : "--"],
       ["UPDATED", s && s.updated_at ? stampText(parseTime(s.updated_at)) : "--"],
       ["INGEST", ingestText],
-      ["LAST INGEST", ingest && ingest.last_duration_s !== null && ingest.last_duration_s !== undefined ? num(ingest.last_duration_s).toFixed(2) + " S" : "--"],
+      ["LAST INGEST", ingest && ingest.last_duration_s !== null && ingest.last_duration_s !== undefined ? FMT.number(num(ingest.last_duration_s).toFixed(2), NO_GROUP) + " S" : "--"],
       ["LAST ERROR", ingest && ingest.last_error ? ingest.last_error : "NONE"],
       ["PLAN", s && s.plan && s.plan.name ? String(s.plan.name).toUpperCase() : "--"],
       ["PRICE", effectivePlanPrice() !== null ? fmtPlanPrice(effectivePlanPrice()) + " / MO" : "UNKNOWN"]
@@ -3032,12 +3045,12 @@
 
   // ── History ─────────────────────────────────────────────────────────────────────
 
-  /* placeholder: ten zeros, the width a typical total has, for a total that has not arrived. */
+  /* placeholder: ODOMETER_PLACEHOLDER, for a total that has not arrived. A separator is the locale's group sign. */
   function odometerHTML(total, placeholder) {
-    var text = placeholder ? "0,000,000,000" : Math.round(Math.max(0, num(total) || 0)).toLocaleString("en-US");
+    var text = placeholder ? ODOMETER_PLACEHOLDER : FMT.number(Math.round(Math.max(0, num(total) || 0)));
     var strip = "0123456789".split("").map(function (n) { return "<i>" + n + "</i>"; }).join("");
     return '<div class="nm-odo" role="img" aria-label="' + esc(fmtInt(total) + " tokens, all time") + '">' + text.split("").map(function (ch) {
-      return ch === "," ? '<span class="nm-od-sep" aria-hidden="true">,</span>'
+      return ch === FMT.group ? '<span class="nm-od-sep" aria-hidden="true">' + esc(ch) + "</span>"
         : '<span class="nm-od-d" aria-hidden="true" data-d="' + ch + '"><span class="strip" style="--d:' + ch + '">' + strip + "</span></span>";
     }).join("") + "</div>";
   }
@@ -3047,7 +3060,7 @@
     if (n === null) {
       return "--";
     }
-    return n >= 100 ? Math.round(n).toLocaleString("en-US") : n >= 10 ? n.toFixed(0) : n.toFixed(1);
+    return n >= 100 ? FMT.number(Math.round(n)) : FMT.number(n >= 10 ? n.toFixed(0) : n.toFixed(1), NO_GROUP);
   }
 
   function comparisonList(od) {
@@ -3062,7 +3075,7 @@
       } else if (c.key === "britannica") {
         out.push({ n: fmtCompare(v), u: "sets of the Encyclopaedia Britannica", t: "Every token you have exchanged, cache reads included, would fill this many complete sets." });
       } else if (c.key === "page_stack_m") {
-        out.push({ n: v >= 1000 ? (v / 1000).toFixed(1) : v >= 100 ? Math.round(v) : v.toFixed(1), u: (v >= 1000 ? "km" : "metres") + " of printed pages", t: "Claude’s output printed at 500 words a page and stacked, 0.1 mm a sheet, would stand this tall." });
+        out.push({ n: FMT.number(v >= 1000 ? (v / 1000).toFixed(1) : v >= 100 ? String(Math.round(v)) : v.toFixed(1), NO_GROUP), u: (v >= 1000 ? "km" : "metres") + " of printed pages", t: "Claude’s output printed at 500 words a page and stacked, 0.1 mm a sheet, would stand this tall." });
       } else {
         out.push({ n: fmtCompare(v), u: String(c.label || c.key || ""), t: "" });
       }
@@ -4897,7 +4910,7 @@
     var s = st();
     var ingest = s && s.ingest;
     var sources = ingest
-      ? (ingest.running ? "INGEST " + Math.floor(100 * (ingest.files_done || 0) / Math.max(1, ingest.files_total || 1)) + "%"
+      ? (ingest.running ? "INGEST " + FMT.percent(String(Math.floor(100 * (ingest.files_done || 0) / Math.max(1, ingest.files_total || 1))))
         : fmtInt(ingest.files_total) + " OK")
       : "--";
     var unpriced = s && s.unpriced_models ? s.unpriced_models.length : 0;
