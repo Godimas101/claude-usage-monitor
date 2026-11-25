@@ -31,8 +31,10 @@ from typing import Any, NamedTuple
 
 from PIL import Image, ImageFilter
 
+from usage_monitor import formats
 from usage_monitor import themes as theme_registry
 from usage_monitor.data.models import ApiStatus
+from usage_monitor.i18n import Locale
 from usage_monitor.log import get_logger
 from usage_monitor.render import engine
 from usage_monitor.render.engine import Canvas, Color, Layer, Point, TRANSPARENT, parse_color, with_alpha
@@ -623,11 +625,11 @@ def _chip_word(model: WidgetModel, row: Row) -> str:
     if model.stale or not _over_cap(model, row) or guard is None:
         return "CRIT"
     cap = guard.caps.get(row.key)
-    return HOLD if cap is None else f"CAP {_number(cap)}"
+    return HOLD if cap is None else f"CAP {formats.number(_number(cap), model.locale, group=False)}"
 
 
 def _number(value: float) -> str:
-    """A cap as people write it: 95, not 95.0."""
+    """A cap as people write it: 95, not 95.0. ASCII digits, for formats.number or formats.percent to write."""
     return str(int(value)) if float(value).is_integer() else f"{value:g}"
 
 
@@ -646,10 +648,12 @@ def _hold_word(model: WidgetModel) -> str | None:
 
 
 def _digits(percent: float | None) -> str:
+    """A value rounded half up, never below 0, as ASCII digits ("--" for none): formats.number writes them."""
     return "--" if percent is None else str(max(0, int(percent + 0.5)))
 
 
 def _exact_digits(percent: float | None) -> str:
+    """The hover card's value to a tenth, ".0" dropped, as ASCII digits: formats.number writes them."""
     if percent is None:
         return "--"
     text = f"{max(0.0, percent):.1f}"
@@ -677,9 +681,17 @@ def _row_name(row: Row) -> str:
     return row.label.strip().upper()
 
 
-def _share_tag(row: Row) -> str | None:
-    """A scoped row's share of the weekly limit, "50% SHARE"; None for the other rows and a scoped one without it."""
-    return f"{round(row.share_pct)}% SHARE" if _is_scoped(row) and row.share_pct is not None else None
+def _share_tag(row: Row, locale: Locale) -> str | None:
+    """A scoped row's share of the weekly limit, "50% SHARE" ("50 % SHARE" in French); None for the other rows and
+    a scoped one without it."""
+    if not _is_scoped(row) or row.share_pct is None:
+        return None
+    return f"{formats.percent(str(round(row.share_pct)), locale)} SHARE"
+
+
+def _sign_first(locale: Locale) -> bool:
+    """Whether ``locale`` puts the percent sign before the number ("%34" in Turkish)."""
+    return bool(formats.percent_parts("0", locale, tight=True)[0])
 
 
 def _copy(theme: Any, key: str, default: str) -> str:
@@ -941,15 +953,16 @@ def _chip_width(ink: _Ink, emphasis: str, word: str = "CRIT") -> float:
 
 
 def _layout_row(ink: _Ink, look: Look, row: Row, emphasis: str, digits: str, reset: str | None,
-                chip_word: str = "CRIT") -> RowBoxes:
+                chip_word: str = "CRIT", *, locale: Locale) -> RowBoxes:
     """Fit a row's name side against its value side. A row too wide for both gives up its reset text first,
-    then its share tag, and then the end of its name; the value and the severity chip always stay."""
+    then its share tag, and then the end of its name; the value and the severity chip always stay. The value is
+    as wide on either side of its sign (_draw_value)."""
     unit_w = ink.width("%", UNIT) if row.percent is not None else 0.0
     value_w = ink.width(digits, VALUE) + (UNIT_GAP + unit_w if unit_w else 0.0)
     value = (RIGHT - value_w, float(RIGHT))
     name = _row_name(row)
     name_w = ink.width(name, NAME)
-    tag = _share_tag(row)
+    tag = _share_tag(row, locale)
     tag_w = ink.width(tag, TAG) if tag else 0.0
     chip_w = _chip_width(ink, emphasis, chip_word)
 
@@ -977,20 +990,25 @@ def _layout_row(ink: _Ink, look: Look, row: Row, emphasis: str, digits: str, res
     return RowBoxes((LEFT, LEFT + name_w), tag_box, chip_box, reset_box, value)
 
 
-def _draw_value(ink: _Ink, row: Row, emphasis: str, motion: Motion, top: float, digits: str) -> None:
-    """The numerals in Share Tech Mono 15 with a small dim percent sign, glowing; a refresh hit splits them."""
+def _draw_value(ink: _Ink, row: Row, emphasis: str, motion: Motion, top: float, digits: str,
+                locale: Locale) -> None:
+    """The numerals in Share Tech Mono 15 with a small dim percent sign, glowing; a refresh hit splits them. The sign
+    goes on its language's side (after the numerals in English, French and Spanish, before them in Turkish), UNIT_GAP
+    from them (it stands for the space French and Spanish put there)."""
     pal = ink.pal
     has_unit = row.percent is not None
     unit_w = ink.width("%", UNIT) if has_unit else 0.0
+    first = has_unit and _sign_first(locale)
+    digits_right = RIGHT - (unit_w + UNIT_GAP if has_unit and not first else 0.0)
     if has_unit:
-        ink.text("%", UNIT, RIGHT, top + UNIT_BASE, pal.ink2, align="right")
+        sign_right = RIGHT - ink.width(digits, VALUE) - UNIT_GAP if first else RIGHT
+        ink.text("%", UNIT, sign_right, top + UNIT_BASE, pal.ink2, align="right")
     color, glow = pal.fg_hi, pal.glow
     if emphasis == SEVERITY_WARNING:
         color = pal.value_warn
     elif emphasis == SEVERITY_CRITICAL:
         color, glow = pal.value_crit, pal.glow_danger
-    layer, _ = ink.layer(digits, VALUE, RIGHT - (unit_w + UNIT_GAP if has_unit else 0.0), top + VALUE_BASE,
-                         align="right")
+    layer, _ = ink.layer(digits, VALUE, digits_right, top + VALUE_BASE, align="right")
     ink.halo(layer, GLOW_SIGMA, glow)
     if motion.hit:
         shift = round(HIT_SPLITS[motion.hit] * ink.cv.kx)
@@ -1092,14 +1110,14 @@ def _draw_row(ink: _Ink, look: Look, model: WidgetModel, row: Row, top: float, m
     pal = ink.pal
     emphasis = _row_emphasis(model, row)
     word = _chip_word(model, row)
-    digits = _exact_digits(row.percent) if tooltip else _digits(row.percent)
+    digits = formats.number(_exact_digits(row.percent) if tooltip else _digits(row.percent), model.locale, group=False)
     reset = _reset_text(row, tooltip)
-    boxes = _layout_row(ink, look, row, emphasis, digits, None if tooltip else reset, word)
+    boxes = _layout_row(ink, look, row, emphasis, digits, None if tooltip else reset, word, locale=model.locale)
     name = _row_name(row)
     if ink.width(name, NAME) > boxes.name[1] - boxes.name[0] + 0.01:
         name = _fit(ink, name, NAME, boxes.name[1] - boxes.name[0])
     ink.text(name, NAME, LEFT, top + NAME_BASE, pal.fg)
-    tag = _share_tag(row)
+    tag = _share_tag(row, model.locale)
     if boxes.tag is not None and tag:
         ink.text(tag, TAG, boxes.tag[0], top + TAG_BASE, pal.ink3)
     if boxes.chip is not None:
@@ -1110,7 +1128,7 @@ def _draw_row(ink: _Ink, look: Look, model: WidgetModel, row: Row, top: float, m
             _chip_out(ink, boxes.chip[0], top, "WARN", colour, colour)
     if boxes.reset is not None and reset is not None:
         _draw_reset(ink, look, reset, boxes.reset, top)
-    _draw_value(ink, row, emphasis, motion, top, digits)
+    _draw_value(ink, row, emphasis, motion, top, digits, model.locale)
     _draw_rail(ink, row, top)
     _draw_bar(ink, look, row, emphasis, top)
     if tooltip:
@@ -1188,18 +1206,19 @@ def _guard_statement(model: WidgetModel) -> tuple[str, str] | None:
     off: ("GUARD // ARMED:", "SESSION 95%, WEEKLY 90%") and ("GUARD // HOLDING:",
     "WEEKLY 91% (CAP 90%). RESUMES FRI 7:12 PM (IN 2D 3H)."). A guard with nothing to list (no caps) is its lead
     alone, without the colon: ("GUARD // ARMED", "")."""
-    guard = model.guard
+    guard, locale = model.guard, model.locale
     if guard is None:
         return None
     if not guard.holding:
-        caps = ", ".join(engine.glue(f"{_guard_name(guard, key)} {_number(cap)}%") for key, cap in guard.caps.items())
+        caps = ", ".join(engine.glue(f"{_guard_name(guard, key)} {formats.percent(_number(cap), locale)}")
+                         for key, cap in guard.caps.items())
         return _lead("GUARD // ARMED", caps)
     limits = []
     for key in guard.over_keys:
         name, reading, cap = _guard_name(guard, key), guard.readings.get(key), guard.caps.get(key)
-        text = engine.glue(name if reading is None else f"{name} {_digits(reading)}%")
+        text = engine.glue(name if reading is None else f"{name} {formats.percent(_digits(reading), locale)}")
         if cap is not None:
-            text += " " + engine.glue(f"(CAP {_number(cap)}%)")
+            text += " " + engine.glue(f"(CAP {formats.percent(_number(cap), locale)})")
         limits.append(text)
     rest = ", ".join(limits)
     rest = f"{rest}." if rest else ""
@@ -1262,7 +1281,8 @@ def _draw_strip_row(ink: _Ink, look: Look, model: WidgetModel, row: Row | None, 
         _draw_slanted(ink, STRIP_BAR_X, bar_y, STRIP_BAR_W, STRIP_BAR_H, STRIP_SLANT, percent, fill)
         bar_end = STRIP_BAR_X + STRIP_BAR_W
 
-    text = "--" if percent is None else f"{_digits(percent)}%"
+    # A box sized for English's "100%": no space before the sign in any language (Chris's decision on #91).
+    text = "--" if percent is None else formats.percent(_digits(percent), model.locale, tight=True)
     spec = _fit_type(ink, text, STRIP_PCT, STRIP_PCT_RIGHT - bar_end - 2, 8.0)
     color = pal.fg_hi
     if emphasis == SEVERITY_WARNING:

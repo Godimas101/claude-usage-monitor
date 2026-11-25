@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 import budgets
-from usage_monitor import i18n
+from usage_monitor import formats, i18n
 from usage_monitor.render import dump
 from usage_monitor.render.skins import night_city as nc
 from usage_monitor.render.skins import nostromo as nos
@@ -80,17 +80,18 @@ STANDS_ON: dict[str, tuple[str, ...]] = {"floating": ("floating", "tooltip"), "t
 # The box the frame dump never draws: [G], since every sample state leaves room for [GUARD].
 NOT_DRAWN_WHOLE = frozenset({"nostromo.floating.armed_guard_short"})
 
-# What #91's number formats have to settle before French or Spanish is offered (#107): a percent with U+00A0 does not
-# fit the strips' values, and Gates' hover card leaves its widest cap badge out; fr-CA's and es-MX's dollars do not fit
-# the money figures. Turkish's "%100" fits; Turkish money has no figure yet (budgets.FIGURES says why).
-_STRIP_VALUES = ("nostromo.strip.value_5h", "nostromo.strip.value_5h_chip", "nostromo.strip.value_7d",
-                 "nostromo.strip.value_7d_chip", "night_city.strip.percent")
+# What #91's number formats have to settle before French or Spanish is offered (#107): fr-CA's and es-MX's dollars do
+# not fit the money figures, and Turkish money has no figure yet (budgets.FIGURES says why). The percents are settled:
+# the boxes sized for English's figures (the strips' values, Gates' cap badge) draw them without the space (Box.tight,
+# Chris's decision on #91), and Turkish's "%100" fits.
+TIGHT_BOXES = frozenset({"nostromo.strip.value_5h", "nostromo.strip.value_5h_chip", "nostromo.strip.value_7d",
+                         "nostromo.strip.value_7d_chip", "night_city.strip.percent", "gates.floating.cap_badge",
+                         "gates.tooltip.cap_badge"})
 _MONEY = tuple(f"dashboard.{skin}.cost_{part}" for part in ("tile", "hero")
                for skin in ("nostromo", "night_city", "gates"))
-_PERCENT = {(box, "100\u00a0%") for box in _STRIP_VALUES} | {("gates.tooltip.cap_badge", "Cap 100\u00a0%")}
 FOR_91: dict[str, set[tuple[str, str]]] = {
-    "fr": _PERCENT | {(box, "5,96 $ US") for box in _MONEY},
-    "es": _PERCENT | {(box, text) for box in _MONEY for text in ("USD 5.96", "1,234.5")},
+    "fr": {(box, "5,96 $ US") for box in _MONEY},
+    "es": {(box, text) for box in _MONEY for text in ("USD 5.96", "1,234.5")},
     "tr": set(),
 }
 
@@ -262,6 +263,22 @@ def test_what_91_has_to_settle_is_all_that_runs_past() -> None:
     """French's and Spanish's longest figures run past only where FOR_91 says; #91 strikes each as it settles it."""
     for language, expected in FOR_91.items():
         assert {(r.box.id, r.text) for r in budgets.over(language)} == expected, language
+
+
+def test_the_boxes_sized_for_englishs_figures_take_their_percents_tight() -> None:
+    """Chris's decision on #91: French and Spanish drop the space before "%" only in the boxes sized for English's
+    figures, and the sign keeps its side. budgets.tight writes each language's percent figure as formats.percent does
+    with tight=True for the language's base format, so the budgets measure what the skins draw (test_locale_surfaces.py
+    holds the skins to it); every other box takes the figure with its space."""
+    assert {box.id for box in budgets.BOXES if box.tight} == TIGHT_BOXES
+    for language, figures in budgets.FIGURES["percent"].items():
+        tag = i18n.BASE_FORMATS[language]
+        locale = i18n.Locale(setting="system", language=language, system="en", format=tag, clock=24, offered=("en",))
+        assert [budgets.tight(figure) for figure in figures] == [formats.percent("100", locale, tight=True)], language
+    assert budgets.texts(budgets.BOX["gates.tooltip.cap_badge"], "fr") == ["Cap 100%"]
+    assert budgets.texts(budgets.BOX["nostromo.strip.value_5h"], "es") == ["100%"]
+    assert budgets.texts(budgets.BOX["night_city.strip.percent"], "tr") == ["%100"]
+    assert budgets.texts(budgets.BOX["gates.floating.row_value"], "fr") == ["100\u00a0%"]
 
 
 def test_a_box_that_shrinks_its_text_is_measured_at_the_size_it_shrinks_to(monkeypatch: pytest.MonkeyPatch) -> None:

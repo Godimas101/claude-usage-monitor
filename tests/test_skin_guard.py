@@ -29,6 +29,7 @@ from PIL import Image, ImageChops
 
 from usage_monitor.agent import guard
 from usage_monitor.data.models import ApiStatus, Limit
+from usage_monitor.i18n import ENGLISH
 from usage_monitor.render import dump, engine
 from usage_monitor.render.model import WidgetModel, build_model
 from usage_monitor.render.skins import RenderOptions, gates, get_skin, night_city, nostromo
@@ -616,7 +617,7 @@ def test_night_city_a_long_scoped_name_keeps_the_chip_and_the_value():
         row = model.rows[2]
         word = night_city._chip_word(model, row)
         assert word == "CAP 90" and night_city._row_emphasis(model, row) == "critical"
-        boxes = night_city._layout_row(ink, look, row, "critical", "95", None, word)
+        boxes = night_city._layout_row(ink, look, row, "critical", "95", None, word, locale=ENGLISH)
         assert boxes.chip is not None and boxes.chip[1] <= boxes.value[0] - night_city.MIN_GAP + 1e-6, label
 
 

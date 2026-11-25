@@ -25,6 +25,7 @@ from PIL import Image
 
 from usage_monitor import themes as theme_registry
 from usage_monitor.data.models import ApiStatus, Limit
+from usage_monitor.i18n import ENGLISH
 from usage_monitor.render import dump, engine
 from usage_monitor.render.model import STALE_MESSAGE_REFUSED, STALE_REFUSED, build_model
 from usage_monitor.render.skins import RenderOptions, get_skin
@@ -770,7 +771,7 @@ def test_the_pill_shows_the_age_in_the_mockup_style(age_text, age_s, label):
 def test_labels_are_sentence_case_and_tags_follow_the_row():
     m = dump.sample_model("normal3")
     assert [gates._sentence(row.label) for row in m.rows] == ["Session", "Weekly", "Fable weekly"]
-    assert [gates._tag(row) for row in m.rows] == ["5H", "7D", "50% share"]
+    assert [gates._tag(row, ENGLISH) for row in m.rows] == ["5H", "7D", "50% share"]
     assert gates._sentence("Claude Design weekly") == "Claude Design weekly"
 
 
@@ -796,13 +797,13 @@ def test_a_scoped_row_is_named_for_its_scope_not_its_label(model_name, surface, 
     (0.0, "0%"), (-3.0, "0%"), (None, "--"), (float("nan"), "--"),
 ])
 def test_percent_text(percent, text):
-    assert gates._percent_text(percent) == text
+    assert gates._percent_text(percent, ENGLISH) == text
 
 
 def test_exact_percent_text_drops_a_trailing_zero():
-    assert gates._exact_percent_text(13.0) == "13%"
-    assert gates._exact_percent_text(13.25) == "13.2%" or gates._exact_percent_text(13.25) == "13.3%"
-    assert gates._exact_percent_text(None) == "--"
+    assert gates._exact_percent_text(13.0, ENGLISH) == "13%"
+    assert gates._exact_percent_text(13.25, ENGLISH) == "13.2%" or gates._exact_percent_text(13.25, ENGLISH) == "13.3%"
+    assert gates._exact_percent_text(None, ENGLISH) == "--"
 
 
 def test_pace_text_gives_the_points_and_the_direction():

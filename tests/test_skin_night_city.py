@@ -25,6 +25,7 @@ from PIL import Image, ImageChops
 
 from usage_monitor import themes as theme_registry
 from usage_monitor.data.models import ApiStatus, Limit
+from usage_monitor.i18n import ENGLISH
 from usage_monitor.render import dump, engine, glyphs
 from usage_monitor.render.model import STALE_MESSAGE_REFUSED, STALE_REFUSED, Row, WidgetModel, build_model
 from usage_monitor.render.skins import RenderOptions, get_skin
@@ -600,7 +601,7 @@ def test_row_parts_never_overlap_and_stay_inside_the_frame(variant_id, scale, in
     look = nc.look_for(variant(variant_id))
     emphasis = target.severity
     digits = nc._digits(target.percent)
-    boxes = nc._layout_row(ink, look, target, emphasis, digits, nc._reset_text(target, False))
+    boxes = nc._layout_row(ink, look, target, emphasis, digits, nc._reset_text(target, False), locale=ENGLISH)
     parts = [boxes.name]
     for part in (boxes.tag, boxes.chip, boxes.reset):
         if part is not None:
@@ -616,7 +617,7 @@ def test_row_parts_never_overlap_and_stay_inside_the_frame(variant_id, scale, in
 def test_a_long_name_is_cut_with_dots_and_the_value_and_chip_stay():
     ink = ink_for()
     target = LAYOUT_ROWS[8]
-    boxes = nc._layout_row(ink, nc.look_for(variant("blackwall")), target, "critical", "99", None)
+    boxes = nc._layout_row(ink, nc.look_for(variant("blackwall")), target, "critical", "99", None, locale=ENGLISH)
     assert boxes.tag is None and boxes.chip is not None                               # the tag went, the chip stayed
     cut = nc._fit(ink, nc._row_name(target), nc.NAME, boxes.name[1] - boxes.name[0])
     assert cut.endswith("...") and ink.width(cut, nc.NAME) <= boxes.name[1] - boxes.name[0] + 0.01
@@ -627,10 +628,10 @@ def test_the_reset_text_is_dropped_before_the_name_is_touched():
     look = nc.look_for(variant("blackwall"))
     tight = LAYOUT_ROWS[3]                                                           # WEEKLY 100 % with a CRIT chip
     roomy = LAYOUT_ROWS[0]
-    squeezed = nc._layout_row(ink, look, tight, "critical", "100", "RST WED 12:30 PM")
+    squeezed = nc._layout_row(ink, look, tight, "critical", "100", "RST WED 12:30 PM", locale=ENGLISH)
     assert squeezed.reset is None
     assert squeezed.name == (nc.LEFT, nc.LEFT + ink.width("WEEKLY", nc.NAME))          # the name is whole
-    assert nc._layout_row(ink, look, roomy, "normal", "13", "RST 7:39 PM").reset is not None
+    assert nc._layout_row(ink, look, roomy, "normal", "13", "RST 7:39 PM", locale=ENGLISH).reset is not None
 
 
 @pytest.mark.parametrize("variant_id", VARIANTS)
@@ -1026,9 +1027,9 @@ def drawn_digits(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
     seen: list[tuple[str, str]] = []
     real = nc._draw_value
 
-    def spy(ink: nc._Ink, row_: Row, emphasis: str, motion: Any, top: float, digits: str) -> None:
+    def spy(ink: nc._Ink, row_: Row, emphasis: str, motion: Any, top: float, digits: str, *rest: Any) -> None:
         seen.append((row_.key, digits))
-        real(ink, row_, emphasis, motion, top, digits)
+        real(ink, row_, emphasis, motion, top, digits, *rest)
 
     monkeypatch.setattr(nc, "_draw_value", spy)
     return seen
@@ -1117,7 +1118,7 @@ def test_the_warn_chip_has_the_same_padding_either_side_of_its_text(variant_id):
     rows = sample_rows(session=78.0, severities=("warning", "normal", "normal"))
     image = render(model(rows), variant_id, scale)
     boxes = nc._layout_row(ink_for(1.0, variant_id), nc.look_for(variant(variant_id)), rows[0], "warning",
-                           nc._digits(78.0), nc._reset_text(rows[0], False))
+                           nc._digits(78.0), nc._reset_text(rows[0], False), locale=ENGLISH)
     assert boxes.chip is not None
     panel = palette(variant_id).panel[:3]
     left, right = int(boxes.chip[0] * scale), round(boxes.chip[1] * scale)

@@ -20,7 +20,8 @@ runs past it by design (the strip's 100%: KNOWN_ENGLISH_OVERRUNS). A character b
 KNOWN_ENGLISH_OVERRUNS may pass it.
 
 What goes in a box: English as the skins draw it today; each language's longest figures (FIGURES), set in the box's
-text where the box holds one (``templates``); and, once the box's text moves to the catalog (#93 to #101), its keys in
+text where the box holds one (``templates``), a percent without its space in a box sized for English's figures
+(``Box.tight``: Chris's decision on #91); and, once the box's text moves to the catalog (#93 to #101), its keys in
 that language. Until then the pseudo-locale measures that English through ``i18n.pseudo_text``. Durations and counts
 get figures when #91 gives each language their format.
 
@@ -32,6 +33,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import string
 import sys
 import tempfile
@@ -185,6 +187,7 @@ class Box:
     kinds: tuple[str, ...] = ()     # the figures it holds
     templates: tuple[str, ...] = ("{}",)    # how a figure sits in its text
     keys: tuple[str, ...] = ()      # catalog keys drawn in it, once its text is in the catalog (#93 to #101)
+    tight: bool = False             # sized for English's figures: its percent has no space before the sign (#91)
 
     @property
     def unit(self) -> str:
@@ -305,18 +308,21 @@ _WAIT_N = "12 sessions waiting on the usage guard were let go early."
 
 def _nos(id_: str, font: str, size: float, tracking: float, limit: float, why: str, fit: str = "none", *,
          english: tuple[str, ...], kinds: tuple[str, ...] = (), templates: tuple[str, ...] = ("{}",),
-         canvas: str = "frame") -> Box:
-    return Box(id_, nos_run(font, size, tracking, canvas), limit, why, fit, english, kinds, templates)
+         canvas: str = "frame", tight: bool = False) -> Box:
+    return Box(id_, nos_run(font, size, tracking, canvas), limit, why, fit, english, kinds, templates, tight=tight)
 
 
 def _nc(id_: str, spec: str, limit: float, why: str, fit: str = "none", *, english: tuple[str, ...],
-        kinds: tuple[str, ...] = (), templates: tuple[str, ...] = ("{}",), measure: Measure | None = None) -> Box:
-    return Box(id_, measure or Measure("night_city", (spec,)), limit, why, fit, english, kinds, templates)
+        kinds: tuple[str, ...] = (), templates: tuple[str, ...] = ("{}",), measure: Measure | None = None,
+        tight: bool = False) -> Box:
+    return Box(id_, measure or Measure("night_city", (spec,)), limit, why, fit, english, kinds, templates,
+               tight=tight)
 
 
 def _g(id_: str, role: str, size: float, weight: int, limit: float, why: str, fit: str = "none", *,
-       english: tuple[str, ...], kinds: tuple[str, ...] = (), templates: tuple[str, ...] = ("{}",)) -> Box:
-    return Box(id_, Measure("gates", (role, size, weight)), limit, why, fit, english, kinds, templates)
+       english: tuple[str, ...], kinds: tuple[str, ...] = (), templates: tuple[str, ...] = ("{}",),
+       tight: bool = False) -> Box:
+    return Box(id_, Measure("gates", (role, size, weight)), limit, why, fit, english, kinds, templates, tight=tight)
 
 
 def _chars(id_: str, limit: float, why: str, fit: str, *, english: tuple[str, ...], kinds: tuple[str, ...] = (),
@@ -404,15 +410,16 @@ BOXES: tuple[Box, ...] = (
     _nos("nostromo.strip.window_tag", SEMI, 11, 1.1, nos.STRIP_GROUPS[0][1] - nos.STRIP_GROUPS[0][0],
          "from the group's start to its bar (STRIP_GROUPS)", canvas="strip", english=("5H", "7D")),
     _nos("nostromo.strip.value_5h", VT, 18, 0, _NOS_STRIP_ROOM[0], "from the 5H bar's last cell to the next group",
-         kinds=("percent",), canvas="strip", english=("--", "13%", "38%", "41%", "78%", "100%")),
+         kinds=("percent",), canvas="strip", english=("--", "13%", "38%", "41%", "78%", "100%"), tight=True),
     _nos("nostromo.strip.value_5h_chip", VT, 18, 0, _NOS_STRIP_ROOM[0] - 4,
          "the 5H value in its critical chip (4 px of padding): at 90 % and up, or at any cap the guard holds on "
-         "(_row_emphasis)", kinds=("percent",), canvas="strip", english=("60%", "90%", "93%", "96%", "99%", "100%")),
+         "(_row_emphasis)", kinds=("percent",), canvas="strip", english=("60%", "90%", "93%", "96%", "99%", "100%"),
+         tight=True),
     _nos("nostromo.strip.value_7d", VT, 18, 0, _NOS_STRIP_ROOM[1], "from the 7D bar's last cell to the strip's end",
-         kinds=("percent",), canvas="strip", english=("--", "2%", "21%", "52%", "58%", "100%")),
+         kinds=("percent",), canvas="strip", english=("--", "2%", "21%", "52%", "58%", "100%"), tight=True),
     _nos("nostromo.strip.value_7d_chip", VT, 18, 0, _NOS_STRIP_ROOM[1] - 4,
          "the 7D value in its critical chip, as the 5H one", kinds=("percent",), canvas="strip",
-         english=("60%", "90%", "91%", "100%")),
+         english=("60%", "90%", "91%", "100%"), tight=True),
     Box("nostromo.tray.readout", Measure("nostromo_tray"), 2 * (_TRAY[0] - _TRAY[1]),
         "the ring's hole on a 32 px icon, in device px (_tray_geometry)", "none", ("--", "0", "13", "100")),
 
@@ -499,7 +506,7 @@ BOXES: tuple[Box, ...] = (
     _nc("night_city.strip.percent", "STRIP_PCT", _NC_PCT_ROOM,
         "from the segmented bar's end (the slanted look has one px more); shrunk to fit, down to 8 px", "shrink",
         kinds=("percent",), measure=Measure("night_city_fit", ("STRIP_PCT", _NC_PCT_ROOM, 8.0)),
-        english=("100%", "13%", "2%", "--")),
+        english=("100%", "13%", "2%", "--"), tight=True),
     _nc("night_city.strip.status_live", "STATUS", nc.STRIP_TAG[2] - nc.STRIP_WORD_X, "the status tag's room",
         english=("LIVE",)),
     _nc("night_city.strip.status_word", "STATUS", _NC_STATUS_ROOM,
@@ -547,7 +554,7 @@ BOXES: tuple[Box, ...] = (
        g.RIGHT - _G_VALUE_100 - 10 - g.LEFT - W_g("Fable weekly", "body", 12, 400) - (6 + W_g("100% share", "mono", 11, 400))
        - g.BADGE_GAP - 2 * g.BADGE_PAD,
        "after the widest label and tag, before the value; left out where it does not fit", "drop", kinds=("percent",),
-       templates=("Cap {}",), english=("Cap 95%", "Cap 90%", "Cap 100%")),
+       templates=("Cap {}",), english=("Cap 95%", "Cap 90%", "Cap 100%"), tight=True),
     _g("gates.tooltip.row_label", "body", 12, 400, g.RIGHT - g.LEFT - 10 - _G_VALUE_EXACT,
        "left of the exact value; the tag gives way first, then the label is cut", "ellipsis",
        english=("Session", "Weekly", "Fable weekly")),
@@ -562,7 +569,7 @@ BOXES: tuple[Box, ...] = (
        g.RIGHT - _G_VALUE_EXACT - 10 - g.LEFT - W_g("Fable weekly", "body", 12, 400) - (6 + W_g("100% share", "mono", 11, 400))
        - g.BADGE_GAP - 2 * g.BADGE_PAD,
        "after the widest label and tag, before the exact value; left out where it does not fit", "drop",
-       kinds=("percent",), templates=("Cap {}",), english=("Cap 95%", "Cap 90%", "Cap 100%")),
+       kinds=("percent",), templates=("Cap {}",), english=("Cap 95%", "Cap 90%", "Cap 100%"), tight=True),
     # ── Gates: the hover card's info line and guard bar (render_tooltip, _guard_bar_lines) ──
     _g("gates.tooltip.resets", "body", 11, 400, g.RIGHT - g.LEFT - _G_PACE_WIDEST,
        "from LEFT to the widest pace, right-aligned at RIGHT", kinds=("clock",), templates=("Resets {}", "Resets Wed {}"),
@@ -769,6 +776,13 @@ def budget(box: Box, scale: float = 1.0) -> float:
     return max(box.limit, max((box.width(text, scale) for text in box.english), default=0.0))
 
 
+def tight(figure: str) -> str:
+    """A percent figure as a box sized for English's figures takes it: no space between the number and the sign,
+    which stays on its language's side ("100%" for French's "100 %", Turkish's "%100" as it is), as
+    formats.percent(..., tight=True) writes it."""
+    return re.sub(r"\s*%\s*", "%", figure)
+
+
 def texts(box: Box, language: str) -> list[str]:
     """What ``language`` puts in ``box``: English as drawn today, for the pseudo-locale that English made pseudo,
     the language's longest figures set in the box's text, and the text of the box's keys once it has them."""
@@ -780,6 +794,7 @@ def texts(box: Box, language: str) -> list[str]:
     if language != i18n.PSEUDO:
         for kind in box.kinds:
             for figure in FIGURES.get(kind, {}).get(language, ()):
+                figure = tight(figure) if box.tight and kind == "percent" else figure
                 found += [template.format(figure) for template in box.templates]
     if box.keys:
         catalog = i18n.load_catalog(language)

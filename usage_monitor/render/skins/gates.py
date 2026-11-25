@@ -42,8 +42,10 @@ from typing import Any
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
+from usage_monitor import formats
 from usage_monitor import themes as theme_registry
 from usage_monitor.data.models import ApiStatus
+from usage_monitor.i18n import Locale
 from usage_monitor.log import get_logger
 from usage_monitor.render import engine
 from usage_monitor.render.engine import Canvas, Color, Layer, TRANSPARENT, parse_color, with_alpha
@@ -811,15 +813,19 @@ def _known(percent: float | None) -> bool:
     return percent is not None and math.isfinite(percent)
 
 
-def _percent_text(percent: float | None) -> str:
-    return f"{int(percent + 0.5) if percent >= 0 else 0}%" if _known(percent) else "--"
+def _percent_text(percent: float | None, locale: Locale) -> str:
+    """A value rounded half up, in ``locale``: "13%", "13 %" in French, "%13" in Turkish."""
+    if not _known(percent):
+        return "--"
+    return formats.percent(str(int(percent + 0.5) if percent >= 0 else 0), locale)
 
 
-def _exact_percent_text(percent: float | None) -> str:
+def _exact_percent_text(percent: float | None, locale: Locale) -> str:
+    """The hover card's value to a tenth, ".0" dropped, in ``locale``: "33.5%", "33,5 %" in French."""
     if not _known(percent):
         return "--"
     text = f"{percent:.1f}"
-    return f"{text[:-2] if text.endswith('.0') else text}%"
+    return formats.percent(text[:-2] if text.endswith('.0') else text, locale)
 
 
 def _age_label(model: WidgetModel) -> str | None:
@@ -872,12 +878,12 @@ def _guard_name(guard: GuardMark, key: str) -> str:
     return guard.labels.get(key, key)
 
 
-def _tag(row: Row) -> str:
+def _tag(row: Row, locale: Locale) -> str:
     if row.key == "session":
         return "5H"
-    if row.key == "weekly":
+    if row.key == "weekly" or row.share_pct is None:
         return "7D"
-    return f"{round(row.share_pct)}% share" if row.share_pct is not None else "7D"
+    return f"{formats.percent(str(round(row.share_pct)), locale)} share"
 
 
 def _blank_row(key: str, label: str, kind: str) -> Row:
@@ -1017,7 +1023,7 @@ def _value_color(pal: Palette, model: WidgetModel, row: Row) -> Color:
 
 
 def _number(value: float) -> str:
-    """A cap as people write it: 95, not 95.0."""
+    """A cap as people write it: 95, not 95.0. ASCII digits, for formats.percent to write."""
     return str(int(value)) if float(value).is_integer() else f"{value:g}"
 
 
@@ -1165,13 +1171,14 @@ def _fit(ink: Ink, text: str, face: Face, limit: float) -> str:
 def _cap_badge(ink: Ink, pal: Palette, model: WidgetModel, row: Row, name_end: float, limit: float, top: float) -> None:
     """"Cap 95%" in a capsule tinted with the alert colour, after the name of a row the usage guard holds on. It is
     drawn only where it fits between the name and the value (``limit``): a long scoped name keeps its room, and the
-    value in the alert colour and the footer carry the state."""
+    value in the alert colour and the footer carry the state. The badge is sized for English's "Cap 100%", so its
+    percent has no space in any language (tight; Chris's decision on #91): "Cap 100%" in French too."""
     guard = model.guard
     cap = guard.caps.get(row.key) if guard is not None and _over_cap(model, row) else None
     if cap is None:
         return
     face = ink.face(ink.fonts.body, SIZE_PILL, 600)
-    text = f"Cap {_number(cap)}%"
+    text = f"Cap {formats.percent(_number(cap), model.locale, tight=True)}"
     left = name_end + BADGE_GAP
     width = BADGE_PAD + ink.advance(text, face) + BADGE_PAD
     if left + width > limit:
@@ -1189,11 +1196,11 @@ def _row(ink: Ink, pal: Palette, model: WidgetModel, row: Row, top: float, *, ex
     tag_face = ink.face(fonts.mono, SIZE_TAG, 400)
     value_face = ink.face(fonts.mono, SIZE_VALUE, 700)
 
-    value = _exact_percent_text(row.percent) if exact else _percent_text(row.percent)
+    value = _exact_percent_text(row.percent, model.locale) if exact else _percent_text(row.percent, model.locale)
     value_w = ink.advance(value, value_face)
     room = RIGHT - LEFT - value_w - 10
     label = _row_name(row)
-    tag = _tag(row)
+    tag = _tag(row, model.locale)
     label_w = ink.advance(label, label_face)
     tag_w = ink.advance(tag, tag_face)
     if label_w + 6 + tag_w > room:
@@ -1254,18 +1261,19 @@ def _guard_statement(model: WidgetModel) -> tuple[str, str] | None:
     ("Guard armed:", "session 95%, weekly 90%") and
     ("Guard holding:", "weekly 91% (cap 90%). Resumes Fri 7:12 PM (in 2d 3h)."). A guard with nothing to list (no
     caps) is its lead alone, without the colon: ("Guard armed", "")."""
-    guard = model.guard
+    guard, locale = model.guard, model.locale
     if guard is None:
         return None
     if not guard.holding:
-        caps = ", ".join(engine.glue(f"{_guard_name(guard, key)} {_number(cap)}%") for key, cap in guard.caps.items())
+        caps = ", ".join(engine.glue(f"{_guard_name(guard, key)} {formats.percent(_number(cap), locale)}")
+                         for key, cap in guard.caps.items())
         return _lead("Guard armed", caps)
     limits = []
     for key in guard.over_keys:
         name, reading, cap = _guard_name(guard, key), guard.readings.get(key), guard.caps.get(key)
-        text = engine.glue(name if reading is None else f"{name} {_percent_text(reading)}")
+        text = engine.glue(name if reading is None else f"{name} {_percent_text(reading, locale)}")
         if cap is not None:
-            text += " " + engine.glue(f"(cap {_number(cap)}%)")
+            text += " " + engine.glue(f"(cap {formats.percent(_number(cap), locale)})")
         limits.append(text)
     rest = ", ".join(limits)
     rest = f"{rest}." if rest else ""
@@ -1553,7 +1561,7 @@ def _render_strip(model: WidgetModel, pal: Palette, theme: Any, height_px: int, 
             fill_w = width * min(1.0, row.percent / 100)
             ink.rrect(STRIP_RAIL_X0, top + 5, STRIP_RAIL_X0 + fill_w, top + 9, BAR_RADIUS,
                       _usage_color(pal, model, row))
-        value = _percent_text(row.percent if row is not None else None)
+        value = _percent_text(row.percent if row is not None else None, model.locale)
         color = _value_color(pal, model, row) if row is not None else _fade(pal.text, DIM_VALUE)
         ink.put(value, STRIP_VALUE_RIGHT, ink.baseline(top, STRIP_ROW_LINE, value_face), value_face, color, "right")
     _lamp(ink, pal, _LAMP_KIND[model.status], STRIP_LAMP_X, plate_h / 2)

@@ -64,10 +64,10 @@ def scoped_row(share: float | None) -> Row:
 HELPERS: dict[str, dict[str, Callable[[Any], str]]] = {
     "percent": {
         "app._percent_text": app._percent_text,
-        "nostromo._percent_text": nostromo._percent_text,
-        "nostromo._exact_percent_text": nostromo._exact_percent_text,
-        "gates._percent_text": gates._percent_text,
-        "gates._exact_percent_text": gates._exact_percent_text,
+        "nostromo._percent_text": lambda p: nostromo._percent_text(p, i18n.ENGLISH),
+        "nostromo._exact_percent_text": lambda p: nostromo._exact_percent_text(p, i18n.ENGLISH),
+        "gates._percent_text": lambda p: gates._percent_text(p, i18n.ENGLISH),
+        "gates._exact_percent_text": lambda p: gates._exact_percent_text(p, i18n.ENGLISH),
         "night_city._digits": night_city._digits,
         "night_city._exact_digits": night_city._exact_digits,
     },
@@ -77,10 +77,10 @@ HELPERS: dict[str, dict[str, Callable[[Any], str]]] = {
         "night_city._number": night_city._number,
     },
     "share": {
-        "nostromo._qualifier": lambda share: nostromo._qualifier(scoped_row(share)),
-        "nostromo._short_qualifier": lambda share: nostromo._short_qualifier(scoped_row(share)),
-        "gates._tag": lambda share: gates._tag(scoped_row(share)),
-        "night_city._share_tag": lambda share: night_city._share_tag(scoped_row(share)),
+        "nostromo._qualifier": lambda share: nostromo._qualifier(scoped_row(share), i18n.ENGLISH),
+        "nostromo._short_qualifier": lambda share: nostromo._short_qualifier(scoped_row(share), i18n.ENGLISH),
+        "gates._tag": lambda share: gates._tag(scoped_row(share), i18n.ENGLISH),
+        "night_city._share_tag": lambda share: night_city._share_tag(scoped_row(share), i18n.ENGLISH),
     },
 }
 

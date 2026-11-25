@@ -22,6 +22,7 @@ from PIL import Image
 from usage_monitor import themes as theme_registry
 from usage_monitor.agent import guard as guard_mod
 from usage_monitor.data import usage_api
+from usage_monitor.i18n import ENGLISH
 from usage_monitor.data.models import (
     ApiStatus,
     BurnRate,
@@ -1538,7 +1539,7 @@ def test_the_name_line_gives_way_in_the_order_night_city_does(label, allowance, 
     fonts = (cv.font(nostromo_skin.FONT_SEMI, nostromo_skin.LABEL_SIZE), cv.font(nostromo_skin.FONT_REG, nostromo_skin.LABEL_SIZE),
              cv.font(nostromo_skin.FONT_VT, nostromo_skin.VALUE_SIZE))
     row = scoped_model(label, allowance).rows[2]
-    assert nostromo_skin._name_line(cv, row, "33%", *fonts) == expected
+    assert nostromo_skin._name_line(cv, row, "33%", *fonts, locale=ENGLISH) == expected
 
 
 def test_a_name_too_long_for_any_form_is_cut_with_an_ellipsis():
@@ -1547,7 +1548,7 @@ def test_a_name_too_long_for_any_form_is_cut_with_an_ellipsis():
     semi, reg, vt = (cv.font(nostromo_skin.FONT_SEMI, nostromo_skin.LABEL_SIZE), cv.font(nostromo_skin.FONT_REG, nostromo_skin.LABEL_SIZE),
                      cv.font(nostromo_skin.FONT_VT, nostromo_skin.VALUE_SIZE))
     row = scoped_model("A VERY LONG MODEL NAME THAT KEEPS GOING FOR A WHILE WEEKLY", 25.0).rows[2]
-    name, qualifier = nostromo_skin._name_line(cv, row, "33%", semi, reg, vt)
+    name, qualifier = nostromo_skin._name_line(cv, row, "33%", semi, reg, vt, locale=ENGLISH)
     assert name.endswith("\u2026") and name.startswith("A VERY LONG") and qualifier == "25%"
     room = nostromo_skin.RIGHT - cv.advance("33%", vt) - nostromo_skin.VALUE_CLEARANCE - nostromo_skin.LEFT
     used = cv.advance(name, semi, nostromo_skin.LABEL_TRACKING) + nostromo_skin.QUALIFIER_GAP + cv.advance(
@@ -1561,8 +1562,8 @@ def test_the_session_and_weekly_rows_keep_their_fixed_qualifiers():
     semi, reg, vt = (cv.font(nostromo_skin.FONT_SEMI, nostromo_skin.LABEL_SIZE), cv.font(nostromo_skin.FONT_REG, nostromo_skin.LABEL_SIZE),
                      cv.font(nostromo_skin.FONT_VT, nostromo_skin.VALUE_SIZE))
     rows = scoped_model("FABLE WEEKLY", 50.0).rows
-    assert nostromo_skin._name_line(cv, rows[0], "13%", semi, reg, vt) == ("SESSION", "5H")
-    assert nostromo_skin._name_line(cv, rows[1], "2%", semi, reg, vt) == ("WEEKLY", "7D")
+    assert nostromo_skin._name_line(cv, rows[0], "13%", semi, reg, vt, locale=ENGLISH) == ("SESSION", "5H")
+    assert nostromo_skin._name_line(cv, rows[1], "2%", semi, reg, vt, locale=ENGLISH) == ("WEEKLY", "7D")
 
 
 @pytest.mark.parametrize(("model_name", "surface", "full", "short"), [

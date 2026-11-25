@@ -19,9 +19,11 @@ from typing import Any
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
+from usage_monitor import formats
 from usage_monitor import themes as theme_registry
 from usage_monitor.themes import colour as colour_math
 from usage_monitor.data.models import ApiStatus
+from usage_monitor.i18n import Locale
 from usage_monitor.render import engine
 from usage_monitor.render.engine import Canvas, Color, Layer, TRANSPARENT, parse_color, with_alpha
 from usage_monitor.render.model import (
@@ -356,32 +358,39 @@ def _row_emphasis(model: WidgetModel, row: Row) -> str:
     return _emphasis(model, row)
 
 
-def _percent_text(percent: float | None) -> str:
-    return "--" if percent is None else f"{int(percent + 0.5) if percent >= 0 else 0}%"
+def _percent_text(percent: float | None, locale: Locale, *, tight: bool = False) -> str:
+    """A value rounded half up, in ``locale``: "13%", "13 %" in French, "%13" in Turkish. ``tight`` drops the space
+    (the strip's values are sized for English's "100%"; Chris's decision on #91)."""
+    if percent is None:
+        return "--"
+    return formats.percent(str(int(percent + 0.5) if percent >= 0 else 0), locale, tight=tight)
 
 
-def _exact_percent_text(percent: float | None) -> str:
+def _exact_percent_text(percent: float | None, locale: Locale) -> str:
+    """The hover card's value to a tenth, ".0" dropped, in ``locale``: "33.5%", "33,5 %" in French."""
     if percent is None:
         return "--"
     text = f"{percent:.1f}"
     if text.endswith(".0"):
         text = text[:-2]
-    return f"{text}%"
+    return formats.percent(text, locale)
 
 
-def _qualifier(row: Row) -> str | None:
+def _qualifier(row: Row, locale: Locale) -> str | None:
     if row.key == "session":
         return "5H"
     if row.key == "weekly":
         return "7D"
-    return f"OF {round(row.share_pct)}% SHARE" if row.share_pct is not None else None
+    if row.share_pct is None:
+        return None
+    return f"OF {formats.percent(str(round(row.share_pct)), locale)} SHARE"
 
 
-def _short_qualifier(row: Row) -> str | None:
+def _short_qualifier(row: Row, locale: Locale) -> str | None:
     """The qualifier when the full one does not fit: a scoped limit's share on its own ("25%")."""
     if row.key in ("session", "weekly") or row.share_pct is None:
-        return _qualifier(row)
-    return f"{round(row.share_pct)}%"
+        return _qualifier(row, locale)
+    return formats.percent(str(round(row.share_pct)), locale)
 
 
 def _row_names(row: Row) -> tuple[str, str]:
@@ -403,7 +412,7 @@ def _row_names(row: Row) -> tuple[str, str]:
 
 
 def _name_line(cv: Canvas, row: Row, value: str, semi: Any, reg: Any, vt: Any,
-               chip: float = 0.0) -> tuple[str, str | None]:
+               chip: float = 0.0, *, locale: Locale) -> tuple[str, str | None]:
     """The row's name and qualifier, cut so the line ends VALUE_CLEARANCE px before the value (and before
     its chip, which is ``chip`` px wider than the digits, when a critical row draws one).
 
@@ -420,7 +429,7 @@ def _name_line(cv: Canvas, row: Row, value: str, semi: Any, reg: Any, vt: Any,
             used += QUALIFIER_GAP + cv.advance(qualifier, reg, QUALIFIER_TRACKING)
         return used <= room
 
-    qualifier, short = _qualifier(row), _short_qualifier(row)
+    qualifier, short = _qualifier(row, locale), _short_qualifier(row, locale)
     full, shorter = _row_names(row)
     for name, kept in ((full, qualifier), (full, short), (shorter, short)):
         if fits(name, kept):
@@ -467,11 +476,11 @@ def _cap_text(model: WidgetModel, row: Row) -> str | None:
     """"CAP 95%" for a row that is over its cap, else None."""
     guard = model.guard
     cap = guard.caps.get(row.key) if guard is not None and _over_cap(model, row) else None
-    return None if cap is None else f"CAP {_number(cap)}%"
+    return None if cap is None else f"CAP {formats.percent(_number(cap), model.locale)}"
 
 
 def _number(value: float) -> str:
-    """A cap as people write it: 95, not 95.0."""
+    """A cap as people write it: 95, not 95.0. ASCII digits, for formats.number or formats.percent to write."""
     return str(int(value)) if float(value).is_integer() else f"{value:g}"
 
 
@@ -709,7 +718,9 @@ def _row_widget(plan: _Plan, cv: Canvas, pal: Palette, model: WidgetModel, row: 
 
     # Name and qualifier share one 12 px line box, and end before the value.
     chipped = emphasis == SEVERITY_CRITICAL and row.percent is not None
-    label, qualifier = _name_line(cv, row, _percent_text(row.percent), semi, reg, vt, VALUE_CHIP_PAD if chipped else 0.0)
+    value = _percent_text(row.percent, model.locale)
+    label, qualifier = _name_line(cv, row, value, semi, reg, vt, VALUE_CHIP_PAD if chipped else 0.0,
+                                  locale=model.locale)
     name_layer, name_w = cv.text_layer(label, LEFT, cv.baseline_in_box(top, 12, semi), semi, LABEL_TRACKING)
     plan.stamp(name_layer, pal.main)
     name_end = LEFT + name_w
@@ -718,11 +729,10 @@ def _row_widget(plan: _Plan, cv: Canvas, pal: Palette, model: WidgetModel, row: 
                                            reg, QUALIFIER_TRACKING)
         plan.stamp(qual_layer, pal.label)
         name_end += QUALIFIER_GAP + qual_w
-    value_left = RIGHT - cv.advance(_percent_text(row.percent), vt) - (VALUE_CHIP_PAD if chipped else 0.0)
+    value_left = RIGHT - cv.advance(value, vt) - (VALUE_CHIP_PAD if chipped else 0.0)
     _cap_tag(plan, cv, pal, model, row, name_end, value_left, top)
 
     # Value: 22 px VT323, right edge at 266, line box from top - 4.
-    value = _percent_text(row.percent)
     value_baseline = cv.baseline_in_box(top - 4, 22, vt)
     if chipped:
         chip_w = cv.advance(value, vt) + VALUE_CHIP_PAD
@@ -897,7 +907,8 @@ def _row_tooltip(plan: _Plan, cv: Canvas, pal: Palette, model: WidgetModel, row:
     reg = cv.font(FONT_REG, LABEL_SIZE)
     vt = cv.font(FONT_VT, VALUE_SIZE)
 
-    label, qualifier = _name_line(cv, row, _exact_percent_text(row.percent), semi, reg, vt)
+    value = _exact_percent_text(row.percent, model.locale)
+    label, qualifier = _name_line(cv, row, value, semi, reg, vt, locale=model.locale)
     name_layer, name_w = cv.text_layer(label, LEFT, cv.baseline_in_box(top, 12, semi), semi, LABEL_TRACKING)
     plan.stamp(name_layer, pal.main)
     name_end = LEFT + name_w
@@ -906,10 +917,9 @@ def _row_tooltip(plan: _Plan, cv: Canvas, pal: Palette, model: WidgetModel, row:
                                            reg, QUALIFIER_TRACKING)
         plan.stamp(qual_layer, pal.label)
         name_end += QUALIFIER_GAP + qual_w
-    _cap_tag(plan, cv, pal, model, row, name_end, RIGHT - cv.advance(_exact_percent_text(row.percent), vt), top)
+    _cap_tag(plan, cv, pal, model, row, name_end, RIGHT - cv.advance(value, vt), top)
 
-    value_layer, _ = cv.text_layer(_exact_percent_text(row.percent), RIGHT, cv.baseline_in_box(top - 4, 22, vt),
-                                   vt, align="right")
+    value_layer, _ = cv.text_layer(value, RIGHT, cv.baseline_in_box(top - 4, 22, vt), vt, align="right")
     plan.halo(value_layer, GLOW_VALUE_SMALL_SIGMA, pal.glow)
     plan.halo(value_layer, GLOW_VALUE_LARGE_SIGMA, pal.glow_soft)
     plan.stamp(value_layer, pal.hot if emphasis in (SEVERITY_WARNING, SEVERITY_CRITICAL) else pal.bright)
@@ -960,18 +970,19 @@ def _guard_statement(model: WidgetModel) -> tuple[str, str] | None:
     ("GUARD ARMED:", "SESSION 95%, WEEKLY 90%") and
     ("GUARD HOLDING:", "WEEKLY 91% (CAP 90%). RESUMES FRI 7:12 PM (IN 2D 3H)."). A guard with nothing to list (no
     caps) is its lead alone, without the colon: ("GUARD ARMED", "")."""
-    guard = model.guard
+    guard, locale = model.guard, model.locale
     if guard is None:
         return None
     if not guard.holding:
-        caps = ", ".join(engine.glue(f"{_guard_name(guard, key)} {_number(cap)}%") for key, cap in guard.caps.items())
+        caps = ", ".join(engine.glue(f"{_guard_name(guard, key)} {formats.percent(_number(cap), locale)}")
+                         for key, cap in guard.caps.items())
         return _lead("GUARD ARMED", caps)
     limits = []
     for key in guard.over_keys:
         name, reading, cap = _guard_name(guard, key), guard.readings.get(key), guard.caps.get(key)
-        text = engine.glue(name if reading is None else f"{name} {_percent_text(reading)}")
+        text = engine.glue(name if reading is None else f"{name} {_percent_text(reading, locale)}")
         if cap is not None:
-            text += " " + engine.glue(f"(CAP {_number(cap)}%)")
+            text += " " + engine.glue(f"(CAP {formats.percent(_number(cap), locale)})")
         limits.append(text)
     rest = ", ".join(limits)
     rest = f"{rest}." if rest else ""
@@ -1063,7 +1074,7 @@ def _render_strip(model: WidgetModel, pal: Palette, scale: float, opts: RenderOp
         _cell_bar(plan, cv, pal, bar_x, STRIP_BAR_Y, STRIP_CELL_STEP, STRIP_CELL_W, STRIP_BAR_H,
                   STRIP_CELLS, full, partial_w, lit)
 
-        value = _percent_text(percent)
+        value = _percent_text(percent, model.locale, tight=True)       # a box sized for English's "100%"
         if emphasis == SEVERITY_CRITICAL and percent is not None:
             chip_w = cv.advance(value, vt) + 4
             plan.mark(lambda c, r=value_right, w=chip_w: c.fill_rect(r - w, STRIP_VALUE_TOP, r,
