@@ -1396,6 +1396,7 @@ def test_the_money_boxes_take_the_dollar_without_its_space(checks: dict[str, Any
     assert [text.replace("$", "", 1) for text in tr["tile"][3:]] == [f"1,2{NB}B", f"1,2{NB}Mn"]
     assert all(text.count("$") == 1 and "$" in (text[0], text[-1]) for text in tr["tile"][3:]), tr["tile"]
     assert tr["tile"][3] == re.sub(r"\s*\$\s*", "$", tr["usd"][4]) and mx["hero"][:2] == ["$5.96", "$1,235"]
+    assert tr["tile"][4].startswith("$") == tr["tile"][3].startswith("$"), tr["tile"]    # both on fmtUsdShort's side
 
 
 @ui_only
@@ -1417,10 +1418,10 @@ def test_the_pseudo_pages_figures_are_englishs_with_two_changes(checks: dict[str
 def test_the_budgets_measure_the_money_boxes_with_what_the_page_writes(checks: dict[str, Any]) -> None:
     """tests/budgets.py's PAGE_MONEY is what the cost tiles and the big cost figure write (#91): each figure, tight as
     those boxes take it, is what the page writes there for one of its language's format tags, at an amount where
-    English's own figure has six characters at most, with its "$" on either side (the boxes count characters, and
-    CLDR 48 puts Turkish's compact "$" first: sign_last); nothing the page writes there in any of those tags is wider,
-    so budgets.over() measures the widest (test_budgets.py's FOR_91 lists what runs past); and none of it has a space
-    beside the "$"."""
+    English's own figure has six characters at most (French's and Spanish's exactly; Turkish's with its "$" on either
+    side, sign_last, since CLDR 48 puts Turkish's compact "$" first and the boxes count characters); nothing the page
+    writes there in any of those tags is wider, so budgets.over() measures the widest (test_budgets.py's FOR_91 lists
+    what runs past); and none of it has a space beside the "$"."""
     import budgets
 
     money = checks["pageMoney"]
@@ -1432,7 +1433,8 @@ def test_the_budgets_measure_the_money_boxes_with_what_the_page_writes(checks: d
         written = {text for tag, texts in money["tags"].items() if i18n.primary(tag) == language for text in texts}
         assert not [text for text in written if SPACE_BESIDE_THE_DOLLAR.search(text)], language
         tight = {budgets.tight(figure) for figure in figures}
-        missing = {sign_last(text) for text in tight} - {sign_last(text) for text in written}
+        side = sign_last if language == "tr" else str
+        missing = {side(text) for text in tight} - {side(text) for text in written}
         assert not missing, (language, missing)
         assert max(chars.width(text) for text in tight) == max(chars.width(text) for text in written), language
 
