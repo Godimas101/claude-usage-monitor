@@ -84,11 +84,11 @@ NOT_DRAWN_WHOLE = frozenset({"nostromo.floating.armed_guard_short"})
 # What still runs past before French or Spanish is offered (#107), each with the ticket that settles it: #91's part 2
 # the dashboard's money figures, #94 Nostromo's boxes, #95 Night City's, #96 Gates'. The dollar is the plain "$"
 # (Chris's decision on #91), which fits the money figures' six characters; the percents are settled too: the boxes
-# sized for English's figures (the strips' values, Gates' cap badge) draw them without the space (Box.tight, Chris's
-# decision on #91), and Turkish's "%100" fits. Recompute with budgets.over() after a change, never by hand.
+# sized for English's figures (the strips' values, the cap badge on Gates' hover card) draw them without the space
+# (Box.tight, Chris's decision on #91), and Turkish's "%100" fits. Gates' floating badge has room for "Cap 100 %" and
+# keeps the space. Recompute with budgets.over() after a change, never by hand.
 TIGHT_BOXES = frozenset({"nostromo.strip.value_5h", "nostromo.strip.value_5h_chip", "nostromo.strip.value_7d",
-                         "nostromo.strip.value_7d_chip", "night_city.strip.percent", "gates.floating.cap_badge",
-                         "gates.tooltip.cap_badge"})
+                         "nostromo.strip.value_7d_chip", "night_city.strip.percent", "gates.tooltip.cap_badge"})
 _MONEY = tuple(f"dashboard.{skin}.cost_{part}" for part in ("tile", "hero")
                for skin in ("nostromo", "night_city", "gates"))
 _FR_DAYS = ("LUN.", "MAR.", "MER.", "JEU.", "VEN.", "SAM.", "DIM.")
@@ -292,6 +292,7 @@ def test_the_boxes_sized_for_englishs_figures_take_their_percents_tight() -> Non
     assert budgets.texts(budgets.BOX["nostromo.strip.value_5h"], "es") == ["100%"]
     assert budgets.texts(budgets.BOX["night_city.strip.percent"], "tr") == ["%100"]
     assert budgets.texts(budgets.BOX["gates.floating.row_value"], "fr") == ["100\u00a0%"]
+    assert budgets.texts(budgets.BOX["gates.floating.cap_badge"], "fr") == ["Cap 100\u00a0%"]
 
 
 def test_a_box_that_shrinks_its_text_is_measured_at_the_size_it_shrinks_to(monkeypatch: pytest.MonkeyPatch) -> None:

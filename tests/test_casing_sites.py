@@ -1,4 +1,5 @@
-"""Every bare letter-case call outside the skins is an id or English on purpose (#91).
+"""Every bare letter-case call where the widgets', the tray's and the alerts' words come from is an id or English on
+purpose (#91).
 
 Text people read is cased with usage_monitor/casing.py, by the language's rules (Turkish's dotted i). A bare
 str.upper(), lower(), capitalize(), title(), casefold() or swapcase() uses the default rules, which is right only for an

@@ -29,7 +29,7 @@ from usage_monitor.render.model import build_model
 from usage_monitor.render.skins import gates, get_skin
 from usage_monitor.settings import Settings
 from usage_monitor.ui import tray
-from usage_monitor.ui.widgets import steady
+from usage_monitor.ui.widgets import FrameCache, steady
 
 EN = i18n.ENGLISH
 PSEUDO = i18n.Locale(setting="system", language=i18n.PSEUDO, system="en", format="en-US", clock=12, offered=("en",))
@@ -85,10 +85,27 @@ def test_the_model_is_english_unless_given_a_locale():
 
 
 def test_a_locale_change_draws_the_frames_again():
-    """The frame caches key on steady(model): two locales must not share a cached frame."""
-    english = dump.sample_model("normal3")
-    assert steady(dump.sample_model("normal3", locale=FR_CA)) != steady(english)
+    """The frame caches key on steady(model), so steady() keeps the locale: two locales never share a cached frame,
+    even where their models' texts agree. fr-FR and fr-CH write the same resets and age on normal2, but Gates' strip
+    draws "13 %" in one and "13%" in the other."""
+    english, french = dump.sample_model("normal3"), dump.sample_model("normal3", locale=FR_CA)
+    assert steady(french).locale == FR_CA and steady(english).locale == EN
+    assert steady(french) != steady(english)
     assert steady(dump.sample_model("normal3", locale=EN)) == steady(english)
+    france, swiss = (dump.sample_model("normal2", locale=loc(tag)) for tag in ("fr-FR", "fr-CH"))
+    assert dataclasses.replace(france, locale=EN) == dataclasses.replace(swiss, locale=EN)
+    assert steady(france) != steady(swiss)
+    theme = THEMES["gates"]
+    skin, variant = get_skin("gates"), theme.variant(None)
+    cache, frames = FrameCache(), []
+
+    def strip(model: Any) -> Any:
+        frames.append(skin.render_taskbar(model, theme, variant, 40, 1.0, None).tobytes())
+        return frames[-1]
+
+    for model in (france, swiss, swiss):
+        cache.get((theme.id, None, 1.0, steady(model)), True, lambda: strip(model))
+    assert len(frames) == 2 and frames[0] != frames[1]          # drawn again for fr-CH, once
 
 
 def test_the_frame_dump_and_the_digests_draw_in_the_locale_they_are_given(monkeypatch, tmp_path):
@@ -330,8 +347,9 @@ def test_a_french_exact_value_has_its_decimal_comma_in_every_hover_card(runs):
 
 @pytest.mark.parametrize("tag", ["fr-FR", "fr-CA", "es-ES", "es-MX", "tr-TR"])
 def test_the_boxes_sized_for_englishs_figures_draw_their_percents_tight(runs, tag):
-    """Chris's decision on #91: Nostromo's strip values, Night City's strip percent and Gates' cap badge draw "100%"
-    (Turkish "%100"); everywhere else the language keeps its space ("100 %" in fr-FR and es-ES)."""
+    """Chris's decision on #91: Nostromo's strip values, Night City's strip percent and the cap badge on Gates' hover
+    card draw "100%" (Turkish "%100"); everywhere else the language keeps its space ("100 %" in fr-FR and es-ES),
+    Gates' floating badge too, which has the room."""
     locale = loc(tag)
     model = build_model(reading(100.0, 100.0, capped=True), NOW, locale=locale)
     tight = formats.percent("100", locale, tight=True)
@@ -341,9 +359,9 @@ def test_the_boxes_sized_for_englishs_figures_draw_their_percents_tight(runs, ta
         strip = texts(drawn(runs, theme_id, "taskbar", model))
         assert strip.count(tight) == 2, (theme_id, strip)
         assert spaced == tight or spaced not in strip, (theme_id, strip)
-    for surface in ("floating", "tooltip"):
+    for surface, value in (("floating", spaced), ("tooltip", tight)):
         badges = [text for text in texts(drawn(runs, "gates", surface, model)) if text.startswith("Cap ")]
-        assert badges == [f"Cap {tight}"] * 2, (surface, badges)
+        assert badges == [f"Cap {value}"] * 2, (surface, badges)
     elsewhere = {
         ("nostromo", "floating"): spaced, ("gates", "floating"): spaced, ("gates", "taskbar"): spaced,
         ("nostromo", "tooltip"): spaced, ("gates", "tooltip"): spaced,
@@ -364,7 +382,8 @@ def test_the_skins_numbers_follow_the_locale_where_they_are_drawn(runs):
             for surface in ("floating", "tooltip", "taskbar"):
                 for run in drawn(runs, theme_id, surface, model):
                     english = re.search(r"\d%", run["text"])
-                    tight_box = surface == "taskbar" and theme_id != "gates" or run["text"].startswith("Cap ")
+                    tight_box = (surface == "taskbar" and theme_id != "gates"
+                                 or surface == "tooltip" and theme_id == "gates" and run["text"].startswith("Cap "))
                     assert english is None or tight_box, (name, theme_id, surface, run["text"])
     held = dump.sample_model("guard_hold_session", locale=fr)
     statement = " ".join(texts(drawn(runs, "nostromo", "tooltip", held)))

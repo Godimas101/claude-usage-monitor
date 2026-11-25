@@ -4,8 +4,8 @@
 - Spanish's minimum grouping (1234 but 12.345), which Babel alone does not give.
 - The plural categories and rules usage_monitor.i18n uses, against the samples Babel worked out.
 - The shape of the tables: canonical tags, a base for every region, seven weekdays from Monday, twelve months.
-- That tests/cldr_gen.py still writes the committed file, where Babel 2.18.0 with CLDR 47 is installed (skipped
-  elsewhere: CI has no Babel, and the app never imports it).
+- That tests/cldr_gen.py still writes the committed file and keeps the currency symbols, where Babel 2.18.0 with
+  CLDR 47 is installed (skipped elsewhere: CI has no Babel, and the app never imports it).
 """
 from __future__ import annotations
 
@@ -136,9 +136,8 @@ def test_the_data_is_plain_and_written_with_escapes():
 
 # ── The generator ─────────────────────────────────────────────────────────────
 
-def test_the_generator_writes_the_committed_file():
-    """Where Babel 2.18.0 with CLDR 47 is installed (a dev PC), regenerating gives usage_monitor/cldr.py byte for byte.
-    CI has no Babel and skips this; a newer Babel is a deliberate update (run tests/cldr_gen.py, review the diff)."""
+def _generator() -> Any:
+    """tests/cldr_gen.py, where Babel 2.18.0 with CLDR 47 is installed; the test skips elsewhere."""
     babel = pytest.importorskip("babel")
     from babel.core import get_cldr_version
 
@@ -146,4 +145,27 @@ def test_the_generator_writes_the_committed_file():
         pytest.skip(f"Babel {babel.__version__} (CLDR {get_cldr_version()}), not 2.18.0 (CLDR 47)")
     import cldr_gen
 
+    return cldr_gen
+
+
+def test_the_generator_writes_the_committed_file():
+    """Where Babel 2.18.0 with CLDR 47 is installed (a dev PC), regenerating gives usage_monitor/cldr.py byte for byte.
+    CI has no Babel and skips this; a newer Babel is a deliberate update (run tests/cldr_gen.py, review the diff)."""
+    cldr_gen = _generator()
     assert cldr_gen.render() == TARGET.read_text(encoding="utf-8").replace("\r\n", "\n")
+
+
+def test_the_generator_keeps_the_currency_symbols_and_stops_on_one_it_does_not_know():
+    """Money takes CLDR's currencyDecimal and currencyGroup where a tag has them (fr-CH, the only one of the three
+    languages in CLDR 47), else the plain ones; a number symbol the generator neither reads nor knows it can leave out
+    stops the run (Gap) rather than being dropped unseen."""
+    cldr_gen = _generator()
+    plain = {"decimal": ",", "group": "\u202f", "minusSign": "-", "percentSign": "%", "nan": "NaN", "plusSign": "+"}
+    assert cldr_gen.number_symbols("fr", plain) == {"decimal": ",", "group": "\u202f", "minus": "-",
+                                                    "currency_decimal": ",", "currency_group": "\u202f"}
+    swiss = cldr_gen.number_symbols("fr_CH", {**plain, "currencyDecimal": ".", "currencyGroup": "'"})
+    assert (swiss["decimal"], swiss["currency_decimal"], swiss["currency_group"]) == (",", ".", "'")
+    with pytest.raises(cldr_gen.Gap):
+        cldr_gen.number_symbols("xx", {**plain, "currencyMinusSign": "-"})
+    assert table("fr-CH")["currency_decimal"] == "." and table("fr-CH")["decimal"] == ","
+    assert table("fr-FR")["currency_decimal"] == ","

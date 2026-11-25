@@ -249,9 +249,10 @@ their day as values, and no skin reads them yet.
 **Numbers in the locale (#91).** Each skin rounds a value as it always has (half up, `round()` for a share, one decimal
 for an exact value) and writes the digits with `formats.number` and `formats.percent` in `model.locale`; Night City
 draws its small percent sign on the side `formats.percent_parts` gives (before the numerals in Turkish). The boxes
-sized for English's figures (Nostromo's strip values, Night City's strip percent, Gates' cap badge) take the percent
-without its space ("100%"; Turkish "%100", Chris's decision on #91). The tray icons' numbers stay digits. The skins' own
-words, units and case calls are #94 to #96's.
+sized for English's figures (Nostromo's strip values, Night City's strip percent, the cap badge on Gates' hover card)
+take the percent without its space ("100%"; Turkish "%100", Chris's decision on #91); Gates' floating badge has the
+room and keeps the language's space. The tray icons' numbers stay digits. The skins' own words, units and case calls
+are #94 to #96's.
 
 **Lamp kinds.** A status with no room for words (the strip, the tray icon) is drawn by `WidgetModel.lamp`
 (`model.LAMP_KINDS`): `live`, `paused`, `stale` (sign-in lost or missing: the user acts), `offline` (no connection),
@@ -453,12 +454,20 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   reads the CLDR data. French, Spanish and Turkish follow `Locale.format` through `usage_monitor/cldr.py`: CLDR 47 from
   Babel 2.18.0 for every CLDR region of the three languages, each region kept as its differences from the language's
   base, and a tag with no region of its own takes the base. `Locale.clock` picks CLDR's 24-hour or 12-hour pattern.
-  Three fields Babel does not keep are rules in the generator, each with its source: minimum grouping digits (es-ES
-  `1234` but `12.345`), the plain `$` for US dollars (Chris), and a U+00A0 between a currency code and a digit. The
-  pseudo-locale takes English's shapes with two changes: numbers grouped with U+202F and a U+00A0 before `%`; it keeps
-  English's 12-hour clock. Rounding stays with the caller: `number` and `percent` take the digits the caller rounded
-  to. `tight=True` drops the space beside the sign for the boxes sized for English's figures. Nothing reads the
-  process locale. The widgets, the tray tooltip and the alerts write their numbers, percents, clocks and weekdays this
+  `cldr.py` is generated, never edited by hand: `python tests/cldr_gen.py` writes it on a dev PC with Babel 2.18.0
+  (CLDR 47), and `--check` exits 1 when the committed file differs. Babel is a dev tool only: the app never imports
+  it, and the generator's tests in `tests/test_cldr.py` skip where Babel 2.18.0 is missing (CI). A number symbol the
+  generator does not know stops it. Three fields Babel does not keep are rules in the generator, each with its source:
+  minimum grouping digits (es-ES `1234` but `12.345`), the plain `$` for US dollars (Chris), and a U+00A0 between a
+  currency code and a digit. An amount with a currency takes the tag's currency decimal and group, which CLDR sets
+  apart for fr-CH (`5.96 $` but `1 234,5`, as Windows' ICU writes them). The pseudo-locale takes English's shapes with
+  two changes: numbers grouped with U+202F and a U+00A0 before `%`; it keeps English's 12-hour clock. Rounding stays
+  with the caller: `number` and `percent` take the digits the caller rounded to. `tight=True` drops the space beside
+  the sign for the boxes sized for English's figures; a currency code keeps its U+00A0. Nothing reads the process
+  locale: `tests/test_formats.py` parses the package, `main.py`, `update_check.py` and `version.py` and fails an
+  import of `locale`, a `setlocale`, `getlocale` or `localeconv` call, or a `strftime` format that names a weekday, a
+  month, a day period or the zone (the agent modes' English `Mon 09:00` in `agent/status.py` is the one listed
+  exception). The widgets, the tray tooltip and the alerts write their numbers, percents, clocks and weekdays this
   way; their words stay English until #93 to #101. The alerts read the app's locale on each evaluation
   (`AlertEngine(settings, locale_provider=)`, English without one or when it fails); English alerts keep their trailing
   `USD`, other languages write each amount with the plain `$` (US dollars) or the currency's code.
@@ -467,8 +476,10 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   own. A name in capitals is cased with the words by the language's rule (`HAİKU` in Turkish, Chris's decision); in
   lower or sentence case it keeps its own letters (`Claude Instant`, never `ınstant`). English keeps its old quirks byte
   for byte. Ids (limit kinds, keys, the guard's identity strings, tags, currency codes) keep the plain calls:
-  `tests/test_casing_sites.py` lists every bare call allowed outside the skins, whose own calls move to `casing` in #94
-  to #96. `tests/test_locale_surfaces.py` draws every theme, state and surface in Turkish and finds no U+0307.
+  `tests/test_casing_sites.py` lists every bare call allowed in the files the widgets', the tray's and the alerts' words
+  come from (render/model.py, app.py, data/alerts.py, data/identity.py, data/usage_api.py, formats.py); the skins' own
+  calls move to `casing`, and the skins join that list, in #94 to #96. `tests/test_locale_surfaces.py` draws every
+  theme, state and surface in Turkish and finds no U+0307.
 - **Catalogs.** `webui/i18n/<lang>.json`, shared by Python and the page. `en.json` is the source of truth: a key missing
   from another catalog shows its English text, and the lookup says it came from English (`Catalog.text()` and
   `plural()` return an `i18n.Text`, a `str` that knows its `.language`), so the caller marks it `lang="en"` and cases it

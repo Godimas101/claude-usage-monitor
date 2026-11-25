@@ -1168,17 +1168,19 @@ def _fit(ink: Ink, text: str, face: Face, limit: float) -> str:
     return text.rstrip() + "…"
 
 
-def _cap_badge(ink: Ink, pal: Palette, model: WidgetModel, row: Row, name_end: float, limit: float, top: float) -> None:
+def _cap_badge(ink: Ink, pal: Palette, model: WidgetModel, row: Row, name_end: float, limit: float, top: float, *,
+               tight: bool) -> None:
     """"Cap 95%" in a capsule tinted with the alert colour, after the name of a row the usage guard holds on. It is
     drawn only where it fits between the name and the value (``limit``): a long scoped name keeps its room, and the
-    value in the alert colour and the footer carry the state. The badge is sized for English's "Cap 100%", so its
-    percent has no space in any language (tight; Chris's decision on #91): "Cap 100%" in French too."""
+    value in the alert colour and the footer carry the state. On the hover card the badge's room is sized for
+    English's "Cap 100%" beside the exact value, so there its percent has no space in any language (``tight``,
+    Chris's decision on #91): "Cap 100%" in French too. The floating widget's room fits the language's own spacing."""
     guard = model.guard
     cap = guard.caps.get(row.key) if guard is not None and _over_cap(model, row) else None
     if cap is None:
         return
     face = ink.face(ink.fonts.body, SIZE_PILL, 600)
-    text = f"Cap {formats.percent(_number(cap), model.locale, tight=True)}"
+    text = f"Cap {formats.percent(_number(cap), model.locale, tight=tight)}"
     left = name_end + BADGE_GAP
     width = BADGE_PAD + ink.advance(text, face) + BADGE_PAD
     if left + width > limit:
@@ -1214,7 +1216,7 @@ def _row(ink: Ink, pal: Palette, model: WidgetModel, row: Row, top: float, *, ex
         ink.put(tag, LEFT + label_w + 6, ink.baseline(top, LINE_H, tag_face), tag_face, pal.text_3)
         name_end += 6 + tag_w
     ink.put(value, RIGHT, ink.baseline(top, LINE_H, value_face), value_face, _value_color(pal, model, row), "right")
-    _cap_badge(ink, pal, model, row, name_end, RIGHT - value_w - 10, top)
+    _cap_badge(ink, pal, model, row, name_end, RIGHT - value_w - 10, top, tight=exact)
 
     # time rail: the share of the window already gone, with an index tick at its end
     rail_top = top + RAIL_DY

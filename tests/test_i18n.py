@@ -546,7 +546,10 @@ def test_the_real_windows_calls_answer_in_shape() -> None:
 
 def test_rendering_never_reads_the_windows_language(monkeypatch: pytest.MonkeyPatch) -> None:
     """The widgets, the golden frames and the frame dump draw in the language they are given, never in the one this PC
-    is set to: a French Windows must not change a single English frame."""
+    is set to: a French Windows must not change a single English frame. The model and the frames are built under the
+    trap in English and in two other locales (Turkish on a 12-hour clock, fr-CA on a 24-hour one), so the formats'
+    CLDR branch (clocks, day clocks, ages, countdowns, percents) runs under it too; and the formats, casing and CLDR
+    modules the render path calls are read with the render folder."""
     asked: list[str] = []
 
     def told(name: str) -> Any:
@@ -558,18 +561,35 @@ def test_rendering_never_reads_the_windows_language(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(i18n, "windows_reader", told("windows_reader"))
     for name in ("display_languages", "regional_format", "short_time"):
         monkeypatch.setattr(i18n.Win32Language, name, told(name))
+    from usage_monitor import formats
     from usage_monitor.render import dump
     from usage_monitor.render.skins import get_skin
+    tables: list[tuple[str, str]] = []
+    real_table_for = formats._table_for
+
+    def table_for(language: str, tag: str) -> Any:
+        tables.append((language, tag))
+        return real_table_for(language, tag)
+
+    monkeypatch.setattr(formats, "_table_for", table_for)
+    turkish = i18n.Locale(setting="tr", language="tr", system="en", format="tr-TR", clock=12, offered=("en", "tr"))
+    french = i18n.Locale(setting="fr", language="fr", system="en", format="fr-CA", clock=24, offered=("en", "fr"))
     themes = dump.load_theme_objects()
+    draws = [("normal2", None)] + [(state, locale) for locale in (turkish, french)
+                                   for state in ("normal2", "guard_hold_session", "guard_hold_weekly")]
     for theme_id, theme in themes.items():
         skin = get_skin(theme_id)
-        model, variant = dump.sample_model("normal2"), theme.variant(None)
-        skin.render_floating(model, theme, variant, 1.0)
-        skin.render_taskbar(model, theme, variant, 40, 1.0)
-        skin.render_tooltip(model, theme, variant, 1.0)
-        skin.render_tray_icon(model, theme, variant, 32)
+        for state, locale in draws:
+            model = dump.sample_model(state) if locale is None else dump.sample_model(state, locale=locale)
+            variant = theme.variant(None)
+            skin.render_floating(model, theme, variant, 1.0)
+            skin.render_taskbar(model, theme, variant, 40, 1.0)
+            skin.render_tooltip(model, theme, variant, 1.0)
+            skin.render_tray_icon(model, theme, variant, 32)
     assert asked == []
+    assert {tag for _language, tag in tables} == {"tr-TR", "fr-CA"}           # the CLDR branch ran under the trap
     sources = [path for path in (REPO / "usage_monitor" / "render").rglob("*.py")] + [REPO / "tests" / "frame_digests.py"]
+    sources += [REPO / "usage_monitor" / name for name in ("formats.py", "casing.py", "cldr.py")]
     names = ("windows_reader", "Win32Language", "LocaleSource", "locale_provider", "GetUserPreferredUILanguages",
              "GetUserDefaultUILanguage", "GetUserDefaultLocaleName", "GetLocaleInfoEx", "getlocale", "getdefaultlocale",
              "setlocale", "DEV_LANG_ENV", "USAGE_MONITOR_LANG", "LCIDToLocaleName", "build_locale", "LazyWindows")

@@ -588,7 +588,7 @@ BOXES: tuple[Box, ...] = (
        g.RIGHT - _G_VALUE_100 - 10 - g.LEFT - W_g("Fable weekly", "body", 12, 400) - (6 + W_g("100% share", "mono", 11, 400))
        - g.BADGE_GAP - 2 * g.BADGE_PAD,
        "after the widest label and tag, before the value; left out where it does not fit", "drop", kinds=("percent",),
-       templates=("Cap {}",), english=("Cap 95%", "Cap 90%", "Cap 100%"), tight=True),
+       templates=("Cap {}",), english=("Cap 95%", "Cap 90%", "Cap 100%")),
     _g("gates.tooltip.row_label", "body", 12, 400, g.RIGHT - g.LEFT - 10 - _G_VALUE_EXACT,
        "left of the exact value; the tag gives way first, then the label is cut", "ellipsis",
        english=("Session", "Weekly", "Fable weekly")),

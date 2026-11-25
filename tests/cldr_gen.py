@@ -52,6 +52,12 @@ CLOCK_PATTERNS = ("Hm", "hm", "EHm", "Ehm")
 CLOCK_FIELDS = re.compile(r"'[^']*'|(E+|H+|h+|m+|a+)|([A-Za-z])")   # what formats.clock reads; any other letter fails
 LATIN_AMERICA = "es_419"
 MIN_GROUPING_SPANISH = 2
+# Babel's latn number symbols: the ones the formats read, and the ones they have no use for (no exponent, per mille,
+# plus sign or NaN is written; the clock patterns carry their own ":"). Any other key stops the run (Gap), so a symbol
+# such as fr-CH's currencyDecimal is never dropped unseen.
+SYMBOLS_READ = frozenset({"decimal", "group", "minusSign", "percentSign", "currencyDecimal", "currencyGroup"})
+SYMBOLS_UNUSED = frozenset({"approximatelySign", "exponential", "infinity", "list", "nan", "perMille", "plusSign",
+                            "superscriptingExponent", "timeSeparator"})
 
 
 class Gap(Exception):
@@ -111,14 +117,31 @@ def _clock(loc: Locale, name: str) -> str:
     return pattern
 
 
+def number_symbols(identifier: str, symbols: Any) -> dict[str, str]:
+    """The symbols the formats read. An amount with a currency takes CLDR's currencyDecimal and currencyGroup where
+    the locale has them (fr-CH: a decimal point in money, a comma in a plain number), else the plain decimal and
+    group, as ICU does."""
+    unknown = sorted(set(symbols) - SYMBOLS_READ - SYMBOLS_UNUSED)
+    if unknown:
+        raise Gap(f"{identifier}: number symbols the generator does not know: {unknown}")
+    if symbols["percentSign"] != "%" or any(not symbols[key] for key in ("decimal", "group", "minusSign")):
+        raise Gap(f"{identifier}: number symbols {dict(symbols)}")
+    return {
+        "decimal": symbols["decimal"],
+        "group": symbols["group"],
+        "minus": symbols["minusSign"],
+        "currency_decimal": symbols.get("currencyDecimal") or symbols["decimal"],
+        "currency_group": symbols.get("currencyGroup") or symbols["group"],
+    }
+
+
 def table(identifier: str) -> dict[str, Any]:
     """Every field the formats read, for one Babel locale."""
     loc = Locale.parse(identifier)
     symbols = loc.number_symbols["latn"]
     if loc.decimal_formats[None].pattern != "#,##0.###":
         raise Gap(f"{identifier}: decimal pattern {loc.decimal_formats[None].pattern!r}")
-    if symbols["percentSign"] != "%" or any(not s for s in (symbols["decimal"], symbols["group"], symbols["minusSign"])):
-        raise Gap(f"{identifier}: number symbols {dict(symbols)}")
+    signs = number_symbols(identifier, symbols)
     days = loc.days["format"]["abbreviated"]
     months = loc.months["format"]["abbreviated"]
     periods = loc.day_periods["format"]["abbreviated"]
@@ -129,9 +152,7 @@ def table(identifier: str) -> dict[str, Any]:
                      for code, name in UNITS.items()}
              for width in ("narrow", "short")}
     return {
-        "decimal": symbols["decimal"],
-        "group": symbols["group"],
-        "minus": symbols["minusSign"],
+        **signs,
         "min_grouping": _min_grouping(identifier),
         "percent": _sides(loc.percent_formats[None], "%", symbols["percentSign"], symbols["minusSign"]),
         "currency": _sides(loc.currency_formats["standard"], "\u00a4", "\u00a4", symbols["minusSign"]),
@@ -220,9 +241,10 @@ data, read by the formats only; English never reads it (its formats are today's 
 BASES holds each language's own CLDR data, which is also its base format tag's (fr-FR, es-ES, tr-TR). REGIONS holds every
 CLDR region of the three languages, with only what differs from its language's base, level by level (a dict of strings,
 such as one unit's plural forms, is replaced whole). A field:
-- decimal, group, minus: the number symbols. min_grouping: the digits that must come before the first group separator
-  for it to be written (Spanish 2: 1234 but 12.345). percent and currency: (prefix, suffix, negative prefix, negative
-  suffix) around the digits; U+00A4 in a currency side stands for the symbol.
+- decimal, group, minus: the number symbols. currency_decimal, currency_group: the ones an amount with a currency
+  takes (fr-CH's decimal point), the plain ones where CLDR has none. min_grouping: the digits that must come before the
+  first group separator for it to be written (Spanish 2: 1234 but 12.345). percent and currency: (prefix, suffix,
+  negative prefix, negative suffix) around the digits; U+00A4 in a currency side stands for the symbol.
 - weekdays (Monday first) and months: abbreviated, as dates use them. am_pm: the abbreviated day periods.
 - Hm, hm, EHm, Ehm: CLDR's patterns for a 24-hour and a 12-hour clock, alone and after a weekday.
 - units: duration units by width ("narrow", "short"), the view model's unit code ("d", "h", "m", "s") and plural

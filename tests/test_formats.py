@@ -322,6 +322,10 @@ def test_tight_drops_the_space_and_keeps_the_side():
     assert formats.percent_parts("99.5", loc("fr-FR"), tight=True) == ("", "99,5", "%")
     assert formats.money(99.99, "USD", loc("fr-FR"), tight=True) == "99,99$"
     assert formats.money(99.99, "USD", loc("tr-TR"), tight=True) == "$99,99"
+    assert formats.money(5.96, "USD", loc("es-PE"), tight=True) == "$5.96"            # the pattern's own space
+    assert formats.money(5.96, "EUR", loc("fr-FR"), tight=True) == "5,96\u00a0EUR"    # a code keeps its U+00A0
+    assert formats.money(5.96, "EUR", loc("es-MX"), tight=True) == "EUR\u00a05.96"
+    assert formats.money(-5.96, "EUR", loc("es-PE"), tight=True) == "-EUR\u00a05.96"  # one space, not two
 
 
 def test_clocks_follow_the_tag_and_the_windows_clock():
@@ -390,6 +394,23 @@ def test_money_writes_the_plain_dollar():
     assert formats.money(5.96, "eur", loc("fr-FR")) == "5,96\u00a0EUR"
     assert formats.money(-5.96, "USD", loc("fr-FR")) == "-5,96\u00a0$"
     assert formats.money(1234.56, None, loc("fr-FR")) == "1\u202f234,56"
+
+
+def test_money_takes_the_currency_decimal_where_cldr_sets_one_apart(monkeypatch):
+    """CLDR 47's fr-CH writes an amount with a currency with a decimal point and a plain number with a comma, as
+    Windows' ICU 72.1 does ("1 234.56 $" against "1 234,56"); fr-FR keeps its comma in both. No tag of the three
+    languages has a currency group of its own in CLDR 47, so a table with one stands in for it."""
+    assert formats.money(5.96, "USD", loc("fr-CH")) == "5.96\u00a0$"
+    assert formats.money(1234.56, "EUR", loc("fr-CH")) == "1\u202f234.56\u00a0EUR"
+    assert formats.money(-5.96, "USD", loc("fr-CH")) == "-5.96\u00a0$"
+    assert formats.money(5.96, "USD", loc("fr-CH"), tight=True) == "5.96$"
+    assert formats.money(1234.56, None, loc("fr-CH")) == "1\u202f234,56"              # no currency: a plain number
+    assert formats.number("1234.5", loc("fr-CH")) == "1\u202f234,5"
+    assert formats.money(5.96, "USD", loc("fr-FR")) == "5,96\u00a0$"
+    grouped = dict(formats._table_for("fr", "fr-CH"), currency_group="'")
+    monkeypatch.setattr(formats, "_table_for", lambda _language, _tag: grouped)
+    assert formats.money(1234.56, "USD", loc("fr-CH")) == "1'234.56\u00a0$"
+    assert formats.money(1234.56, None, loc("fr-CH")) == "1\u202f234,56"
 
 
 def test_ago_uses_cldrs_relative_time():

@@ -7,9 +7,10 @@ data, read by the formats only; English never reads it (its formats are today's 
 BASES holds each language's own CLDR data, which is also its base format tag's (fr-FR, es-ES, tr-TR). REGIONS holds every
 CLDR region of the three languages, with only what differs from its language's base, level by level (a dict of strings,
 such as one unit's plural forms, is replaced whole). A field:
-- decimal, group, minus: the number symbols. min_grouping: the digits that must come before the first group separator
-  for it to be written (Spanish 2: 1234 but 12.345). percent and currency: (prefix, suffix, negative prefix, negative
-  suffix) around the digits; U+00A4 in a currency side stands for the symbol.
+- decimal, group, minus: the number symbols. currency_decimal, currency_group: the ones an amount with a currency
+  takes (fr-CH's decimal point), the plain ones where CLDR has none. min_grouping: the digits that must come before the
+  first group separator for it to be written (Spanish 2: 1234 but 12.345). percent and currency: (prefix, suffix,
+  negative prefix, negative suffix) around the digits; U+00A4 in a currency side stands for the symbol.
 - weekdays (Monday first) and months: abbreviated, as dates use them. am_pm: the abbreviated day periods.
 - Hm, hm, EHm, Ehm: CLDR's patterns for a 24-hour and a 12-hour clock, alone and after a weekday.
 - units: duration units by width ("narrow", "short"), the view model's unit code ("d", "h", "m", "s") and plural
@@ -37,6 +38,8 @@ BASES: dict[str, dict[str, Any]] = {
         "decimal": ",",
         "group": "\u202f",
         "minus": "-",
+        "currency_decimal": ",",
+        "currency_group": "\u202f",
         "min_grouping": 1,
         "percent": ("", "\u00a0%", "-", "\u00a0%"),
         "currency": ("", "\u00a0\u00a4", "-", "\u00a0\u00a4"),
@@ -92,6 +95,8 @@ BASES: dict[str, dict[str, Any]] = {
         "decimal": ",",
         "group": ".",
         "minus": "-",
+        "currency_decimal": ",",
+        "currency_group": ".",
         "min_grouping": 2,
         "percent": ("", "\u00a0%", "-", "\u00a0%"),
         "currency": ("", "\u00a0\u00a4", "-", "\u00a0\u00a4"),
@@ -129,6 +134,8 @@ BASES: dict[str, dict[str, Any]] = {
         "decimal": ",",
         "group": ".",
         "minus": "-",
+        "currency_decimal": ",",
+        "currency_group": ".",
         "min_grouping": 1,
         "percent": ("%", "", "-%", ""),
         "currency": ("\u00a4", "", "-\u00a4", ""),
@@ -174,6 +181,8 @@ REGIONS: dict[str, dict[str, Any]] = {
     "es-419": {
         "decimal": ".",
         "group": ",",
+        "currency_decimal": ".",
+        "currency_group": ",",
         "min_grouping": 1,
         "percent": ("", "%", "-", "%"),
         "currency": ("\u00a4", "", "-\u00a4", ""),
@@ -216,6 +225,8 @@ REGIONS: dict[str, dict[str, Any]] = {
     "es-BR": {
         "decimal": ".",
         "group": ",",
+        "currency_decimal": ".",
+        "currency_group": ",",
         "min_grouping": 1,
         "percent": ("", "%", "-", "%"),
         "currency": ("\u00a4", "", "-\u00a4", ""),
@@ -229,6 +240,8 @@ REGIONS: dict[str, dict[str, Any]] = {
     "es-BZ": {
         "decimal": ".",
         "group": ",",
+        "currency_decimal": ".",
+        "currency_group": ",",
         "min_grouping": 1,
         "percent": ("", "%", "-", "%"),
         "currency": ("\u00a4", "", "-\u00a4", ""),
@@ -268,6 +281,7 @@ REGIONS: dict[str, dict[str, Any]] = {
     },
     "es-CR": {
         "group": "\u00a0",
+        "currency_group": "\u00a0",
         "min_grouping": 1,
         "percent": ("", "%", "-", "%"),
         "currency": ("\u00a4", "", "-\u00a4", ""),
@@ -280,6 +294,8 @@ REGIONS: dict[str, dict[str, Any]] = {
     "es-CU": {
         "decimal": ".",
         "group": ",",
+        "currency_decimal": ".",
+        "currency_group": ",",
         "min_grouping": 1,
         "percent": ("", "%", "-", "%"),
         "currency": ("\u00a4", "", "-\u00a4", ""),
@@ -293,6 +309,8 @@ REGIONS: dict[str, dict[str, Any]] = {
     "es-DO": {
         "decimal": ".",
         "group": ",",
+        "currency_decimal": ".",
+        "currency_group": ",",
         "min_grouping": 1,
         "percent": ("", "%", "-", "%"),
         "currency": ("\u00a4", "", "-\u00a4", ""),
@@ -322,6 +340,8 @@ REGIONS: dict[str, dict[str, Any]] = {
     "es-GT": {
         "decimal": ".",
         "group": ",",
+        "currency_decimal": ".",
+        "currency_group": ",",
         "min_grouping": 1,
         "percent": ("", "%", "-", "%"),
         "currency": ("\u00a4", "", "-\u00a4", ""),
@@ -334,6 +354,8 @@ REGIONS: dict[str, dict[str, Any]] = {
     "es-HN": {
         "decimal": ".",
         "group": ",",
+        "currency_decimal": ".",
+        "currency_group": ",",
         "min_grouping": 1,
         "percent": ("", "%", "-", "%"),
         "currency": ("\u00a4", "", "-\u00a4", ""),
@@ -347,6 +369,8 @@ REGIONS: dict[str, dict[str, Any]] = {
     "es-MX": {
         "decimal": ".",
         "group": ",",
+        "currency_decimal": ".",
+        "currency_group": ",",
         "min_grouping": 1,
         "percent": ("", "%", "-", "%"),
         "currency": ("\u00a4", "", "-\u00a4", ""),
@@ -366,6 +390,8 @@ REGIONS: dict[str, dict[str, Any]] = {
     "es-NI": {
         "decimal": ".",
         "group": ",",
+        "currency_decimal": ".",
+        "currency_group": ",",
         "min_grouping": 1,
         "percent": ("", "%", "-", "%"),
         "currency": ("\u00a4", "", "-\u00a4", ""),
@@ -378,6 +404,8 @@ REGIONS: dict[str, dict[str, Any]] = {
     "es-PA": {
         "decimal": ".",
         "group": ",",
+        "currency_decimal": ".",
+        "currency_group": ",",
         "min_grouping": 1,
         "percent": ("", "%", "-", "%"),
         "currency": ("\u00a4", "", "-\u00a4", ""),
@@ -390,6 +418,8 @@ REGIONS: dict[str, dict[str, Any]] = {
     "es-PE": {
         "decimal": ".",
         "group": ",",
+        "currency_decimal": ".",
+        "currency_group": ",",
         "min_grouping": 1,
         "percent": ("", "%", "-", "%"),
         "currency": ("\u00a4\u00a0", "", "-\u00a4\u00a0", ""),
@@ -404,6 +434,8 @@ REGIONS: dict[str, dict[str, Any]] = {
     "es-PR": {
         "decimal": ".",
         "group": ",",
+        "currency_decimal": ".",
+        "currency_group": ",",
         "min_grouping": 1,
         "percent": ("", "%", "-", "%"),
         "currency": ("\u00a4", "", "-\u00a4", ""),
@@ -436,6 +468,8 @@ REGIONS: dict[str, dict[str, Any]] = {
     "es-SV": {
         "decimal": ".",
         "group": ",",
+        "currency_decimal": ".",
+        "currency_group": ",",
         "min_grouping": 1,
         "percent": ("", "%", "-", "%"),
         "currency": ("\u00a4", "", "-\u00a4", ""),
@@ -448,6 +482,8 @@ REGIONS: dict[str, dict[str, Any]] = {
     "es-US": {
         "decimal": ".",
         "group": ",",
+        "currency_decimal": ".",
+        "currency_group": ",",
         "min_grouping": 1,
         "percent": ("", "%", "-", "%"),
         "currency": ("\u00a4", "", "-\u00a4", ""),
@@ -488,6 +524,7 @@ REGIONS: dict[str, dict[str, Any]] = {
     "fr-BL": {},
     "fr-CA": {
         "group": "\u00a0",
+        "currency_group": "\u00a0",
         "months": (
             "janv.",
             "f\u00e9vr.",
@@ -520,7 +557,7 @@ REGIONS: dict[str, dict[str, Any]] = {
     "fr-CD": {},
     "fr-CF": {},
     "fr-CG": {},
-    "fr-CH": {"percent": ("", "%", "-", "%")},
+    "fr-CH": {"currency_decimal": ".", "percent": ("", "%", "-", "%")},
     "fr-CI": {},
     "fr-CM": {"am_pm": ("mat.", "soir"), "hm": "h:mm", "Ehm": "E h:mm"},
     "fr-DJ": {},
@@ -533,7 +570,7 @@ REGIONS: dict[str, dict[str, Any]] = {
     "fr-GQ": {},
     "fr-HT": {},
     "fr-KM": {},
-    "fr-LU": {"group": "."},
+    "fr-LU": {"group": ".", "currency_group": "."},
     "fr-MA": {
         "months": (
             "jan.",
