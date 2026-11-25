@@ -8,8 +8,13 @@ that. Here: the other languages reach each surface, and only its numbers, percen
 from __future__ import annotations
 
 import dataclasses
+import json
+import os
 import re
+import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -502,3 +507,109 @@ def test_other_languages_name_every_kind_of_limit_from_its_scope():
     assert alerts._name(limit("session", 1.0, WEEK_AT, label=""), fr) == "Session"
     assert alerts._name(scoped("", label=""), fr) == "Scoped"
     assert alerts._name(scoped(" Spaced  Out ", label=""), fr) == "Spaced Out"
+
+
+# ── Turkish frames (step 1.12) ────────────────────────────────────────────────
+
+REPO = Path(__file__).resolve().parent.parent
+COMBINING_DOT = "\u0307"
+# The frame dump in a fresh Python, every run of text it draws listened to (as tests/english_left.py listens), under
+# tr-TR on each clock; each time with the dump's Fable row and again with that row scoped to Haiku.
+_TURKISH_FRAMES = """
+import dataclasses
+import json
+import tempfile
+
+from PIL import ImageDraw
+
+from usage_monitor import i18n
+from usage_monitor.render import dump, engine
+from usage_monitor.render.skins import gates
+
+runs = set()
+real = (engine.Canvas.text_layer, gates.Ink.put, ImageDraw.ImageDraw.text, dump.sample_state)
+
+
+def layer(self, text, *args, **kwargs):
+    runs.add(str(text))
+    return real[0](self, text, *args, **kwargs)
+
+
+def put(self, text, *args, **kwargs):
+    runs.add(str(text))
+    return real[1](self, text, *args, **kwargs)
+
+
+def draw(self, xy, text, *args, **kwargs):
+    runs.add(str(text))
+    return real[2](self, xy, text, *args, **kwargs)
+
+
+def haiku(name, now=dump.SAMPLE_NOW):
+    state = real[3](name, now)
+    if state is None or state.usage is None:
+        return state
+    limits = [dataclasses.replace(limit, scope_model="Haiku", label="HAIKU WEEKLY") if limit.scope_model == "Fable"
+              else limit for limit in state.usage.limits]
+    guard = state.guard and json.loads(json.dumps(state.guard).replace("Fable", "Haiku").replace("FABLE", "HAIKU"))
+    return dataclasses.replace(state, usage=dataclasses.replace(state.usage, limits=limits), guard=guard)
+
+
+engine.Canvas.text_layer, gates.Ink.put, ImageDraw.ImageDraw.text = layer, put, draw
+dump._save = lambda image, path, report: None
+dump._contact_sheet = lambda theme, skin, path, variant_filter=None, **_kwargs: path
+out = {}
+for clock in (24, 12):
+    locale = i18n.Locale(setting="system", language="tr", system="tr", format="tr-TR", clock=clock, offered=("en",))
+    for scope, states in (("Fable", real[3]), ("Haiku", haiku)):
+        runs.clear()
+        dump.sample_state = states
+        with tempfile.TemporaryDirectory(prefix="turkish-frames-") as folder:
+            for theme_id, theme in sorted(dump.load_theme_objects().items()):
+                dump.dump_frames(folder, [theme_id], variants=[theme.variants[0].id], scales=(1.0,), locale=locale)
+        out[f"{clock} {scope}"] = sorted(runs)
+print(json.dumps(out))
+"""
+
+
+@pytest.fixture(scope="module")
+def turkish_frames() -> dict[str, list[str]]:
+    """Every run of text the frame dump draws under tr-TR, on a 24-hour and on a 12-hour clock: every theme (in its
+    first variant; the variants differ in colour), state and surface at 1x, with the time zone pinned as the frame
+    dump's other tests pin it ("24 Fable", "24 Haiku", "12 Fable", "12 Haiku")."""
+    done = subprocess.run([sys.executable, "-c", _TURKISH_FRAMES], cwd=REPO, capture_output=True, encoding="utf-8",
+                          env={**os.environ, "TZ": "UTC0", "PYTHONPATH": str(REPO)}, timeout=600, check=False,
+                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    assert done.returncode == 0, done.stderr[-3000:]
+    return json.loads(done.stdout)
+
+
+def test_no_turkish_frame_draws_a_combining_dot(turkish_frames):
+    """A U+0307 comes from lower-casing Turkish's İ by the default rule (str.lower, str.capitalize); casing never
+    writes one. The skins' own case calls move to casing in #94 to #96: this holds every frame meanwhile."""
+    assert set(turkish_frames) == {"24 Fable", "24 Haiku", "12 Fable", "12 Haiku"}
+    for frames, runs in turkish_frames.items():
+        assert runs and [run for run in runs if COMBINING_DOT in run] == [], frames
+
+
+def test_turkish_frames_draw_turkish_weekdays_percents_and_clocks(turkish_frames):
+    """The locale reaches every skin's frames: the Saturday reset is "Cmt" in all three (Nostromo and Night City in
+    capitals), every percent has its sign first, the day period ("ÖS") comes first on a 12-hour clock, and an
+    afternoon hour is written past 12 on a 24-hour clock only. Nothing is left in English's shapes."""
+    for frames, runs in turkish_frames.items():
+        shown = "\n".join(runs)
+        assert [lead for lead in ("RESETS CMT ", "RST CMT ", "Resets Cmt ") if lead not in shown] == [], frames
+        assert re.search(r"%\d", shown) and not re.search(r"\d%", shown), frames
+        assert ("ÖS" in shown) == frames.startswith("12"), frames
+        assert bool(re.search(r"\b(?:1[3-9]|2[0-3]):[0-5]\d", shown)) == frames.startswith("24"), frames
+        assert not re.search(r"\b(?:SAT|Sat|AM|PM)\b", shown), frames
+
+
+def test_a_name_with_an_i_reaches_the_turkish_frames(turkish_frames):
+    """Haiku, scoped in place of Fable, is drawn in every skin's own case ("HAIKU", "Haiku weekly"; the Turkish
+    capitals HAİKU come with #94 to #96), so the combining-dot check above has an i to see."""
+    for clock in (24, 12):
+        runs = turkish_frames[f"{clock} Haiku"]
+        assert {"HAIKU", "Haiku weekly"} <= set(runs), clock
+        assert not [run for run in runs if "Fable" in run or "FABLE" in run], clock
+    assert any(re.search("Fable|FABLE", run) for run in turkish_frames["24 Fable"])
