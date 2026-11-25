@@ -3014,6 +3014,7 @@ def test_the_bundle_holds_the_dashboard_the_fonts_the_themes_and_the_prices(spec
     bundled = set(bundled_files(spec.analysis.kw["datas"]))
     expected = {
         "usage_monitor/webui/index.html", "usage_monitor/webui/app.js", "usage_monitor/webui/charts.js",
+        "usage_monitor/webui/formats.js", "usage_monitor/webui/motion.js",
         "usage_monitor/data/pricing.json",
         *(f"usage_monitor/themes/{theme}.json" for theme in ("nostromo", "night_city", "gates")),
         *(f"usage_monitor/webui/themes/{theme}.{ext}" for theme in ("nostromo", "night_city", "gates") for ext in ("css", "js")),

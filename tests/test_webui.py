@@ -63,7 +63,7 @@ FX = read("themes/nostromo.js")
 THEME_IDS = ("nostromo", "night_city", "gates")
 THEME_CSS = {theme_id: read(f"themes/{theme_id}.css") for theme_id in THEME_IDS}
 THEME_JS = {theme_id: read(f"themes/{theme_id}.js") for theme_id in THEME_IDS}
-ALL_SCRIPTS = {"app.js": APP, "charts.js": CHARTS,
+ALL_SCRIPTS = {"app.js": APP, "charts.js": CHARTS, "formats.js": read("formats.js"),
                **{f"themes/{theme_id}.js": THEME_JS[theme_id] for theme_id in THEME_IDS}}
 
 
@@ -270,9 +270,10 @@ def test_index_html_is_the_shell_the_server_and_the_scripts_expect() -> None:
     assert INDEX.count('<html lang="en"') == 1                                # and the page's language
     scripts = re.findall(r'<script src="([^"]+)"', INDEX)
     # app.js last: it starts the page. The catalog before charts.js (the server names its language), so the first paint
-    # has the text; only the motion layer before that.
+    # has the text; only the formats (#91) and the motion layer before that, the formats first, so that any script after
+    # them can use them.
     assert scripts[-3:] == ["/static/i18n/en.js", "/static/charts.js", "/static/app.js"]
-    assert set(scripts[:-3]) <= {"/static/motion.js"}
+    assert scripts[:-3] == ["/static/formats.js", "/static/motion.js"]
     assert not re.search(r"<script(?![^>]*\bsrc=)", INDEX), "an inline script (the CSP forbids it)"
     for needle in ('id="theme-css"', 'id="main"', 'id="menu"', 'id="variants"', 'id="refresh"', 'id="boot"'):
         assert needle in INDEX, needle
@@ -967,8 +968,8 @@ def test_the_dashboards_choices_come_from_the_page_and_are_saved_in_the_monitors
 
 
 def page_scripts() -> dict[str, str]:
-    """Every script the dashboard runs: app.js, charts.js, the motion layer and each theme's own."""
-    return {"app.js": APP_CODE, "charts.js": CHARTS, "motion.js": read("motion.js"),
+    """Every script the dashboard runs: app.js, charts.js, the formats (#91), the motion layer and each theme's own."""
+    return {"app.js": APP_CODE, "charts.js": CHARTS, "formats.js": read("formats.js"), "motion.js": read("motion.js"),
             **{f"themes/{theme_id}.js": source for theme_id, source in THEME_JS.items()}}
 
 
@@ -1186,6 +1187,68 @@ def test_the_pages_english_formats_are_the_recorded_ones() -> None:
             assert not changed and list(found[name]) == list(cases), (name, changed[:5])
         else:
             assert found[name] == cases, name
+
+
+NB, NNB = "\u00a0", "\u202f"            # what CLDR writes before "%" and "$", and French's group separator
+
+
+@ui_only
+def test_the_formats_keep_englishs_shapes_and_the_pseudo_locales_two_changes(checks: dict[str, Any]) -> None:
+    """formats.js on its own: English as the page writes it today (a minus after the "$" in a compact figure, as the
+    tiles had it; a code Intl refuses after the number); the pseudo-locale the same with U+202F groups and a U+00A0
+    before "%"; any language without formats of its own as English."""
+    en, pseudo = checks["formats"]["en"], checks["formats"]["pseudo"]
+    assert (en["tag"], en["english"], en["signs"]) == ("en-US", True, [",", "."])
+    assert en["number"] == ["1,234.5", "1234.5", "1,234.5", "1,234.50", "-0", "-0.0", "x", "1,234", "12,345"]
+    assert en["percent"] == ["34%", "33.5%", "-34%", "34%"]
+    assert en["parts"] == [["", "34", "%"], ["", "-34", "%"], ["", "34", "%"]]
+    assert en["usd"] == ["$5.96", "-$5.96", "$1,235", "$1,234.50", "-$1,235", "$1.2K", "$-1.2K", "$5.96", "$1.2K"]
+    assert en["money"] == ["$5.96", "€5.96", "5.96 EURO", "$1,234.50"]
+    assert en["compact"] == ["1.5K", "1.5M", "-1.5K"]
+    assert (pseudo["tag"], pseudo["english"], pseudo["signs"]) == ("en-US", True, [NNB, "."])
+    assert pseudo["number"] == [f"1{NNB}234.5", "1234.5", f"1{NNB}234.5", f"1{NNB}234.50", "-0", "-0.0", "x",
+                                f"1{NNB}234", f"12{NNB}345"]
+    assert pseudo["percent"] == [f"34{NB}%", f"33.5{NB}%", f"-34{NB}%", "34%"]
+    assert pseudo["usd"][2:5] == [f"$1{NNB}235", f"$1{NNB}234.50", f"-$1{NNB}235"] and pseudo["money"][3] == f"$1{NNB}234.50"
+    assert {key: pseudo[key] for key in ("compact", "parts")} == {"compact": en["compact"], "parts": [
+        ["", "34", f"{NB}%"], ["", "-34", f"{NB}%"], ["", "34", "%"]]}
+    tags = checks["formatsTags"]
+    assert tags == ["fr-FR", "fr-FR", "fr-CA", "tr-TR", "es-419", "en-US", "en-US", "en-US", "en-US", "en-US"]
+
+
+@ui_only
+def test_the_formats_follow_the_format_tag_in_french_spanish_and_turkish(checks: dict[str, Any]) -> None:
+    """#91's cases, as Intl writes them for the format tag: fr 34 % (U+00A0), tr %34, es-ES 1234 but 12.345 (CLDR's
+    minimum grouping), fr-FR's U+202F and fr-CA's U+00A0 groups, US dollars as the plain "$" (5,96 $, never $US),
+    fr-CH's currency decimal, Turkish's B for a thousand, and tight: no space before the "$" or the "%"."""
+    fr, ca, ch = checks["formats"]["frFR"], checks["formats"]["frCA"], checks["formats"]["frCH"]
+    es, mx, tr = checks["formats"]["esES"], checks["formats"]["esMX"], checks["formats"]["trTR"]
+    assert [f["english"] for f in (fr, ca, ch, es, mx, tr)] == [False] * 6
+    assert (fr["signs"], ca["signs"], es["signs"], mx["signs"], tr["signs"]) == (
+        [NNB, ","], [NB, ","], [".", ","], [",", "."], [".", ","])
+    assert fr["number"][:4] == [f"1{NNB}234,5", "1234,5", f"1{NNB}234,5", f"1{NNB}234,50"] and fr["number"][5] == "-0,0"
+    assert ca["number"][0] == f"1{NB}234,5" and tr["number"][0] == "1.234,5"
+    assert es["number"][0] == "1234,5" and es["number"][-2:] == ["1234", "12.345"] and mx["number"][-2:] == ["1,234", "12,345"]
+    assert fr["percent"] == [f"34{NB}%", f"33,5{NB}%", f"-34{NB}%", "34%"] and es["percent"][0] == f"34{NB}%"
+    assert tr["percent"] == ["%34", "%33,5", "-%34", "%34"]
+    assert fr["parts"] == [["", "34", f"{NB}%"], ["-", "34", f"{NB}%"], ["", "34", "%"]]
+    assert tr["parts"] == [["%", "34", ""], ["-%", "34", ""], ["%", "34", ""]]
+    assert fr["usd"] == [f"5,96{NB}$", f"-5,96{NB}$", f"1{NNB}235{NB}$", f"1{NNB}234,50{NB}$", f"-1{NNB}235{NB}$",
+                         f"1,2{NB}k{NB}$", f"-1,2{NB}k{NB}$", "5,96$", f"1,2{NB}k$"]
+    assert mx["usd"][:5] == ["$5.96", "-$5.96", "$1,235", "$1,234.50", "-$1,235"] and mx["usd"][7] == "$5.96"
+    assert tr["usd"][:3] == ["$5,96", "-$5,96", "$1.235"] and tr["usd"][7:] == ["$5,96", f"1,2{NB}B$"]
+    assert es["usd"][2] == f"1235{NB}$" and ch["usd"][0] == f"5.96{NB}$" and ch["number"][0] == f"1{NNB}234,5"
+    assert fr["money"] == [f"5,96{NB}$", f"5,96{NB}€", f"5,96{NB}EURO", f"1{NNB}234,50{NB}$"]
+    assert ch["money"][2] == f"5.96{NB}EURO" and mx["money"][1:3] == [f"EUR{NB}5.96", f"EURO{NB}5.96"]
+    assert tr["compact"][0] == f"1,5{NB}B" and fr["compact"] == [f"1,5{NB}k", f"1,5{NB}M", f"-1,5{NB}k"]
+    assert es["compact"][0] == f"1,5{NB}mil"
+
+
+@ui_only
+def test_the_page_takes_its_formats_from_the_monitor_locale_meta(checks: dict[str, Any]) -> None:
+    """MonitorFormats.active() reads the meta the server fills in, once; with no meta, one it cannot read, one with no
+    language, or no page at all, the page formats in English (as app.js's LOCALE falls back)."""
+    assert checks["formatsActive"] == [["tr-TR", "%34", True]] + [["en-US", "34%", True]] * 5
 
 
 def test_the_language_row_is_wired_into_the_settings_page() -> None:

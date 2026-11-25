@@ -21,8 +21,8 @@ with nothing saved, and the tray tooltip of each sample state. Other scales draw
 dump's contact sheet (a developer's overview, not the widgets) is left out. The widgets take no language until #93, so
 for now this lists all their words.
 
-The dashboard: tests/english_scan.js runs the page (index.html, the catalog, charts.js and app.js, from the dev
-server) on a small DOM, for every scenario of the dev server under the pseudo-locale, in the passes PASSES lists:
+The dashboard: tests/english_scan.js runs the page (index.html, formats.js, the catalog, charts.js and app.js, from the
+dev server) on a small DOM, for every scenario of the dev server under the pseudo-locale, in the passes PASSES lists:
 every page and segment as an installed monitor and as a dev instance shows them, and in some scenarios every action
 and control, the update banner, the reports' loading and failed states, and every change failing. The theme scripts'
 boot texts and the words in the stylesheets are not in it (#101 moves them).

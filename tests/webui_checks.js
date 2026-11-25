@@ -1,5 +1,6 @@
 "use strict";
-/* Runs the dashboard's real scripts (charts.js, app.js) under node and prints what they do as one JSON object.
+/* Runs the dashboard's real scripts (formats.js, charts.js, app.js) under node and prints what they do as one JSON
+ * object.
  *
  * tests/test_webui.py starts this with `node tests/webui_checks.js <webui folder>` and asserts on the result.
  * app.js is loaded in a vm context with a small fake DOM and window.__USAGE_MONITOR_TEST__ set, so it hands back its
@@ -71,7 +72,7 @@ function load(query, globals) {
   box.MonitorI18n = EN_CATALOG;                    // what /static/i18n/en.js sets before app.js runs (#87)
   Object.assign(box, globals || {});               // what the page's other scripts set first: another catalog, or none
   vm.createContext(box);
-  for (const name of ["charts.js", "app.js"]) {
+  for (const name of ["formats.js", "charts.js", "app.js"]) {
     vm.runInContext(fs.readFileSync(path.join(webui, name), "utf8"), box, { filename: name });
   }
   return { api: box.__USAGE_MONITOR_TEST__.api, charts: box.MonitorCharts, elements, box };
@@ -298,6 +299,54 @@ function spend(currency) {
 out.spend = { EUR: spend("EUR"), GBP: spend("GBP"), USD: spend("USD"), none: spend(null), lower: spend("eur"), bad: spend("EURO"), jpy: spend("JPY") };
 out.fmtMoney = [api.fmtMoney(1234.5, "EUR"), api.fmtMoney(null, "EUR"), api.fmtMoney(0, "USD")];
 out.fmtUsdUnchanged = [api.fmtUsd(12.5), api.fmtUsd(1234.5)];
+
+// ── formats (#91): formats.js on its own, in English, the pseudo-locale and the languages' format tags ─────────
+{
+  const source = fs.readFileSync(path.join(webui, "formats.js"), "utf8");
+  // formats.js in a context of its own; meta is the monitor-locale meta's content (none: no meta, undefined: no page).
+  const formatsIn = (meta) => {
+    const b = {};
+    if (meta !== undefined) {
+      const found = meta === null ? null : { getAttribute: (k) => (k === "content" ? meta : null) };
+      b.document = { querySelector: (sel) => (sel === 'meta[name="monitor-locale"]' ? found : null) };
+    }
+    b.window = b;
+    vm.createContext(b);
+    vm.runInContext(source, b, { filename: "formats.js" });
+    return b.MonitorFormats;
+  };
+  const M = formatsIn(undefined);
+  const of = (language, format) => M.make({ setting: "system", language, system: "en", format, clock: 24, offered: ["en"] });
+  const sample = (F) => ({
+    tag: F.tag, english: F.english, signs: [F.group, F.decimal],
+    number: [F.number("1234.5"), F.number("1234.5", { group: false }), F.number(1234.5), F.number(1234.5, { digits: 2 }),
+      F.number(-0), F.number("-0.0"), F.number("x"), F.number("1234"), F.number("12345")],
+    percent: [F.percent("34"), F.percent("33.5"), F.percent("-34"), F.percent("34", { tight: true })],
+    parts: [F.percentParts("34"), F.percentParts("-34"), F.percentParts("34", { tight: true })],
+    usd: [F.usd("5.96"), F.usd("-5.96"), F.usd("1235"), F.usd(1234.5, { digits: 2 }), F.usd(-1234.5, { digits: 0 }),
+      F.usd("1.2", { scale: 3 }), F.usd("-1.2", { scale: 3 }), F.usd("5.96", { tight: true }),
+      F.usd("1.2", { scale: 3, tight: true })],
+    money: [F.money(5.96, "USD"), F.money(5.96, "EUR"), F.money(5.96, "EURO"), F.money(1234.5, "USD")],
+    compact: [F.compact("1.5", 3), F.compact("1.5", 6), F.compact("-1.5", 3)],
+  });
+  out.formats = {};
+  for (const [name, language, format] of [["en", "en", "en-US"], ["pseudo", "pseudo", "en-US"], ["frFR", "fr", "fr-FR"],
+    ["frCA", "fr", "fr-CA"], ["frCH", "fr", "fr-CH"], ["esES", "es", "es-ES"], ["esMX", "es", "es-MX"],
+    ["trTR", "tr", "tr-TR"]]) {
+    out.formats[name] = sample(of(language, format));
+  }
+  // The tag Intl gets: the format tag of the same language, else the language's base; English for anything else.
+  out.formatsTags = [of("fr", "en-US").tag, of("fr", "").tag, of("fr", "fr_CA").tag, of("tr", "not a tag").tag,
+    of("es", "es-419").tag, of("de", "de-DE").tag, of("en", "fr-FR").tag, M.make(null).tag, M.make("fr").tag,
+    M.make({ language: 7 }).tag];
+  // active(): the page's own formats, from the monitor-locale meta; English without one or with one it cannot read.
+  out.formatsActive = [JSON.stringify({ language: "tr", format: "tr-TR", clock: 24 }), null, "{not json", "",
+    JSON.stringify({ format: "fr-FR" }), undefined].map((meta) => {
+    const formats = formatsIn(meta);
+    const active = formats.active();
+    return [active.tag, active.percent("34"), formats.active() === active];
+  });
+}
 
 // ── the plan multiple: a cell a month, or a month per N cells beyond 24 ───────────────────────────────────
 function cells(ratio) {

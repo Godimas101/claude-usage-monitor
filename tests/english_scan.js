@@ -1,14 +1,14 @@
 "use strict";
 /* The dashboard half of the "no English left" scan (#89; tests/english_left.py, tests/test_english_left.py).
  *
- * Runs the real page under node with no browser: index.html as the dev server serves it, then its scripts (the catalog,
- * charts.js, app.js) from the same server, on the small DOM in tests/mini_dom.js. app.js starts as it does in the app
- * (init: the first render and the first state), and each pass then works the page the way a person would: it opens every
- * page from the menu, presses the segment buttons (the windows, the metrics, the folder mode), and in some passes every
- * action button, every Settings control and the update banner's buttons. After each step it keeps the page's title and
- * body, once each. A pass is one fresh load of the page; it can rewrite what the server answers, to show the page as an
- * installed monitor (not a dev instance), with an update offered, with the reports still loading or failing, or with
- * every change refused:
+ * Runs the real page under node with no browser: index.html as the dev server serves it, then its scripts (formats.js,
+ * the catalog, charts.js, app.js) from the same server, on the small DOM in tests/mini_dom.js. app.js starts as it does
+ * in the app (init: the first render and the first state), and each pass then works the page the way a person would: it
+ * opens every page from the menu, presses the segment buttons (the windows, the metrics, the folder mode), and in some
+ * passes every action button, every Settings control and the update banner's buttons. After each step it keeps the
+ * page's title and body, once each. A pass is one fresh load of the page; it can rewrite what the server answers, to
+ * show the page as an installed monitor (not a dev instance), with an update offered, with the reports still loading or
+ * failing, or with every change refused:
  *
  *   installed       every page, with every segment, as an installed monitor shows them
  *   dev             every page as the dev server serves it (its dev-instance wording)

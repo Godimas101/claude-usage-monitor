@@ -107,8 +107,8 @@ python main.py            (console: Ctrl+C quits, errors print)     or    launch
 - `USAGE_MONITOR_UI_TESTS=1 python -m pytest` — adds the tests that create real windows, tray icons or
   processes. They need an interactive desktop, park widgets off-screen and use a fake data service.
   A new test that opens a window, a tray icon or a process must be gated the same way.
-- The dashboard scripts (`app.js`, `charts.js`, `motion.js`) are tested by running them under node:
-  `tests/webui_checks.js` loads `charts.js` and `app.js` with a fake DOM and the test hook at the end of `app.js`, and
+- The dashboard scripts (`app.js`, `charts.js`, `formats.js`, `motion.js`) are tested by running them under node:
+  `tests/webui_checks.js` loads all but `motion.js` with a fake DOM and the test hook at the end of `app.js`, and
   `tests/test_webui.py` asserts on what they return; `tests/test_motion.py` runs `motion.js` on its own fake DOM and
   checks the motion stylesheets, and runs each theme script with no `motion.js` (`tests/theme_scripts_checks.js`). They
   start node, so they are gated with `USAGE_MONITOR_UI_TESTS=1`; `tests.yml` runs them once more with it set

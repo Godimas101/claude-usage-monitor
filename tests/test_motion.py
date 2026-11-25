@@ -594,6 +594,13 @@ function world(opts) {
     setItem(k, v) { if (opts.blockedStorage) { throw new Error("blocked"); } w.store[k] = String(v); }
   };
   vm.createContext(sandbox);
+  // opts.locale: the page has the formats layer (#91), loaded before motion.js as index.html loads it, with the locale
+  // in its monitor-locale meta. Without it the page has no formats.js, and motion.js has to work all the same.
+  if (opts.locale) {
+    const meta = { getAttribute: (k) => (k === "content" ? JSON.stringify(opts.locale) : null) };
+    sandbox.document.querySelector = (sel) => (sel === 'meta[name="monitor-locale"]' ? meta : null);
+    vm.runInContext(fs.readFileSync(path.join(webui, "formats.js"), "utf8"), sandbox, { filename: "formats.js" });
+  }
   vm.runInContext(fs.readFileSync(path.join(webui, "motion.js"), "utf8"), sandbox, { filename: "motion.js" });
   w.FX = sandbox.USAGE_MONITOR_FX;
   w.root = root;
@@ -652,6 +659,21 @@ const out = {};
     money: a, moneyZero: t.fmtNum(a, 0), moneyFull: t.fmtNum(a, 1107.5), moneyHalf: t.fmtNum(a, 553.75),
     percent: b, percentMid: t.fmtNum(b, 6.4), times: c.val, timesDec: c.dec, timesMid: t.fmtNum(c, 3.04).length,
     none: t.parseNum("Mon")
+  };
+}
+
+// the formats layer (#91): a page with a locale has formats.js, loaded before motion.js; a page without has none
+{
+  const fr = world({ locale: { setting: "system", language: "fr", system: "fr", format: "fr-FR", clock: 24, offered: ["en", "fr"] } });
+  const en = world({ locale: { setting: "system", language: "en", system: "en", format: "en-US", clock: 12, offered: ["en"] } });
+  const none = world();
+  const t = en.FX.text;
+  const a = t.parseNum("$1,107.50 x");
+  out.formatsLayer = {
+    fr: fr.sandbox.MonitorFormats ? fr.sandbox.MonitorFormats.active().percent("34") : null,
+    en: en.sandbox.MonitorFormats ? en.sandbox.MonitorFormats.active().percent("34") : null,
+    none: typeof none.sandbox.MonitorFormats,
+    english: [a, t.fmtNum(a, 553.75)]
   };
 }
 
@@ -1152,6 +1174,16 @@ def test_figures_are_parsed_and_formatted_with_their_prefix_decimals_commas_and_
     assert f["percent"]["val"] == 13 and f["percent"]["post"] == "%" and f["percentMid"] == "6%"
     assert f["times"] == 6 and f["timesDec"] == 1 and f["timesMid"] == 4
     assert f["none"] is None
+
+
+@ui_only
+def test_a_page_with_a_locale_has_the_formats_layer_before_motion_js(engine: dict[str, Any]) -> None:
+    """#91: index.html loads formats.js just before motion.js. A scenario with a locale does the same, with the locale in
+    its monitor-locale meta, so the layer reads it there; one without has no formats.js, and an English page's figures
+    roll alike with the layer and without it."""
+    layer = engine["formatsLayer"]
+    assert (layer["fr"], layer["en"], layer["none"]) == ("34\u00a0%", "34%", "undefined")
+    assert layer["english"] == [engine["formats"]["money"], engine["formats"]["moneyHalf"]]
 
 
 @ui_only

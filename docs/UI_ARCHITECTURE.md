@@ -59,8 +59,9 @@ usage_monitor/
     __init__.py           load + validate theme JSON, variants, v1 migration, system accent
     colour.py             OKLCH, WCAG contrast and CIE76 distance in pure Python (the accent's lift)
     nostromo.json  night_city.json  gates.json
-  webui/                  index.html, app.js, charts.js, motion.js + motion.css (the shared half of the motion
-                          layer), themes/<theme>.css, <theme>.motion.css and <theme>.js (the theme's look,
+  webui/                  index.html, app.js, charts.js, formats.js (numbers and money in the locale, #91),
+                          motion.js + motion.css (the shared half of the motion layer),
+                          themes/<theme>.css, <theme>.motion.css and <theme>.js (the theme's look,
                           its motion and its scripted flavour),
                           fonts/<family>/*.ttf + OFL.txt — bundled fonts, used by BOTH the
                           dashboard (@font-face via /static/fonts) and the Pillow skins,
@@ -470,7 +471,12 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   exception). The widgets, the tray tooltip and the alerts write their numbers, percents, clocks and weekdays this
   way; their words stay English until #93 to #101. The alerts read the app's locale on each evaluation
   (`AlertEngine(settings, locale_provider=)`, English without one or when it fails); English alerts keep their trailing
-  `USD`, other languages write each amount with the plain `$` (US dollars) or the currency's code.
+  `USD`, other languages write each amount with the plain `$` (US dollars) or the currency's code. The dashboard has its
+  own: `webui/formats.js` (`window.MonitorFormats`: `make(locale)`, and `active()` from the `monitor-locale` meta),
+  loaded before every other page script. English keeps the page's own shapes (`tests/fixtures/webui_formats_english.json`
+  holds them), the pseudo-locale takes them with the same two changes, and French, Spanish and Turkish go through `Intl`
+  with the format tag, so the WebView's own CLDR data; US dollars are the plain `$` (`narrowSymbol`). Its `number`,
+  `percent`, `usd` and `compact` take the caller's digits too, and `tight` drops the space beside `%` and `$`.
 - **Letter case (#91).** `usage_monitor/casing.py`: `upper`, `lower`, `capitalize` and `cased` by the language's rules,
   so Turkish (and Azerbaijani) give `İ` and `ı` and never a combining dot (U+0307); every other language gets Python's
   own. A name in capitals is cased with the words by the language's rule (`HAİKU` in Turkish, Chris's decision); in
@@ -503,7 +509,7 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   value made with `markup()`, which only `app.js` can make (it is known by a prototype nothing from outside has).
   `tPlural()` uses the page's own copy of the CLDR rules (`pluralCategory()`), so a WebView with other ICU data cannot
   disagree with the app. A key is a literal string in its call and the values are an object literal written there, so
-  `test_webui.py` checks each call against `en.json`. No page script (`app.js`, `charts.js`, `motion.js`, the themes')
+  `test_webui.py` checks each call against `en.json`. No page script (`app.js`, `charts.js`, `formats.js`, `motion.js`, the themes')
   may format in the browser's own locale (`toLocale*()` or `Intl.*()` without a locale) or read `navigator.language`;
   `test_webui.py` checks them all.
 - **A new locale.** When `/api/state`'s `locale` has another language, format or clock than the page, the page
@@ -884,8 +890,9 @@ default browser instead, and the exit code says so (below).
   visible with ETag, hash router: `#overview #limits #cost #efficiency #history #settings #about`) +
   `charts.js` (dependency-free SVG: sparkline, bars, stacked bar, ring, heatmap). The shell loads, in this order and all
   from `/static/`: `motion.css`, the three `themes/<id>.motion.css` sheets (each scoped by `html[data-theme]`, so all three can
-  load whatever the theme) and `motion.js` in the `<head>` (so a boot curtain can start before the body is parsed), then
-  `charts.js` and `app.js` last: `app.js` starts the page. A test pins the order.
+  load whatever the theme), `formats.js` and `motion.js` in the `<head>` (the formats first, so every script after them
+  can use them; a boot curtain can start before the body is parsed), then the catalog, `charts.js` and `app.js` last:
+  `app.js` starts the page. A test pins the order.
 - **Efficiency.** The page that was called *Nerds only* is `#efficiency`. `PAGE_ALIASES = { nerds: "efficiency" }` opens an old
   link or bookmark and rewrites the address with `history.replaceState`. Its saved window choice is `efficiencyWindow`.
   The old `nerdsWindow` lived in the page's own storage, which never outlived the window (#54), so nothing carries it
@@ -989,8 +996,8 @@ default browser instead, and the exit code says so (below).
   fit is cut in the middle with an ellipsis (`fitLabel`), so folders that differ at the end still differ.
 - **Test hook.** With `window.__USAGE_MONITOR_TEST__` set before the script runs, `app.js` hands its helpers back
   (`__USAGE_MONITOR_TEST__.api`: `esc`, `fmtPct`, `paceOf`, `ratioCells`, `remainHTML`, `sessionsTable`, ...) and returns
-  without starting the page. Nothing else sets it. `tests/webui_checks.js` loads `charts.js` and `app.js` in a
-  node `vm` context with a fake DOM and prints what they do as JSON; `tests/test_webui.py` asserts on it. Those
+  without starting the page. Nothing else sets it. `tests/webui_checks.js` loads `formats.js`, `charts.js` and `app.js`
+  in a node `vm` context with a fake DOM and prints what they do as JSON; `tests/test_webui.py` asserts on it. Those
   tests start node, so they need `USAGE_MONITOR_UI_TESTS=1`, and `tests.yml` runs them (and `tests/test_motion.py` and
   `tests/test_english_left.py`) once more with it set. `tests/webui_formats.js` runs every formatter of the page
   (numbers, money, durations, clocks, dates, lists, the odometer, the rolling figures and the sentences and charts that

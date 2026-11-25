@@ -1,11 +1,12 @@
 "use strict";
 /* Today's English page formats (#91, step 2.0 of its plan), as one JSON object: tests/fixtures/webui_formats_english.json.
  *
- * Runs the dashboard's real scripts under node, as tests/webui_checks.js does (charts.js and app.js in a vm context with
- * the test hook set, so app.js hands back its helpers and does not start; motion.js in a context of its own), and calls
- * every formatter of the page on a fixed grid of inputs: the numbers, percents and money, the counts and compact
- * figures, the durations and ages, the clocks, dates and weekdays, the plurals and lists, the odometer and the rolling
- * figures, and the sites that write a number into a sentence, a card or a chart (their text only, not their markup).
+ * Runs the dashboard's real scripts under node, as tests/webui_checks.js does (formats.js, charts.js and app.js in a vm
+ * context with the test hook set, so app.js hands back its helpers and does not start; motion.js in a context of its
+ * own), and calls every formatter of the page on a fixed grid of inputs: the numbers, percents and money, the counts and
+ * compact figures, the durations and ages, the clocks, dates and weekdays, the plurals and lists, the odometer and the
+ * rolling figures, and the sites that write a number into a sentence, a card or a chart (their text only, not their
+ * markup).
  * tests/test_webui.py runs it with TZ=UTC and compares what it prints with the fixture, which was recorded before #91
  * changed the page: English must not change by a byte. The page's clock stands still at NOW. CALLS names each recorded
  * formatter and how it is called; a later step that reshapes one changes its entry here, never the fixture. An output is
@@ -74,7 +75,7 @@ function stillContext(box) {
 }
 
 /* The page's scripts in the order index.html loads them, minus the catalog (given) and motion.js (run apart). */
-const PAGE_ORDER = ["charts.js", "app.js"];
+const PAGE_ORDER = ["formats.js", "charts.js", "app.js"];
 
 function loadPage() {
   const elements = {};
