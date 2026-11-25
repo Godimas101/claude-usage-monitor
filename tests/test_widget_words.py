@@ -18,13 +18,14 @@ import pytest
 
 import english_left
 import widget_words
-from usage_monitor import i18n
+from usage_monitor import app, i18n
 from usage_monitor.agent import guard
 from usage_monitor.data.identity import legacy_label
 from usage_monitor.data.models import ApiStatus, Limit
 from usage_monitor.render import dump
 from usage_monitor.render import model as view
 from usage_monitor.render.model import build_model
+from usage_monitor.ui import tray
 
 FIXTURE = Path(__file__).parent / "fixtures" / "widget_words_english.json"
 
@@ -207,7 +208,7 @@ def test_the_models_words_come_from_the_catalog(catalogs):
     live = build_model(scoped_state("Fable"), dump.SAMPLE_NOW, show_scoped="always", locale=FR)
     assert (live.status_text, live.status_text.language) == ("EN DIRECT", "fr")
     assert [row.label for row in live.rows] == ["SESSION 5 H", "WEEKLY", "FABLE HEBDO"]
-    assert live.rows[2].share_text == "PART 25 %"
+    assert live.rows[2].share_text == "PART 25\u00a0%"
     assert live.guard is not None and live.guard.labels == {"session": "session de 5 h", "weekly": "weekly",
                                                             "scoped:fable": "Fable hebdo"}
     refused = build_model(dataclasses.replace(dump.sample_state("stale"), signin_refused=403), dump.SAMPLE_NOW,
@@ -277,3 +278,58 @@ def test_no_model_word_is_english_in_the_pseudo_locale():
     assert any("/login" in text for text in texts) and any("Fable" in text for text in texts)
     assert english_left.english(texts, names) == set()
     assert english_left.english(model_words(dump.sample_model("guard_hold_weekly")), names)    # English is caught
+
+
+# ── The tray tooltip's words (step 3) ─────────────────────────────────────────
+
+# Made-up French, long enough that the guard's phrase runs past the shell's 127 units.
+LONG_TIP = {
+    "tray.tip.session": "session en cours {percent}", "tray.tip.weekly": "semaine en cours {percent}",
+    "tray.tip.status.rate_limited": "trop de requêtes",
+    "tray.tip.guard_holding": "garde en attente",
+    "tray.tip.guard_until": "garde en attente, reprise {clock}",
+    "tray.tip.guard_until_in": "garde en attente, reprise {clock} (dans {countdown})",
+}
+
+
+def units(text: str) -> int:
+    return len(text.encode("utf-16-le")) // 2
+
+
+def test_the_tooltip_is_worded_from_the_catalog(catalogs):
+    """Each phrase is the catalog's in the model's language, English's where the language has none; the percents are
+    the locale's."""
+    catalogs["fr"] = catalog("fr", {**LONG_TIP, "tray.tip.lead": "Usage de Claude", "tray.tip.guard_armed": "garde armée",
+                                    "tray.tip.status.offline": "hors ligne"})
+    assert app.tray_tooltip(dump.sample_model("guard_armed", locale=FR)) == (
+        "Usage de Claude - session en cours 38\u00a0% - semaine en cours 52\u00a0% - garde armée")
+    assert app.tray_tooltip(dump.sample_model("offline", locale=FR), dev=True) == (
+        "Usage de Claude - session en cours 13\u00a0% - semaine en cours 2\u00a0% - hors ligne (dev)")
+    assert app.tray_tooltip(build_model(None, dump.SAMPLE_NOW, locale=FR)) == "Usage de Claude - loading"
+    stale = app.tray_tooltip(dump.sample_model("stale", locale=FR))
+    assert stale.endswith(" - stale") and stale.startswith("Usage de Claude - ")
+
+
+def test_the_tooltip_drops_its_countdown_then_its_resume_time(catalogs):
+    """Past the limit, the guard's countdown goes, then its resume time, each form a whole phrase; the percents, the
+    status and the dev mark stay. Only a tooltip still too long is cut, with an ellipsis. English keeps it all."""
+    catalogs["fr"] = catalog("fr", LONG_TIP)
+    base = dump.sample_model("rate_limited", locale=FR)
+    held = view.GuardMark(state="holding", over_keys=("session",), resume_clock="sam. 12:59",
+                          resume_seconds=(6 * 24 + 23) * 3600)
+    model = dataclasses.replace(base, rows=[dataclasses.replace(row, percent=100.0) for row in base.rows], guard=held)
+    lead = "Claude usage - session en cours 100\u00a0% - semaine en cours 100\u00a0% - trop de requêtes"
+    full = f"{lead} - garde en attente, reprise sam. 12:59 (dans 6j 23h) (dev)"
+    until = f"{lead} - garde en attente, reprise sam. 12:59 (dev)"
+    holding = f"{lead} - garde en attente (dev)"
+    assert units(full) > tray.TIP_LIMIT >= units(until)                      # the made-up words run past
+    assert app.tray_tooltip(model, dev=True) == until
+    assert app.tray_tooltip(model, dev=True, limit=units(full)) == full
+    assert app.tray_tooltip(model, dev=True, limit=units(full) - 1) == until
+    assert app.tray_tooltip(model, dev=True, limit=units(until) - 1) == holding
+    cut = app.tray_tooltip(model, dev=True, limit=units(holding) - 1)
+    assert cut == tray.clip(holding, units(holding) - 1) and cut.endswith("\u2026")
+    assert units(cut) == units(holding) - 1
+    english = dataclasses.replace(model, locale=i18n.ENGLISH)
+    assert app.tray_tooltip(english, dev=True) == ("Claude usage - session 100% - weekly 100% - rate limited - guard "
+                                                   "holding, resumes sam. 12:59 (in 6d 23h) (dev)")

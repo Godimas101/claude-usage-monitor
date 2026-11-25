@@ -19,6 +19,7 @@ from typing import Any
 
 import pytest
 
+import widget_words
 from usage_monitor import app, casing, cldr, formats, i18n
 from usage_monitor.data import alerts
 from usage_monitor.data.alerts import AlertEngine
@@ -396,7 +397,7 @@ def test_the_skins_numbers_follow_the_locale_where_they_are_drawn(runs):
     assert "96 % (CAP 95 %)" in statement.replace("\u00a0", " ")
 
 
-# ── The tray's percent (step 1.7) ─────────────────────────────────────────────
+# ── The tray's percent (step 1.7) and words (#93) ─────────────────────────────
 
 def test_the_tray_tooltip_writes_its_percents_in_the_locale():
     assert app.tray_tooltip(dump.sample_model("normal3")) == "Claude usage - session 13% - weekly 2%"
@@ -404,28 +405,45 @@ def test_the_tray_tooltip_writes_its_percents_in_the_locale():
             == "Claude usage - session 13\u00a0% - weekly 2\u00a0%")
     turkish = app.tray_tooltip(dump.sample_model("normal3", locale=loc("tr-TR")))
     assert turkish == "Claude usage - session %13 - weekly %2"
-    assert (app.tray_tooltip(dump.sample_model("stale", locale=PSEUDO))
-            == "Claude usage - session 13\u00a0% - weekly 2\u00a0% - stale")
+    pseudo, fill = i18n.pseudo_text, i18n.fill                               # the pseudo-locale's words too (#93)
+    assert app.tray_tooltip(dump.sample_model("stale", locale=PSEUDO)) == " - ".join([
+        pseudo("Claude usage"), fill(pseudo("session {percent}"), {"percent": "13\u00a0%"}),
+        fill(pseudo("weekly {percent}"), {"percent": "2\u00a0%"}), pseudo("stale")])
 
 
-def _every_tag() -> list[i18n.Locale]:
-    tags = sorted({*cldr.REGIONS, *(i18n.BASE_FORMATS[language] for language in cldr.BASES)})
-    return [EN, PSEUDO] + [loc(tag, clock) for tag in tags for clock in (12, 24)]
+def test_the_tray_countdown_is_cldrs_outside_english():
+    """#93: the guard's countdown in the tooltip is CLDR's narrow units in French, Spanish and Turkish, in CLDR's own
+    case; English and the pseudo-locale keep their own letters."""
+    def countdown(locale: i18n.Locale, seconds: int) -> str:
+        model = dump.sample_model("guard_hold_session", locale=locale)
+        model = dataclasses.replace(model, guard=dataclasses.replace(model.guard, resume_seconds=seconds))
+        before = " (ıñ " if locale.language == i18n.PSEUDO else " (in "       # the pseudo-locale's "in"
+        return app.tray_tooltip(model, limit=1000).rsplit(before, 1)[1].split(")")[0]
+
+    two_hours = 2 * 3600 + 14 * 60
+    assert [countdown(locale, two_hours) for locale in (EN, PSEUDO, loc("fr-FR"), loc("tr-TR"), loc("es-ES"))] == [
+        "2h 14m", "2h 14m", "2h 14min", "2s 14d", "2h 14min"]
+    assert [countdown(locale, 30) for locale in (EN, PSEUDO, loc("fr-FR"), loc("fr-CA"), loc("tr-TR"))] == [
+        "<1m", "<1m", "<1min", "<1m", "<1d"]
+    assert countdown(loc("es-CO"), (6 * 24 + 23) * 3600) == "6 días 23 h"
 
 
-def test_the_longest_tray_tooltip_fits_the_shells_127_units_in_every_format():
-    """The worst case the tray can say (two full limits, a status, the guard holding with a resume time a week away,
-    a dev instance) stays within the 127 UTF-16 units the shell keeps, for every format tag and clock."""
-    now = wall(datetime(2026, 10, 21, 22, 0))
-    resume = wall(datetime(2026, 10, 28, 21, 59))
-    limits = [limit("session", 100.0, resume), limit("weekly_all", 100.0, resume)]
-    block = {"state": "holding", "resume_at": resume.isoformat(), "policy": {"session_cap": 95, "weekly_cap": 90},
-             "over": [{"name": "session", "label": "session", "percent": 100.0, "cap": 95}]}
-    state = dataclasses.replace(dump._state(now, ApiStatus.RATE_LIMITED, limits, 360), guard=block)
-    longest = max((app.tray_tooltip(build_model(state, now, locale=locale), dev=True) for locale in _every_tag()),
-                  key=lambda text: len(text.encode("utf-16-le")))
-    assert "guard holding, resumes" in longest and longest.endswith(" (dev)")
-    assert len(longest.encode("utf-16-le")) // 2 <= tray.TIP_LIMIT, longest
+def test_every_language_fits_the_tooltip_in_every_tag():
+    """The worst tooltip each language can show (two limits at 100 %, a status, the guard holding with a resume time
+    on every weekday at the longest clocks and every countdown shape, a dev instance), in every format tag and clock,
+    stays within the shell's 127 UTF-16 units with nothing cut. English, French, Spanish and Turkish (English's words
+    while their catalogs are empty) keep the whole guard phrase; the pseudo-locale, longer, needs the drop rule."""
+    longest: dict[str, int] = {}
+    for language in i18n.DEV_LANGUAGES:
+        texts = list(widget_words.tooltip_sweep(language))
+        assert texts and all(text.endswith(" (dev)") and "\u2026" not in text for text in texts), language
+        if language != i18n.PSEUDO:
+            assert all(" (in " in text for text in texts), language
+        longest[language] = max(len(text.encode("utf-16-le")) // 2 for text in texts)
+    assert max(longest.values()) <= tray.TIP_LIMIT, longest
+    # Today's worst: es-CO and fr-CA on a 12-hour clock with English's words, and the pseudo-locale's "guard holding"
+    # once its resume time has dropped. A draft of fr, es or tr changes its own figure (#104 to #106).
+    assert longest == {"en": 113, "fr": 120, "es": 121, "tr": 113, "pseudo": 118}
 
 
 # ── The alerts (step 1.8) ─────────────────────────────────────────────────────

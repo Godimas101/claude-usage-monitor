@@ -9,6 +9,8 @@ labels and resume texts) for every dump state in every show_scoped mode, and for
 tooltip of each, without and with the dev mark; the guard's tooltip at each countdown shape, with and without a resume
 time; and every tray menu the toggles, the waiting sessions and an update can give.
 
+Also here: ``tooltip_sweep``, every worst-case tray tooltip a language can show, for the fit tests.
+
     python tests/widget_words.py --print        the words of the code Python imports, as JSON
 """
 from __future__ import annotations
@@ -17,8 +19,9 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Iterator
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -165,6 +168,49 @@ def words() -> dict[str, Any]:
     for key, menu in _menus().items():
         found[f"menu/{key}"] = menu
     return found
+
+
+# The tray tooltip's worst cases (#93): two limits at 100 %, a status, the guard holding with a resume time and a
+# countdown, a dev instance; every weekday at the hours whose clock text is longest, and every countdown shape.
+SWEEP_MONDAY = datetime(2026, 7, 13)            # a wall-clock Monday: only its weekdays and clocks are written
+SWEEP_HOURS = (0, 1, 9, 10, 11, 12, 13, 21, 22, 23)
+SWEEP_MINUTES = (0, 59)
+SWEEP_COUNTDOWNS = ((6 * 24 + 23) * 3600, 23 * 3600 + 59 * 60, 10 * 3600 + 59 * 60, 59 * 60, 30)
+
+
+def sweep_locales(language: str) -> list[Any]:
+    """The locales ``language`` (a DEV_LANGUAGES id) can show: one for English and the pseudo-locale; for French,
+    Spanish and Turkish every format tag of theirs (cldr.py's regions and their base), on a 12-hour and a 24-hour
+    clock."""
+    from usage_monitor import cldr, i18n
+
+    if language in (i18n.DEFAULT, i18n.PSEUDO):
+        return [i18n.dev_locale(language)]
+    tags = sorted({*cldr.REGIONS, *(i18n.BASE_FORMATS[base] for base in cldr.BASES)})
+    return [i18n.Locale(setting="system", language=language, system=i18n.DEFAULT, format=tag, clock=clock,
+                        offered=(i18n.DEFAULT,))
+            for tag in tags if i18n.primary(tag) == language for clock in (12, 24)]
+
+
+def tooltip_sweep(language: str) -> Iterator[str]:
+    """Every worst-case tray tooltip ``language`` can show, as a dev instance says it (critic 2 of #93's plan). Pure:
+    the resume times are written from wall clocks, so the process's time zone does not matter."""
+    from usage_monitor import app, formats
+    from usage_monitor.data.models import ApiStatus
+    from usage_monitor.render import dump
+    from usage_monitor.render.model import GuardMark, build_model
+
+    now = dump.SAMPLE_NOW
+    state = dump._state(now, ApiStatus.RATE_LIMITED, [_limit("session", 100.0, now, "SESSION"),
+                                                      _limit("weekly_all", 100.0, now, "WEEKLY")], 360)
+    for locale in sweep_locales(language):
+        model = build_model(state, now, locale=locale)
+        clocks = {formats.day_clock(SWEEP_MONDAY + timedelta(days=day, hours=hour, minutes=minute), locale)
+                  for day in range(7) for hour in SWEEP_HOURS for minute in SWEEP_MINUTES}
+        for clock in sorted(clocks):
+            for seconds in SWEEP_COUNTDOWNS:
+                guard = GuardMark(state="holding", over_keys=("session",), resume_clock=clock, resume_seconds=seconds)
+                yield app.tray_tooltip(replace(model, guard=guard), dev=True)
 
 
 def collect(repo: str | Path = REPO) -> dict[str, Any]:

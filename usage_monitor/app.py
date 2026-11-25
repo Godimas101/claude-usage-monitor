@@ -76,7 +76,7 @@ from usage_monitor.ui.dashboard import find_window_of as dashboard_window_of
 from usage_monitor.ui.host import UIHost, signal_running_instance
 from usage_monitor.ui.menu import SEPARATOR, MenuItem, show_menu
 from usage_monitor.ui.server import DEV_ENV, SETTING_SPECS, ApiServer, open_statistics_store, plain_version
-from usage_monitor.ui.tray import TrayIcon
+from usage_monitor.ui.tray import TIP_LIMIT, TrayIcon, clip
 from usage_monitor.ui.widgets import (
     FloatingWidget,
     FrameStats,
@@ -202,47 +202,77 @@ def _percent_text(percent: float, locale: i18n.Locale) -> str:
     return formats.percent(str(int(percent + 0.5) if percent >= 0 else 0), locale)
 
 
-# The tray tooltip's words for the view model's values (#90): the two limits it reads, by kind; the status after them
-# when the numbers are not live; the units of the guard's countdown.
-TRAY_LIMITS: tuple[tuple[str, str], ...] = (("session", "session"), ("weekly_all", "weekly"))
+# The tray tooltip's words for the view model's values (#90), as catalog keys (#93): the two limits it reads, by kind;
+# the status after them when the numbers are not live. TRAY_UNITS are the guard's countdown letters in English and
+# the pseudo-locale (#91's English shape, as format_countdown keeps "2D 3H"); other languages take CLDR's.
+TRAY_LIMITS: tuple[tuple[str, str], ...] = (("session", "tray.tip.session"), ("weekly_all", "tray.tip.weekly"))
 TRAY_STATUS: dict[ApiStatus, str] = {
-    ApiStatus.LOADING: "loading",
-    ApiStatus.LIVE: "live",
-    ApiStatus.STALE: "stale",
-    ApiStatus.OFFLINE: "offline",
-    ApiStatus.RATE_LIMITED: "rate limited",
-    ApiStatus.NO_CREDENTIALS: "no login",
-    ApiStatus.PAUSED: "paused",
+    ApiStatus.LOADING: "tray.tip.status.loading",
+    ApiStatus.LIVE: "tray.tip.status.live",
+    ApiStatus.STALE: "tray.tip.status.stale",
+    ApiStatus.OFFLINE: "tray.tip.status.offline",
+    ApiStatus.RATE_LIMITED: "tray.tip.status.rate_limited",
+    ApiStatus.NO_CREDENTIALS: "tray.tip.status.no_login",
+    ApiStatus.PAUSED: "tray.tip.status.paused",
 }
 TRAY_UNITS: dict[str, str] = {UNIT_MINUTES: "m", UNIT_HOURS: "h", UNIT_DAYS: "d"}
+TIP_JOIN = " - "                    # between the tooltip's phrases
+DEV_MARK = " (dev)"                 # a dev instance's tooltip ends with it: a developer's mark, not a word
 
 
-def tray_tooltip(model: WidgetModel, *, dev: bool = False) -> str:
+def _tip_units(text: str) -> int:
+    """UTF-16 code units, as the shell counts the tooltip (ui/tray.clip)."""
+    return len(text.encode("utf-16-le")) // 2
+
+
+def tray_tooltip(model: WidgetModel, *, dev: bool = False, limit: int = TIP_LIMIT) -> str:
     """"Claude usage - session 13% - weekly 2%", with the status after it when the numbers are not
     live ("... - stale"), the usage guard while it is on ("... - guard armed") and " (dev)" for a dev
-    instance. The percents and the guard's resume time are in the model's locale; the words are English (#93)."""
-    parts = ["Claude usage"]
-    for kind, word in TRAY_LIMITS:
+    instance. The words come from the catalog in the model's language (#93); the percents, the guard's
+    resume time and its countdown are in the model's locale.
+
+    Past ``limit`` UTF-16 units (the shell keeps 127), the guard's countdown goes, then its resume time, each form
+    a whole phrase; the percents, the status and the dev mark stay. Only a tooltip still too long is cut
+    (tray.clip). English never comes near: 113 units at worst."""
+    words = i18n.app_catalog(model.locale.language)
+    parts = [words.text("tray.tip.lead")]
+    for kind, key in TRAY_LIMITS:
         row = next((row for row in model.rows if row.kind == kind), None)
         if row is not None and row.percent is not None:
-            parts.append(f"{word} {_percent_text(row.percent, model.locale)}")
+            parts.append(words.text(key, {"percent": _percent_text(row.percent, model.locale)}))
     if len(parts) == 1 or model.status not in (ApiStatus.LIVE, ApiStatus.PAUSED):
-        parts.append(TRAY_STATUS[model.status])
-    if model.guard is not None:
-        parts.append(_guard_tip(model.guard))
-    return " - ".join(parts) + (" (dev)" if dev else "")
+        parts.append(words.text(TRAY_STATUS[model.status]))
+    mark = DEV_MARK if dev else ""
+    text = TIP_JOIN.join(parts) + mark
+    for phrase in _guard_tip(model.guard, model.locale, words) if model.guard is not None else ():
+        text = TIP_JOIN.join([*parts, phrase]) + mark
+        if _tip_units(text) <= limit:
+            return text
+    return clip(text, limit)
 
 
-def _guard_tip(guard: GuardMark) -> str:
-    """The usage guard in the tooltip, in the Gates footer's words: "guard armed", or "guard holding, resumes
-    6:26 PM (in 2h 14m)". Which limits are over their caps is left to the hover card and the dashboard, so the
-    worst case still fits the shell's 127 characters."""
+def _guard_tip(guard: GuardMark, locale: i18n.Locale, words: i18n.Catalog) -> tuple[str, ...]:
+    """The usage guard in the tooltip, each form shorter than the one before: "guard holding, resumes 6:26 PM
+    (in 2h 14m)", "guard holding, resumes 6:26 PM", "guard holding"; or "guard armed". Which limits are over their
+    caps is left to the hover card and the dashboard."""
     if not guard.holding:
-        return "guard armed"
+        return (words.text("tray.tip.guard_armed"),)
+    holding = words.text("tray.tip.guard_holding")
     if guard.resume_seconds is None or guard.resume_clock is None:
-        return "guard holding"
-    countdown = " ".join(f"{count}{TRAY_UNITS[unit]}" for count, unit in countdown_units(guard.resume_seconds)) or "<1m"
-    return f"guard holding, resumes {guard.resume_clock} (in {countdown})"
+        return (holding,)
+    clock = guard.resume_clock
+    countdown = _tray_countdown(guard.resume_seconds, locale)
+    return (words.text("tray.tip.guard_until_in", {"clock": clock, "countdown": countdown}),
+            words.text("tray.tip.guard_until", {"clock": clock}), holding)
+
+
+def _tray_countdown(seconds: int, locale: i18n.Locale) -> str:
+    """The guard's countdown in the tooltip: "2h 14m", "9m" or "<1m" in English and the pseudo-locale; CLDR's narrow
+    units in its own case otherwise ("2h 14min" in fr-FR, "2s 14d" in Turkish, "<1min" in fr-FR under a minute)."""
+    units = countdown_units(seconds)
+    if formats.english_shapes(locale):
+        return " ".join(f"{count}{TRAY_UNITS[unit]}" for count, unit in units) or "<1m"
+    return formats.duration(units, locale) if units else "<" + formats.duration(((1, UNIT_MINUTES),), locale)
 
 
 def menu_items(
