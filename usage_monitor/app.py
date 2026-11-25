@@ -291,27 +291,33 @@ def menu_items(
     report_bug: Callable[[], None],
     update: Callable[[], None],
     quit_app: Callable[[], None],
+    locale: i18n.Locale = i18n.ENGLISH,
 ) -> list[MenuItem]:
-    """The tray and widget menu. "Resume waiting sessions" appears only while Claude sessions wait on the usage
-    guard (#27), and "Update to vX" only while an update is on offer."""
+    """The tray and widget menu, worded from the catalog in ``locale``'s language (#93). "Resume waiting sessions"
+    appears only while Claude sessions wait on the usage guard (#27), and "Update to vX" only while an update is on
+    offer. Each row has an id (MenuItem.id), the same in every language."""
+    words = i18n.app_catalog(locale.language)
+    text = words.text
     items = [
-        MenuItem("Open dashboard", open_dashboard),
+        MenuItem(text("tray.menu.open_dashboard"), open_dashboard, id="open_dashboard"),
         SEPARATOR,
-        MenuItem("Floating widget", toggle_floating, checked=floating_on),
-        MenuItem("Taskbar widget", toggle_taskbar, checked=taskbar_on),
+        MenuItem(text("tray.menu.floating"), toggle_floating, checked=floating_on, id="floating"),
+        MenuItem(text("tray.menu.taskbar"), toggle_taskbar, checked=taskbar_on, id="taskbar"),
         SEPARATOR,
-        MenuItem("Usage guard", toggle_guard, checked=guard_on),
+        MenuItem(text("tray.menu.guard"), toggle_guard, checked=guard_on, id="guard"),
     ]
     if waiting:
-        items.append(MenuItem(f"Resume waiting sessions ({waiting})", resume_waiting))
+        count = formats.number(str(waiting), locale, group=False)      # no group sign, as the widgets' numbers
+        items.append(MenuItem(words.plural("tray.menu.resume_waiting", waiting, {"count": count}), resume_waiting,
+                              id="resume_waiting"))
     items += [
         SEPARATOR,
-        MenuItem("Refresh now", refresh),
-        MenuItem("Report a bug", report_bug),
+        MenuItem(text("tray.menu.refresh"), refresh, id="refresh"),
+        MenuItem(text("tray.menu.report_bug"), report_bug, id="report_bug"),
     ]
     if update_version:
-        items.append(MenuItem(f"Update to v{update_version}", update))
-    items += [SEPARATOR, MenuItem("Exit", quit_app)]
+        items.append(MenuItem(text("tray.menu.update", {"version": update_version}), update, id="update"))
+    items += [SEPARATOR, MenuItem(text("tray.menu.exit"), quit_app, id="exit")]
     return items
 
 
@@ -854,6 +860,7 @@ class MonitorApp:
             report_bug=lambda: self._open_url(bug_report_url()),
             update=self._apply_update,
             quit_app=self.quit,
+            locale=self.locale(),
         )
 
     def refresh_now(self) -> None:

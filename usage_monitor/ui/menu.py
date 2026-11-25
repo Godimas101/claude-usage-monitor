@@ -5,8 +5,8 @@ the chosen item's action once the menu is gone. The classic tray-menu recipe app
 controller window is made foreground first (so the menu dismisses when the user clicks away) and a
 WM_NULL is posted after tracking.
 
-build_entries() and popup_flags() hold the decisions (separator tidying, mnemonic escaping,
-which way the menu opens) and are tested without a desktop.
+build_entries(), popup_flags() and run_chosen() hold the decisions (separator tidying, mnemonic
+escaping, which way the menu opens, running the chosen row) and are tested without a desktop.
 """
 from __future__ import annotations
 
@@ -23,13 +23,15 @@ log = get_logger(__name__)
 
 @dataclass(frozen=True)
 class MenuItem:
-    """One menu row. ``action`` runs after the menu closes. A separator ignores everything else."""
+    """One menu row. ``action`` runs after the menu closes. A separator ignores everything else. ``id`` names the
+    row the same way in every language (#93): the log names it, never the label, which is in the app's language."""
 
     label: str = ""
     action: Callable[[], None] | None = None
     checked: bool = False
     enabled: bool = True
     separator: bool = False
+    id: str = ""
 
 
 SEPARATOR = MenuItem(separator=True)
@@ -91,6 +93,17 @@ def popup_flags(x: int, y: int, area: Rect | None) -> int:
     return flags
 
 
+def run_chosen(item: MenuItem | None) -> None:
+    """Run the chosen row's action, if it has one. A failure is logged by the row's id ("?" without one), never by its
+    label: the logs stay English (#86)."""
+    if item is None or item.action is None:
+        return
+    try:
+        item.action()
+    except Exception:
+        log.exception("menu action %r failed", item.id or "?")
+
+
 # ── Showing a menu ────────────────────────────────────────────────────────────
 
 _showing = False  # one menu at a time; the UI thread is the only caller
@@ -137,9 +150,5 @@ def show_menu(host: UIHost, items: Sequence[MenuItem], x: int, y: int) -> MenuIt
     finally:
         _showing = False
     chosen = next((entry.item for entry in entries if command and entry.command == command), None)
-    if chosen is not None and chosen.action is not None:
-        try:
-            chosen.action()
-        except Exception:
-            log.exception("menu action %r failed", chosen.label)
+    run_chosen(chosen)
     return chosen

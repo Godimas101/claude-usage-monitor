@@ -25,6 +25,7 @@ from usage_monitor.data.models import ApiStatus, Limit
 from usage_monitor.render import dump
 from usage_monitor.render import model as view
 from usage_monitor.render.model import build_model
+from usage_monitor.render.skins import get_skin
 from usage_monitor.ui import tray
 
 FIXTURE = Path(__file__).parent / "fixtures" / "widget_words_english.json"
@@ -333,3 +334,54 @@ def test_the_tooltip_drops_its_countdown_then_its_resume_time(catalogs):
     english = dataclasses.replace(model, locale=i18n.ENGLISH)
     assert app.tray_tooltip(english, dev=True) == ("Claude usage - session 100% - weekly 100% - rate limited - guard "
                                                    "holding, resumes sam. 12:59 (in 6d 23h) (dev)")
+
+
+# ── The tray menu's words (step 4) ────────────────────────────────────────────
+
+MENU_CALLS = {name: (lambda: None) for name in ("open_dashboard", "toggle_floating", "toggle_taskbar", "toggle_guard",
+                                                "resume_waiting", "refresh", "report_bug", "update", "quit_app")}
+
+
+def menu(locale: i18n.Locale, waiting: int = 0, update: str | None = None) -> list[Any]:
+    return app.menu_items(floating_on=True, taskbar_on=False, guard_on=True, waiting=waiting, update_version=update,
+                          locale=locale, **MENU_CALLS)
+
+
+def test_the_menu_words_come_from_the_catalog(catalogs):
+    """Each row is the catalog's in the menu's language, English's where the language has none. The plural picks its
+    form by the count in that language (French: one, many and other; 0 is one), with the count written as the widgets
+    write numbers, no group sign; the update row keeps its version as given."""
+    resume = {"one": "Reprendre la session en attente ({count})", "many": "Reprendre les {count} de sessions en attente",
+              "other": "Reprendre les sessions en attente ({count})"}
+    catalogs["fr"] = catalog("fr", {"tray.menu.open_dashboard": "Ouvrir le tableau de bord", "tray.menu.exit": "Quitter",
+                                    "tray.menu.resume_waiting": resume,
+                                    "tray.menu.update": "Mettre \u00e0 jour vers v{version}"})
+    labels = [item.label for item in menu(FR, waiting=1, update="2.1.0") if not item.separator]
+    assert labels[0] == "Ouvrir le tableau de bord" and labels[-1] == "Quitter"
+    assert (labels[1], labels[1].language) == ("Floating widget", "en")
+    assert "Mettre \u00e0 jour vers v2.1.0" in labels
+    rows = {count: next(item.label for item in menu(FR, waiting=count) if item.id == "resume_waiting")
+            for count in (1, 2, 1_000_000)}
+    assert rows == {1: "Reprendre la session en attente (1)", 2: "Reprendre les sessions en attente (2)",
+                    1_000_000: "Reprendre les 1000000 de sessions en attente"}
+    assert catalogs["fr"].plural("tray.menu.resume_waiting", 0, {"count": "0"}) == "Reprendre la session en attente (0)"
+    english = [item.label for item in menu(i18n.ENGLISH, waiting=1000, update="3.0.0-rc.1") if not item.separator]
+    assert "Resume waiting sessions (1000)" in english and "Update to v3.0.0-rc.1" in english
+    pseudo = {item.id: item.label for item in menu(PSEUDO, waiting=1000, update="2.1.0") if not item.separator}
+    assert pseudo["resume_waiting"] == i18n.fill(i18n.pseudo_text("Resume waiting sessions ({count})"),
+                                                 {"count": "1000"})
+    assert pseudo["update"] == i18n.fill(i18n.pseudo_text("Update to v{version}"), {"version": "2.1.0"})
+
+
+def test_the_tray_icon_draws_no_catalog_word():
+    """The tray icon is digits and marks only (Chris's rule): drawn in the pseudo-locale, every skin's icon is
+    English's, pixel for pixel, while the model's words differ."""
+    themes = dump.load_theme_objects()
+    for theme_id, theme in themes.items():
+        skin, variant = get_skin(theme_id), theme.variant(None)
+        for name in dump.DUMP_STATE_NAMES:
+            english, pseudo = dump.sample_model(name), dump.sample_model(name, locale=PSEUDO)
+            assert english.status_text != pseudo.status_text
+            for size in (16, 32):
+                assert (skin.render_tray_icon(english, theme, variant, size).tobytes()
+                        == skin.render_tray_icon(pseudo, theme, variant, size).tobytes()), (theme_id, name, size)

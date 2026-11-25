@@ -64,6 +64,7 @@ from usage_monitor.settings import Settings
 from usage_monitor.ui import platform as plat
 from usage_monitor.ui import win32
 from usage_monitor.ui.host import invoke
+from usage_monitor.ui.menu import MenuItem, run_chosen
 from usage_monitor.ui.platform import Rect, TaskbarInfo
 from usage_monitor.ui.widgets import (
     FloatingWidget,
@@ -1645,6 +1646,29 @@ def test_the_menu_offers_to_resume_only_while_sessions_wait():
     assert waiting.index("Resume waiting sessions (2)") == waiting.index("Usage guard") + 1
 
 
+def test_menu_rows_have_ids():
+    """#93: every row but a separator has an id of its own, the same in every language, which the log names."""
+    items = menu_items(update_version="2.1.0", waiting=2, **MENU_KWARGS)
+    assert [item.id for item in items if not item.separator] == [
+        "open_dashboard", "floating", "taskbar", "guard", "resume_waiting", "refresh", "report_bug", "update", "exit"]
+    assert all(item.id == "" for item in items if item.separator)
+
+
+def test_a_failing_menu_action_is_logged_by_id(caplog):
+    """#93: the logs stay English (#86), so a failing action is named by its row's id, never by its label."""
+    def broken() -> None:
+        raise RuntimeError("boom")
+
+    with caplog.at_level(logging.ERROR, logger="usage_monitor.ui.menu"):
+        run_chosen(MenuItem("Actualiser maintenant", broken, id="refresh"))
+        run_chosen(MenuItem("Sans id", broken))
+        run_chosen(None)
+        run_chosen(MenuItem("Rien"))
+    assert [record.getMessage() for record in caplog.records] == ["menu action 'refresh' failed",
+                                                                  "menu action '?' failed"]
+    assert not any("Actualiser" in record.getMessage() or "Sans id" in record.getMessage() for record in caplog.records)
+
+
 def test_links_stay_on_github():
     assert bug_report_url() == f"https://github.com/{version.REPO}/issues/new?template=bug_report.md&labels=bug"
     good = "https://github.com/Godimas101/claude-usage-monitor/releases/tag/v9.9.9"
@@ -2494,6 +2518,17 @@ def test_the_menu_reflects_and_flips_the_widget_toggles(wired):
     assert settings.get("show_floating") is False and app.floating is None
     items = {i.label: i for i in app.menu_items() if not i.separator}
     assert not items["Floating widget"].checked and items["Taskbar widget"].checked
+
+
+def test_the_menu_is_worded_in_the_apps_language(wired, monkeypatch):
+    """#93: the menu is built at each open in the app's language at that moment."""
+    english = i18n.load_catalog("en").english()
+    monkeypatch.setattr(i18n, "app_catalog", lambda language: i18n.Catalog(
+        language, {"tray.menu.exit": "Quitter"} if language == "fr" else {}, english))
+    assert wired.app.menu_items()[-1].label == "Exit"
+    french = i18n.Locale(setting="fr", language="fr", system="en", format="fr-FR", clock=24, offered=("en", "fr"))
+    monkeypatch.setattr(wired.app, "locale", lambda: french)
+    assert [item.label for item in wired.app.menu_items()][-1] == "Quitter"
 
 
 def test_the_menu_arms_the_guard_and_resumes_waiting_sessions(wired, isolated_env):
