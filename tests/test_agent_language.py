@@ -113,13 +113,16 @@ def test_the_modes_say_the_same_in_french_as_in_english(tmp_path, monkeypatch, n
 
 def test_the_agent_modes_never_read_a_catalog(tmp_path, monkeypatch, no_fetch):
     """Every catalog load fails, and so does any read of a file under the catalog folder. The modes still work, and
-    none of those reads was made."""
+    none of those reads was made. The widgets' cached catalog is emptied and refused too, so a catalog an earlier test
+    cached cannot slip through it (#93)."""
     reads: list[str] = []
 
     def refuse(*args: Any, **kwargs: Any) -> Any:
         reads.append(f"call {getattr(args[0], '__name__', args[0])!s}" if args else "call")
         raise AssertionError("a catalog was loaded")
 
+    i18n.app_catalog.cache_clear()
+    monkeypatch.setattr(i18n, "app_catalog", refuse)
     monkeypatch.setattr(i18n, "load_catalog", refuse)
     monkeypatch.setattr(i18n, "_read_catalog", refuse)
     monkeypatch.setattr(i18n.Catalog, "__init__", refuse)

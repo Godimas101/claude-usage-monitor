@@ -212,6 +212,60 @@ def test_a_broken_catalog_shows_english(tmp_path: Path) -> None:
     assert i18n.load_catalog("fr", root).text("k") == "English"
 
 
+@pytest.fixture
+def fresh_app_catalog() -> Any:
+    """app_catalog with nothing cached, before and after the test."""
+    i18n.app_catalog.cache_clear()
+    yield i18n.app_catalog
+    i18n.app_catalog.cache_clear()
+
+
+def test_the_app_catalog_reads_each_file_once(fresh_app_catalog: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#93: the tray tooltip is worded on every blink, so the widgets' catalog is read once per language and process."""
+    reads: list[str] = []
+    real = i18n._read_catalog
+
+    def counted(path: Path) -> dict[str, Any]:
+        reads.append(path.name)
+        return real(path)
+
+    monkeypatch.setattr(i18n, "_read_catalog", counted)
+    for _ in range(100):
+        assert fresh_app_catalog("fr").text("tray.tip.lead") == "Claude usage"
+        assert fresh_app_catalog("en").text("tray.tip.status.live") == "live"
+    assert sorted(reads) == ["en.json", "en.json", "fr.json"]
+    assert fresh_app_catalog("fr") is fresh_app_catalog("fr") and fresh_app_catalog("fr").language == "fr"
+
+
+def test_a_missing_key_is_logged_once(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """A key no catalog has shows as itself and is logged once per catalog, not once a second from the tooltip."""
+    catalog = i18n.load_catalog("fr", write_catalogs(tmp_path / "i18n", en={"k.a": "A"}))
+    with caplog.at_level(logging.WARNING):
+        for _ in range(5):
+            assert catalog.text("k.gone") == "k.gone" and catalog.plural("k.none", 2) == "k.none"
+        catalog.text("k.other")
+    messages = [record.getMessage() for record in caplog.records]
+    assert messages == ["catalog key 'k.gone' missing", "catalog plural 'k.none' missing", "catalog key 'k.other' missing"]
+
+
+def test_a_dev_locale_is_the_dev_servers(tmp_path: Path) -> None:
+    """dev_locale(x) is what the dev server's --lang x shows, a dev instance's USAGE_MONITOR_LANG on a Windows that says
+    nothing: the language's base format and its own clock."""
+    from usage_monitor.ui import devserver
+
+    for language in i18n.DEV_LANGUAGES:
+        server, settings = devserver.make_server("normal", 0, settings_dir=tmp_path / language, lang=language)
+        try:
+            assert i18n.dev_locale(language) == server._locale(), language
+        finally:
+            settings.close()
+    assert [(i18n.dev_locale(x).language, i18n.dev_locale(x).format, i18n.dev_locale(x).clock)
+            for x in i18n.DEV_LANGUAGES] == [("en", "en-US", 12), ("fr", "fr-FR", 24), ("es", "es-ES", 24),
+                                             ("tr", "tr-TR", 24), ("pseudo", "en-US", 12)]
+    with pytest.raises(ValueError, match="no such language"):
+        i18n.dev_locale("de")
+
+
 def test_the_shipped_catalogs_are_plain_text_and_english_holds_every_key() -> None:
     """en.json is the source of truth: no other catalog has a key it lacks. Strings are plain text (no HTML, no
     entities), NFC, with named placeholders only."""

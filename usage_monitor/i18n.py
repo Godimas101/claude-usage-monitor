@@ -9,13 +9,15 @@ the format tag and the clock take what Windows said as arguments, and ``LocaleSo
 formats themselves are usage_monitor/formats.py and letter case usage_monitor/casing.py (#91).
 
 Catalogs are JSON files in ``webui/i18n`` (``<lang>.json``), shared with the dashboard, which gets them through the
-local server (``/static/i18n/<lang>.js``, built from the JSON). ``en.json`` is the source of truth: a key missing from
+local server (``/static/i18n/<lang>.js``, built from the JSON); the widgets, the tray tooltip and the tray menu read
+them through ``app_catalog`` (#93). ``en.json`` is the source of truth: a key missing from
 another catalog shows its English text, and the lookup says so, so the caller can mark it as English (``lang="en"``)
 and case it by English rules (a Turkish page would otherwise turn ``SESSION`` into ``SESSİON``).
 """
 from __future__ import annotations
 
 import ctypes
+import functools
 import json
 import math
 import os
@@ -381,6 +383,16 @@ def build_locale(setting: Any, windows: WindowsLanguage, *, regional: str | None
                   clock=clock_hours(language, pattern), offered=offered)
 
 
+def dev_locale(language: str) -> Locale:
+    """What a dev instance shows for ``USAGE_MONITOR_LANG=language`` on a Windows that says nothing: the language, its
+    base format tag and its own clock (24-hour for fr, es and tr; 12-hour for en and the pseudo-locale). The dev
+    server's ``--lang`` gives the same. For tools that draw in a language without a Windows set to it (#93).
+    ValueError for anything but a DEV_LANGUAGES id."""
+    if language not in DEV_LANGUAGES:
+        raise ValueError(f"no such language: {language!r} (one of {', '.join(DEV_LANGUAGES)})")
+    return build_locale("system", NoWindows(), env={DEV_INSTANCE_ENV: "1", DEV_LANG_ENV: language})
+
+
 class LocaleSource:
     """The app's current ``Locale``, from the ``language`` setting and Windows. Thread-safe; cheap to call.
 
@@ -479,6 +491,7 @@ class Catalog:
         self.language = language
         self._own = dict(own)
         self._english = dict(english)
+        self._missing: set[str] = set()
 
     def lookup(self, key: str) -> Found | None:
         if self.language != DEFAULT and key in self._own:
@@ -487,12 +500,18 @@ class Catalog:
             return Found(self._english[key], DEFAULT)
         return None
 
+    def _missed(self, what: str, key: str) -> None:
+        """Log a missing key once per catalog: the tray's tooltip is worded on every blink."""
+        if key not in self._missing:
+            self._missing.add(key)
+            log.warning("catalog %s %r missing", what, key)
+
     def text(self, key: str, values: Mapping[str, Any] | None = None) -> Text:
-        """The text for ``key`` with its placeholders filled; the key itself when no catalog has it (a bug, logged).
-        It carries the language it came from."""
+        """The text for ``key`` with its placeholders filled; the key itself when no catalog has it (a bug, logged
+        once). It carries the language it came from."""
         found = self.lookup(key)
         if found is None or not isinstance(found.value, str):
-            log.warning("catalog key %r missing", key)
+            self._missed("key", key)
             return Text(key, DEFAULT)
         return Text(fill(found.value, values), found.language)
 
@@ -501,7 +520,7 @@ class Catalog:
         entry came from, so an English fallback follows English rules."""
         found = self.lookup(key)
         if found is None or not isinstance(found.value, dict):
-            log.warning("catalog plural %r missing", key)
+            self._missed("plural", key)
             return Text(key, DEFAULT)
         forms = found.value
         form = forms.get(plural_category(found.language, count)) or forms.get("other") or ""
@@ -545,6 +564,14 @@ def load_catalog(language: str, directory: Path = CATALOG_DIR) -> Catalog:
         return Catalog(PSEUDO, pseudo_catalog(english), english)
     own = english if language == DEFAULT else _read_catalog(directory / f"{language}.json")
     return Catalog(language if language in LANGUAGES else DEFAULT, own, english)
+
+
+@functools.lru_cache(maxsize=None)
+def app_catalog(language: str) -> Catalog:
+    """The catalog the widgets, the tray tooltip and the tray menu read (#93): the shipped one, read once per language
+    and process, since the tooltip is worded on every blink. A test that needs other text patches this function or
+    calls ``app_catalog.cache_clear()``."""
+    return load_catalog(language)
 
 
 def page_script(language: str, directory: Path = CATALOG_DIR) -> str:
