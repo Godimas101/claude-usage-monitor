@@ -25,7 +25,7 @@ Privacy, everywhere: never print, store or log message text, prompts, file conte
 | `usage_monitor/agent/` | Plan-usage awareness for Claude sessions (#24): `state.json`, `--status`, `--hook`, `--gate`, the MCP server, and the usage guard (#27): `guard.py`, `sessions.py`, `--wait`, `--watch`, and `setup.py` (its one-click setup). Setup: [`docs/AGENT_HOOK.md`](docs/AGENT_HOOK.md) |
 | `usage_monitor/i18n.py` | The app's language (#87): Windows' display language when offered, else English; the locale (language, format tag, clock), the catalogs (`webui/i18n/<lang>.json`) and plural forms. No UI imports. See `docs/UI_ARCHITECTURE.md`, "Languages" |
 | `usage_monitor/formats.py`, `casing.py`, `cldr.py` | The locale's numbers, percents, money, clocks, weekdays and durations, and letter case by the language's rules (#91). English keeps today's US formats byte for byte; French, Spanish and Turkish read `cldr.py`, CLDR 47 data that `tests/cldr_gen.py` generates. Standard library only |
-| `usage_monitor/webui/` | Dashboard HTML/CSS/JS, the motion layer (`motion.js`, `motion.css`, `themes/<id>.motion.css`) and the bundled OFL fonts (the Pillow skins read them too) |
+| `usage_monitor/webui/` | Dashboard HTML/CSS/JS, its formats and letter case in the locale (`formats.js`, #91), the motion layer (`motion.js`, `motion.css`, `themes/<id>.motion.css`) and the bundled OFL fonts (the Pillow skins read them too) |
 | `update_check.py`, `version.py` | GitHub release check and self-update; version read from `VERSION` |
 | `tests/` | pytest, offline, synthetic fixtures only |
 
