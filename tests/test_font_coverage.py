@@ -4,8 +4,9 @@ Offline, and standard library only: the character maps come from usage_monitor/r
 from tests/font_tables.py. Pillow is used once, as an independent check of the character-map reader (FreeType).
 
 The corpus is every string of every catalog and of the pseudo-locale, in the cases the skins draw them; the CLDR
-formats the languages use (FORMAT_SAMPLES, until #91's formats module gives them); a floor of the French, Spanish and
-Turkish letters (FLOOR, until #93's drafts fill the catalogs); printable ASCII; and the skins' own non-ASCII text.
+formats the languages use (format_samples: what usage_monitor/formats.py writes for every format tag, on both clocks);
+a floor of the French, Spanish and Turkish letters (FLOOR, until #93's drafts fill the catalogs); printable ASCII; and
+the skins' own non-ASCII text.
 The chains are the skins' own tables, for every shipped theme, read from the skin that draws it as the widgets pick
 it (skins.get_skin): each face the skin draws with, and its fallback faces (fonts.<role>.fallback in the theme's
 JSON), chosen per character as the engine chooses them. A Windows face this machine lacks is skipped.
@@ -20,6 +21,7 @@ import sys
 import unicodedata
 from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -28,7 +30,7 @@ import pytest
 from PIL import Image, ImageDraw, ImageFont
 
 import font_tables
-from usage_monitor import i18n, themes
+from usage_monitor import casing, cldr, formats, i18n, themes
 from usage_monitor.render import engine, glyphs, skins
 from usage_monitor.render.skins import gates, night_city, nostromo
 
@@ -48,26 +50,6 @@ FLOOR: dict[str, str] = {
     "es": "áéíñóúü¿¡",
     "tr": "çğıİöşü",
 }
-# What CLDR 47 (Babel 2.18.0) gives the languages' widget formats: (language, source, text). #91's formats module
-# replaces this table with its own output for every format tag and both clocks (plan-92, section 6).
-FORMAT_SAMPLES: tuple[tuple[str, str, str], ...] = (
-    ("en", "en-US short time, h:mm\u202fa", "4:12\u202fPM"),
-    ("es", "es-MX, es-US and es-419 short time, h:mm\u202fa", "4:12\u202fp.m."),
-    ("es", "es-ES day period, a.\u202fm. and p.\u202fm.", "4:12\u202fp.\u202fm."),
-    ("fr", "fr-CA short time, HH 'h' mm", "16 h 12"),
-    ("fr", "fr-FR grouping, U+202F", "1\u202f234,5"),
-    ("fr", "fr-CA grouping, U+00A0", "1\u00a0234,5"),
-    ("es", "es-ES and tr-TR grouping", "12.345,5"),
-    ("fr", "fr-FR, fr-CA and es-ES percent, #,##0\u00a0%", "42\u00a0%"),
-    ("tr", "tr-TR percent, %#,##0", "%42"),
-    ("tr", "tr-TR day periods", "ÖÖ ÖS"),
-    ("tr", "tr-TR months", "Oca Şub Mar Nis May Haz Tem Ağu Eyl Eki Kas Ara"),
-    ("tr", "tr-TR days", "Pzt Sal Çar Per Cum Cmt Paz"),
-    ("fr", "fr-FR months", "janv. févr. mars avr. mai juin juil. août sept. oct. nov. déc."),
-    ("fr", "fr-FR days", "lun. mar. mer. jeu. ven. sam. dim."),
-    ("es", "es-ES months", "ene feb mar abr may jun jul ago sept oct nov dic"),
-    ("es", "es-ES days", "lun mar mié jue vie sáb dom"),
-)
 
 
 # ── Seams: what the skins and the engine do with a character ──────────────────
@@ -94,13 +76,52 @@ def typeface_donors(typeface: Any) -> tuple[Any, ...]:
 # ── The corpus ────────────────────────────────────────────────────────────────
 
 def upper(text: str, language: str) -> str:
-    """Capitals by the language's rule. Turkish: i to İ, and ı to I (#91's casing helpers replace this)."""
-    return (text.replace("i", "İ") if language == "tr" else text).upper()
+    """Capitals by the language's rule (casing): Turkish i to İ."""
+    return casing.upper(text, language)
 
 
 def lower(text: str, language: str) -> str:
-    """Lower case by the language's rule. Turkish: I to ı, and İ to i (never i with a combining dot)."""
-    return (text.replace("I", "ı").replace("İ", "i") if language == "tr" else text).lower()
+    """Lower case by the language's rule (casing): Turkish I to ı, and İ to i (never i with a combining dot)."""
+    return casing.lower(text, language)
+
+
+def _locales() -> list[i18n.Locale]:
+    """English, the pseudo-locale, and every format tag of French, Spanish and Turkish (each CLDR region and the
+    language's base) on a 12-hour and a 24-hour clock, as a dev instance on such a Windows gets them."""
+    english = i18n.ENGLISH
+    pseudo = i18n.Locale(setting="system", language=i18n.PSEUDO, system="en", format="en-US", clock=12,
+                         offered=english.offered)
+    tags = sorted({*cldr.REGIONS, *(i18n.BASE_FORMATS[language] for language in cldr.BASES)})
+    return [english, pseudo] + [i18n.Locale(setting="system", language=i18n.primary(tag), system="en", format=tag,
+                                            clock=clock, offered=english.offered)
+                                for tag in tags for clock in (12, 24)]
+
+
+def format_samples() -> Iterable[tuple[str, str, str]]:
+    """(language, source, text): what usage_monitor/formats.py writes in each of _locales(): numbers, percents,
+    weekdays, and clocks and day clocks on every weekday either side of midnight and noon; and, outside English and
+    the pseudo-locale, months, money, durations in both widths and ages, at counts of every plural category."""
+    monday = datetime(2026, 7, 13)
+    counts = (0, 1, 2, 5, 21, 100, 1000000)
+    for locale in _locales():
+        source = f"formats, {locale.format} {locale.clock}-hour"
+        texts = [formats.number("-1234567.5", locale), formats.percent("-12.5", locale),
+                 formats.percent("100", locale, tight=True)]
+        texts += [formats.weekday(day, locale) for day in range(7)]
+        for day in range(7):
+            for hour in (0, 4, 11, 12, 16, 23):
+                moment = monday + timedelta(days=day, hours=hour, minutes=59)
+                texts += [formats.clock(moment, locale), formats.day_clock(moment, locale)]
+        if not formats.english_shapes(locale):
+            texts += [formats.month(month, locale) for month in range(12)]
+            texts += [formats.money(amount, currency, locale) for amount in (-1234.5, 5.96)
+                      for currency in ("USD", "EUR", None)]
+            for unit in ("s", "m", "h", "d"):
+                for count in counts:
+                    texts += [formats.duration(((count, unit),), locale, width) for width in formats.WIDTHS]
+                    texts.append(formats.ago(count, unit, locale))
+        for text in texts:
+            yield locale.language, source, text
 
 
 def _strings(catalog: dict[str, Any]) -> Iterable[tuple[str, str]]:
@@ -130,8 +151,8 @@ def corpus() -> dict[str, str]:
         add(text + text.upper(), f"pseudo {key}")
     letters = "".join(str(value) for value in i18n._PSEUDO_LETTERS.values()) + i18n._PSEUDO_PAD + "[]"
     add(letters + letters.upper(), "the pseudo-locale's letters")
-    for language, source, text in FORMAT_SAMPLES:
-        add(text + upper(text, language), f"CLDR 47 {source}")
+    for language, source, text in format_samples():
+        add(text + upper(text, language) + lower(text, language), source)
     for language, text in FLOOR.items():
         add(text + upper(text, language) + lower(text, language), f"the {language} floor")
     return found
@@ -396,7 +417,8 @@ def test_the_dashboard_only_faces_lack_nothing_but_the_narrow_space():
 # ── c6 and c7: the corpus and the skins' tables ───────────────────────────────
 
 def test_the_corpus_holds_no_combining_mark():
-    """A stray U+0307 comes from lower-casing İ by the English rule. #91 owns the check on the frames."""
+    """A stray U+0307 comes from lower-casing İ by the English rule. The frames are checked for one in Turkish
+    (#91: tests/test_locale_surfaces.py)."""
     marks = [_label(ch) for ch in CORPUS if unicodedata.category(ch).startswith("M")]
     assert not marks, marks
 
