@@ -65,12 +65,13 @@ STRIP_SCALES: tuple[float, ...] = tuple(sorted({
 TRAY_SIZE = 32                      # the tray icon that carries a number (both skins draw it at 32 px)
 
 # Each language's longest figures, as #89 lists them: percents with U+00A0 or with the sign first, clocks in both 12-
-# and 24-hour forms (fr-CA's "16 h 12", es-MX's "4:12 p.m."), and the dollar as fr-CA and es-MX write it. #89 names
-# no Turkish dollar: Turkish money gets a figure once L1 (#86) settles how the dollar is marked.
+# and 24-hour forms (fr-CA's "16 h 12", es-MX's "4:12 p.m."), and the dollar as formats.money writes it: the plain "$"
+# (Chris's decision on #91; "5,96 $" in fr and es-ES, "$5.96" in es-MX, "$5,96" in tr), with es-MX's grouping
+# ("1,234.5", formats.number).
 FIGURES: dict[str, dict[str, tuple[str, ...]]] = {
     "percent": {"en": ("100%",), "fr": ("100 %",), "es": ("100 %",), "tr": ("%100",)},
     "clock": {"en": ("4:12 PM",), "fr": ("16 h 12", "16:12"), "es": ("4:12 p.m.", "16:12"), "tr": ("16:12",)},
-    "money": {"en": ("$5.96",), "fr": ("5,96 $ US",), "es": ("USD 5.96", "1,234.5")},
+    "money": {"en": ("$5.96",), "fr": ("5,96\u00a0$",), "es": ("$5.96", "5,96\u00a0$", "1,234.5"), "tr": ("$5,96",)},
 }
 _KINDS = ("percent", "clock", "money", "duration", "count")
 _FITS = ("none", "shrink", "ellipsis", "clip", "drop", "wrap")

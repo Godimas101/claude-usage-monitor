@@ -80,18 +80,18 @@ STANDS_ON: dict[str, tuple[str, ...]] = {"floating": ("floating", "tooltip"), "t
 # The box the frame dump never draws: [G], since every sample state leaves room for [GUARD].
 NOT_DRAWN_WHOLE = frozenset({"nostromo.floating.armed_guard_short"})
 
-# What #91's number formats have to settle before French or Spanish is offered (#107): fr-CA's and es-MX's dollars do
-# not fit the money figures, and Turkish money has no figure yet (budgets.FIGURES says why). The percents are settled:
+# What still runs past before French or Spanish is offered (#107), each with the ticket that settles it. The dollar is
+# the plain "$" (Chris's decision on #91), which fits the money figures' six characters; the percents are settled too:
 # the boxes sized for English's figures (the strips' values, Gates' cap badge) draw them without the space (Box.tight,
-# Chris's decision on #91), and Turkish's "%100" fits.
+# Chris's decision on #91), and Turkish's "%100" fits. Recompute with budgets.over() after a change, never by hand.
 TIGHT_BOXES = frozenset({"nostromo.strip.value_5h", "nostromo.strip.value_5h_chip", "nostromo.strip.value_7d",
                          "nostromo.strip.value_7d_chip", "night_city.strip.percent", "gates.floating.cap_badge",
                          "gates.tooltip.cap_badge"})
 _MONEY = tuple(f"dashboard.{skin}.cost_{part}" for part in ("tile", "hero")
                for skin in ("nostromo", "night_city", "gates"))
 FOR_91: dict[str, set[tuple[str, str]]] = {
-    "fr": {(box, "5,96 $ US") for box in _MONEY},
-    "es": {(box, text) for box in _MONEY for text in ("USD 5.96", "1,234.5")},
+    "fr": set(),
+    "es": {(box, "1,234.5") for box in _MONEY},        # #91 part 2: the dashboard's money figures in es-MX's grouping
     "tr": set(),
 }
 
@@ -294,7 +294,7 @@ def test_a_box_that_shrinks_its_text_is_measured_at_the_size_it_shrinks_to(monke
 def test_a_character_limit_stays_the_budget_where_english_runs_past() -> None:
     """A pixel box where English already runs past its room budgets what English takes there (the strip's 100%). A
     character box's limit is a contract or a hard cut (the money figures' six characters, the tray's 127 units), so it
-    stays the budget: es-MX's "USD 5.96" fails a tile, and only the English in KNOWN_ENGLISH_OVERRUNS passes one."""
+    stays the budget: es-MX's "1,234.5" fails a tile, and only the English in KNOWN_ENGLISH_OVERRUNS passes one."""
     strip = budgets.BOX["nostromo.strip.value_5h"]
     assert strip.width("100%") > strip.limit
     for scale in strip.scales:
@@ -302,7 +302,7 @@ def test_a_character_limit_stays_the_budget_where_english_runs_past() -> None:
     tile = budgets.BOX["dashboard.nostromo.cost_tile"]
     assert (tile.unit, tile.limit, budgets.budget(tile)) == ("chars", 6, 6)
     assert (tile.id, "$100.00") in budgets.KNOWN_ENGLISH_OVERRUNS
-    assert (tile.id, "USD 5.96") in {(r.box.id, r.text) for r in budgets.over("es")}
+    assert (tile.id, "1,234.5") in {(r.box.id, r.text) for r in budgets.over("es")}
     tip = budgets.BOX["app.tray.tooltip"]
     assert (tip.unit, tip.limit, budgets.budget(tip)) == ("chars", tray.TIP_LIMIT, tray.TIP_LIMIT)
 
@@ -359,6 +359,9 @@ def test_each_languages_longest_figures_are_set_in_the_boxs_text() -> None:
     assert budgets.texts(budgets.BOX["nostromo.floating.cap_tag"], "tr") == ["CAP %100"]
     assert budgets.texts(budgets.BOX["nostromo.floating.message"], "fr") == []      # no figure, and no keys until #93
     assert budgets.texts(body, i18n.PSEUDO) == [i18n.pseudo_text(text) for text in body.english]
+    tile = budgets.BOX["dashboard.nostromo.cost_tile"]                      # the plain dollar (Chris, #91)
+    assert budgets.texts(tile, "fr") == ["5,96\u00a0$"] and budgets.texts(tile, "tr") == ["$5,96"]
+    assert budgets.texts(tile, "es") == ["$5.96", "5,96\u00a0$", "1,234.5"]
 
 
 @pytest.mark.parametrize(("kind", "figure"), [("percent", r"%"), ("clock", r"\d:\d\d"), ("money", r"\$|USD")])
@@ -440,7 +443,7 @@ def test_the_pseudo_locale_gets_a_report_not_a_failure(capsys: pytest.CaptureFix
 def test_any_language_can_be_reported_and_only_an_offered_one_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     for language in i18n.DEV_LANGUAGES:
         assert budgets.main(["--lang", language]) == 0, language
-    monkeypatch.setattr(i18n, "OFFERED", ("en", "fr", "tr"))
-    assert budgets.main(["--lang", "fr"]) == 1                             # what #107 runs before it offers French
+    monkeypatch.setattr(i18n, "OFFERED", ("en", "es", "tr"))
+    assert budgets.main(["--lang", "es"]) == 1                             # what #107 runs before it offers Spanish
     assert budgets.main(["--lang", "tr"]) == 0                             # offered, and it fits
-    assert budgets.main(["--lang", "es"]) == 0                             # not offered: a report
+    assert budgets.main(["--lang", "fr"]) == 0                             # not offered: a report
