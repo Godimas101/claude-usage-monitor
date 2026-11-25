@@ -1464,6 +1464,175 @@ def test_app_js_cases_text_through_the_formats_and_ids_alone_with_the_bare_calls
     assert len(calls) == len(allowed) == 6
 
 
+# ── V2 of #91's plan (D1): the page's formats are the widgets', for every format tag ──────────────────────────────
+
+CLDR_JS = Path(__file__).resolve().parent / "webui_cldr.js"
+# The grid tests/webui_cldr.js writes with formats.js and python_formats() with formats.py. Times are UTC wall times;
+# day 0 is Monday 2026-10-19.
+CLDR_GRID: dict[str, Any] = {
+    "numbers": ["1234.5", "12345", "-1234567.25", "0.5", "1234"], "ungrouped": ["1234.5"],
+    "percents": ["34", "-34", "33.5", "1234"], "tight": ["34", "100"],
+    "amounts": [5.96, -5.96, 1234.56], "code": "EURO",
+    "times": [[0, 5], [9, 39], [12, 0], [16, 12], [23, 59]],
+    "dayTimes": [[day, 16, 12] for day in range(7)] + [[5, 9, 5]],
+    "durations": [[[2, "d"], [3, "h"]], [[1, "d"]], [[21, "d"], [1, "h"]], [[1, "h"]], [[3, "h"], [27, "m"]],
+                  [[2, "h"], [1, "m"]], [[27, "m"]], [[1, "m"]], [[12, "s"]], [[1, "s"]], [[0, "s"]]],
+    "cases": ["Haiku", "istanbul \u0131l\u0131k", "\u0130STANBUL ILIK", "HAFTALIK", "Claude Instant", "N\u0130S EK\u0130", "ÇĞÖŞÜ çğöşü"],
+}
+CLOCKS_12 = ("clock12", "dayClock12")
+
+
+def python_formats(tag: str) -> dict[str, list[str]]:
+    """CLDR_GRID through usage_monitor/formats.py and casing.py, field by field as tests/webui_cldr.js names them."""
+    from datetime import datetime
+
+    from usage_monitor import casing
+
+    language, g = i18n.primary(tag), CLDR_GRID
+    row: dict[str, list[str]] = {}
+    for clock in (24, 12):
+        locale = i18n.Locale(setting="system", language=language, system="en", format=tag, clock=clock, offered=("en",))
+        if clock == 24:
+            row["number"] = [formats.number(d, locale) for d in g["numbers"]] + [
+                formats.number(d, locale, group=False) for d in g["ungrouped"]]
+            row["percent"] = [formats.percent(d, locale) for d in g["percents"]] + [
+                formats.percent(d, locale, tight=True) for d in g["tight"]]
+            row["usd"] = row["moneyUsd"] = [formats.money(a, "USD", locale) for a in g["amounts"]]
+            row["usdTight"] = [formats.money(a, "USD", locale, tight=True) for a in g["amounts"]]
+            row["moneyCode"] = [formats.money(a, g["code"], locale) for a in g["amounts"]]
+            row["weekday"] = [formats.weekday(i, locale) for i in range(7)]
+            row["month"] = [formats.month(i, locale) for i in range(12)]
+            row["duration"] = row["durationUnits"] = [
+                formats.duration([(count, unit) for count, unit in parts], locale) for parts in g["durations"]]
+            row["upper"] = [casing.upper(text, language) for text in g["cases"]]
+            row["lower"] = [casing.lower(text, language) for text in g["cases"]]
+        row[f"clock{clock}"] = [formats.clock(datetime(2026, 10, 19, h, m), locale) for h, m in g["times"]]
+        row[f"dayClock{clock}"] = [formats.day_clock(datetime(2026, 10, 19 + day, h, m), locale) for day, h, m in g["dayTimes"]]
+    return row
+
+
+def as_intl_writes_a_clock(text: str) -> str:
+    """formats.py's 12-hour clock with the two spaces Intl writes otherwise (KNOWN_CLOCK_SPACES)."""
+    return text.replace("a.\u202fm.", "a.\u00a0m.").replace("p.\u202fm.", "p.\u00a0m.").replace("\u202f", " ")
+
+
+SEEN = "node v24.13.0, ICU 77.1, CLDR 47.0"
+TABLE = "cldr.py: CLDR 47, Babel 2.18.0"
+# Two differences in every 12-hour clock, applied to formats.py's text before it is compared (as_intl_writes_a_clock).
+KNOWN_CLOCK_SPACES = (
+    {"tags": "every tag", "fields": CLOCKS_12, "page": "4:12 PM", "python": "4:12\u202fPM", "example": "fr-FR",
+     "page_versions": SEEN, "python_version": TABLE,
+     "why": "Intl's DateTimeFormat writes U+0020 where CLDR 47's 12-hour patterns put U+202F beside the day period"},
+    {"tags": "Spanish's", "fields": CLOCKS_12, "page": "4:12 p.\u00a0m.", "python": "4:12\u202fp.\u202fm.", "example": "es-ES",
+     "page_versions": SEEN, "python_version": TABLE,
+     "why": "ICU 77.1's Spanish day periods hold U+00A0 (a.\u00a0m.), Babel 2.18.0's U+202F (a.\u202fm.)"},
+)
+# Where node's Intl and cldr.py differ beyond those two: (tag, field) -> what each writes for the field's grid row.
+KNOWN_CLDR_DIFFERENCES: dict[tuple[str, str], dict[str, Any]] = {}
+
+
+def known(tag: str, field: str, page: list[str], python: list[str], why: str) -> None:
+    KNOWN_CLDR_DIFFERENCES[(tag, field)] = {"page": page, "python": python, "page_versions": SEEN, "python_version": TABLE,
+                                           "why": why}
+
+
+_SPACED_DOLLAR = 'node writes a U+00A0 between "$" and the number; Babel 2.18.0\'s currency pattern for the tag is "¤#,##0.00"'
+known("es-AR", "usd", ["$\u00a05,96", "-$\u00a05,96", "$\u00a01.234,56"], ["$5,96", "-$5,96", "$1.234,56"], _SPACED_DOLLAR)
+known("es-AR", "moneyUsd", ["$\u00a05,96", "-$\u00a05,96", "$\u00a01.234,56"], ["$5,96", "-$5,96", "$1.234,56"], _SPACED_DOLLAR)
+known("es-CO", "usd", ["$\u00a05,96", "-$\u00a05,96", "$\u00a01.234,56"], ["$5,96", "-$5,96", "$1.234,56"], _SPACED_DOLLAR)
+known("es-CO", "moneyUsd", ["$\u00a05,96", "-$\u00a05,96", "$\u00a01.234,56"], ["$5,96", "-$5,96", "$1.234,56"], _SPACED_DOLLAR)
+_SIGN_FIRST = 'node writes the currency first; Babel 2.18.0\'s pattern for es-GQ is "#,##0.00\u00a0¤" (es-ES\'s), the sign last'
+known("es-GQ", "usd", ["$5,96", "-$5,96", "$1234,56"], ["5,96\u00a0$", "-5,96\u00a0$", "1234,56\u00a0$"], _SIGN_FIRST)
+known("es-GQ", "moneyUsd", ["$5,96", "-$5,96", "$1234,56"], ["5,96\u00a0$", "-5,96\u00a0$", "1234,56\u00a0$"], _SIGN_FIRST)
+known("es-GQ", "usdTight", ["$5,96", "-$5,96", "$1234,56"], ["5,96$", "-5,96$", "1234,56$"], _SIGN_FIRST)
+known("es-GQ", "moneyCode", ["EURO\u00a05,96", "-EURO\u00a05,96", "EURO\u00a01234,56"],
+      ["5,96\u00a0EURO", "-5,96\u00a0EURO", "1234,56\u00a0EURO"], _SIGN_FIRST)
+known("es-PY", "usdTight", ["$5,96", "$-5,96", "$1.234,56"], ["$5,96", "$\u00a0-5,96", "$1.234,56"],
+      'not the data (es-PY\'s negative pattern "¤\u00a0-#,##0.00" on both sides): tight on the page drops a space beside the "$", '
+      "formats.py's only one beside the digits")
+_MA_GROUP = 'node groups fr-MA with "."; Babel 2.18.0\'s fr-MA group is U+202F, French\'s'
+known("fr-MA", "number", ["1.234,5", "12.345", "-1.234.567,25", "0,5", "1.234", "1234,5"],
+      ["1\u202f234,5", "12\u202f345", "-1\u202f234\u202f567,25", "0,5", "1\u202f234", "1234,5"], _MA_GROUP)
+known("fr-MA", "percent", ["34\u00a0%", "-34\u00a0%", "33,5\u00a0%", "1.234\u00a0%", "34%", "100%"],
+      ["34\u00a0%", "-34\u00a0%", "33,5\u00a0%", "1\u202f234\u00a0%", "34%", "100%"], _MA_GROUP)
+known("fr-MA", "usd", ["5,96\u00a0$", "-5,96\u00a0$", "1.234,56\u00a0$"], ["5,96\u00a0$", "-5,96\u00a0$", "1\u202f234,56\u00a0$"], _MA_GROUP)
+known("fr-MA", "moneyUsd", ["5,96\u00a0$", "-5,96\u00a0$", "1.234,56\u00a0$"], ["5,96\u00a0$", "-5,96\u00a0$", "1\u202f234,56\u00a0$"],
+      _MA_GROUP)
+known("fr-MA", "usdTight", ["5,96$", "-5,96$", "1.234,56$"], ["5,96$", "-5,96$", "1\u202f234,56$"], _MA_GROUP)
+known("fr-MA", "moneyCode", ["5,96\u00a0EURO", "-5,96\u00a0EURO", "1.234,56\u00a0EURO"],
+      ["5,96\u00a0EURO", "-5,96\u00a0EURO", "1\u202f234,56\u00a0EURO"], _MA_GROUP)
+_MA_PERIODS = 'node\'s fr-MA day periods are "a.m." and "p.m."; Babel 2.18.0\'s are French\'s "AM" and "PM"'
+known("fr-MA", "clock12", ["12:05 a.m.", "9:39 a.m.", "12:00 p.m.", "4:12 p.m.", "11:59 p.m."],
+      ["12:05\u202fAM", "9:39\u202fAM", "12:00\u202fPM", "4:12\u202fPM", "11:59\u202fPM"], _MA_PERIODS)
+known("fr-MA", "dayClock12", ["lun. 4:12 p.m.", "mar. 4:12 p.m.", "mer. 4:12 p.m.", "jeu. 4:12 p.m.", "ven. 4:12 p.m.",
+                              "sam. 4:12 p.m.", "dim. 4:12 p.m.", "sam. 9:05 a.m."],
+      ["lun. 4:12\u202fPM", "mar. 4:12\u202fPM", "mer. 4:12\u202fPM", "jeu. 4:12\u202fPM", "ven. 4:12\u202fPM", "sam. 4:12\u202fPM",
+       "dim. 4:12\u202fPM", "sam. 9:05\u202fAM"], _MA_PERIODS)
+known("tr-CY", "clock12", ["12:05 ÖÖ", "9:39 ÖÖ", "12:00 ÖS", "4:12 ÖS", "11:59 ÖS"],
+      ["ÖÖ\u202f12:05", "ÖÖ\u202f9:39", "ÖS\u202f12:00", "ÖS\u202f4:12", "ÖS\u202f11:59"],
+      'node writes tr-CY\'s day period after the time ("h:mm a"); Babel 2.18.0\'s hm for tr-CY is "a h:mm", as tr-TR\'s')
+
+
+@pytest.fixture(scope="module")
+def cldr_page() -> dict[str, Any]:
+    """What tests/webui_cldr.js wrote with formats.js for every format tag over CLDR_GRID (one node run, TZ=UTC)."""
+    run = subprocess.run([node_binary(), str(CLDR_JS), str(WEBUI), json.dumps(CLDR_TAGS), json.dumps(CLDR_GRID)],
+                         capture_output=True, text=True, timeout=120, check=False, encoding="utf-8",
+                         env={**os.environ, "TZ": "UTC"}, creationflags=NO_WINDOW)
+    assert run.returncode == 0, run.stderr[-800:]
+    return json.loads(run.stdout)
+
+
+def node_versions(page: dict[str, Any]) -> str:
+    versions = page["versions"]
+    return f"node {versions['node']}, ICU {versions['icu']}, CLDR {versions['cldr']}"
+
+
+@ui_only
+def test_the_pages_formats_are_the_widgets_in_every_format_tag(cldr_page: dict[str, Any]) -> None:
+    """V2 of #91's plan (D1): in every format tag of French, Spanish and Turkish, the page's numbers, percents, money,
+    12- and 24-hour clocks, day clocks, weekdays, months, durations (both ways, D14) and letter case (formats.js through
+    node's Intl) are what formats.py and casing.py write from cldr.py, except the differences listed above, each with
+    both values and both versions. A difference not on the list fails with its entry: check which side is right first
+    (a wrong table is fixed in tests/cldr_gen.py, a wrong page in formats.js), then list it with the versions it was
+    seen with. On the versions the list was made with, a listed difference that is gone fails too."""
+    versions = node_versions(cldr_page)
+    print(f"V2: the page's Intl on {versions}; the widgets' {TABLE}")
+    assert sorted(cldr_page["tags"]) == CLDR_TAGS
+    found: dict[tuple[str, str], dict[str, list[str]]] = {}
+    for tag in CLDR_TAGS:
+        page, python = cldr_page["tags"][tag], python_formats(tag)
+        assert page["tag"] == tag, (tag, page["tag"])
+        for field, values in python.items():
+            written = [as_intl_writes_a_clock(value) for value in values] if field in CLOCKS_12 else values
+            if page[field] != written:
+                found[(tag, field)] = {"page": page[field], "python": values}
+    listed = {key: {"page": entry["page"], "python": entry["python"]} for key, entry in KNOWN_CLDR_DIFFERENCES.items()}
+    unknown = {f"{tag} {field}": diff for (tag, field), diff in found.items() if listed.get((tag, field)) != diff}
+    assert not unknown, f"{versions} against {TABLE}, not on the list: " + json.dumps(unknown)
+    if versions == SEEN:
+        assert sorted(set(listed) - set(found)) == [], "listed, no longer different"
+        for rule in KNOWN_CLOCK_SPACES:
+            assert cldr_page["tags"][rule["example"]]["clock12"][3] == rule["page"], rule
+    for rule in KNOWN_CLOCK_SPACES:
+        assert python_formats(rule["example"])["clock12"][3] == rule["python"], rule
+
+
+@ui_only
+def test_a_duration_is_the_same_with_intls_duration_format_and_without(cldr_page: dict[str, Any]) -> None:
+    """D14 of #91's plan: formats.js writes a duration with Intl.DurationFormat where the WebView has it, else each unit
+    through NumberFormat, joined as a unit list. The two must write the same text in every tag; if they ever differ,
+    DURATION_FORMAT = false in formats.js writes them all the second way. A node without DurationFormat (node 20) skips
+    this, and runs only the second way (which V2 holds to formats.py)."""
+    assert cldr_page["versions"]["unitsWithDurationFormat"] is False          # the second way ran without it
+    if not cldr_page["versions"]["durationFormat"]:
+        pytest.skip(f"{node_versions(cldr_page)} has no Intl.DurationFormat: only the NumberFormat way runs here")
+    differ = {tag: [row["duration"], row["durationUnits"]] for tag, row in cldr_page["tags"].items()
+              if row["duration"] != row["durationUnits"]}
+    assert not differ, differ
+    assert cldr_page["tags"]["tr-TR"]["duration"][3:5] == ["1 sa", "3s 27d"]
+
+
 def test_the_language_row_is_wired_into_the_settings_page() -> None:
     """#87: the row is on the Settings page, follows the stored choice, and its button saves it; a new state checks the
     locale before anything else."""
