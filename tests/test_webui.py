@@ -1643,14 +1643,27 @@ KNOWN_CLOCK_SPACES = (
             "ICU 78.2 (CLDR 48.0); Babel 2.18.0's day periods hold U+202F"},
 )
 # Where node's Intl and cldr.py differ beyond those two: (tag, field) -> what each writes for the field's grid row,
-# with both versions and why (known() adds one). None since #111: the regions #91 listed (es-AR, es-CO, es-GQ, es-PY,
-# fr-MA, tr-CY) follow the page, through tests/cldr_gen.py's PAGE_RULES and formats.money's tight.
+# with the versions it was seen on and why (known() adds one). The regions #91 listed (es-AR, es-CO, es-GQ, es-PY,
+# fr-MA, tr-CY) follow the page since #111, through tests/cldr_gen.py's PAGE_RULES and formats.money's tight. What is
+# left is one node build's own data, not the page's.
 KNOWN_CLDR_DIFFERENCES: dict[tuple[str, str], dict[str, Any]] = {}
 
 
-def known(tag: str, field: str, page: list[str], python: list[str], why: str) -> None:
-    KNOWN_CLDR_DIFFERENCES[(tag, field)] = {"page": page, "python": python, "page_versions": SEEN, "python_version": TABLE,
+def known(tag: str, field: str, page: list[str], python: list[str], why: str, seen: str = SEEN) -> None:
+    KNOWN_CLDR_DIFFERENCES[(tag, field)] = {"page": page, "python": python, "page_versions": seen, "python_version": TABLE,
                                            "why": why}
+
+
+_MA_NODE_PERIODS = ("node 20's full ICU 78.2 data writes fr-MA's day periods as French's AM and PM. Chromium's ICU 78.2 "
+                    "data (VS Code's Electron, the build WebView2 carries) and node 24's ICU 77.1 write a.m. and p.m., "
+                    "which the widgets follow (#111)")
+known("fr-MA", "clock12", ["12:05 AM", "9:39 AM", "12:00 PM", "4:12 PM", "11:59 PM"],
+      [f"12:05{NNB}a.m.", f"9:39{NNB}a.m.", f"12:00{NNB}p.m.", f"4:12{NNB}p.m.", f"11:59{NNB}p.m."], _MA_NODE_PERIODS,
+      seen=SEEN_48)
+known("fr-MA", "dayClock12",
+      [f"{day}. 4:12 PM" for day in ("lun", "mar", "mer", "jeu", "ven", "sam", "dim")] + ["sam. 9:05 AM"],
+      [f"{day}. 4:12{NNB}p.m." for day in ("lun", "mar", "mer", "jeu", "ven", "sam", "dim")] + [f"sam. 9:05{NNB}a.m."],
+      _MA_NODE_PERIODS, seen=SEEN_48)
 
 
 @pytest.fixture(scope="module")
@@ -1706,8 +1719,8 @@ def test_the_pages_formats_are_the_widgets_in_every_format_tag(cldr_page: dict[s
     found = page_differences(cldr_page["tags"])
     unknown = not_on_the_list(found)
     assert not unknown, f"{versions} against {TABLE}, not on the list: " + json.dumps(unknown)
-    if versions == SEEN:
-        assert sorted(set(KNOWN_CLDR_DIFFERENCES) - set(found)) == [], "listed, no longer different"
+    seen_here = {key for key, entry in KNOWN_CLDR_DIFFERENCES.items() if entry["page_versions"] == versions}
+    assert sorted(seen_here - set(found)) == [], "listed, no longer different"
     cldr_version = cldr_page["versions"]["cldr"]
     for rule in KNOWN_CLOCK_SPACES:
         if cldr_version in rule["page"]:

@@ -513,9 +513,11 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   `tests/webui_cldr.js` writes the page's formats in every format tag over a grid (real codes, EUR and CAD, as well as
   one Intl refuses), and `test_webui.py` holds them to
   `formats.py`'s and `casing.py`'s, except a list of known differences, each with its tag, field, both values and both
-  versions. The list is empty since #111: the rows #91 found (es-AR's and es-CO's space after `$`, es-GQ's sign or code
-  first, fr-MA's `.` group and `a.m.`, tr-CY's day period after the time, and es-PY's tight `$-5,96`) follow the page
-  now, the same on ICU 77.1 and 78.2. Seen on node 24.13 (ICU 77.1, CLDR 47.0): in every 12-hour clock `Intl` writes
+  versions. Since #111 the rows #91 found (es-AR's and es-CO's space after `$`, es-GQ's sign or code first, fr-MA's
+  `.` group and `a.m.`, tr-CY's day period after the time, and es-PY's tight `$-5,96`) follow the page, the same on
+  ICU 77.1 and on Chromium's ICU 78.2 data (VS Code's Electron). One row is left, and it is a node build's, not the
+  page's: CI's node 20 (ICU 78.2, full data) writes fr-MA's day periods as `AM`/`PM`; it is listed for that node
+  only, and a listed row is checked as still different only on the versions it was seen on. Seen on node 24.13 (ICU 77.1, CLDR 47.0): in every 12-hour clock `Intl` writes
   U+0020 where CLDR's patterns put U+202F, and ICU's Spanish day periods hold U+00A0 where Babel's hold U+202F. On
   ICU 78.2 (CLDR 48.0, CI's node 20.20) `Intl` writes U+0020 inside Spanish's day period too (`p. m.`):
   V2 lets U+0020, U+00A0 and U+202F differ inside or beside a day period, and nowhere else (the widgets draw U+202F as
