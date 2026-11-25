@@ -7,8 +7,9 @@ the status wording are decided once here, so every skin tells the same story.
 The model carries values and codes beside its texts (#90): the age in seconds, why the
 sign-in needs the user, each row's kind and scope, its share and its reset day, and the guard's
 resume time and the kinds of the limits it watches. Each skin words its own text from those, and
-never cuts or matches the texts to find a value in them. The texts' words are English; their
-numbers, percents and times are in the model's locale (#91, English by default).
+never cuts or matches the texts to find a value in them. The texts' words come from the catalog in
+the model's language (#93, i18n.app_catalog), as i18n.Text; their numbers, percents and times are in
+its locale (#91). English by default.
 """
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ from typing import Any, Literal
 from usage_monitor.data.identity import legacy_label, scope_name
 from usage_monitor.data.models import ApiStatus, Limit, MonitorState, UsageSnapshot
 from usage_monitor.data.windows import PACE_BAND_POINTS
-from usage_monitor import casing, formats
+from usage_monitor import casing, formats, i18n
 from usage_monitor.i18n import DEFAULT, ENGLISH, Locale
 
 ShowScoped = Literal["auto", "always", "never"]
@@ -44,6 +45,8 @@ STALE_REFUSED = "refused"               # the usage API turned it down (HTTP 403
 STALE_NO_LOGIN = "no_login"             # there is no sign-in at all (#28)
 STALE_REASONS: tuple[str, ...] = (STALE_EXPIRED, STALE_REFUSED, STALE_NO_LOGIN)
 
+# The English of each reason's message (en.json's widget.stale.* filled with English's values; tests/test_widget_words.py
+# holds them together). The model words the message from the catalog in its language.
 STALE_MESSAGE_EXPIRED = "LOGIN EXPIRED - USE CLAUDE CODE"   # used, not open: an idle Claude Code renews nothing (#52)
 STALE_MESSAGE_NO_LOGIN = "NO LOGIN FOUND - OPEN THE DASHBOARD"   # it has the steps for a claude.ai or app user (#28)
 # An HTTP 403: a sign-in that works for Claude Code but cannot read usage. Using Claude Code does not fix it; only a new sign-in
@@ -51,6 +54,10 @@ STALE_MESSAGE_NO_LOGIN = "NO LOGIN FOUND - OPEN THE DASHBOARD"   # it has the st
 STALE_MESSAGE_REFUSED = "LOGIN REFUSED - RUN /login IN CLAUDE CODE"
 _STALE_MESSAGES = {STALE_EXPIRED: STALE_MESSAGE_EXPIRED, STALE_REFUSED: STALE_MESSAGE_REFUSED,
                    STALE_NO_LOGIN: STALE_MESSAGE_NO_LOGIN}
+_STALE_KEYS = {STALE_EXPIRED: "widget.stale.expired", STALE_REFUSED: "widget.stale.refused",
+               STALE_NO_LOGIN: "widget.stale.no_login"}
+PRODUCT = "Claude Code"                 # the messages' {product}, in the language's capitals
+LOGIN_COMMAND = "/login"                # the refused message's {command}, as the user types it
 
 # The units of an age and of a countdown, as codes: each skin words them ("12 S", "41 min", "2h 14m").
 UNIT_SECONDS = "s"
@@ -60,14 +67,15 @@ UNIT_DAYS = "d"
 _UNIT_S = {UNIT_SECONDS: 1, UNIT_MINUTES: 60, UNIT_HOURS: 60 * 60, UNIT_DAYS: 24 * 60 * 60}
 AGE_HOURS_BEFORE_DAYS = 48              # an age is told in hours up to two days, then in days
 
-STATUS_TEXT: dict[ApiStatus, str] = {
-    ApiStatus.LOADING: "LOADING",
-    ApiStatus.LIVE: "LIVE",
-    ApiStatus.STALE: "STALE",
-    ApiStatus.OFFLINE: "OFFLINE",
-    ApiStatus.RATE_LIMITED: "RATE LIMITED",
-    ApiStatus.NO_CREDENTIALS: "NO LOGIN",
-    ApiStatus.PAUSED: "PAUSED",
+# The status pill's words, by status: catalog keys (#93), in capitals ("LIVE", "RATE LIMITED" in English).
+STATUS_KEYS: dict[ApiStatus, str] = {
+    ApiStatus.LOADING: "widget.status.loading",
+    ApiStatus.LIVE: "widget.status.live",
+    ApiStatus.STALE: "widget.status.stale",
+    ApiStatus.OFFLINE: "widget.status.offline",
+    ApiStatus.RATE_LIMITED: "widget.status.rate_limited",
+    ApiStatus.NO_CREDENTIALS: "widget.status.no_login",
+    ApiStatus.PAUSED: "widget.status.paused",
 }
 
 SEVERITY_NORMAL = "normal"
@@ -113,8 +121,9 @@ class Row:
     is no data yet. time_fraction is the elapsed share of the limit's window (0..1). pace is
     "ahead", "on_pace" or "behind" (usage against the clock, +/-10 points), or None.
 
-    label is English, and resets_text and share_text are in the model's locale (share_text's word is
-    English). The skins word a row from its values instead:
+    label and share_text's word come from the catalog in the model's language (i18n.Text); English keeps a
+    scoped row's label as the limit's own, the identity string (#90). resets_text and share_text's percent
+    are in the model's locale. The skins word a row from its values instead:
     kind is the limit's kind ("session", "weekly_all", "weekly_scoped", or another the usage API
     names), scope_model and scope_name what a scoped limit is named for (scope_name is the model,
     else the surface; None when it has neither), share_pct its share of the weekly limit, and
@@ -158,8 +167,10 @@ class GuardMark:
     draws it today (each picks its countdown or resume_clock itself), the dump and the tests read it. resume_in is
     always the countdown ("2D 3H" past a day) and resume_clock always the reset time, for a surface with room for both.
 
-    labels are English; resume_text, resume_in and resume_clock are in the model's locale (format_countdown,
-    format_resets). The values the skins word the guard from: kinds, models and
+    labels come from the catalog in the model's language; English keeps a scoped limit's label as the guard
+    names it, and a limit the reading no longer carries keeps the guard's own label in every language.
+    resume_text, resume_in and resume_clock are in the model's locale (format_countdown, format_resets). The
+    values the skins word the guard from: kinds, models and
     scope_names give each watched limit's kind, scoped model and scope name (as Row has them) by Row key; a key
     they lack is a limit the reading no longer carries, which keeps the guard's own label. resume_seconds is the
     time left until resume_at in whole seconds (0 once it has passed), which countdown_units words; resume_same_day
@@ -202,13 +213,14 @@ class WidgetModel:
     """Everything a skin needs to draw the floating widget, the strip, the tray and the tooltip.
 
     status_text is the pill wording (LIVE, STALE, OFFLINE, RATE LIMITED, PAUSED, LOADING,
-    NO LOGIN). age_text is "12 S AGO" style (format_age, in the model's locale), or None before
+    NO LOGIN in English). age_text is "12 S AGO" style (format_age, in the model's locale), or None before
     the first fetch. stale is True when
     the values are not live (everything except LIVE and PAUSED). stale_message is set when the
-    user must act (expired or missing login). blink_on drives the alive mark (animation only).
+    user must act (expired or missing login). status_text and stale_message come from the catalog in
+    the model's language (i18n.Text). blink_on drives the alive mark (animation only).
     guard is the usage guard when it is armed or holding, None while it is off.
 
-    The skins word the age and the sign-in from values, not from those English texts. age_seconds
+    The skins word the age and the sign-in from values, not from those texts. age_seconds
     is the age in whole seconds, never negative, which age_unit tells in its unit; None exactly when
     age_text is. stale_reason is why the user must act: "expired", "refused" (an HTTP 403) or
     "no_login" (STALE_REASONS), None exactly when stale_message is.
@@ -293,11 +305,11 @@ def build_model(
     reason = _stale_reason(status, getattr(state, "signin_refused", None))
     return WidgetModel(
         status=status,
-        status_text=STATUS_TEXT[status],
+        status_text=_words(locale).text(STATUS_KEYS[status]),
         age_text=format_age(fetched_at, now, locale) if fetched_at is not None else None,
         rows=_rows(usage, now, show_scoped, locale),
         stale=status not in (ApiStatus.LIVE, ApiStatus.PAUSED),
-        stale_message=english_stale_message(reason),
+        stale_message=stale_message(reason, locale),
         blink_on=bool(blink_on),
         updated_at=state.updated_at if state is not None else now,
         guard=_guard_mark(getattr(state, "guard", None), usage, now, locale),
@@ -401,10 +413,11 @@ def format_age(fetched_at: datetime, now: datetime, locale: Locale = ENGLISH) ->
 
 
 def share_text(allowance_pct: float | None, locale: Locale = ENGLISH) -> str | None:
-    """"50% SHARE", its percent rounded with round() and written in ``locale`` ("50 % SHARE" in French)."""
+    """"50% SHARE", its percent rounded with round() and written in ``locale``, its word from the catalog in its
+    language ("50 % SHARE" in French while its catalog has no word of its own)."""
     if allowance_pct is None:
         return None
-    return f"{formats.percent(str(round(allowance_pct)), locale)} SHARE"
+    return _words(locale).text("widget.share", {"percent": formats.percent(str(round(allowance_pct)), locale)})
 
 
 def countdown_units(seconds: float) -> tuple[tuple[int, str], ...]:
@@ -446,14 +459,29 @@ def english_stale_message(reason: str | None) -> str | None:
     return _STALE_MESSAGES.get(reason) if reason is not None else None
 
 
+def stale_message(reason: str | None, locale: Locale = ENGLISH) -> str | None:
+    """The message of a stale reason in ``locale``'s language, from the catalog, None for no reason. Claude Code's
+    name is in the language's capitals; /login keeps its case. English gives english_stale_message's text."""
+    key = _STALE_KEYS.get(reason) if reason is not None else None
+    if key is None:
+        return None
+    return _words(locale).text(key, {"product": casing.upper(PRODUCT, locale.language), "command": LOGIN_COMMAND})
+
+
 # ── Internals ─────────────────────────────────────────────────────────────────
 
+def _words(locale: Locale) -> i18n.Catalog:
+    """The catalog the model's words come from: its language's, English behind it (#93)."""
+    return i18n.app_catalog(locale.language)
+
+
 def _rows(usage: UsageSnapshot | None, now: datetime, show_scoped: str, locale: Locale) -> list[Row]:
+    words = _words(locale)
     rows = [
-        _limit_row("session", "SESSION", "session", usage.session if usage else None, now, SESSION_WINDOW_S, False,
-                   locale),
-        _limit_row("weekly", "WEEKLY", "weekly_all", usage.weekly if usage else None, now, WEEKLY_WINDOW_S, False,
-                   locale),
+        _limit_row("session", words.text("widget.limit.session"), "session", usage.session if usage else None, now,
+                   SESSION_WINDOW_S, False, locale),
+        _limit_row("weekly", words.text("widget.limit.weekly"), "weekly_all", usage.weekly if usage else None, now,
+                   WEEKLY_WINDOW_S, False, locale),
     ]
     if usage is None or show_scoped == "never":
         return rows
@@ -461,9 +489,21 @@ def _rows(usage: UsageSnapshot | None, now: datetime, show_scoped: str, locale: 
         if show_scoped == "auto" and not _auto_shows(limit):
             continue
         name = _scoped_name(limit, index)
-        label = limit.label or casing.upper(name, DEFAULT)      # the English label, cased by English rules
-        rows.append(_limit_row(f"scoped:{name}", label, limit.kind, limit, now, WEEKLY_WINDOW_S, True, locale))
+        rows.append(_limit_row(f"scoped:{name}", _scoped_label(limit, name, locale), limit.kind, limit, now,
+                               WEEKLY_WINDOW_S, True, locale))
     return rows
+
+
+def _scoped_label(limit: Limit, name: str, locale: Locale) -> str:
+    """A scoped row's label. English keeps the limit's own label, the identity string the data layer gives (#90),
+    and names an unlabelled one from its key; another language words a scoped limit from the catalog, its scope's
+    name in the language's capitals. A kind no catalog has words for keeps the limit's label in every language."""
+    if locale.language != DEFAULT and limit.kind == "weekly_scoped":
+        scope = scope_name(limit.scope_model, limit.scope_surface)
+        if scope:
+            return _words(locale).text("widget.limit.scoped", {"name": casing.upper(scope, locale.language)})
+        return _words(locale).text("widget.limit.scoped_unnamed")
+    return limit.label or casing.upper(name, DEFAULT)      # the English label, cased by English rules
 
 
 def _scoped_name(limit: Limit, index: int) -> str:
@@ -475,7 +515,8 @@ def _scoped_name(limit: Limit, index: int) -> str:
 # ("session", "weekly", or a scoped limit's own label) and by a label for people ("Fable weekly"). The widgets
 # key a row by "session", "weekly" or "scoped:<model>", so the guard's answer is mapped onto the rows here, once,
 # and every skin marks the rows it is told about. The mapping matches the guard's identity strings (its name and
-# label never change with the language); the skins word each limit from the kind and scope the mark carries.
+# label never change with the language); the skins word each limit from the kind and scope the mark carries. The
+# mark's labels are worded in the model's language; English keeps the guard's own label for a scoped limit.
 
 def _guard_mark(block: Any, usage: UsageSnapshot | None, now: datetime, locale: Locale) -> GuardMark | None:
     """The guard block of the state as a mark, or None when it is off, missing or empty, and while there is
@@ -488,6 +529,8 @@ def _guard_mark(block: Any, usage: UsageSnapshot | None, now: datetime, locale: 
     kinds = {"session": "session", "weekly": "weekly_all"}
     models: dict[str, str | None] = {}
     scope_names: dict[str, str | None] = {}
+    words = _words(locale)
+    shown: dict[str, str] = {}          # the label people read for each scoped limit
     for index, limit in enumerate(usage.scoped if usage is not None else ()):
         model = limit.scope_model
         label = f"{model} weekly" if model else str(limit.label or "scoped").lower()   # as agent/guard.py names it
@@ -495,9 +538,15 @@ def _guard_mark(block: Any, usage: UsageSnapshot | None, now: datetime, locale: 
         scoped.append((key, str(limit.label or label), label))
         kinds[key] = limit.kind
         models[key] = model
-        scope_names[key] = scope_name(model, limit.scope_surface)
+        scope_names[key] = scope = scope_name(model, limit.scope_surface)
+        if locale.language == DEFAULT or limit.kind != "weekly_scoped":
+            shown[key] = label          # English, and a kind no catalog has words for: the guard's own label
+        elif scope:
+            shown[key] = words.text("widget.guard.scoped", {"name": scope})       # the name as written
+        else:
+            shown[key] = words.text("widget.guard.scoped_unnamed")
 
-    labels = {"session": "session", "weekly": "weekly", **{key: label for key, _name, label in scoped}}
+    labels = {"session": words.text("widget.guard.session"), "weekly": words.text("widget.guard.weekly"), **shown}
     caps: dict[str, int | float] = {}
     for key, setting in (("session", "session_cap"), ("weekly", "weekly_cap")):
         cap = _cap(policy.get(setting))

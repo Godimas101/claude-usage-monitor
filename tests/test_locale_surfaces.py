@@ -53,10 +53,11 @@ def settings(tmp_path: Any) -> Any:
 
 # ── The view model carries the locale (step 1.4) ──────────────────────────────
 
-# The view model's texts, which follow the locale; every other field is data, the same in every language.
-MODEL_TEXTS = ("age_text",)
-ROW_TEXTS = ("resets_text", "share_text")
-GUARD_TEXTS = ("resume_text", "resume_in", "resume_clock")
+# The view model's texts, which follow the locale (their words follow its language too, #93); every other field is
+# data, the same in every language.
+MODEL_TEXTS = ("age_text", "status_text", "stale_message")
+ROW_TEXTS = ("resets_text", "share_text", "label")
+GUARD_TEXTS = ("resume_text", "resume_in", "resume_clock", "labels")
 
 
 def _data(model: Any) -> dict[str, Any]:
@@ -229,7 +230,8 @@ def test_ages_countdowns_and_shares_follow_the_locale_in_capitals():
         assert view.format_age(now - timedelta(seconds=12), now, locale) == "12 S AGO"
         assert view.format_countdown(30, locale) == "<1M" and view.format_countdown(7500, locale) == "2H 5M"
     assert view.share_text(50.0, EN) == "50% SHARE"
-    assert view.share_text(50.0, PSEUDO) == "50\u00a0% SHARE"                  # the pseudo-locale's own percent
+    # The pseudo-locale's own percent, and its words from the catalog (#93).
+    assert view.share_text(50.0, PSEUDO) == "[50\u00a0% \u015eH\u00c1R\u00c9 \u0131\u0130\u011f]"
 
 
 def test_the_models_texts_follow_the_locale_and_its_values_do_not():
@@ -244,11 +246,15 @@ def test_the_models_texts_follow_the_locale_and_its_values_do_not():
     assert _data(french) == _data(english)
 
 
-def test_a_rows_label_stays_english_cased_in_every_language():
-    """Row.label is the English label: a scoped limit without one is named from its model by English rules."""
+def test_a_scoped_rows_label_is_worded_in_the_models_language():
+    """#93: English keeps a scoped row's label as the limit gives it, and names an unlabelled one from its model by
+    English rules. Another language words it from the catalog (English's words while Turkish has none of its own),
+    the model's name in its own capitals: Turkish's dotted İ."""
     now, at = wall(WEDNESDAY_NOON), wall(SATURDAY_1612)
     state = held(at, now, label="", scope_model="Haiku")
-    assert build_model(state, now, locale=loc("tr-TR")).rows[2].label == "HAIKU"
+    assert build_model(state, now).rows[2].label == "HAIKU"
+    turkish = build_model(state, now, locale=loc("tr-TR")).rows[2].label
+    assert (turkish, turkish.language) == ("HAİKU WEEKLY", "en")
 
 
 # ── The skins' numbers (step 1.6) ─────────────────────────────────────────────
