@@ -9,7 +9,8 @@ labels and resume texts) for every dump state in every show_scoped mode, and for
 tooltip of each, without and with the dev mark; the guard's tooltip at each countdown shape, with and without a resume
 time; and every tray menu the toggles, the waiting sessions and an update can give.
 
-Also here: ``tooltip_sweep``, every worst-case tray tooltip a language can show, for the fit tests.
+Also here: ``tooltip_sweep``, the worst-case tray tooltips a language can show (the guard holding, at a resume clock
+and a countdown of every length), for the fit tests.
 
     python tests/widget_words.py --print        the words of the code Python imports, as JSON
 """
@@ -171,11 +172,18 @@ def words() -> dict[str, Any]:
 
 
 # The tray tooltip's worst cases (#93): two limits at 100 %, each status, the guard holding with a resume time and a
-# countdown, a dev instance; every weekday at the hours whose clock text is longest, and every countdown shape.
+# countdown, a dev instance. The resume time in both of its forms (model.format_resets: the clock alone on the same
+# day, the weekday and the clock on another) on every weekday at hours of one and two digits, before and after noon;
+# the countdown at every minute under a day and every hour from a day to a week, and under a minute.
 SWEEP_MONDAY = datetime(2026, 7, 13)            # a wall-clock Monday: only its weekdays and clocks are written
 SWEEP_HOURS = (0, 1, 9, 10, 11, 12, 13, 21, 22, 23)
 SWEEP_MINUTES = (0, 59)
-SWEEP_COUNTDOWNS = ((6 * 24 + 23) * 3600, 23 * 3600 + 59 * 60, 10 * 3600 + 59 * 60, 59 * 60, 30)
+SWEEP_COUNTDOWNS = (30, *range(60, 24 * 3600, 60), *range(24 * 3600, 7 * 24 * 3600 + 1, 3600))
+
+
+def _units(text: str) -> int:
+    """UTF-16 code units, as the shell counts the tooltip."""
+    return len(text.encode("utf-16-le")) // 2
 
 
 def sweep_locales(language: str) -> list[Any]:
@@ -193,23 +201,39 @@ def sweep_locales(language: str) -> list[Any]:
 
 
 def sweep_clocks(locale: Any) -> list[str]:
-    """The resume clocks the sweep tries in ``locale``: of its day clocks for every weekday at SWEEP_HOURS and
-    SWEEP_MINUTES, the first (in sorted order) of each length in UTF-16 units."""
+    """The resume clocks the sweep tries in ``locale``: of the clocks it writes in both forms (formats.clock, for a
+    resume on the same day, and formats.day_clock) for every weekday at SWEEP_HOURS and SWEEP_MINUTES, the first (in
+    sorted order) of each length in UTF-16 units."""
     from usage_monitor import formats
 
-    clocks = {formats.day_clock(SWEEP_MONDAY + timedelta(days=day, hours=hour, minutes=minute), locale)
-              for day in range(7) for hour in SWEEP_HOURS for minute in SWEEP_MINUTES}
+    moments = [SWEEP_MONDAY + timedelta(days=day, hours=hour, minutes=minute)
+               for day in range(7) for hour in SWEEP_HOURS for minute in SWEEP_MINUTES]
+    clocks = {write(moment, locale) for moment in moments for write in (formats.clock, formats.day_clock)}
     by_length: dict[int, str] = {}
     for clock in sorted(clocks):
-        by_length.setdefault(len(clock.encode("utf-16-le")), clock)
+        by_length.setdefault(_units(clock), clock)
+    return list(by_length.values())
+
+
+def sweep_countdowns(locale: Any) -> list[int]:
+    """The countdowns the sweep tries in ``locale``, in seconds: of SWEEP_COUNTDOWNS, the first of each length in
+    UTF-16 units of the countdown the tooltip writes (app._tray_countdown: Turkish's one hour, "1 sa", is longer than
+    its ten, "10s")."""
+    from usage_monitor import app
+
+    by_length: dict[int, int] = {}
+    for seconds in SWEEP_COUNTDOWNS:
+        by_length.setdefault(_units(app._tray_countdown(seconds, locale)), seconds)
     return list(by_length.values())
 
 
 def tooltip_sweep(language: str) -> Iterator[str]:
-    """Every worst-case tray tooltip ``language`` can show, as a dev instance says it (critic 2 of #93's plan), in each
-    status. A tooltip's length, and so whether it fits, drops or is cut, hangs on its clock's length alone, so of the
-    clocks a locale writes at one length only the first is used. Pure: the resume times are written from wall clocks,
-    so the process's time zone does not matter."""
+    """The worst-case tray tooltips ``language`` can show, as a dev instance says them (critic 2 of #93's plan), in each
+    status: the guard holding with a resume time (sweep_clocks) and a countdown (sweep_countdowns). A tooltip's
+    length, and so whether it fits, drops or is cut, hangs on the lengths of its clock and its countdown alone, so one
+    of each length is used. They are paired freely, so a pair no real moment gives can be tried: that can only make
+    the longest come out longer, not shorter. Pure: the resume times are written from wall clocks, so the process's
+    time zone does not matter."""
     from usage_monitor import app
     from usage_monitor.data.models import ApiStatus
     from usage_monitor.render import dump
@@ -218,11 +242,11 @@ def tooltip_sweep(language: str) -> Iterator[str]:
     now = dump.SAMPLE_NOW
     limits = [_limit("session", 100.0, now, "SESSION"), _limit("weekly_all", 100.0, now, "WEEKLY")]
     for locale in sweep_locales(language):
-        clocks = sweep_clocks(locale)
+        clocks, countdowns = sweep_clocks(locale), sweep_countdowns(locale)
         for status in ApiStatus:
             model = build_model(dump._state(now, status, limits, 360), now, locale=locale)
             for clock in clocks:
-                for seconds in SWEEP_COUNTDOWNS:
+                for seconds in countdowns:
                     guard = GuardMark(state="holding", over_keys=("session",), resume_clock=clock,
                                       resume_seconds=seconds)
                     yield app.tray_tooltip(replace(model, guard=guard), dev=True)

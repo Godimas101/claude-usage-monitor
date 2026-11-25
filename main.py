@@ -7,7 +7,8 @@
     main.py --remove-setup [FILE]        take this app's hooks and MCP tool out of Claude Code (the uninstaller runs this;
                                          what could not be done goes to FILE, and the exit code is 1)
     main.py --dump-frames DIR [--lang ID]  render every theme, variant, state and scale to PNGs, in English or
-                                         the language ID (en, fr, es, tr or pseudo; a dev instance's locale)
+                                         the language ID (en, fr, es, tr or pseudo) with its base format tag and
+                                         its own clock, as the dev server's --lang shows it (i18n.dev_locale)
     main.py --smoke-test SECONDS FILE    run the real app for SECONDS, exercise it, write a report
     main.py --status [--json]            print the plan usage for a Claude session (see docs/AGENT_HOOK.md)
     main.py --hook [--threshold N] [--always]   a Claude Code hook that adds the usage to the context
@@ -215,8 +216,9 @@ def _fail(message: str) -> int:
 
 
 def _dump_frames(folder: str, lang: str | None = None) -> int:
-    """The frame dump, in English or in ``lang``: the locale a dev instance shows for it (i18n.dev_locale), built here
-    because nothing under render/ builds a locale (#87)."""
+    """The frame dump, in English or in ``lang``: i18n.dev_locale, the language with its base format tag and its own
+    clock (24-hour for fr, es and tr), as the dev server's --lang shows it. A dev instance takes its clock and format
+    tag from Windows, so its frames can differ. Built here because nothing under render/ builds a locale (#87)."""
     from usage_monitor.render.dump import dump_frames
 
     if lang is None:

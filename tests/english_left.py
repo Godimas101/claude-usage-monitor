@@ -14,15 +14,15 @@ a frame has no markup to mark them. On the dashboard, an element marked ``transl
 than the page's, is skipped with all inside it (``tName``, ``tPath`` and ``tCode`` in app.js mark names, paths and
 commands so); an unmarked name, id or path is reported, for the ticket that words its card to mark. An entry is a run
 of text as the page or the frame holds it, digits as "#" and spaces collapsed, so the same words with other figures are
-one entry; the pseudo-locale's number shapes (#91: groups set off by U+202F, a U+00A0 before "%") are English's there.
+one entry; the pseudo-locale's number shapes (#91: groups set off by U+202F, a U+00A0 before "%") are English's there,
+and a digit, a plain space and "%" is a digit and "%" (a widget's wrap gives a glued U+00A0 back as a plain space).
 
 The widgets: the frame dump (``render/dump.py``) at scale 1.0 in the pseudo-locale (a dev instance's, i18n.dev_locale),
 every theme, variant, state, strip height and tray size, with nothing saved; the tray tooltip of each sample state, as
 an installed monitor and as a dev instance show it; and the tray menu with every row shown (#93). Other scales draw the
 same words. Text drawn on the dump's contact sheet (a developer's overview, not the widgets) is left out. Besides the
 names, the widget half takes out the dev instance's "(dev)" mark and, as whole words, the pseudo-locale's format words
-(its weekday names and AM/PM, English's since #91): they are formats, as numbers are. A wrap gives a glued U+00A0 back
-as a plain space, so a digit, a space and "%" fold as a digit and "%" do.
+(its weekday names and AM/PM, English's since #91): they are formats, as numbers are.
 
 The dashboard: tests/english_scan.js runs the page (index.html, formats.js, the catalog, charts.js and app.js, from the
 dev server) on a small DOM, for every scenario of the dev server under the pseudo-locale, in the passes PASSES lists:

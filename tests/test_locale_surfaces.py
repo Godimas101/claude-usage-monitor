@@ -428,42 +428,68 @@ def test_the_tray_countdown_is_cldrs_outside_english():
     assert countdown(loc("es-CO"), (6 * 24 + 23) * 3600) == "6 días 23 h"
 
 
-def test_the_tooltip_sweep_tries_a_clock_of_every_length():
-    """A tooltip's length, and so whether it fits, drops or is cut, hangs on its resume clock's length alone, so the
-    sweep tries one clock of each length a locale writes (#93): every length is tried, once."""
-    def units(text: str) -> int:
-        return len(text.encode("utf-16-le")) // 2
+def _units(text: str) -> int:
+    return len(text.encode("utf-16-le")) // 2
 
+
+def test_the_tooltip_sweep_tries_a_clock_of_every_length():
+    """A tooltip's length, and so whether it fits, drops or is cut, hangs on its resume clock's length, so the sweep
+    tries one clock of each length a locale writes (#93), in both of the guard's forms (model.format_resets: the clock
+    alone on the same day, the weekday and the clock on another): every length is tried, once."""
     several = 0
     for language in i18n.DEV_LANGUAGES:
         for locale in widget_words.sweep_locales(language):
-            written = {formats.day_clock(widget_words.SWEEP_MONDAY + timedelta(days=day, hours=hour, minutes=minute),
-                                         locale)
-                       for day in range(7) for hour in widget_words.SWEEP_HOURS for minute in widget_words.SWEEP_MINUTES}
+            moments = [widget_words.SWEEP_MONDAY + timedelta(days=day, hours=hour, minutes=minute)
+                       for day in range(7) for hour in widget_words.SWEEP_HOURS for minute in widget_words.SWEEP_MINUTES]
+            written = {write(moment, locale) for moment in moments for write in (formats.clock, formats.day_clock)}
             tried = widget_words.sweep_clocks(locale)
-            assert set(tried) <= written and sorted(map(units, tried)) == sorted(set(map(units, written))), locale
+            assert set(tried) <= written and sorted(map(_units, tried)) == sorted(set(map(_units, written))), locale
             several += len(tried) > 1
     assert several, "no locale writes clocks of two lengths, so the check above proves nothing"
 
 
-def test_every_language_fits_the_tooltip_in_every_tag():
-    """The worst tooltip each language can show (two limits at 100 % in each status, the guard holding with a resume
-    time on every weekday at the longest clocks and every countdown shape, a dev instance), in every format tag and
-    clock, stays within the shell's 127 UTF-16 units with nothing cut. English, French, Spanish and Turkish (English's
-    words while their catalogs are empty) keep the whole guard phrase; the pseudo-locale, longer, needs the drop
-    rule."""
+def test_the_tooltip_sweep_tries_a_countdown_of_every_length():
+    """The same for the guard's countdown: of every countdown the guard can show (each minute up to a week, and under a
+    minute), the sweep tries one of each length the tooltip writes, once. Turkish's one hour ("1 sa 10d") is longer
+    than any of its other hours ("10s 10d")."""
+    shapes: dict[Any, int] = {}                     # each countdown_units shape, at the first second that has it
+    for seconds in (30, *range(60, 7 * 86400 + 1, 60)):
+        shapes.setdefault(view.countdown_units(seconds), seconds)
+    tags = set()
+    for language in i18n.DEV_LANGUAGES:
+        for locale in widget_words.sweep_locales(language):
+            if (language, locale.format) in tags:
+                continue                            # the clock does not change a countdown
+            tags.add((language, locale.format))
+            written = {app._tray_countdown(seconds, locale) for seconds in shapes.values()}
+            tried = [app._tray_countdown(seconds, locale) for seconds in widget_words.sweep_countdowns(locale)]
+            assert sorted(map(_units, tried)) == sorted(set(map(_units, written))), locale
+    turkish = [app._tray_countdown(seconds, loc("tr-TR")) for seconds in widget_words.sweep_countdowns(loc("tr-TR"))]
+    assert max(turkish, key=_units) == "1 sa 10d"
+
+
+def test_every_language_fits_the_tooltip_in_every_tag(monkeypatch):
+    """The worst tooltips each language can show (two limits at 100 % in each status, the guard holding with a resume
+    clock and a countdown of every length, a dev instance: widget_words.tooltip_sweep), in every format tag and clock,
+    fit the shell's 127 UTF-16 units through the drop rule alone: app.tray_tooltip never has to cut one (tray.clip).
+    English, French, Spanish and Turkish (English's words while their catalogs are empty) keep the whole guard phrase;
+    the pseudo-locale, longer, needs the drop rule."""
+    def clip(text: str, limit: int) -> str:
+        assert tray.clip(text, limit) == text, f"cut: {text}"
+        return text
+
+    monkeypatch.setattr(app, "clip", clip)
     longest: dict[str, int] = {}
     for language in i18n.DEV_LANGUAGES:
         texts = list(widget_words.tooltip_sweep(language))
-        assert texts and all(text.endswith(" (dev)") and "\u2026" not in text for text in texts), language
+        assert texts and all(text.endswith(" (dev)") for text in texts), language
         if language != i18n.PSEUDO:
             assert all(" (in " in text for text in texts), language
-        longest[language] = max(len(text.encode("utf-16-le")) // 2 for text in texts)
-    assert max(longest.values()) <= tray.TIP_LIMIT, longest
-    # Today's worst: es-CO and fr-CA on a 12-hour clock with English's words, and the pseudo-locale live (no status
-    # word), its countdown dropped. A draft of fr, es or tr changes its own figure here and in test_budgets.TOOLTIPS
-    # (#104 to #106).
-    assert longest == {"en": 113, "fr": 120, "es": 121, "tr": 113, "pseudo": 121}
+        longest[language] = max(map(_units, texts))
+    # Today's worst: es-CO and fr-CA on a 12-hour clock with English's words, Turkish with CLDR's one hour ("1 sa"),
+    # and the pseudo-locale live (no status word) with a same-day resume, its countdown kept at the shell's limit. A
+    # draft of fr, es or tr changes its own figure here and in test_budgets.TOOLTIPS (#104 to #106).
+    assert longest == {"en": 113, "fr": 120, "es": 121, "tr": 114, "pseudo": 127}
 
 
 # ── The alerts (step 1.8) ─────────────────────────────────────────────────────

@@ -122,7 +122,10 @@ class Row:
     "ahead", "on_pace" or "behind" (usage against the clock, +/-10 points), or None.
 
     label and share_text's word come from the catalog in the model's language (i18n.Text); English keeps a
-    scoped row's label as the limit's own, the identity string (#90). resets_text and share_text's percent
+    scoped row's label as the limit's own, the identity string (#90). Outside English a scoped row's label holds
+    its scope's name in the language's capitals ("HAİKU WEEKLY" in Turkish) while its Text.language is the
+    template's, English's until the language has the key: that label is final, never cased again (English's rule
+    would give the İ a U+0307). resets_text and share_text's percent
     are in the model's locale. The skins word a row from its values instead:
     kind is the limit's kind ("session", "weekly_all", "weekly_scoped", or another the usage API
     names), scope_model and scope_name what a scoped limit is named for (scope_name is the model,

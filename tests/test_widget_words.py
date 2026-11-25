@@ -18,7 +18,7 @@ import pytest
 
 import english_left
 import widget_words
-from usage_monitor import app, i18n
+from usage_monitor import app, casing, i18n
 from usage_monitor.agent import guard
 from usage_monitor.data.identity import legacy_label
 from usage_monitor.data.models import ApiStatus, Limit
@@ -255,6 +255,49 @@ def test_a_key_the_language_lacks_is_english_and_says_so(catalogs):
     expired = build_model(dump.sample_state("stale"), dump.SAMPLE_NOW, locale=FR)
     assert (expired.status_text.language, expired.stale_message, expired.stale_message.language) == (
         "fr", view.STALE_MESSAGE_EXPIRED, "en")
+
+
+def model_texts(model: Any) -> list[tuple[str, Any, i18n.Text]]:
+    """Every i18n.Text of a model as (where, the row it is on or None, the text): the model's fields, each row's, the
+    guard's and the guard's labels."""
+    found: list[tuple[str, Any, i18n.Text]] = []
+    parts = [("model", None, model), *((f"rows[{i}]", row, row) for i, row in enumerate(model.rows))]
+    parts += [("guard", None, model.guard)] if model.guard is not None else []
+    for where, row, part in parts:
+        values = [(field.name, getattr(part, field.name)) for field in dataclasses.fields(part)]
+        values += [(f"labels[{key}]", label) for key, label in getattr(part, "labels", {}).items()]
+        found += [(f"{where}.{name}", row, value) for name, value in values if isinstance(value, i18n.Text)]
+    return found
+
+
+def test_no_model_text_cased_again_writes_a_combining_dot(catalogs):
+    """A caller that cases an i18n.Text again uses its language's rules (casing). In Turkish, with scopes named with
+    an i, no text of the model gives a U+0307 that way in any case, with the shipped catalog (English behind Turkish)
+    and with Turkish words of its own. The one text that is final is checked as it is (Row.label): a scoped row's
+    label whose template is another language's than the model's, its name in the model language's capitals."""
+    dot = "\u0307"
+    states = [scoped_state("Haiku", label=""), scoped_state("Haiku"), scoped_state(None, "mobile"),
+              scoped_state("Haiku", kind="design_weekly", label=legacy_label("design_weekly", None, None)),
+              dataclasses.replace(dump.sample_state("stale3"), signin_refused=403),
+              *(dump.sample_state(name) for name in dump.DUMP_STATE_NAMES)]
+    final, recased = [], []
+    for own in ({}, {"widget.limit.scoped": "{name} HAFTALIK", "widget.guard.scoped": "{name} haftalık",
+                     "widget.status.live": "CANLI"}):
+        catalogs["tr"] = catalog("tr", own)
+        for state in states:
+            model = build_model(state, dump.SAMPLE_NOW, show_scoped="always", locale=TR)
+            for where, row, text in model_texts(model):
+                if (where.endswith(".label") and row.kind == "weekly_scoped"
+                        and text.language != model.locale.language):
+                    assert dot not in text, (where, text)
+                    final.append(text)
+                    continue
+                cased = (casing.upper(text), casing.lower(text), casing.capitalize(text),
+                         casing.lower(casing.upper(text)), casing.capitalize(casing.upper(text)))
+                assert not [out for out in cased if dot in out], (where, text, text.language)
+                recased.append(text)
+    assert {"HAİKU WEEKLY", "MOBİLE WEEKLY"} <= set(final)                  # the shipped catalog: English's words
+    assert "HAİKU HAFTALIK" in recased and "Haiku weekly" in recased and "Haiku haftalık" in recased
 
 
 def model_words(model: Any) -> list[str]:

@@ -465,7 +465,11 @@ def _read_catalog(path: Path) -> dict[str, Any]:
 
 class Text(str):
     """Catalog text that knows the language it came from (English when the language's catalog lacks the key), so a
-    caller that changes its case uses that language's rules, and marks it ``lang="en"`` where it is English."""
+    caller that changes its case uses that language's rules, and marks it ``lang="en"`` where it is English.
+
+    The language is the template's. A value filled in may have been cased by another language's rules: a scoped
+    row's label (render.model.Row) holds its name in the model language's capitals inside English's words while that
+    language lacks the key. Such a text is final, and nothing cases it again."""
 
     language: str = DEFAULT
 

@@ -378,9 +378,13 @@ that was lost is never counted as shown (the update announcement is then offered
 `USAGE_MONITOR_APPDATA_DIR=<dir>` puts settings, DB and log in `<dir>`. `USAGE_MONITOR_DEV_INSTANCE=1` uses the
 mutex `Global\ClaudeUsageMonitor-dev`, its own controller window class, and tags the tray
 tooltip "(dev)", so a test build runs alongside an installed copy. `main.py --dump-frames <dir> [--lang <id>]`
-renders every theme × variant × state × scale to PNGs without opening windows, in English, or with `--lang` in what a
-dev instance shows for `USAGE_MONITOR_LANG=<id>` (en, fr, es, tr or pseudo: `i18n.dev_locale`, built in `main.py`, which
-imports `i18n` only for that flag, since every hook call parses the command line);
+renders every theme × variant × state × scale to PNGs without opening windows, in English, or with `--lang` (en, fr, es,
+tr or pseudo) in `i18n.dev_locale`: the language with its base format tag (en-US, fr-FR, es-ES, tr-TR; en-US for the
+pseudo-locale) and its own clock, 24-hour for fr, es and tr. That is what the dev server's `--lang` shows, and what a
+dev instance shows for `USAGE_MONITOR_LANG=<id>` on a Windows that reports nothing. On a real Windows a dev instance in
+fr, es or tr takes its clock from the short-time pattern and its format tag from the regional format when that is of
+the same language (fr-CA), so its frames can differ. The locale is built in `main.py`, which imports `i18n` only for
+that flag, since every hook call parses the command line;
 `--smoke-test <seconds> <report.json>` runs the real app, exercises the API server (state with its
 `update` block, themes, live settings, the dashboard child, every statistics route and both exports), then exits
 with a report. The report holds statuses, sizes and timings, never usage content; it also says whether the
@@ -613,7 +617,11 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   (`LIVE` on a widget, `live` in the tooltip), never made by re-casing; names, commands, numbers and times are
   placeholders. English keeps its text where it is data: a scoped row's label is the limit's own (the identity string),
   a guard label with no model is the limit's label in lower case, and a limit gone from the reading keeps the guard's
-  English label in every language (identity text: `test_english_keeps_the_labels_that_are_data`). The tooltip's lead
+  English label in every language (identity text: `test_english_keeps_the_labels_that_are_data`). Outside English a
+  scoped row's label holds its scope's name in the language's capitals (Turkish's `HAİKU`) inside the template, and
+  its `Text.language` is the template's, English's until the language has the key: that label is final and nothing
+  cases it again (English's rule would give the İ a U+0307). The skins word scoped rows from `scope_name`, and
+  `test_no_model_text_cased_again_writes_a_combining_dot` holds every other text of the model. The tooltip's lead
   "Claude usage" is `tray.tip.lead`, kept as written in every language as #86's brand mark (Chris may override it);
   its " - " joins and its " (dev)" mark stay code. Its drop rule (`app.tray_tooltip(model, dev=, limit=TIP_LIMIT)`):
   past 127 UTF-16 units the guard's countdown goes, then its resume time, each form a whole phrase
@@ -646,11 +654,16 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   dashboard's money boxes take the page's own widest figures (`PAGE_MONEY`), tight as the page draws them. A box's
   catalog keys (`Box.keys`) are measured in each language too; since #93 the boxes that draw the view model's status
   word carry its key, and each key's `_budget.<key>` note in `en.json` names every box it sits in. The tray tooltip is
-  a composing box: it measures every worst-case tooltip `app.tray_tooltip` words in the language
-  (`tests/widget_words.tooltip_sweep`: two limits at 100 % in each status, the guard holding at the longest clocks of
-  every format tag and every countdown shape, a dev instance), after the drop rule, and only a composing box may hold a
-  key with a placeholder. `python tests/budgets.py --tooltips` prints each language's longest tooltip, which
-  `test_budgets.py` pins as `TOOLTIPS` (en 113, fr 120, es 121, tr 113, pseudo 121 units today).
+  a composing box: it measures the worst-case tooltips `app.tray_tooltip` words in the language, after the drop rule
+  (`tests/widget_words.tooltip_sweep`). Those are two limits at 100 % in each status, in every format tag and clock,
+  as a dev instance, with the guard holding at a resume clock and a countdown of every length they take: the clock
+  alone (a resume the same day) and with its weekday (another day), on every weekday at hours of one and two digits
+  before and after noon; the countdown at every minute under a day, every hour from a day to a week, and under a
+  minute. Clock and countdown are paired freely, so a figure can come out longer than the longest real tooltip, never
+  shorter.
+  Only a composing box may hold a key with a placeholder. `python tests/budgets.py --tooltips` prints each language's
+  longest tooltip, which `test_budgets.py` pins as `TOOLTIPS` (en 113, fr 120, es 121, tr 114, pseudo 127 units today;
+  the pseudo-locale's is a same-day resume that keeps its countdown at the shell's limit).
   `tests/test_budgets.py` holds each box's measure to the widths the skins work out as the frame dump draws, and every
   drawn run to a box. It pins every room (`python tests/budgets.py --limits` prints them after a skin
   change), fails English that runs past a room it did not run past before, and fails an offered language past a box
@@ -661,11 +674,11 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   small DOM (`tests/mini_dom.js`, `tests/english_scan.js`) through every
   dev-server scenario, as an installed monitor and as a dev instance, and in some scenarios with its actions, its
   update banner and its loading and failed states. The scan leaves out numbers (the pseudo-locale's U+202F groups and
-  U+00A0 before `%` read as English's), what the page marks as data
-  (`translate="no"`, or a `lang` other than the page's), the names the skins draw, the product name and #86's brand
-  marks. On the widgets it also leaves out the dev instance's "(dev)" mark and, as whole words, the pseudo-locale's
-  weekday names and AM/PM, which are English's formats (#91), and it reads a digit, a plain space and `%` as a digit and
-  `%` (a wrap gives the glued U+00A0 back as a space).
+  U+00A0 before `%` read as English's, and a digit, a plain space and `%` as a digit and `%`, since a widget's wrap
+  gives the glued U+00A0 back as a space), what the page marks as data (`translate="no"`, or a `lang` other than the
+  page's), the names the skins draw, the product name and #86's brand marks. On the widgets it also leaves out the dev
+  instance's "(dev)" mark and, as whole words, the pseudo-locale's weekday names and AM/PM, which are English's formats
+  (#91).
   `tests/test_english_left.py` holds the result to `tests/fixtures/english_left.json`, which each extraction ticket
   (#93 to #101) shrinks by recording again (`python tests/english_left.py --record`, which adds new English only with
   `--allow-new`).

@@ -25,10 +25,11 @@ them: in capitals in Nostromo and Night City, glued in the guard's statement (wh
 without its space in a box sized for English's figures (``Box.tight``: Chris's decision on #91); the dashboard's money
 boxes take the page's own figures (PAGE_MONEY); and the text of the box's catalog keys (``Box.keys``) in that language.
 The pseudo-locale measures English through ``i18n.pseudo_text``, its keys included. Since #93 the boxes that draw the
-view model's status word carry its key, and the tray tooltip is a composing box (``Box.compose``): it measures every
-worst-case tooltip the code words in the language (tests/widget_words.tooltip_sweep: two limits at 100 % in each
-status, the guard holding at the longest clocks of every format tag and every countdown shape, a dev instance), after
-the drop rule, not its English made pseudo. Only a composing box may hold a key with a placeholder: any other box would
+view model's status word carry its key, and the tray tooltip is a composing box (``Box.compose``): it measures the
+worst-case tooltips the code words in the language, after the drop rule, not its English made pseudo
+(tests/widget_words.tooltip_sweep: two limits at 100 % in each status, in every format tag and clock, as a dev
+instance, with the guard holding at a resume clock, the same day's and another day's, and a countdown of every length
+they take). Only a composing box may hold a key with a placeholder: any other box would
 measure the placeholder as written. The skins' own words get their keys from #94 to #96, the toasts' from #97. Counts
 (the pace points) get no figure: a whole number under 1000 is written alike in all four languages.
 
@@ -400,7 +401,7 @@ TOOLTIP_KEYS: tuple[str, ...] = (
 
 
 def _tooltips(language: str) -> list[str]:
-    """Every worst-case tray tooltip ``language`` shows, as app.tray_tooltip words it (tests/widget_words.py)."""
+    """The worst-case tray tooltips ``language`` shows, as app.tray_tooltip words them (tests/widget_words.py)."""
     from widget_words import tooltip_sweep
 
     return list(tooltip_sweep(language))

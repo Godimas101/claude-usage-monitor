@@ -122,11 +122,12 @@ FOR_91: dict[str, set[tuple[str, str]]] = {
 # budget"), as `python tests/budgets.py --tooltips` prints them, each with its text. fr, es and tr show English's words
 # while their catalogs are empty; a draft that lengthens one records it here again (#104 to #106).
 TOOLTIPS: dict[str, int] = {
-    "en": 113,       # ... - rate limited - guard holding, resumes Fri 10:00 AM (in 10h 59m) (dev)
-    "fr": 120,       # fr-CA, 12-hour: ... - guard holding, resumes dim. 10 h 00 a.m. (in 10h 59m) (dev)
-    "es": 121,       # es-CO, 12-hour: ... - guard holding, resumes dom, 10:00 a. m. (in 10 h 59 min) (dev)
-    "tr": 113,       # ... - guard holding, resumes Cmt ÖS 10:00 (in 10s 59d) (dev)
-    "pseudo": 121,   # live (no status word), countdown dropped: ... [ğüárd höldıñğ, réşüméş Fri 10:00 AM ...] (dev)
+    "en": 113,       # ... - rate limited - guard holding, resumes Fri 10:00 AM (in 10h 10m) (dev)
+    "fr": 120,       # fr-CA, 12-hour: ... - guard holding, resumes dim. 10 h 00 a.m. (in 10h 10m) (dev)
+    "es": 121,       # es-CO, 12-hour: ... - guard holding, resumes dom, 10:00 a. m. (in 10 h 10 min) (dev)
+    "tr": 114,       # 12-hour, CLDR's one hour: ... - guard holding, resumes Cmt ÖS 10:00 (in 1 sa 10d) (dev)
+    "pseudo": 127,   # live (no status word), a same-day resume with its countdown, at the shell's limit:
+                     # ... [ğüárd höldıñğ, réşüméş 10:00 AM (ıñ 1m) ıİğşéñıİğşéñ] (dev)
 }
 
 # Boxes that draw a status word that is the skin's own, not the view model's (Night City's, #95), so they carry no
@@ -645,18 +646,22 @@ def test_the_longest_tooltips_are_the_recorded_ones(capsys: pytest.CaptureFixtur
     here until it is recorded again (python tests/budgets.py --tooltips)."""
     assert budgets.main(["--tooltips"]) == 0
     assert ast.literal_eval("{" + capsys.readouterr().out + "}") == TOOLTIPS
-    assert max(TOOLTIPS.values()) <= tray.TIP_LIMIT
 
 
-def test_the_pseudo_tooltip_fits() -> None:
-    """Composed in the pseudo-locale, past the drop rule, every tooltip fits: the report lists no tooltip, and none is
-    cut. Made pseudo whole, its English would not (153 and more units)."""
+def test_the_pseudo_tooltip_fits(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Composed in the pseudo-locale, every tooltip fits through the drop rule alone: app.tray_tooltip never has to cut
+    one (tray.clip). A cut text fits by construction, so that is what is checked. Made pseudo whole, its English would
+    not fit (153 and more units)."""
+    from usage_monitor import app
+
+    def clip(text: str, limit: int) -> str:
+        assert tray.clip(text, limit) == text, f"cut: {text}"
+        return text
+
+    monkeypatch.setattr(app, "clip", clip)
     box = budgets.BOX["app.tray.tooltip"]
     assert box.fit == "drop" and box.compose is not None
-    assert not [r for r in budgets.over(i18n.PSEUDO) if r.box.id == box.id]
-    found = budgets.texts(box, i18n.PSEUDO)
-    assert found and max(box.width(text) for text in found) <= tray.TIP_LIMIT
-    assert not any("\u2026" in text for text in found)
+    assert budgets.texts(box, i18n.PSEUDO)
     assert max(box.width(i18n.pseudo_text(text)) for text in box.english) > tray.TIP_LIMIT
 
 
