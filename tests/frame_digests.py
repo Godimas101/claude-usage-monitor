@@ -29,9 +29,11 @@ PINNED_TZ = "UTC0"                   # the C runtime reads TZ when Python starts
 PARTS = max(1, min(4, (os.cpu_count() or 1) - 1))   # processes that share the rendering
 
 
-def digests(part: int = 0, parts: int = 1) -> dict[str, str]:
+def digests(part: int = 0, parts: int = 1, locale: Any = None) -> dict[str, str]:
     """The digests of the usage_monitor this Python imports, or the ``part``-th of ``parts`` shares of them. Reset
-    times follow the local time zone: see collect."""
+    times follow the local time zone: see collect. ``locale`` (an i18n.Locale, #91) draws the frames in its language,
+    format tag and clock; None draws them in the sample models' own default, English, and passes no locale, so this
+    file also records a release from before #91 (collect runs it against that release's code)."""
     from usage_monitor.render import dump
     from usage_monitor.render.skins import get_skin
 
@@ -45,7 +47,7 @@ def digests(part: int = 0, parts: int = 1) -> dict[str, str]:
                 index += 1
                 if index % parts != part:
                     continue
-                model = dump.sample_model(state)
+                model = dump.sample_model(state) if locale is None else dump.sample_model(state, locale=locale)
                 hashed = hashlib.sha256()
                 for scale in dump.SCALES:
                     _feed(hashed, skin.render_floating(model, theme, variant, scale, None))

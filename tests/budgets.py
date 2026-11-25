@@ -972,7 +972,7 @@ def drawn(scales: Sequence[float] = (1.0,), every_variant: bool = True) -> list[
 
     engine.Canvas.text_layer, g.Ink.put, g._text_px, ImageDraw.ImageDraw.text = layer, put, text_px, draw
     dump._save = lambda image, path, report: None
-    dump._contact_sheet = lambda theme, skin, path, variant_filter=None: path
+    dump._contact_sheet = lambda theme, skin, path, variant_filter=None, **_kwargs: path
     dump.get_skin = lambda theme_id: Told(real[6](theme_id))
     try:
         with tempfile.TemporaryDirectory(prefix="budgets-drawn-") as folder:

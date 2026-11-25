@@ -22,6 +22,7 @@ from PIL import Image, ImageDraw
 
 from usage_monitor import themes as theme_registry
 from usage_monitor.agent import guard
+from usage_monitor.i18n import ENGLISH, Locale
 from usage_monitor.data.models import (
     ApiStatus,
     BurnRate,
@@ -154,8 +155,10 @@ def _state(now: datetime, status: ApiStatus, limits: list[Limit] | None, age_s: 
     )
 
 
-def sample_model(name: str, now: datetime = SAMPLE_NOW, show_scoped: str = "auto") -> WidgetModel:
-    return build_model(sample_state(name, now), now, show_scoped=show_scoped)  # type: ignore[arg-type]
+def sample_model(name: str, now: datetime = SAMPLE_NOW, show_scoped: str = "auto",
+                 locale: Locale = ENGLISH) -> WidgetModel:
+    """The view model of a sample state, in ``locale`` (English by default)."""
+    return build_model(sample_state(name, now), now, show_scoped=show_scoped, locale=locale)  # type: ignore[arg-type]
 
 
 # ── Dumping ───────────────────────────────────────────────────────────────────
@@ -175,11 +178,13 @@ def dump_frames(
     variants: Iterable[str] | None = None,
     states: Iterable[str] | None = None,
     scales: Iterable[float] | None = None,
+    locale: Locale = ENGLISH,
 ) -> DumpReport:
     """Render every theme x variant x state x scale. Returns what was written.
 
     themes: theme ids or loaded theme objects; None means every shipped theme.
     variants, states, scales: optional filters (ids, DUMP_STATE_NAMES entries, scale factors).
+    locale: the language, format tag and clock the frames are drawn in (English by default).
     """
     out = Path(out_dir)
     loaded = load_theme_objects()
@@ -201,7 +206,7 @@ def dump_frames(
             variant_dir = theme_dir / variant.id
             variant_dir.mkdir(parents=True, exist_ok=True)
             for state in state_names:
-                model = sample_model(state)
+                model = sample_model(state, locale=locale)
                 for scale in scale_values:
                     _save(skin.render_floating(model, theme, variant, scale, None),
                           variant_dir / f"floating_{state}_x{_scale_tag(scale)}.png", report)
@@ -214,7 +219,8 @@ def dump_frames(
                 for size in TRAY_SIZES:
                     _save(skin.render_tray_icon(model, theme, variant, size),
                           variant_dir / f"tray_{state}_{size}.png", report)
-        report.sheets.append(_contact_sheet(theme, skin, theme_dir / "contact_sheet.png", variant_filter))
+        report.sheets.append(_contact_sheet(theme, skin, theme_dir / "contact_sheet.png", variant_filter,
+                                            locale=locale))
     return report
 
 
@@ -250,11 +256,12 @@ _INK = (220, 217, 210, 255)
 _MUTE = (119, 115, 107, 255)
 
 
-def _contact_sheet(theme: Any, skin: Any, path: Path, variant_filter: set[str] | None = None) -> Path:
+def _contact_sheet(theme: Any, skin: Any, path: Path, variant_filter: set[str] | None = None, *,
+                   locale: Locale = ENGLISH) -> Path:
     """One row per variant: the floating widget for each state, then the strip and tray icons."""
     label_font = engine.load_font(str(engine.font_file("ibmplexmono/IBMPlexMono-Regular.ttf")), 13.0)
     rows: list[Image.Image] = []
-    models = {state: sample_model(state) for state in STATE_NAMES}
+    models = {state: sample_model(state, locale=locale) for state in STATE_NAMES}
     for variant in theme.variants:
         if variant_filter is not None and variant.id not in variant_filter:
             continue

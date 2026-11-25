@@ -20,6 +20,7 @@ from typing import Any, Literal
 from usage_monitor.data.identity import legacy_label, scope_name
 from usage_monitor.data.models import ApiStatus, Limit, MonitorState, UsageSnapshot
 from usage_monitor.data.windows import PACE_BAND_POINTS
+from usage_monitor.i18n import ENGLISH, Locale
 
 ShowScoped = Literal["auto", "always", "never"]
 SHOW_SCOPED_MODES: tuple[str, ...] = ("auto", "always", "never")
@@ -207,6 +208,10 @@ class WidgetModel:
     is the age in whole seconds, never negative, which age_unit tells in its unit; None exactly when
     age_text is. stale_reason is why the user must act: "expired", "refused" (an HTTP 403) or
     "no_login" (STALE_REASONS), None exactly when stale_message is.
+
+    locale is the app's language, format tag and clock (#91; English unless the caller gives one): the
+    skins write their numbers, percents and times in it. It is part of the model, so a frame cache keyed
+    on the model draws again when it changes.
     """
     status: ApiStatus
     status_text: str
@@ -219,6 +224,7 @@ class WidgetModel:
     guard: GuardMark | None = None
     age_seconds: int | None = None
     stale_reason: str | None = None
+    locale: Locale = ENGLISH
 
     @property
     def lamp(self) -> str:
@@ -267,8 +273,10 @@ def build_model(
     *,
     show_scoped: ShowScoped = "auto",
     blink_on: bool = True,
+    locale: Locale = ENGLISH,
 ) -> WidgetModel:
-    """Build the view model. A None state (nothing published yet) renders as LOADING with dashes."""
+    """Build the view model in ``locale`` (English by default; the app passes its own, never read from Windows here).
+    A None state (nothing published yet) renders as LOADING with dashes."""
     if show_scoped not in SHOW_SCOPED_MODES:
         raise ValueError(f"show_scoped must be one of {SHOW_SCOPED_MODES}, not {show_scoped!r}")
     now = _aware(now)
@@ -291,6 +299,7 @@ def build_model(
         guard=_guard_mark(getattr(state, "guard", None), usage, now),
         age_seconds=_age_seconds(fetched_at, now) if fetched_at is not None else None,
         stale_reason=reason,
+        locale=locale,
     )
 
 

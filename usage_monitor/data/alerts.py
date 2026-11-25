@@ -16,12 +16,14 @@ from __future__ import annotations
 
 import math
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone, tzinfo
 from typing import Any
 
 from usage_monitor.data.identity import scope_name
 from usage_monitor.data.models import ApiStatus, Limit, MonitorState, Spend
+from usage_monitor.i18n import ENGLISH, Locale
 from usage_monitor.log import get_logger
 from usage_monitor.settings import DEFAULTS, Settings, parse_clock
 
@@ -64,11 +66,16 @@ class _Config:
 
 
 class AlertEngine:
-    """Turns successive MonitorStates into the alerts that should be shown."""
+    """Turns successive MonitorStates into the alerts that should be shown.
 
-    def __init__(self, settings: Settings, *, tz: tzinfo | None = None) -> None:
+    ``locale_provider`` gives the app's locale (i18n.LocaleSource, #91); it is read on every evaluation, as the
+    settings are. Without one the alerts are English."""
+
+    def __init__(self, settings: Settings, *, tz: tzinfo | None = None,
+                 locale_provider: Callable[[], Locale] | None = None) -> None:
         self._settings = settings
         self._tz = tz
+        self._locale_provider = locale_provider
         self._lock = threading.Lock()
         self._tracks: dict[tuple[str, str], _Track] = {}
         self._credits_seen: float | None = None   # last "used" value; None until the baseline
@@ -207,6 +214,16 @@ class AlertEngine:
         )]
 
     # ── Settings ──
+
+    def _locale(self) -> Locale:
+        """The locale for this evaluation: the provider's, else English. A provider that fails gives English."""
+        if self._locale_provider is None:
+            return ENGLISH
+        try:
+            return self._locale_provider()
+        except Exception:
+            log.exception("the locale could not be read; the alerts are English")
+            return ENGLISH
 
     def _config(self) -> _Config:
         s = self._settings

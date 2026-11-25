@@ -673,7 +673,7 @@ class MonitorApp:
         settings, host = self.settings, self.host
         assert host is not None
         self.updates = UpdateTracker(settings, self._update_check_fn)
-        self._alerts = AlertEngine(settings)
+        self._alerts = AlertEngine(settings, locale_provider=self.locale)
         self.service = self._service_factory(settings)
         self._unsubscribers.append(self.service.subscribe(self._on_service_state))
         self.server = ApiServer(
@@ -697,9 +697,8 @@ class MonitorApp:
         self.launcher = DashboardLauncher(self.server, settings)
         self.tooltip = Tooltip(host, platform=self._plat, stats=self.stats)
         self.blinker = Blinker(host, self._on_blink)
-        self.tray = TrayIcon(
-            host, tray_tooltip(build_model(None, self._clock()), dev=self.dev), self.open_dashboard, self._show_menu,
-        )
+        first = tray_tooltip(build_model(None, self._clock(), locale=self.locale()), dev=self.dev)
+        self.tray = TrayIcon(host, first, self.open_dashboard, self._show_menu)
         self.tray.on_notify_click = self.open_dashboard
         self._sync_widgets()
         self._unsubscribers += [
@@ -1139,7 +1138,8 @@ class MonitorApp:
         theme, variant = self._theme()
         reduce_motion = bool(setting(settings, "reduce_motion"))
         lit = True if reduce_motion or self.blinker is None else self.blinker.lit
-        model = build_model(self._state, self._clock(), show_scoped=show_scoped(settings), blink_on=lit)
+        model = build_model(self._state, self._clock(), show_scoped=show_scoped(settings), blink_on=lit,
+                            locale=self.locale())
         return RenderContext(
             model=model,
             theme=theme,

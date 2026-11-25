@@ -359,7 +359,7 @@ def _drawn() -> dict[str, str]:
             return render
 
     engine.Canvas.text_layer, gates.Ink.put, ImageDraw.ImageDraw.text = layer, put, draw
-    dump._save, dump._contact_sheet = save, (lambda theme, skin, path, variant_filter=None: path)
+    dump._save, dump._contact_sheet = save, (lambda theme, skin, path, variant_filter=None, **_kwargs: path)
     dump.sample_model, dump.get_skin = model, (lambda theme_id: Told(real[6](theme_id)))
     try:
         with tempfile.TemporaryDirectory(prefix="english-left-") as folder:

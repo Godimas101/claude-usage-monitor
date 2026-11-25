@@ -3965,8 +3965,28 @@ def test_the_app_reads_windows_only_once_it_runs(settings, monkeypatch):
 
 
 def test_the_server_and_the_app_share_one_locale(wired):
-    """The page, the state and (with #93) the widgets all read the app's one source."""
+    """The page and the state read the app's one source; the widgets and the alerts do too (the next test)."""
     assert wired.app.server.kwargs["locale_provider"] is wired.app.locale
+
+
+def test_the_widgets_the_tray_and_the_alerts_follow_the_apps_locale(monkeypatch, settings):
+    """Every view model the app builds (the widgets' frames, the tray's first tooltip) is in the app's locale, and the
+    alerts read the same source on each evaluation (#91)."""
+    monkeypatch.setenv("USAGE_MONITOR_LANG", "fr")                     # the fixture makes this a dev instance
+    built: list[Any] = []
+    real = app_mod.build_model
+
+    def spy(*args: Any, **kwargs: Any) -> Any:
+        model = real(*args, **kwargs)
+        built.append(model.locale)
+        return model
+
+    monkeypatch.setattr(app_mod, "build_model", spy)
+    app = build_app(monkeypatch, settings, language_reader=_Windows(["fr-FR"], "fr-CA")).app
+    assert (app.locale().language, app.locale().format) == ("fr", "fr-CA")
+    app._refresh()
+    assert len(built) >= 2 and set(built) == {app.locale()}
+    assert app._alerts is not None and app._alerts._locale_provider is app.locale
 
 
 def test_a_regional_format_change_reads_the_formats_again(settings):

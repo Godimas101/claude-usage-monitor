@@ -581,8 +581,9 @@ def test_rendering_never_reads_the_windows_language(monkeypatch: pytest.MonkeyPa
 
 def test_a_french_windows_changes_no_frame(monkeypatch: pytest.MonkeyPatch) -> None:
     """The same share of the golden frames, drawn plain and then on a French Windows (an fr-CA regional format and a
-    24-hour clock) with French offered and a dev instance asking for French: every digest is the same. When the
-    widgets are worded (#93), their language comes in as an argument."""
+    24-hour clock) with French offered and a dev instance asking for French: every digest is the same. The widgets'
+    language comes in as an argument (#91: the locale of build_model, dump.sample_model and frame_digests.digests,
+    English by default), never from Windows."""
     import frame_digests
 
     plain = frame_digests.digests(part=0, parts=8)
