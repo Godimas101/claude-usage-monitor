@@ -4,6 +4,7 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
+- Localization: the choices only Chris can make ([#86](https://github.com/Godimas101/claude-usage-monitor/issues/86)) — closed 2026-11-26 by @Godimas101
 - Dashboard: its choices are lost each time the monitor restarts ([#54](https://github.com/Godimas101/claude-usage-monitor/issues/54)) — closed 2026-11-26 by @Godimas101
 - Epic: v2.3, finish the open work (update safety, guard reach, hardening) ([#50](https://github.com/Godimas101/claude-usage-monitor/issues/50)) — closed 2026-11-13 by @Godimas101
 - Test: the Cost page height check fails early in a month ([#44](https://github.com/Godimas101/claude-usage-monitor/issues/44)) — closed 2026-11-13 by @Godimas101
