@@ -594,7 +594,15 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   decision on #91: Turkish `HAİKU`). A running update on Settings (#58) takes its words from `settings.update.progress.*`
   (natural case: Nostromo and Night City set the chips and the status line in capitals in CSS, the sizes line as written);
   its sizes are the language's numbers inside the catalog's words, and "MB" is a word of the string, for a translator to
-  abbreviate as the language does (French `Mo`). #97 must not reuse that prefix.
+  abbreviate as the language does (French `Mo`). The rest of the update flow is #97's: `settings.update.*` (the System
+  card's "Check for updates" row, its three buttons and the line under them: `row`, `button`, `offered`, `status`,
+  `failed.<check|install|skip>.<reason>`) and `banner.update.*` (the update banner), in natural case like #58's:
+  Nostromo and Night City set the buttons, the row's title, the banner's heading and the lines in capitals in CSS
+  (Nostromo the banner's sentence too; the row's help stays as written), and Gates shows them as stored. What a click
+  said is a line,
+  `tLine(key, values)`: its text and the language it came from, so the element showing it (`#set-update-status`,
+  `syncUpdate`; the banner's `.nm-status`, in its markup) carries `lang="en"` when it is English on another language's
+  page. `labelFor`'s saved-setting words and the card's title and meta stay #100's.
 - **The page.** `_send_index` writes `<html lang>`, the `monitor-locale` meta (the locale as JSON) and the catalog's
   `<script src="/static/i18n/<lang>.js">` before `charts.js`, and fills the shell's own words, all before the theme,
   which can give up on a page it cannot resolve. A marked element holds text only: `data-i18n="<key>"` replaces its
@@ -900,8 +908,10 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   small DOM (`tests/mini_dom.js`, `tests/english_scan.js`) through every
   dev-server scenario, as an installed monitor and as a dev instance, and in some scenarios with its actions, its
   update banner, Settings during an update in each state of its run (the `update-run:*` passes, #58; a lost link and the
-  monitor closing need timed asks the scan does not make, and the page tests hold them) and its loading and failed
-  states. The scan leaves out numbers (the pseudo-locale's U+202F groups and
+  monitor closing need timed asks the scan does not make, and the page tests hold them), what each update button says
+  for every answer the monitor gives (the `update-said:*` passes, #97: Settings' three buttons and the banner's Update
+  now and Skip this version, each answered with a result, a refusal by status, no answer or a wait) and its loading and
+  failed states. The scan leaves out numbers (the pseudo-locale's U+202F groups and
   U+00A0 before `%` read as English's, and a digit, a plain space and `%` as a digit and `%`, since a widget's wrap
   gives the glued U+00A0 back as a space), what the page marks as data (`translate="no"`, or a `lang` other than the
   page's), the names the skins draw, the product name and #86's brand marks. On the widgets it also leaves out the dev
@@ -1353,6 +1363,17 @@ default browser instead, and the exit code says so (below).
   server fakes no update (its `info` callback returns nothing): to see the banner, answer `/api/state` with an `update` block
   (a Playwright route does it), or start it with `--update-demo` (Dev isolation), which offers a made-up release. The banner
   keeps its one line after *Update now*; Settings shows the run (below; the banner's turn is #114).
+  Its words, the System card's update row, buttons and line, and what each click says are the catalog's since #97
+  (`banner.update.*`, `settings.update.*`; "Languages"), stored in natural case: Nostromo sets the banner's heading,
+  sentence, buttons and line, Settings' buttons, the row's title and the line under them in capitals, Night City all of
+  those but the banner's sentence, and Gates shows them as stored, which is what `gates.js` made of the capitals the page
+  wrote before. A refusal is worded by the HTTP status of the monitor's
+  answer, never by the English `error` it carries (`updateRefusal`): on these routes 501 is a step this monitor does not
+  have, 500 a step that failed (`error`) or, when the error is exactly "internal error", a handler that raised
+  (`internal`), 401 the dashboard's token (`token`), any other status `http` with its number, and no answer `lost`. The
+  English reads as before (`tests/fixtures/update_lines_english.json`, recorded from the code before the move). Error
+  codes in the server's replies are #102's: it would change `updateRefusal` alone. `failedText` stays for the refresh and
+  resume lines (#100).
 - **A running update on Settings (#58).** The System card has `#set-update-progress` (`.nm-uprog`) between its buttons and
   its line, filled from `GET /api/update/status` (the record, "Updates"): three step chips (Download, Check, Restart: done,
   under way, still to come, stalled or failed, with the guard card's tones; a step still to come is dimmed as the theme dims
@@ -1384,15 +1405,19 @@ default browser instead, and the exit code says so (below).
   chips, the cells, with the part of the next cell, the sizes and the line), so an answer every half second rebuilds only
   what moved. It holds no `.nm-big`, `.nm-stat-v` or `.nm-cmp-n`, which Night City glitches on every change. Each failure
   code has its own words (`UPDATE_FAILED`, a table of functions, so a text is the catalog's when it is drawn).
-  `installUpdate` has one line for it (`watchUpdateRun()`, after the installer text): #97, which moves the update rows'
-  English to the catalog after this, keeps it, the hooks in `syncUpdate` and `settingsClick` (its `install-update` branch
-  calls `installUpdateFromSettings`, which calls `installUpdate`), and `settings.update.progress.*`.
+  `installUpdate` has one line for it (`watchUpdateRun()`, after the installer's line): #97, which moved the update rows'
+  English to the catalog after this, kept it, the hooks in `syncUpdate` and `settingsClick` (its `install-update` branch
+  calls `installUpdateFromSettings`, which calls `installUpdate`), #58's functions byte for byte and
+  `settings.update.progress.*`.
   The Starbase (#66, #67) and Overseer (#80) sheets will need `.nm-uprog` rules: the column and its wrapping chips, the
   steps told apart by `[data-step]` with next at the theme's disabled opacity, `.nm-uprog .nm-story:empty { min-height:
   1lh; }`, a stalled and a failed bar, a failed step that differs from a stalled one by more than its fill where the warn
   and alert tones are close, and, if their placeholder bar moves, a rule in their motion sheet that holds it still under
   `.nm-uprog.is-warn`. `tests/browser/update_probe.js` (Playwright,
-  not part of pytest) checks it in a real browser in every look, with and without reduced motion, and shoots every state.
+  not part of pytest) checks it in a real browser in every look, with and without reduced motion, and shoots every state;
+  its step 5 (#97, `--said-only` runs it alone) clicks each update button with every answer and reads the line, the six
+  buttons, the row and the banner's heading as shown (English's capitals in Nostromo, Night City and Edgerun, as stored
+  in Gates), and at the narrow width in French and the pseudo-locale finds nothing wider than its card.
 - **Usage guard card (#27).** The Settings card's two blocks, the live status (`#guard-live`) and the one-click setup
   (`#guard-setup`), are filled by `syncGuard` from `/api/guard`, asked once at a time every `GUARD_POLL_MS` while Settings is
   on screen; a block is rewritten only when its markup changed (`data-sig`), so a poll never drops the focus. The status is

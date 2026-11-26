@@ -1,5 +1,6 @@
 // Real-browser check of a running update on Settings (#58): the block's steps, bar, sizes and status line in every look the
-// owner checks, with and without reduced motion, and a screenshot of the System card in every state of a run.
+// owner checks, with and without reduced motion, and a screenshot of the System card in every state of a run. Since #97 it
+// also checks what each update button says (step 5).
 //
 // Not part of the pytest run (it needs Playwright for node and a Chromium). It starts the dev server itself with its update
 // demo (--update-demo: a made-up release 9.9.9 and a made-up run; it never calls the updater, the network or an exit), on a
@@ -18,6 +19,8 @@
 //   --skip-live         leave out the live runs of the demo
 //   --skip-variants     leave out the pass over every variant (step 4)
 //   --variants a,b      only these of step 4's variants (their names in VARIANTS)
+//   --skip-said         leave out step 5
+//   --said-only         step 5 alone (no routed states, no variants, no narrow pass of steps 1 to 3, no live runs)
 //   CHROMIUM_PATH       a Chromium to launch instead of Playwright's own
 //
 // What it does, per look, without and with reduced motion:
@@ -37,6 +40,14 @@
 //   4. Every variant of every theme (VARIANTS): the next step's contrast, measured from a screenshot as a disabled control's
 //      is, stays within NEXT_TOLERANCE of the disabled Install update button beside it; and in Nostromo a stalled download and
 //      a failed one differ by more than their fill (in a monochrome variant the two tones are one colour).
+//   5. Said (#97): every answer the monitor gives each update button (Check for updates now, Install update and Skip this
+//      version in Settings; Update now and Skip this version in the banner) is routed and the button clicked; the line under
+//      the buttons is read as shown (innerText, which applies text-transform) and as stored (textContent). In English the
+//      line is the catalog's natural-case text, shown in capitals in Nostromo, Night City and Edgerun (the line before #97,
+//      tests/fixtures/update_lines_english.json's "today") and as stored in Gates (its "gates"); the six buttons, the toggle
+//      row's title and the banner's heading in capitals or as stored likewise, the banner's sentence in capitals in Nostromo
+//      only, the row's help as written. In French and the pseudo-locale at the narrow width, nothing of the System card or
+//      the banner is wider than its card. A screenshot of the card or the banner for each line.
 // Exit code 1 and "VERDICT: FAIL" when any check fails.
 'use strict';
 const { chromium } = require('playwright');
@@ -54,7 +65,9 @@ const LOOKS = opt('looks', 'nostromo,night_city,edgerun,gates-dark,gates-light')
 const LANGS = opt('langs', 'fr,pseudo').split(',').filter((l) => l && l !== 'none');
 const NARROW = +opt('narrow', '640');
 const SKIP_LIVE = args.includes('--skip-live');
-const SKIP_VARIANTS = args.includes('--skip-variants');
+const SAID_ONLY = args.includes('--said-only');
+const SKIP_VARIANTS = args.includes('--skip-variants') || SAID_ONLY;
+const SKIP_SAID = args.includes('--skip-said');
 fs.mkdirSync(OUT, { recursive: true });
 fs.mkdirSync(DATA, { recursive: true });
 
@@ -432,18 +445,227 @@ async function variantPass(browser, server, variant) {
   return out;
 }
 
+// ── Step 5 (#97): what each update button says ─────────────────────────────────────────────────────────────────────────
+// Every line, with its English before #97 ("today") and as stored since ("gates"): the b1 record. The release on offer is
+// the demo's 9.9.9 (the record's 2.4.0 in the offered line).
+const SAID_LINES = JSON.parse(fs.readFileSync(path.join(REPO, 'tests', 'fixtures', 'update_lines_english.json'), 'utf8')).lines;
+const SAID_STEP = { check: 'check', install: 'apply', skip: 'skip' };
+const SAID_BUTTON = { check: 'check-update', install: 'install-update', skip: 'skip-update' };
+const SAID_REPLY = {   // the monitor's answer to each button, as ui/server.py gives it
+  'check:found': [200, { ok: true, result: { available: true, version: '9.9.9', checked: true } }],
+  'check:up_to_date': [200, { ok: true, result: { available: false, version: null, checked: true } }],
+  'check:unreached': [200, { ok: true, result: { available: false, version: null, checked: false } }],
+  'install:browser': [200, { ok: true, result: { started: true, mode: 'browser' } }],
+  'install:installer': [200, { ok: true, result: { started: true, mode: 'installer' } }],
+  'install:not_started': [200, { ok: true, result: { started: false, mode: 'none' } }],
+  'skip:skipping': [200, { ok: true }],
+  'check:checking': 'hang', 'install:installing': 'hang',
+};
+function saidReply(said) {
+  if (SAID_REPLY[said]) return SAID_REPLY[said];
+  const [op, reason] = said.split(':');
+  const step = SAID_STEP[op];
+  return { error: [500, { error: `update ${step} failed` }], internal: [500, { error: 'internal error' }],
+    unavailable: [501, { error: `update ${step} is not available` }], token: [401, { error: 'missing or wrong token' }],
+    http: [502, null], lost: 'lost' }[reason];
+}
+const stored = (line) => line.gates.replace('2.4.0', '9.9.9');
+// the waits last (their requests are never answered), the installer's line in the banner only (in Settings it hides under
+// the run's block, #58), and a skip that works in Settings only (in the banner it hides the banner)
+const SETTINGS_SAID = SAID_LINES.filter((l) => /^(check|install|skip):/.test(l.said) && l.said !== 'install:installer')
+  .sort((a, b) => (saidReply(a.said) === 'hang') - (saidReply(b.said) === 'hang'));
+const BANNER_SAID = SAID_LINES.filter((l) => /^install:/.test(l.said) || (/^skip:/.test(l.said) && l.said !== 'skip:skipping'))
+  .sort((a, b) => (saidReply(a.said) === 'hang') - (saidReply(b.said) === 'hang'));
+const NARROW_SAID = ['check:unreached', 'check:unavailable', 'install:browser', 'install:unavailable', 'skip:unavailable', 'skip:lost'];
+const NARROW_BANNER_SAID = ['install:installer', 'install:unavailable', 'skip:unavailable'];
+
+// What Settings' System card and the banner show, read from the page: each text as shown and as stored, its lang, and
+// whether it runs wider than its card (a button, which does not wrap, by its own scroll width too).
+const READ_SAID = () => {
+  const item = (el, box) => el ? { shown: el.innerText.trim(), stored: el.textContent.trim(), lang: el.getAttribute('lang'),
+    wide: el.scrollWidth > el.clientWidth + 1 || el.getBoundingClientRect().right > box.right + 1 } : null;
+  const status = document.getElementById('set-update-status');
+  const out = {};
+  if (status) {
+    const card = status.closest('.nm-card').getBoundingClientRect();
+    const row = document.querySelector('input[data-key="check_updates"]').closest('label');
+    out.settings = { line: item(status, card), hidden: status.hidden, rowLabel: item(row.querySelector('.t'), card),
+      rowHelp: item(row.querySelector('.d'), card),
+      buttons: [...document.querySelectorAll('#set-update-actions .nm-btn')].filter((b) => !b.hidden).map((b) => item(b, card)) };
+  }
+  const banner = document.querySelector('.nm-update');
+  if (banner) {
+    const box = banner.getBoundingClientRect();
+    out.banner = { title: item(banner.querySelector('.nm-update-t > b'), box), sentence: item(banner.querySelector('.nm-update-t > span'), box),
+      line: item(banner.querySelector('.nm-status'), box), buttons: [...banner.querySelectorAll('.nm-btn')].map((b) => item(b, box)) };
+  }
+  return out;
+};
+
+const SENTENCE_CAPS = { nostromo: true, night_city: false, edgerun: false, 'gates-dark': false, 'gates-light': false };
+
+// A text as the look shows it in English: capitals (Nostromo, Night City) or as stored (Gates).
+function judgeText(where, item, want, caps) {
+  if (!item) { fail(`${where}: not drawn`); return; }
+  if (item.stored !== want) fail(`${where}: stored "${item.stored}" (want "${want}")`);
+  const shown = caps ? want.toUpperCase() : want;
+  if (item.shown !== shown) fail(`${where}: shown "${item.shown}" (want "${shown}")`);
+}
+
+function judgeWide(where, info) {
+  const items = [];
+  if (info.settings) items.push(['line', info.settings.line], ['row title', info.settings.rowLabel], ['row help', info.settings.rowHelp],
+    ...info.settings.buttons.map((b, i) => ['button ' + (i + 1), b]));
+  if (info.banner) items.push(['banner heading', info.banner.title], ['banner sentence', info.banner.sentence], ['banner line', info.banner.line],
+    ...info.banner.buttons.map((b, i) => ['banner button ' + (i + 1), b]));
+  for (const [name, item] of items) {
+    if (item && item.wide) fail(`${where}: the ${name} is wider than its card ("${item.shown}")`);
+  }
+}
+
+async function saidLook(browser, server, look, opts) {
+  const { width, prefix, lang } = opts;
+  const english = !lang;
+  const caps = LOOK[look].caps;
+  const replies = { check: null, apply: null, skip: null };
+  const routes = async (page) => {
+    for (const step of Object.keys(replies)) {
+      await page.route('**/api/update/' + step, (r) => {
+        const reply = replies[step];
+        if (reply === 'hang') return undefined;                    // never answered: the button's wait
+        if (reply === 'lost') return r.abort();
+        if (!reply) return r.continue();
+        return r.fulfill({ status: reply[0], contentType: 'application/json', body: JSON.stringify(reply[1]) });
+      });
+    }
+  };
+  const result = { settings: {}, banner: {} };
+  // Settings
+  {
+    const { context, page, errors } = await openSettings(browser, server, look, { width });
+    await routes(page);
+    const card = page.locator('section[data-card="system"]');
+    const at = `${prefix}${look}/settings`;
+    try {
+      const first = await page.evaluate(READ_SAID);
+      result.settings.first = first;
+      if (english) {
+        judgeText(`${at}/offered`, first.settings.line, 'Version 9.9.9 is available.', caps);
+        ['Check for updates now', 'Install update', 'Skip this version'].forEach((want, i) => judgeText(`${at}/button ${i + 1}`, first.settings.buttons[i], want, caps));
+        judgeText(`${at}/row title`, first.settings.rowLabel, 'Check for updates', caps);
+        judgeText(`${at}/row help`, first.settings.rowHelp, 'Look for a newer release once in a while.', false);
+      }
+      judgeWide(`${at}/first`, first);
+      await card.screenshot({ path: path.join(OUT, `${prefix}${look}-settings-offered.png`) });
+      for (const line of SETTINGS_SAID.filter((l) => english || NARROW_SAID.includes(l.said))) {
+        const [op] = line.said.split(':');
+        const before = await page.evaluate(() => document.getElementById('set-update-status').textContent);
+        replies[SAID_STEP[op]] = saidReply(line.said);
+        await page.click(`[data-action="${SAID_BUTTON[op]}"]`);
+        if (line.said === 'check:checking') {
+          // a check that waits shows its line when Settings is drawn again (as it is at the next state that changed)
+          await page.evaluate(() => { location.hash = '#about'; });
+          await page.waitForTimeout(400);
+          await page.evaluate(() => { location.hash = '#settings'; });
+        }
+        try {
+          await page.waitForFunction(([want, was]) => {
+            const s = document.getElementById('set-update-status');
+            return !s.hidden && (want === null ? s.textContent !== was && s.textContent !== '' : s.textContent === want);
+          }, [english ? stored(line) : null, before], { timeout: 8000 });
+        } catch (e) {
+          fail(`${at}/${line.said}: the line did not change (it says "${await page.evaluate(() => document.getElementById('set-update-status').textContent)}")`);
+        }
+        const info = await page.evaluate(READ_SAID);
+        result.settings[line.said] = info.settings;
+        if (english) {
+          judgeText(`${at}/${line.said}`, info.settings.line, stored(line), caps);
+          if (caps && info.settings.line.shown !== line.today) fail(`${at}/${line.said}: shown "${info.settings.line.shown}", before #97 "${line.today}"`);
+          if (!caps && info.settings.line.shown !== line.gates) fail(`${at}/${line.said}: shown "${info.settings.line.shown}", Gates before #97 "${line.gates}"`);
+          if (info.settings.line.lang !== null) fail(`${at}/${line.said}: an English line on an English page carries lang="${info.settings.line.lang}"`);
+        } else if (lang === 'fr' && info.settings.line.lang !== 'en') {
+          fail(`${at}/${line.said}: an English line on the French page has no lang="en"`);
+        }
+        judgeWide(`${at}/${line.said}`, info);
+        replies[SAID_STEP[op]] = null;
+        await card.screenshot({ path: path.join(OUT, `${prefix}${look}-settings-${line.said.replace(':', '-')}.png`) });
+      }
+    } catch (e) {
+      fail(`${at}: ${String(e).split('\n')[0]}`);
+    }
+    if (errors.length) fail(`${at}: page errors: ${errors.slice(0, 3).join(' | ')}`);
+    await context.close();
+  }
+  // the banner, on the Overview
+  {
+    const { context, page, errors } = await openSettings(browser, server, look, { width });
+    await routes(page);
+    const at = `${prefix}${look}/banner`;
+    try {
+      await page.evaluate(() => { location.hash = '#overview'; });
+      await page.waitForSelector('.nm-update', { timeout: 15000 });
+      await page.waitForTimeout(800);
+      const banner = page.locator('.nm-update');
+      const first = await page.evaluate(READ_SAID);
+      result.banner.first = first;
+      if (english) {
+        judgeText(`${at}/heading`, first.banner.title, 'Claude Usage Monitor v9.9.9 is available', caps);
+        judgeText(`${at}/sentence`, first.banner.sentence, 'Update now installs it and restarts the monitor.', SENTENCE_CAPS[look]);
+        ['Update now', 'Release notes', 'Skip this version'].forEach((want, i) => judgeText(`${at}/button ${i + 1}`, first.banner.buttons[i], want, caps));
+      }
+      judgeWide(`${at}/first`, first);
+      await banner.screenshot({ path: path.join(OUT, `${prefix}${look}-banner.png`) });
+      for (const line of BANNER_SAID.filter((l) => english || NARROW_BANNER_SAID.includes(l.said))) {
+        const [op] = line.said.split(':');
+        const before = await page.evaluate(() => { const l = document.querySelector('.nm-update .nm-status'); return l ? l.textContent : ''; });
+        replies[SAID_STEP[op]] = saidReply(line.said);
+        await page.click(`.nm-update [data-action="${op === 'install' ? 'update-now' : 'update-skip'}"]`);
+        try {
+          await page.waitForFunction(([want, was]) => {
+            const l = document.querySelector('.nm-update .nm-status');
+            return !!l && (want === null ? l.textContent !== was && l.textContent !== '' : l.textContent === want);
+          }, [english ? stored(line) : null, before], { timeout: 8000 });
+        } catch (e) {
+          fail(`${at}/${line.said}: the banner's line did not change`);
+        }
+        const info = await page.evaluate(READ_SAID);
+        result.banner[line.said] = info.banner;
+        if (english) {
+          judgeText(`${at}/${line.said}`, info.banner.line, stored(line), caps);
+          if (caps && info.banner.line.shown !== line.today) fail(`${at}/${line.said}: shown "${info.banner.line.shown}", before #97 "${line.today}"`);
+          if (!caps && info.banner.line.shown !== line.gates) fail(`${at}/${line.said}: shown "${info.banner.line.shown}", Gates before #97 "${line.gates}"`);
+        } else if (lang === 'fr' && info.banner.line.lang !== 'en') {
+          fail(`${at}/${line.said}: an English line on the French page has no lang="en"`);
+        }
+        judgeWide(`${at}/${line.said}`, info);
+        replies[SAID_STEP[op]] = null;
+        await banner.screenshot({ path: path.join(OUT, `${prefix}${look}-banner-${line.said.replace(':', '-')}.png`) });
+      }
+    } catch (e) {
+      fail(`${at}: ${String(e).split('\n')[0]}`);
+    }
+    if (errors.length) fail(`${at}: page errors: ${errors.slice(0, 3).join(' | ')}`);
+    await context.close();
+  }
+  return result;
+}
+
 (async () => {
   const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
-  const result = { out: OUT, routed: {}, narrow: {}, live: {}, variants: {} };
+  const result = { out: OUT, routed: {}, narrow: {}, live: {}, variants: {}, said: {} };
   const ordered = SHOWN.filter((s) => s !== 'gone').concat(SHOWN.includes('gone') ? ['gone'] : []);
   try {
     const server = await startServer(['--update-demo', 'ok']);
     try {
-      for (const look of LOOKS) {
+      for (const look of SAID_ONLY ? [] : LOOKS) {
         for (const reduced of [false, true]) {
           result.routed[look + (reduced ? '-reduced' : '')] = await routedLook(browser, server, look, reduced, ordered, '', 1280);
           console.log('routed', look, reduced ? 'reduced' : '', 'done');
         }
+      }
+      for (const look of SKIP_SAID ? [] : LOOKS) {
+        result.said[look] = await saidLook(browser, server, look, { width: 1280, prefix: 'said-' });
+        console.log('said', look, 'done');
       }
       if (!SKIP_VARIANTS) {
         for (const variant of VARIANTS.filter((v) => !opt('variants', '') || opt('variants', '').split(',').includes(v.name))) {
@@ -459,14 +681,20 @@ async function variantPass(browser, server, variant) {
       const local = await startServer(['--update-demo', 'ok', '--lang', lang]);
       try {
         for (const look of LOOKS) {
-          result.narrow[lang + '/' + look] = await routedLook(browser, local, look, false, NARROW_STATES, lang + '-narrow-', NARROW);
-          console.log('narrow', lang, look, 'done');
+          if (!SAID_ONLY) {
+            result.narrow[lang + '/' + look] = await routedLook(browser, local, look, false, NARROW_STATES, lang + '-narrow-', NARROW);
+            console.log('narrow', lang, look, 'done');
+          }
+          if (!SKIP_SAID) {
+            result.said[lang + '/' + look] = await saidLook(browser, local, look, { width: NARROW, prefix: 'said-' + lang + '-narrow-', lang });
+            console.log('said narrow', lang, look, 'done');
+          }
         }
       } finally {
         await stopServer(local);
       }
     }
-    if (!SKIP_LIVE) {
+    if (!SKIP_LIVE && !SAID_ONLY) {
       for (const look of LOOKS) {
         for (const reduced of [false, true]) {
           result.live[look + (reduced ? '-reduced' : '')] = await liveLook(browser, look, reduced);
