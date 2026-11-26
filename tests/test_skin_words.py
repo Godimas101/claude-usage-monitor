@@ -56,6 +56,52 @@ def test_every_recorded_skin_is_worked_out_and_its_record_is_whole() -> None:
             "NO LOGIN FOUND", "5H", "7D"} <= drawn
 
 
+def _night_city_runs(words: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every set of runs one recorded Night City state has: Blackwall's, each look's and each transparent_bg one."""
+    return [words["runs"], *words["looks"].values(), *words["clear"].values()]
+
+
+def test_night_citys_record_is_whole() -> None:
+    """Night City's section has every dump state, the edge and guard states and the states its own words hang on (the
+    refused band, HOLD alone, ages on the stale and offline bands, the band's hold chip, the GUARD chip beside a status
+    chip, the paces); Blackwall's runs on every surface at both scales, Relic's and Edgerun's at 1.0, and Blackwall's
+    and Edgerun's floating widget and strip with transparent_bg; and every word the skin draws today."""
+    from usage_monitor.render import dump
+
+    night_city = RECORDED["night_city"]
+    assert {name.split("/")[0] for name in night_city} >= set(dump.DUMP_STATE_NAMES)
+    assert {"refused", "reason/refused", "unknown_kind", "scoped_neither", "guard_over_a_limit_gone",
+            "guard_hold_session/no_resume_time", "rate_limited3/resume_in_59s", "age/stale/100d", "age/offline/59s",
+            "age/rate_limited/47h", "band_hold/stale3", "band_hold/offline3/no_resume_time", "guard_armed_paused",
+            "guard_armed_loading", "guard_armed_no_caps", "pace/none", "pace/behind_100"} <= set(night_city)
+    heights = dump.TASKBAR_HEIGHTS_AT_1X
+    surfaces = {"floating@1", "floating@1.25", "tooltip@1", "tooltip@1.25", "tray/32",
+                *(f"strip/h{round(height * scale)}@{scale:g}" for scale in skin_words.SCALES for height in heights)}
+    looks = {"floating@1", "tooltip@1", "tray/32", *(f"strip/h{height}@1" for height in heights)}
+    clear = {"floating@1", *(f"strip/h{height}@1" for height in heights)}
+    for words in night_city.values():
+        assert set(words) == {"helpers", "runs", "looks", "clear"}
+        assert set(words["runs"]) == surfaces
+        assert {look: set(found) for look, found in words["looks"].items()} == {
+            look: looks for look in skin_words.NIGHT_CITY_LOOKS}
+        assert {variant: set(found) for variant, found in words["clear"].items()} == {
+            variant: clear for variant in skin_words.NIGHT_CITY_CLEAR}
+    assert set(skin_words.NIGHT_CITY_LOOKS) == {"relic", "edgerun"} and "blackwall" in skin_words.NIGHT_CITY_CLEAR
+    drawn = {run[0] for words in night_city.values() for part in _night_city_runs(words) for found in part.values()
+             if not isinstance(found, str) for run in found}
+    assert {"CLAUDE//USAGE", "LIVE", "PAUSED", "LOADING", "GUARD", "HOLD", "HOLD 2H 14M", "HOLD <1M",
+            "RELINK // USE CLAUDE CODE", "RELINK // RUN /login", "NO LOGIN // OPEN DASHBOARD", "NO SIGNAL // NET DOWN",
+            "RATE LIMITED", "59 S OLD", "100 D OLD", "CRIT", "WARN", "CAP 95", "SESSION", "WEEKLY", "WEEKLY SCOPED",
+            "50% SHARE", "RST 11:39 PM", "RST SAT 8:12 PM", "PACE --", "ON PACE", "AHEAD +100", "UNDER PACE -100",
+            "GUARD // ARMED", "GUARD // ARMED:", "GUARD // HOLDING:", "5H", "7D", "STALE", "OFFLINE", "LIMITED",
+            "NO LOGIN"} <= drawn
+    paused = _drawn(night_city["guard_armed_paused"], "floating@1")
+    assert {"PAUSED", "GUARD"} <= paused and "GUARD" not in _drawn(night_city["guard_armed_loading"], "floating@1")
+    normal = night_city["normal3/auto"]
+    assert len({json.dumps(part["floating@1"]) for part in _night_city_runs(normal)}) == 3   # boxed, plain, plate
+    assert normal["clear"]["edgerun"]["floating@1"] == normal["looks"]["relic"]["floating@1"]  # no plate: plain
+
+
 # ── The keys hold today's English (#94 step 1) ────────────────────────────────
 
 # Nostromo's keys (widget.nostromo.<group>.<name>): the header's state words, the guard's chip, mark and line, the
@@ -136,6 +182,121 @@ def test_the_english_catalog_is_nostromos_english() -> None:
             text("pace.behind", points="-100")] == paces
     assert paces[2].endswith(" " + text("pace.points", points="+100")) and \
         paces[3].endswith(" " + text("pace.points", points="-100"))
+
+
+# Night City's keys (widget.night_city.<group>.<name>, #95): the status words (the strip's tag, the header's LIVE tag)
+# and the rows' chips, the stale band's four causes, the guard's chip, mark and line, the rows' names, the strip's
+# labels, the share, the cap chip, the reset, the pace and the band's age.
+NIGHT_CITY_KEYS = (
+    *(f"state.{code}" for code in ("live", "stale", "offline", "paused", "loading", "rate_limited", "no_credentials",
+                                   "warning", "critical")),
+    *(f"band.{cause}" for cause in ("offline", "expired", "refused", "no_login")),
+    *(f"guard.{part}" for part in ("hold", "hold_for", "mark", "armed", "armed_list", "holding", "holding_list",
+                                   "limit", "cap", "resumes", "time_left")),
+    "limit.session", "limit.weekly", "limit.scoped", "limit.scoped_unnamed", "window.session", "window.weekly",
+    "share.of", "cap.tag", "resets.at", "pace.none", "pace.on", "pace.ahead", "pace.behind", "age.old",
+)
+
+
+def _night_city_drawn(words: dict[str, Any], surface: str = "floating@1") -> set[str]:
+    """The texts one recorded Night City state drew on one surface in every look (Blackwall's runs, each look's and
+    each transparent_bg one that has the surface)."""
+    found: set[str] = set()
+    for part in _night_city_runs(words):
+        runs = part.get(surface, [])
+        found |= {run[0] for run in (part[runs] if isinstance(runs, str) else runs)}
+    return found
+
+
+def test_the_english_catalog_is_night_citys_english() -> None:
+    """Each widget.night_city key of en.json, filled with the values English gives it, is the text Night City drew
+    before #95 (the record above), so a retyped value fails. The fills: {product} CLAUDE CODE, {command} /login,
+    {countdown} 2H 14M, {name} SESSION, WEEKLY or FABLE, {percent} the percent, {clock} the reset or resume time,
+    {time_left} the glued countdown, {number} the cap, {points} the signed points, {age} the age. guard.holding, the
+    lead of a guard holding with nothing to list, has no English text of its own: it is holding_list without its colon,
+    as the code gave such a lead."""
+    from usage_monitor import i18n
+    from usage_monitor.render import engine
+
+    en = i18n.load_catalog("en")
+    assert {key for key in en.english() if key.startswith("widget.night_city.")} == {
+        f"widget.night_city.{key}" for key in NIGHT_CITY_KEYS}
+
+    def text(key: str, **values: str) -> str:
+        return str(en.text(f"widget.night_city.{key}", values))
+
+    was = RECORDED["night_city"]
+    helpers = {state: words["helpers"] for state, words in was.items()}
+    strip = {"live": "normal3/auto", "stale": "stale/auto", "offline": "offline/auto", "paused": "paused/auto",
+             "loading": "loading/auto", "rate_limited": "rate_limited/auto", "no_credentials": "no_credentials/auto"}
+    for code, state in strip.items():
+        assert text(f"state.{code}") in _night_city_drawn(was[state], "strip/h48@1"), code
+    assert text("state.live") in _night_city_drawn(was["normal3/auto"])
+    assert text("state.warning") in _night_city_drawn(was["warning/auto"])
+    assert text("state.critical") == helpers["critical/auto"]["rows"][0]["chip"]
+    names = {"product": "CLAUDE CODE", "command": "/login"}
+    for cause, state in (("offline", "offline/auto"), ("expired", "stale/auto"), ("refused", "refused"),
+                         ("no_login", "no_credentials/auto")):
+        assert text(f"band.{cause}", **names) == helpers[state]["band"], cause
+        assert helpers[state]["band"] in _night_city_drawn(was[state]), cause
+    held = helpers["guard_hold_session/auto"]
+    assert text("guard.hold_for", countdown="2H 14M") == held["hold"]
+    assert text("guard.hold") == helpers["guard_hold_session/no_resume_time"]["hold"]
+    assert text("guard.mark") in _night_city_drawn(was["guard_armed/auto"])
+    assert helpers["guard_armed_no_caps"]["statement"] == [text("guard.armed"), ""]
+    caps = (("SESSION", "95%"), ("WEEKLY", "90%"))
+    assert helpers["guard_armed/auto"]["statement"] == [text("guard.armed_list"), ", ".join(
+        engine.glue(text("guard.limit", name=name, percent=cap)) for name, cap in caps)]
+    assert text("guard.holding") + ":" == text("guard.holding_list") == held["statement"][0]
+    time_left = engine.glue(text("guard.time_left", countdown="2H 14M"))
+    assert held["statement"][1] == (engine.glue(text("guard.limit", name="SESSION", percent="96%")) + " "
+                                    + engine.glue(text("guard.cap", percent="95%")) + ". "
+                                    + text("guard.resumes", clock=engine.glue("10:26 PM"), time_left=time_left) + ".")
+    rows = {row["key"]: row for row in helpers["normal3/auto"]["rows"]}
+    assert (text("limit.session"), text("limit.weekly")) == (rows["session"]["name"], rows["weekly"]["name"])
+    assert helpers["scoped_model/guard_holding"]["statement"][1].replace(engine.NO_BREAK, " ").startswith(
+        text("limit.scoped", name="FABLE") + " ")
+    assert text("limit.scoped_unnamed") == helpers["scoped_neither"]["rows"][2]["name"]
+    labels = [run[0] for run in was["normal3/auto"]["runs"]["strip/h48@1"] if run[1] == 10]    # x: STRIP_LABEL_X
+    assert [text("window.session"), text("window.weekly")] == labels
+    assert text("share.of", percent="50%") == rows["scoped:fable"]["share"]
+    assert text("cap.tag", number="95") == held["rows"][0]["chip"]
+    assert text("resets.at", clock="11:39 PM") == rows["session"]["reset"] == rows["session"]["reset_tooltip"]
+    paces = [helpers[f"pace/{shape}"]["rows"][0]["pace"][0] for shape in ("none", "on", "ahead_100", "behind_100")]
+    assert [text("pace.none"), text("pace.on"), text("pace.ahead", points="+100"),
+            text("pace.behind", points="-100")] == paces
+    for state, age in (("stale/auto", "41 M"), ("age/stale/100d", "100 D"), ("age/offline/59s", "59 S"),
+                       ("age/rate_limited/47h", "47 H")):
+        assert text("age.old", age=age) == helpers[state]["age"], state
+
+
+def test_night_citys_english_records_are_the_catalogs() -> None:
+    """Night City keeps its English words as records the older tests read, never drawn: STRIP_WORDS (the strip's
+    status words), the four DEFAULT_ band causes and the theme file's copy of them (night_city.json's extras.copy, the
+    mockup's record). Each is en.json's English, so the two cannot drift apart."""
+    from usage_monitor import i18n
+    from usage_monitor.data.models import ApiStatus
+    from usage_monitor.render import dump
+    from usage_monitor.render.skins import night_city as nc
+
+    en = i18n.load_catalog("en")
+    names = {"product": "CLAUDE CODE", "command": "/login"}
+
+    def text(key: str) -> str:
+        return str(en.text(f"widget.night_city.{key}", names))
+
+    codes = {ApiStatus.LIVE: "live", ApiStatus.STALE: "stale", ApiStatus.OFFLINE: "offline",
+             ApiStatus.PAUSED: "paused", ApiStatus.LOADING: "loading", ApiStatus.RATE_LIMITED: "rate_limited",
+             ApiStatus.NO_CREDENTIALS: "no_credentials"}
+    assert set(nc.STRIP_WORDS) == set(ApiStatus) == set(codes)
+    assert {status: word for status, word in nc.STRIP_WORDS.items()} == {
+        status: text(f"state.{code}") for status, code in codes.items()}
+    copy = dump.load_theme_objects()["night_city"].extras["copy"]
+    for default, copied, cause in ((nc.DEFAULT_OFFLINE, "offline", "offline"),
+                                   (nc.DEFAULT_STALE_AUTH, "stale_auth", "expired"),
+                                   (nc.DEFAULT_STALE_REFUSED, "stale_refused", "refused"),
+                                   (nc.DEFAULT_NO_LOGIN, "no_login", "no_login")):
+        assert default == copy[copied] == text(f"band.{cause}"), cause
 
 
 # ── The skin's words come from the catalog (#94 steps 2 and 3) ────────────────

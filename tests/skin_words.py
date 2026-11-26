@@ -1,17 +1,23 @@
 """Each skin's own English words, for tests/test_skin_words.py (#94 to #96).
 
 tests/fixtures/skin_words_english.json holds what a skin drew before its own words moved into the catalog, one section
-per skin: "nostromo" (#94), and Night City's and Gates' once #95 and #96 record theirs, before they edit. A section has
-the output of every helper of the skin that words a text, and every run of text each surface draws (the text, where it
-is set, its face, size, tracking and alignment, the pixel it lands on and its advance) at 1.0 and 1.25. The test holds
-the skin to it byte for byte. Reset times and resume clocks are local time, so the words are worked out in a fresh
-Python with the time zone pinned to UTC (``collect``), as tests/widget_words.py does.
+per skin: "nostromo" (#94), "night_city" (#95), and Gates' once #96 records it, before it edits. A section has the output
+of every helper of the skin that words a text, and every run of text each surface draws (the text, where it is set, its
+face, size, tracking and alignment, the pixel it lands on and its advance) at 1.0 and 1.25. The test holds the skin to it
+byte for byte. Reset times and resume clocks are local time, so the words are worked out in a fresh Python with the time
+zone pinned to UTC (``collect``), as tests/widget_words.py does.
 
 The states: every dump state in every show_scoped mode; tests/widget_words.py's edge states (the refused sign-in, the
 scoped limits named every way, a kind with no words, a limit gone from the reading) and guard states (each countdown
 shape, on a live and on a rate-limited reading, with no resume time); and the states a skin's own words hang on. For
 Nostromo: each sign-in reason on three rows, ages of 59 s, 59 min, 47 h and 100 d on a live and on a rate-limited
-reading, a pace that is unknown, on pace, 100 points ahead and 100 points behind, and a guard armed with no caps.
+reading, a pace that is unknown, on pace, 100 points ahead and 100 points behind, and a guard armed with no caps. For
+Night City: Nostromo's, and the same ages on a stale and on an offline reading (its band shows an age on the stale,
+offline and rate-limited ones), the guard holding over a stale and an offline reading with a resume time and without
+(the band's hold chip), and the guard armed while paused and while loading (the header's status chip beside the GUARD
+chip). Night City's variants place their runs by look (night_city.Look), so its section has Blackwall's runs at 1.0 and
+1.25, Relic's and Edgerun's at 1.0 (Mox is Relic's look), and Blackwall's and Edgerun's floating widget and strip with
+transparent_bg at 1.0 (Edgerun drops its plate there).
 
     python tests/skin_words.py --print SKIN      a skin's words, from the code this Python imports, as JSON
     python tests/skin_words.py --record SKIN     write a skin's section, worked out in a fresh Python; refused when the
@@ -53,6 +59,10 @@ def _limit(kind: str, percent: float, at: Any, label: str, **extra: Any) -> Any:
     return widget_words._limit(kind, percent, at, label, **extra)
 
 
+# An age in each unit at its widest (model.age_unit), by its shape's name.
+AGES: dict[str, int] = {"59s": 59, "59m": 59 * 60 + 59, "47h": 47 * 3600 + 59 * 60, "100d": 100 * 86400}
+
+
 def _nostromo_states() -> dict[str, Any]:
     """The states Nostromo's own words hang on, beyond the dump's and widget_words': each sign-in reason, the age in
     each unit at its widest, each pace, and a guard armed with no caps (its lead alone)."""
@@ -66,9 +76,8 @@ def _nostromo_states() -> dict[str, Any]:
     states["reason/no_login"] = dump.sample_state("no_credentials")
     base = [_limit("session", 40.0, now + timedelta(hours=3, minutes=27), "SESSION"),
             _limit("weekly_all", 20.0, now + timedelta(days=3), "WEEKLY")]
-    ages = {"59s": 59, "59m": 59 * 60 + 59, "47h": 47 * 3600 + 59 * 60, "100d": 100 * 86400}
     for status in (ApiStatus.LIVE, ApiStatus.RATE_LIMITED):
-        for shape, seconds in ages.items():
+        for shape, seconds in AGES.items():
             states[f"age/{status.name.lower()}/{shape}"] = dump._state(now, status, base, seconds)
     session = 18000
     paces = {
@@ -81,6 +90,33 @@ def _nostromo_states() -> dict[str, Any]:
         states[f"pace/{shape}"] = dump._state(now, ApiStatus.LIVE, [limit, base[1]], 12)
     armed = dump._state(now, ApiStatus.LIVE, base, 12)
     states["guard_armed_no_caps"] = replace(armed, guard={"state": "armed", "policy": {"enabled": True}})
+    return states
+
+
+def _night_city_states() -> dict[str, Any]:
+    """The states Night City's own words hang on, beyond the dump's and widget_words': Nostromo's (each sign-in reason,
+    each age shape on a live and a rate-limited reading, each pace, a guard armed with no caps), each age shape on a
+    stale and an offline reading too (the band's age), the guard holding over a stale and an offline reading with a
+    resume time and without (the band's hold chip), and the guard armed while paused and while loading (the header's
+    status chip beside the GUARD chip, which a short room leaves out)."""
+    from usage_monitor.data.models import ApiStatus
+    from usage_monitor.render import dump
+
+    now = dump.SAMPLE_NOW
+    states = _nostromo_states()
+    base = [_limit("session", 40.0, now + timedelta(hours=3, minutes=27), "SESSION"),
+            _limit("weekly_all", 20.0, now + timedelta(days=3), "WEEKLY")]
+    for status in (ApiStatus.STALE, ApiStatus.OFFLINE):
+        for shape, seconds in AGES.items():
+            states[f"age/{status.name.lower()}/{shape}"] = dump._state(now, status, base, seconds)
+    held = dump.sample_state("guard_hold_session").guard
+    for name in ("stale3", "offline3"):
+        source = dump.sample_state(name)
+        states[f"band_hold/{name}"] = replace(source, guard=held)
+        states[f"band_hold/{name}/no_resume_time"] = replace(source, guard={**held, "resume_at": None})
+    armed = dump.sample_state("guard_armed").guard
+    states["guard_armed_paused"] = replace(dump.sample_state("paused3"), guard=armed)
+    states["guard_armed_loading"] = replace(dump._state(now, ApiStatus.LOADING, None, 0), guard=armed)
     return states
 
 
@@ -110,12 +146,12 @@ def models(extra: Callable[[], dict[str, Any]], locale: Any = None) -> dict[str,
 # ── What a skin draws ─────────────────────────────────────────────────────────
 
 def runs(skin: Any, model: Any, theme: Any, variant: Any, heights: tuple[int, ...],
-         scales: tuple[float, ...] = SCALES) -> dict[str, list[list[Any]] | str]:
+         scales: tuple[float, ...] = SCALES, *, opts: Any = None) -> dict[str, list[list[Any]] | str]:
     """Every run of text each surface draws, in drawing order, at each of ``scales`` (the strip at each taskbar height
     of ``heights``, the tray icon at TRAY_SIZE): (text, x, baseline, face file without its .ttf, size, tracking, align,
     the layer's pixel x and y, advance) for a canvas run, (text, x, y, size, anchor) for a tray number. A surface that
     draws exactly what an earlier one of the state drew names it instead (the strip on a taskbar tall enough for
-    it)."""
+    it). With ``opts`` (RenderOptions) only the surfaces that take them are drawn, the floating widget and the strip."""
     from PIL import ImageDraw
 
     from usage_monitor.render import engine
@@ -149,13 +185,15 @@ def runs(skin: Any, model: Any, theme: Any, variant: Any, heights: tuple[int, ..
     try:
         for scale in scales:
             tag = f"{scale:g}"
-            take(f"floating@{tag}", lambda: skin.render_floating(model, theme, variant, scale, None))
-            take(f"tooltip@{tag}", lambda: skin.render_tooltip(model, theme, variant, scale))
+            take(f"floating@{tag}", lambda: skin.render_floating(model, theme, variant, scale, opts))
+            if opts is None:
+                take(f"tooltip@{tag}", lambda: skin.render_tooltip(model, theme, variant, scale))
             for height in heights:
                 take(f"strip/h{round(height * scale)}@{tag}",
-                     lambda: skin.render_taskbar(model, theme, variant, round(height * scale), scale, None))
-        tray[0] = True
-        take(f"tray/{TRAY_SIZE}", lambda: skin.render_tray_icon(model, theme, variant, TRAY_SIZE))
+                     lambda: skin.render_taskbar(model, theme, variant, round(height * scale), scale, opts))
+        if opts is None:
+            tray[0] = True
+            take(f"tray/{TRAY_SIZE}", lambda: skin.render_tray_icon(model, theme, variant, TRAY_SIZE))
     finally:
         engine.Canvas.text_layer, ImageDraw.ImageDraw.text = real_layer, real_draw
     return drawn
@@ -199,8 +237,57 @@ def _nostromo() -> dict[str, Any]:
     return found
 
 
-# The skins with a section, and what works their words out. #95 and #96 add theirs here, and record before they edit.
-SKINS: dict[str, Callable[[], dict[str, Any]]] = {"nostromo": _nostromo}
+def _night_city_helpers(model: Any, theme: Any, variant: Any) -> dict[str, Any]:
+    """What each of Night City's wording helpers gives for ``model``: per row its name, share tag, critical chip's word,
+    reset text on the widget and on the hover card, and pace with its kind; the band's cause and age, the hold chip's
+    word, the guard's statement and its lines at 1.0 and 1.25 (measured as render_tooltip measures them). The header's
+    LIVE tag, the GUARD chip, the WARN chip and the strip's words have no helper of their own: they are in the runs."""
+    from usage_monitor.render.skins import RenderOptions
+    from usage_monitor.render.skins import night_city as nc
+
+    rows = [{"key": row.key, "name": nc._row_name(row), "share": nc._share_tag(row, model.locale),
+             "chip": nc._chip_word(model, row), "reset": nc._reset_text(row, False),
+             "reset_tooltip": nc._reset_text(row, True), "pace": list(nc._pace_text(row))} for row in model.rows]
+    opts = RenderOptions()
+    pal = nc._palette(theme, variant, model, opts)
+    lines: dict[str, Any] = {}
+    for scale in SCALES:
+        lead, wrapped = nc._guard_lines(nc._Ink(nc._canvas(1, 1, scale, theme), pal, opts), model)
+        lines[f"{scale:g}"] = {"lead": lead, "lines": wrapped}
+    statement = nc._guard_statement(model)
+    return {"band": nc._band_text(theme, model), "age": nc._age_tag(model), "hold": nc._hold_word(model),
+            "statement": list(statement) if statement is not None else None, "guard_lines": lines, "rows": rows}
+
+
+# Night City's looks besides Blackwall's (its first variant): their runs at 1.0. Mox is Relic's look (night_city.Look).
+NIGHT_CITY_LOOKS = ("relic", "edgerun")
+# The variants drawn with transparent_bg at 1.0: Blackwall's boxes stay, Edgerun's plate goes (night_city._palette).
+NIGHT_CITY_CLEAR = ("blackwall", "edgerun")
+
+
+def _night_city() -> dict[str, Any]:
+    from usage_monitor.render import dump
+    from usage_monitor.render.skins import RenderOptions, get_skin
+
+    theme = dump.load_theme_objects()["night_city"]
+    skin, first = get_skin("night_city"), theme.variants[0]
+    heights = dump.TASKBAR_HEIGHTS_AT_1X
+    clear = RenderOptions(transparent_bg=True)
+    found: dict[str, Any] = {}
+    for name, model in models(_night_city_states).items():
+        found[name] = {
+            "helpers": _night_city_helpers(model, theme, first),
+            "runs": runs(skin, model, theme, first, heights),
+            "looks": {look: runs(skin, model, theme, theme.variant(look), heights, scales=(1.0,))
+                      for look in NIGHT_CITY_LOOKS},
+            "clear": {variant: runs(skin, model, theme, theme.variant(variant), heights, scales=(1.0,), opts=clear)
+                      for variant in NIGHT_CITY_CLEAR},
+        }
+    return found
+
+
+# The skins with a section, and what works their words out. #96 adds Gates' here, and records before it edits.
+SKINS: dict[str, Callable[[], dict[str, Any]]] = {"nostromo": _nostromo, "night_city": _night_city}
 
 
 # ── Running ───────────────────────────────────────────────────────────────────
