@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -57,6 +58,38 @@ def test_the_widgets_draw_only_the_english_on_record() -> None:
 def test_the_dashboard_shows_only_the_english_on_record() -> None:
     node()
     same_as_record("dashboard", english_left.dashboard())
+
+
+@ui_only
+def test_the_update_run_passes_reach_every_phase(tmp_path: Path) -> None:
+    """#58: each update-run pass offers a release the monitor installs itself (with the check's info, so Settings has one on
+    offer) and answers GET /api/update/status with one state of a run; Settings, opened, shows that state at its first ask.
+    So the scan above sees every text of the update's block, in the pseudo-locale. Lost and gone need three timed asks, and
+    the scan's timers never fire: the page tests hold those."""
+    node()
+    import update_check
+
+    runs = [name for name in english_left.PASSES["normal"] if name.startswith("update-run:")]
+    assert runs == [f"update-run:{state}" for state in english_left.UPDATE_RUNS]
+    assert {state[len("failed-"):] for state in english_left.UPDATE_RUNS if state.startswith("failed-")} == set(update_check.REASONS)
+    shown = {s["pass"]: s["body"] for s in english_left.scan_dashboard("normal", runs, tmp_path)["snapshots"]
+             if s["step"] == "settings"}
+    steps = {"downloading": ["now", "next", "next"], "unknown": ["now", "next", "next"], "connecting": ["now", "next", "next"],
+             "checking": ["done", "now", "next"], "starting": ["done", "done", "now"], "restarting": ["done", "done", "now"],
+             "stalled": ["stalled", "next", "next"]}
+    failed_in = {"digest": ["done", "failed", "next"], "helper": ["done", "done", "failed"]}
+    for state in english_left.UPDATE_RUNS:
+        body = shown[f"update-run:{state}"]
+        block = re.search(r'<div class="(nm-uprog[^"]*)" id="set-update-progress"([^>]*)>', body)
+        assert block and "hidden" not in block.group(2), state
+        code = state[len("failed-"):] if state.startswith("failed-") else ""
+        wanted = steps.get(state) or failed_in.get(code, ["failed", "next", "next"])
+        assert re.findall(r'data-step="(\w+)"', body) == wanted, state
+        assert block.group(1) == ("nm-uprog is-crit" if code else "nm-uprog is-warn" if state == "stalled" else "nm-uprog"), state
+        line = re.search(r'data-part="line"[^>]*>(.*?)</p>', body).group(1)
+        assert line.startswith("[") and line.endswith("]"), (state, line)              # the pseudo-locale's, not English
+    assert "data-pending" in shown["update-run:unknown"] and "data-pending" in shown["update-run:connecting"]
+    assert 'class="nm-cells hot"' in shown["update-run:failed-network"]
 
 
 def test_the_record_holds_sorted_entries_each_of_them_english() -> None:

@@ -460,6 +460,24 @@ def test_the_pending_marks_the_engine_reads_are_the_apps() -> None:
     assert "data-fx-pend" in code
 
 
+def test_the_update_block_adds_no_animation_or_transition() -> None:
+    """#58: the update's block on Settings moves only as each theme's existing pending bar and bar arrival do. No motion
+    sheet names it, no rule of a theme sheet that names it sets an animation or a transition, and the page's code for it
+    starts no animation of its own (it writes data-pending, which motion.js reads; never a motion mark)."""
+    for name in MOTION_CSS:
+        assert "nm-uprog" not in read(name), name
+    for theme_id in THEME_IDS:
+        named = [rule for rule in css_rules(read(f"themes/{theme_id}.css")) if "nm-uprog" in rule.header]
+        assert named, theme_id
+        for rule in named:
+            assert not re.search(r"\b(?:animation|transition)(?:-[a-z]+)?\s*:", rule.body), (theme_id, rule.header)
+    app = read("app.js")
+    section = app[app.index("// ── The update's progress (#58)"):]
+    section = section[:section.index("// ── ", 10)]
+    assert "data-pending" in section
+    assert not re.search(r"requestAnimationFrame|setInterval|\.animate\(|animation|transition|data-fx", section)
+
+
 # ── The engine on a minimal fake DOM (node) ───────────────────────────────────────
 
 MOTION_CHECKS_JS = r"""
@@ -1117,7 +1135,57 @@ const HOME = { left: 100, top: 100, right: 300, bottom: 200 };
   out.hoverWindow = { both, afterWindowLeave, afterBlur, afterHidden: marks(stat).hot };
 }
 
-console.log(JSON.stringify(out));
+// a running update on Settings (#58): the bar of a download whose size is not known yet is a placeholder (data-pending),
+// which the engine marks for the theme as it marks any other; when the size comes, the theme's arrival plays, only with motion
+function updateBarWorld(opts) {
+  const w = world(opts);
+  const dir = w.FX.director({
+    id: "gates", c0: 30, step: 30, total: 940, landMs: 700, barMs: 520, ghost: false, defer: false, card: [],
+    fallback: { at: 70, dur: 500 }, make: () => null
+  });
+  w.pends = [];
+  w.arrivals = [];
+  dir.pend = (el, kind) => { w.pends.push(kind); };
+  dir.arrive = (list) => { w.arrivals.push(list.map((s) => s.kind + ":" + s.key)); };
+  const card = new El("section");
+  card.className = "nm-card";
+  card.setAttribute("data-card", "system");
+  const block = new El("div");
+  block.className = "nm-uprog";
+  const bar = new El("div");
+  bar.className = "nm-cells";
+  bar.setAttribute("data-pending", "");
+  block.appendChild(bar);
+  card.appendChild(block);
+  w.main.appendChild(card);
+  bar.closest = (sel) => (sel === "[data-pending], .is-pending" ? (bar.hasAttribute("data-pending") ? bar : null) :
+    /\.nm-card/.test(sel) ? card : null);
+  w.main._lists[".nm-cells, .nm-ratio"] = [bar];
+  const before = w.observers.length;
+  w.FX.watch(w.main);
+  w.landed = () => {                           // app.js takes the mark off when the size comes; the observer hears it
+    bar.removeAttribute("data-pending");
+    w.observers[before].cb([{ type: "attributes", target: bar, attributeName: "data-pending" }]);
+  };
+  w.bar = bar;
+  return w;
+}
+
+async function updateBar() {
+  const turn = () => new Promise((resolve) => setImmediate(resolve));
+  const run = async (opts, reduce) => {
+    const w = updateBarWorld(opts);
+    if (reduce) { w.root.setAttribute("data-reduce-motion", "1"); }
+    await turn();
+    const marked = w.bar.getAttribute("data-fx-pend");
+    w.landed();
+    await turn();
+    return { pends: w.pends, marked, arrivals: w.arrivals, markAfter: w.bar.getAttribute("data-fx-pend") };
+  };
+  out.updateBar = { moving: await run({}, false), reducedBySetting: await run({}, true), reducedByPreference: await run({ reducedPref: true }, false) };
+}
+
+updateBar().then(() => console.log(JSON.stringify(out)), (error) => { console.error(error && error.stack ? error.stack : String(error)); process.exit(1); });
 """
 
 
@@ -1336,6 +1404,17 @@ def test_the_decoder_locks_left_to_right_keeps_punctuation_and_leaves_no_trace(e
 def test_one_frame_loop_runs_every_job_and_stops_when_none_is_left(engine: dict[str, Any]) -> None:
     j = engine["jobs"]
     assert j["counts"] == [2, 1, 0] and j["cancelled"] == ["cancel-b"] and j["idle"] is True
+
+
+@ui_only
+def test_a_pending_bar_in_settings_gets_the_placeholder_mark_and_lands_only_with_motion(engine: dict[str, Any]) -> None:
+    """#58: an update whose size is not known draws its bar with data-pending inside the System card. The engine marks it
+    data-fx-pend="bar" (each theme's placeholder bar) and, when app.js takes the mark off, hands it to the theme's arrival,
+    which nothing calls under reduced motion, by the setting or by the system's preference."""
+    bar = engine["updateBar"]
+    assert bar["moving"] == {"pends": ["bar"], "marked": "bar", "arrivals": [["bar:card:system|bar#1"]], "markAfter": None}
+    for reduced in ("reducedBySetting", "reducedByPreference"):
+        assert bar[reduced] == {"pends": ["bar"], "marked": "bar", "arrivals": [], "markAfter": None}, reduced
 
 
 @ui_only

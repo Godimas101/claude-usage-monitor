@@ -1793,4 +1793,393 @@ async function staleTexts() {
   reset();
 }
 
-failures().then(guardPolling).then(guardActions).then(signInActions).then(colourSaves).then(planHint).then(staleTexts).then(() => console.log(JSON.stringify(out)), (error) => { console.error(error && error.stack ? error.stack : String(error)); process.exit(1); });
+// ── a running update on Settings (#58): the steps, the bar, the sizes, the status line, and when the page asks ─────────────────
+// Every record is made up, shaped as GET /api/update/status answers (update_check.UpdateProgress.snapshot). It runs after the
+// other scenarios and puts back what it changes, so they never see a run.
+const UPDATE_NOW = Date.UTC(2026, 10, 26, 16, 0);
+const OFFERED = "2.4.0";
+const record = (extra) => Object.assign({ phase: "downloading", version: OFFERED, done: 0, total: null, age_s: 1, idle_s: 0,
+  stalled: false, reason: null, failed_in: null, http_status: null, limit_mb: 512, timeout_s: 60 }, extra || {});
+const unesc = (text) => String(text).replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+// What the page shows for a record: the view, the parts and the block's markup ("" for nothing).
+function runOf(a, p, update, offered, hold) {
+  const view = a.progressView(Object.assign(a.updateProgressState(), p), UPDATE_NOW, offered === undefined ? OFFERED : offered, update, hold);
+  if (!view) {
+    return { view: null, html: "" };
+  }
+  const parts = a.progressParts(view);
+  const html = a.progressHtml(parts);
+  const chips = [...html.matchAll(/<span class="nm-chip([^"]*)" data-tone="([^"]*)" data-step="([^"]*)">/g)];
+  return {
+    kind: view.kind, phase: view.phase, busy: view.busy, tone: parts.tone, err: parts.err, size: parts.size, text: parts.text, line: parts.line,
+    now: parts.now, pending: parts.bar.pending, hot: parts.bar.hot, sig: parts.barSig,
+    lit: (parts.cells.match(/class="on"/g) || []).length, part: (parts.cells.match(/class="part"/g) || []).length,
+    partFill: (/--f:([0-9.]+)%/.exec(parts.cells) || [])[1] || null,
+    steps: chips.map((m) => m[3]), tones: chips.map((m) => m[2]), classes: chips.map((m) => m[1].trim()), html
+  };
+}
+// A Settings block as the browser holds it: writing its markup makes its parts, which keep their data-sig and count their writes.
+function fakeBlock() {
+  const box = element("set-update-progress");
+  box.hidden = true;
+  box.className = "nm-uprog";
+  let html = "";
+  let parts = {};
+  const counts = { box: 0, steps: 0, cells: 0, size: 0, line: 0 };
+  const part = (name, sig, extra) => {
+    const el = element(name);
+    let inner = "";
+    Object.defineProperty(el, "innerHTML", { get: () => inner, set: (v) => { inner = v; counts[name] += 1; } });
+    if (sig !== null) { el.setAttribute("data-sig", sig); }
+    Object.assign(el, extra || {});
+    return el;
+  };
+  Object.defineProperty(box, "innerHTML", {
+    get: () => html,
+    set: (value) => {
+      html = value;
+      counts.box += 1;
+      parts = {};
+      if (!value) { return; }
+      const sig = (name) => { const m = new RegExp('data-part="' + name + '"[^>]*? data-sig="([^"]*)"').exec(value); return m ? unesc(m[1]) : null; };
+      const cellsSig = /class="nm-cells[^"]*" aria-hidden="true" data-sig="([^"]*)"/.exec(value);
+      parts.steps = part("steps", sig("steps"));
+      parts.cells = part("cells", cellsSig ? unesc(cellsSig[1]) : null, { className: /class="(nm-cells[^"]*)"/.exec(value)[1] });
+      if (/data-pending=""/.test(value)) { parts.cells.setAttribute("data-pending", ""); }
+      parts.bar = part("bar", null);
+      parts.bar.querySelector = (sel) => (sel === ".nm-cells" ? parts.cells : null);
+      parts.size = part("size", sig("size"));
+      parts.line = part("line", sig("line"), { className: /<p class="(nm-status[^"]*)" role="status"/.exec(value)[1] });
+    },
+  });
+  box.querySelector = (sel) => ({ '[data-part="steps"]': parts.steps, '[data-part="bar"]': parts.bar, '[data-part="size"]': parts.size,
+    '[data-part="line"]': parts.line })[sel] || null;
+  return { box, counts, parts: () => parts };
+}
+
+async function updateProgress() {
+  const saved = {
+    hash: box.location.hash, main: elements.main, fetch: box.fetch, set: box.setTimeout, clear: box.clearTimeout,
+    query: box.document.querySelector, visibility: box.document.visibilityState, progress: S.progress, update: S.update
+  };
+  const a = api;
+  const U = {};
+  const R = (extra) => ({ status: record(extra) });                // the page's state after one answer
+  const SUB = Object.freeze({ text: "" });                           // the S.update a run or a failure was drawn over
+
+  // 1. the bytes and the bar: 4.2 of 21.0 MB, a sixth of the cells and part of the next; done floored and the total rounded,
+  // so the done never reads the total's figure before the end
+  U.bytes = {
+    fifth: runOf(a, R({ done: 4404020, total: 22020096 })),
+    nearlyRoundsUp: runOf(a, R({ done: 22015000, total: 22020096 })),
+    midTenth: runOf(a, R({ done: 4466934, total: 22020096 })),     // 4.26 MB: floored 4.2, rounded 4.3
+    sameTenth: runOf(a, R({ done: 22030000, total: 22060000 })),
+    sameTenthEnd: runOf(a, R({ done: 22060000, total: 22060000 })),
+    whole: runOf(a, R({ done: 22020096, total: 22020096 })),
+    nothingYet: runOf(a, R({ done: 0, total: 22020096 })),
+    sizes: [[4404020, 22020096], [22015000, 22020096], [22030000, 22060000], [0, 1048576], [1048575, 1048576], [104857, 104857600]]
+      .map(([done, total]) => a.updateSizes(done, total)),
+  };
+  // 2. an unknown size is the theme's pending bar; before the first byte it says it is connecting
+  U.unknown = {
+    soFar: runOf(a, R({ done: 4404020, total: null })),
+    connecting: runOf(a, R({ done: 0, total: null })),
+    stalledUnknown: runOf(a, R({ done: 4404020, total: null, stalled: true })),
+  };
+  // 3. the steps of every phase, and of a failure in each step
+  U.steps = {
+    connecting: runOf(a, R({})), downloading: runOf(a, R({ done: 9, total: 99 })), stalled: runOf(a, R({ done: 9, total: 99, stalled: true })),
+    checking: runOf(a, R({ phase: "checking", done: 99, total: 99 })), starting: runOf(a, R({ phase: "starting", done: 99, total: 99 })),
+    restarting: runOf(a, R({ phase: "restarting", done: 99, total: 99 })),
+  };
+  const failed = (reason, failedIn, extra) => runOf(a, Object.assign(R(Object.assign({ phase: "failed", reason, failed_in: failedIn, done: 9, total: 99 }, extra || {})), { failOver: SUB }), SUB);
+  U.failedIn = {
+    downloading: failed("cut_short", "downloading"), checking: failed("digest", "checking", { done: 99 }),
+    starting: failed("helper", "starting", { done: 99 }), restarting: failed("error", "restarting", { done: 99 }), none: failed("error", null),
+  };
+  // 4. a stall and each failure say so, every code in its own words
+  const CODES = ["timeout", "network", "http", "redirect", "too_large", "cut_short", "digest", "rejected", "helper", "local", "error"];
+  U.failures = {};
+  for (const code of CODES) {
+    U.failures[code] = failed(code, "downloading", { http_status: code === "http" ? 404 : code === "redirect" ? 302 : null });
+  }
+  U.failures.unknownCode = failed("not-a-code", "downloading");
+  U.failures.httpWithoutStatus = failed("http", "downloading");
+  U.failures.tooLargeAnnounced = failed("too_large", "downloading", { done: 0, total: 600 * 1048576 });
+  U.failures.rejectedNoVersion = failed("rejected", "downloading", { version: null, done: 0, total: null });
+  U.stall = runOf(a, R({ done: 7759462, total: 22020096, stalled: true }));
+  // 5. the release on offer only
+  U.offer = {
+    otherVersion: runOf(a, R({ version: "2.3.0", done: 9, total: 99 })),
+    otherVersionFailed: runOf(a, Object.assign(R({ phase: "failed", reason: "network", version: "2.3.0" }), { failOver: SUB }), SUB),
+    nothingOnOffer: runOf(a, R({ done: 9, total: 99 }), undefined, ""),
+    idle: runOf(a, R({ phase: "idle", version: null, age_s: 0 })),
+    none: runOf(a, Object.assign(R({ done: 9, total: 99 }), { none: true })),
+  };
+  // 6. just after a click: a record with no run yet, or a failure older than the click, is the click's run not begun; a run
+  // that is going is shown as it is, however old
+  const clicked = (ago, extra, p) => runOf(a, Object.assign({ clickedAt: UPDATE_NOW - ago, failOver: SUB }, R(extra), p || {}), SUB);
+  U.afterClick = {
+    nothingYet: runOf(a, { clickedAt: UPDATE_NOW - 200, status: null }),
+    idle: clicked(500, { phase: "idle", version: null, age_s: 0 }),
+    olderFailure: clicked(1000, { phase: "failed", reason: "network", age_s: 40 }),
+    newFailure: clicked(2000, { phase: "failed", reason: "network", age_s: 1.5 }),
+    olderRun: clicked(1000, { phase: "downloading", done: 4404020, total: 22020096, age_s: 60 }),
+    graceOver: clicked(3500, { phase: "idle", version: null, age_s: 0 }),
+  };
+  // 7. the link lost while the update downloads, or once the monitor has begun to close for it; never with no run
+  const missed = (active, misses, extra) => runOf(a, Object.assign(R(extra), { misses, active }));
+  U.lost = {
+    downloading: missed("downloading", 3, { done: 4404020, total: 22020096 }),
+    checking: missed("checking", 3, { phase: "checking", done: 99, total: 99 }),
+    restarting: missed("restarting", 3, { phase: "restarting", done: 99, total: 99 }),
+    starting: missed("starting", 3, { phase: "starting", done: 99, total: 99 }),
+    twoMisses: missed("downloading", 2, { done: 4404020, total: 22020096 }),
+    noRun: missed("", 3, { phase: "idle", version: null }),
+    afterClickNoAnswer: runOf(a, { clickedAt: UPDATE_NOW - 1500, active: "downloading", misses: 3, status: null }),
+  };
+  // 8. the owner's hold on the Check step: 0 by default (the Check chip shows done at once), and a hold shows it a while
+  const held = (ago, hold) => runOf(a, Object.assign(R({ phase: "starting", done: 99, total: 99 }), { checkAt: UPDATE_NOW - ago }), undefined, undefined, hold);
+  U.hold = { constant: a.UPDATE_CHECK_HOLD_MS, byDefault: held(300), holding: held(300, 1000), heldLongEnough: held(1500, 1000) };
+  // 9. a failure lasts until the next click on an update button gives S.update a new answer
+  U.lasts = {
+    sameAnswer: failed("network", "downloading"),
+    newAnswer: runOf(a, Object.assign(R({ phase: "failed", reason: "network", failed_in: "downloading" }), { failOver: SUB }), { text: "CHECKING…" }),
+    neverShown: runOf(a, R({ phase: "failed", reason: "network", failed_in: "downloading" }), SUB),
+  };
+  // 10. the texts are the catalog's when they are drawn, not when the page loaded
+  {
+    const key = "settings.update.progress.failed.network";
+    const was = EN_CATALOG.fallback[key];
+    EN_CATALOG.fallback[key] = "Changed after the page loaded.";
+    U.drawnAtDrawTime = failed("network", "downloading").line;
+    EN_CATALOG.fallback[key] = was;
+  }
+
+  // 11. the bar's data-sig moves with the part of a cell: a block that arrives redraws the cells even when no cell fills
+  {
+    const block = fakeBlock();
+    const parts = (extra) => a.progressParts(a.progressView(Object.assign(a.updateProgressState(), R(extra)), UPDATE_NOW, OFFERED, SUB));
+    a.patchUpdateBlock(block.box, parts({ done: 4404020, total: 22020096 }));
+    const first = Object.assign({}, block.counts);
+    a.patchUpdateBlock(block.box, parts({ done: 4404020, total: 22020096 }));
+    const same = Object.assign({}, block.counts);
+    a.patchUpdateBlock(block.box, parts({ done: 4500000, total: 22020096 }));
+    const partMoved = Object.assign({}, block.counts);
+    const cellsHtml = block.parts().cells.innerHTML;
+    a.patchUpdateBlock(block.box, parts({ phase: "checking", done: 22020096, total: 22020096 }));
+    const nextStep = Object.assign({}, block.counts);
+    a.patchUpdateBlock(block.box, null);
+    U.patches = { first, same, partMoved, nextStep, cellsHtml, hiddenAfter: block.box.hidden, emptyAfter: block.box.innerHTML === "" };
+  }
+
+  // The page's real paths, against a recording monitor: Settings opened, the asks, the clicks.
+  const main = element("main");
+  const statusLine = element("set-update-status");
+  const install = element("install");
+  const skip = element("skip");
+  let block = fakeBlock();
+  let drawn = "";
+  Object.defineProperty(main, "innerHTML", { get: () => drawn, set: (html) => { drawn = html; } });
+  main.querySelector = (sel) => ({ "#set-update-progress": block.box, "#set-update-status": statusLine,
+    '[data-action="install-update"]': install, '[data-action="skip-update"]': skip })[sel] || null;
+  elements.main = main;
+  box.document.querySelector = (sel) => (sel === "#main" ? main : null);
+  const timers = [];
+  box.setTimeout = (fn, ms) => { timers.push({ fn, ms }); return timers.length; };
+  box.clearTimeout = () => {};
+  const calls = [];
+  let replies = {};
+  box.fetch = (url, init) => {
+    const key = ((init && init.method) || "GET") + " " + url;
+    if (/\/api\/update\//.test(key)) { calls.push(key); }
+    const hit = typeof replies[key] === "function" ? replies[key]() : replies[key];
+    if (hit === "lost") { return Promise.reject(new Error("link lost")); }
+    return answer(...(hit || [404, { error: "not in this test" }]))();
+  };
+  const offering = (version) => ({ state: { status: "live" }, settings: {}, model_names: {},
+    update: version ? { available: true, version, skipped: false, skip_version: null, info: { version, can_self_update: true } } : { available: false } });
+  const STATUS = "GET /api/update/status";
+  const fresh = (version) => {
+    reset();
+    S.update = { text: "" };
+    S.skipped = "";
+    S.progress = a.updateProgressState();
+    S.data = offering(version === undefined ? OFFERED : version);
+    block = fakeBlock();
+    calls.length = 0;
+    timers.length = 0;
+    install.removeAttribute("aria-disabled");
+    statusLine.hidden = false;
+  };
+  const opens = async (hash) => { box.location.hash = hash; S.page = null; api.renderPage(); await settle(); };
+  const look = () => ({
+    shown: !block.box.hidden, cls: block.box.className, html: block.box.innerHTML, line: statusLine.textContent, lineHidden: !!statusLine.hidden,
+    busy: install.getAttribute("aria-disabled"), calls: calls.slice(), quick: timers.filter((t) => t.ms === a.UPDATE_POLL_MS).length,
+    said: Object.keys(block.parts()).length ? block.parts().line.getAttribute("data-sig") : null,
+    size: Object.keys(block.parts()).length ? block.parts().size.getAttribute("data-sig") : null,
+    steps: Object.keys(block.parts()).length ? [...block.parts().steps.getAttribute("data-sig").matchAll(/data-step="(\w+)"/g)].map((m) => m[1]) : null
+  });
+  // the quick asks that are due (any other timer the page set is dropped: nothing here waits on one)
+  const fire = async () => { const due = timers.filter((t) => t.ms === a.UPDATE_POLL_MS); timers.length = 0; due.forEach((t) => t.fn()); await settle(); };
+  const tickAfter = async (ms) => { S.progress.askedAt = Date.now() - ms; a.updateTick(); await settle(); };
+
+  // 12. a page opened while an update runs shows it at its first ask, and asks again in half a second
+  fresh();
+  replies = { [STATUS]: [200, record({ done: 4404020, total: 22020096, age_s: 3 })] };
+  await opens("#settings");
+  U.flow = { opened: look() };
+  await fire();
+  U.flow.again = look();
+  replies[STATUS] = [200, record({ phase: "idle", version: null, done: 0, total: null, age_s: 0 })];
+  await fire();
+  U.flow.idle = look();                                               // no run: today's line, and no quick ask
+  await tickAfter(1000);
+  U.flow.tickEarly = look();
+  await tickAfter(3000);
+  U.flow.tickDue = look();
+  box.document.visibilityState = "hidden";
+  await tickAfter(9000);
+  a.askUpdateStatus();
+  await settle();
+  U.flow.hidden = look();
+  box.document.visibilityState = "visible";
+  S.page = "overview";
+  await tickAfter(9000);
+  a.askUpdateStatus();
+  await settle();
+  U.flow.otherPage = look();
+  S.page = "settings";
+  S.data = offering(null);
+  await tickAfter(9000);
+  U.flow.noOffer = look();
+  S.data = offering(OFFERED);
+  replies[STATUS] = [404, { error: "not found" }];
+  await tickAfter(9000);
+  await tickAfter(9000);
+  U.flow.notFound = look();
+  fresh();
+  replies = { [STATUS]: [501, { error: "update status is not available" }] };
+  await opens("#settings");
+  await tickAfter(9000);
+  U.flow.notAvailable = Object.assign(look(), { none: S.progress.none });
+  // a page change stops the quick asks
+  fresh();
+  replies = { [STATUS]: [200, record({ done: 9, total: 99 })] };
+  await opens("#settings");
+  const quickBefore = timers.filter((t) => t.ms === a.UPDATE_POLL_MS).length;
+  const cleared = [];
+  box.clearTimeout = (id) => { cleared.push(id); };
+  const pending = S.progress.timer;
+  await opens("#about");                                            // another page: the quick ask is called off
+  const timerAfter = S.progress.timer;
+  box.clearTimeout = () => {};
+  await fire();                                                     // and a timer that fires anyway asks nothing there
+  U.flow.pageChange = { quickBefore, calledOff: pending > 0 && cleared.indexOf(pending) >= 0, timer: timerAfter, calls: calls.slice() };
+
+  // 13. Install update: the start at once, then the run; a second click sends nothing; a check's answer shows under the run;
+  // the failure that ends it shows until the next click on an update button
+  fresh();
+  replies = {
+    [STATUS]: [200, record({ phase: "failed", reason: "network", failed_in: "downloading", age_s: 40 })],
+    "POST /api/update/check": [200, { ok: true, result: { available: true, version: OFFERED, checked: true } }],
+    "GET /api/state": [200, offering(OFFERED)],
+    "POST /api/update/apply": [200, { ok: true, result: { started: true, mode: "installer" } }],
+    "POST /api/update/skip": [200, { ok: true }],
+  };
+  await opens("#settings");
+  U.click = { oldFailure: look() };
+  api.settingsClick(click("check-update"));
+  await settle();
+  U.click.checked = look();
+  calls.length = 0;
+  api.settingsClick(click("install-update"));
+  await settle();
+  U.click.started = look();                                          // the record still has the old failure: the start shows
+  replies[STATUS] = [200, record({ done: 4404020, total: 22020096, age_s: 0.4 })];
+  await fire();
+  U.click.running = look();
+  calls.length = 0;
+  api.settingsClick(click("install-update"));
+  await settle();
+  U.click.secondClick = look();
+  api.settingsClick(click("check-update"));
+  await settle();
+  U.click.checkDuringRun = look();
+  replies[STATUS] = [200, record({ phase: "failed", reason: "cut_short", failed_in: "downloading", done: 4404020, total: 22020096, age_s: 0 })];
+  await fire();
+  U.click.failed = look();
+  api.settingsClick(click("skip-update"));
+  await settle();
+  U.click.skipped = look();
+  // a run the tray starts later shows, and its failure shows in turn
+  S.update = { text: "" };
+  replies[STATUS] = [200, record({ done: 9, total: 99, age_s: 0.2 })];
+  await tickAfter(9000);
+  U.click.trayRun = look();
+  replies[STATUS] = [200, record({ phase: "failed", reason: "helper", failed_in: "starting", done: 99, total: 99, age_s: 0 })];
+  await fire();
+  U.click.trayFailed = look();
+
+  // 14. the link lost: three asks with no answer
+  const losing = async (rec) => {
+    fresh();
+    replies = { [STATUS]: [200, rec] };
+    await opens("#settings");
+    replies[STATUS] = "lost";
+    const seen = [];
+    for (let i = 0; i < 3; i++) {
+      await fire();
+      await tickAfter(9000);
+      seen.push(look());
+    }
+    await tickAfter(9000);
+    return { seen, after: look() };
+  };
+  U.linkLost = {
+    downloading: await losing(record({ done: 4404020, total: 22020096 })),
+    restarting: await losing(record({ phase: "restarting", done: 99, total: 99 })),
+    idle: await losing(record({ phase: "idle", version: null })),
+  };
+
+  // 15. the banner and the line under the buttons are what they were, with a run and without
+  fresh();
+  S.data = Object.assign(offering(OFFERED), { update: { available: true, version: OFFERED, url: RELEASE, can_self_update: true, skipped: false, skip_version: "", info: { version: OFFERED } } });
+  S.update = { text: "DOWNLOADING AND CHECKING THE UPDATE; IF IT CHECKS OUT, THE MONITOR CLOSES AND RESTARTS BY ITSELF.", version: OFFERED };
+  const without = { banner: a.updateBanner(), line: a.updateLine() };
+  S.progress = Object.assign(a.updateProgressState(), { status: record({ done: 4404020, total: 22020096 }), clickedAt: Date.now() });
+  U.untouched = { without, with: { banner: a.updateBanner(), line: a.updateLine() }, busy: a.updateRunBusy() };
+
+  box.location.hash = saved.hash;
+  elements.main = saved.main;
+  box.fetch = saved.fetch;
+  box.setTimeout = saved.set;
+  box.clearTimeout = saved.clear;
+  box.document.querySelector = saved.query;
+  box.document.visibilityState = saved.visibility;
+  S.progress = saved.progress;
+  S.update = saved.update;
+  S.page = null;
+  S.formKey = null;
+  S.skipped = "";
+  reset();
+  out.updateProgress = U;
+}
+
+// The sizes in another language: a French page (fr-FR) whose catalog has no update text yet shows English's, marked lang="en",
+// with the figures in French numbers.
+{
+  const french = { setting: "fr", language: "fr", system: "fr", format: "fr-FR", clock: 24, offered: ["en", "fr"] };
+  const meta = (sel) => (sel === 'meta[name="monitor-locale"]' ? { getAttribute: (k) => (k === "content" ? JSON.stringify(french) : null) } : null);
+  const fr = load(meta, { MonitorI18n: { language: "fr", strings: {}, fallback: EN_CATALOG.fallback } }).api;
+  const view = (extra) => fr.progressParts(fr.progressView(Object.assign(fr.updateProgressState(), { status: record(extra), failOver: fr.S.update }),
+    UPDATE_NOW, OFFERED, fr.S.update));
+  const sized = view({ done: 4404020, total: 22020096 });
+  out.updateFrench = {
+    size: sized.size, text: sized.text, soFar: view({ done: 4404020, total: null }).size, step: sized.steps,
+    timeout: view({ phase: "failed", reason: "timeout", failed_in: "downloading" }).line,
+    tooLarge: view({ phase: "failed", reason: "too_large", failed_in: "downloading" }).line,
+  };
+}
+
+failures().then(guardPolling).then(guardActions).then(signInActions).then(colourSaves).then(planHint).then(staleTexts).then(updateProgress).then(() => console.log(JSON.stringify(out)), (error) => { console.error(error && error.stack ? error.stack : String(error)); process.exit(1); });

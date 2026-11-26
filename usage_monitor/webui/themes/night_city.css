@@ -667,6 +667,19 @@ h1, h2, h3, p, figure, dl, dd { margin: 0; }
 .nm-update .nm-status { flex: 1 0 100%; min-height: 0; }
 .nm-update .nm-status:empty { display: none; }
 
+/* a running update on Settings (#58): the guard card's parts. A step done is a plate in the bar's colour, filled as the cells
+   are (an outline would match the accent tag where the bar is the accent, as in Edgerun); now is the plain accent tag; next is
+   dimmed as a disabled control is; a stall is the warn plate, a failure the danger plate. The bar takes the limit cards' warn
+   and hazard fills. */
+.nm-uprog { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.nm-uprog .nm-verdict { flex-wrap: wrap; row-gap: 6px; padding-bottom: 0; }
+.nm-uprog .nm-chip[data-step="done"] { --oc: var(--nc-bar); --of: var(--nc-bar); color: var(--nc-ink); }
+.nm-uprog .nm-chip[data-step="next"] { --oc: var(--nc-hair); color: var(--nc-ink-3); opacity: .45; }
+.nm-uprog.is-warn .nm-cells i.on { background: var(--nc-warn); }
+.nm-uprog.is-warn .nm-cells i.part { background: linear-gradient(90deg, var(--nc-warn) var(--f, 0%), var(--nc-track) var(--f, 0%)); }
+.nm-uprog.is-crit .nm-cells i.on { background: var(--nc-hazard); }
+.nm-uprog.is-crit .nm-cells i.part { background: linear-gradient(90deg, var(--nc-hz-a) var(--f, 0%), var(--nc-track) var(--f, 0%)); }
+
 /* the sign-in help: the hazard-framed status line grown into a panel, for a missing or an expired sign-in */
 .nm-help { flex-direction: column; align-items: flex-start; gap: 8px; padding: 14px 18px; }
 .nm-help > b { margin: 0; font-size: 13px; }

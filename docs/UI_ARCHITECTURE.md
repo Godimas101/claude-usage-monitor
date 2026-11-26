@@ -591,7 +591,10 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   inserted after any case change, with `tCode()` (a block) or `tPath()` (in a sentence): `lang="en"`, `translate="no"`
   and `.nm-path`'s `text-transform: none`. Names (models, plans, folders, sessions, tools, Claude Code) go in `tName()`:
   `translate="no"` only, with no `lang` of its own, so the theme's capitals reach them by the page's language (Chris's
-  decision on #91: Turkish `HAİKU`).
+  decision on #91: Turkish `HAİKU`). A running update on Settings (#58) takes its words from `settings.update.progress.*`
+  (natural case: Nostromo and Night City set the chips and the status line in capitals in CSS, the sizes line as written);
+  its sizes are the language's numbers inside the catalog's words, and "MB" is a word of the string, for a translator to
+  abbreviate as the language does (French `Mo`). #97 must not reuse that prefix.
 - **The page.** `_send_index` writes `<html lang>`, the `monitor-locale` meta (the locale as JSON) and the catalog's
   `<script src="/static/i18n/<lang>.js">` before `charts.js`, and fills the shell's own words, all before the theme,
   which can give up on a page it cannot resolve. A marked element holds text only: `data-i18n="<key>"` replaces its
@@ -866,7 +869,9 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   reads each sample state's tooltip plain and with the dev mark, and the menu with every row. The dashboard runs on a
   small DOM (`tests/mini_dom.js`, `tests/english_scan.js`) through every
   dev-server scenario, as an installed monitor and as a dev instance, and in some scenarios with its actions, its
-  update banner and its loading and failed states. The scan leaves out numbers (the pseudo-locale's U+202F groups and
+  update banner, Settings during an update in each state of its run (the `update-run:*` passes, #58; a lost link and the
+  monitor closing need timed asks the scan does not make, and the page tests hold them) and its loading and failed
+  states. The scan leaves out numbers (the pseudo-locale's U+202F groups and
   U+00A0 before `%` read as English's, and a digit, a plain space and `%` as a digit and `%`, since a widget's wrap
   gives the glued U+00A0 back as a space), what the page marks as data (`translate="no"`, or a `lang` other than the
   page's), the names the skins draw, the product name and #86's brand marks. On the widgets it also leaves out the dev
@@ -1306,7 +1311,35 @@ default browser instead, and the exit code says so (below).
   about, so it never shows against a newer one. The line under the Settings buttons follows the same rule (`updateLine`), and a
   check's words are tied there through `S.update.offered`, which keeps them out of the banner. Without `--update-demo` the dev
   server fakes no update (its `info` callback returns nothing): to see the banner, answer `/api/state` with an `update` block
-  (a Playwright route does it), or start it with `--update-demo` (Dev isolation), which offers a made-up release.
+  (a Playwright route does it), or start it with `--update-demo` (Dev isolation), which offers a made-up release. The banner
+  keeps its one line after *Update now*; Settings shows the run (below; the banner's turn is #114).
+- **A running update on Settings (#58).** The System card has `#set-update-progress` (`.nm-uprog`) between its buttons and
+  its line, filled from `GET /api/update/status` (the record, "Updates"): three step chips (Download, Check, Restart: done,
+  under way, still to come, stalled or failed, with the guard card's tones), the limit cards' 32-cell bar, the sizes
+  ("4.2 of 21.0 MB": 1 MB is 1,048,576 bytes, the total rounded and the done floored to a tenth, and written a tenth lower
+  where it would read the total's figure before the last byte) and a status line. An unknown size is a pending bar
+  (`data-pending`, so each theme draws its placeholder bar), "4.2 MB so far" under it, and before the first byte
+  "Connecting to GitHub…". The page asks every `UPDATE_POLL_MS` (500 ms) while a run shows, every `UPDATE_IDLE_POLL_MS`
+  (3 s, from `tick()`) while Settings is open with a release on offer (the tray can start a run), never while the window is
+  hidden, another page is open or nothing is on offer, and not again after a 404 or a 501 (an older monitor, the dev server
+  without `--update-demo`). A run shows only for the release on offer (a failure whose link named no version too). For
+  `UPDATE_CLICK_GRACE_MS` (3 s) after *Install update* answered `installer`, a record with no run yet (none, idle, or a
+  failure older than the click) shows the run's start; a running record shows as it is. Three asks in a row with no answer
+  (`UPDATE_LOST_AFTER`) read as a lost link while the update downloads or is checked, and as the monitor closing once it
+  had begun to (`starting`, `restarting`; no version is named, since a helper that dies brings the old one back), after
+  which nothing more is asked; with no run, nothing changes (the header already says the link is lost). A failure shows
+  until the next click on an update button (owner question 4: `updateFailureLasts`; each click gives `S.update` a new
+  answer, which then shows) or a new run. While the block shows, the line under the buttons is hidden when it is the
+  run's own (an answer given after the run began shows under the block), and *Install update* is `aria-disabled` while a
+  run goes: `settingsClick` sends nothing for it. The Check step is shown done as soon as the record has passed it
+  (owner question 1: `UPDATE_CHECK_HOLD_MS` is 0). The block is drawn once and patched part by part (`data-sig` on the
+  chips, the cells, with the part of the next cell, the sizes and the line), so an answer every half second rebuilds only
+  what moved. It holds no `.nm-big`, `.nm-stat-v` or `.nm-cmp-n`, which Night City glitches on every change. Each failure
+  code has its own words (`UPDATE_FAILED`, a table of functions, so a text is the catalog's when it is drawn).
+  `installUpdate` has one line for it (`watchUpdateRun()`, after the installer text): #97, which moves the update rows'
+  English to the catalog after this, keeps it, the hooks in `syncUpdate` and `settingsClick`, and `settings.update.progress.*`.
+  The Starbase (#66, #67) and Overseer (#80) sheets will need `.nm-uprog` rules. `tests/browser/update_probe.js` (Playwright,
+  not part of pytest) checks it in a real browser in every look, with and without reduced motion, and shoots every state.
 - **Usage guard card (#27).** The Settings card's two blocks, the live status (`#guard-live`) and the one-click setup
   (`#guard-setup`), are filled by `syncGuard` from `/api/guard`, asked once at a time every `GUARD_POLL_MS` while Settings is
   on screen; a block is rewritten only when its markup changed (`data-sig`), so a poll never drops the focus. The status is
@@ -1425,8 +1458,9 @@ animation of their own.
 rule hangs on it and fills `backwards`, so removing it leaves exactly the markup `app.js` wrote) and `fx-quiet` (the page was
 just redrawn and the pointer has not moved since: one-shot hover animations wait, and a hover transition is taken away, never
 the hover look itself; `app.js` and the engine both set it and both clear it on the first pointer or wheel movement). On a
-slot: `data-pending` (read by the engine, written by `app.js`), `data-fx-pend="num | text | bar | rail | chart"` (written by the
-engine for the themes' CSS), `.fx-land` (a bar, rail or chart whose data just arrived plays its fill from its own start, with
+slot: `data-pending` (read by the engine, written by `app.js`; a running update whose size is not known yet is a pending bar
+too, #58, so each theme draws its placeholder bar there and its arrival when the size comes, and nothing else of the update's
+block moves), `data-fx-pend="num | text | bar | rail | chart"` (written by the engine for the themes' CSS), `.fx-land` (a bar, rail or chart whose data just arrived plays its fill from its own start, with
 no page stagger), and `data-fx` / `data-fx-d` (a figure whose characters the script draws: the ghost text). The orders the CSS
 reads are custom properties the engine writes (`--fx-i` a card's order, clamped to 8 so a long page ends inside its budget,
 `--fx-k` a cell's order in its bar, `--fx-c`, `--fx-p`, `--fx-d`, `--fx-r` for chart columns, pips, dots and rows, `--fx-cn` a

@@ -33,6 +33,13 @@
  *             does) + .nm-actions (button.nm-btn[data-action=update-now | update-notes | update-skip]) + .nm-status.
  *             The first banner of every page but Settings (which has the same buttons in its System card), present only while
  *             /api/state reports a release that was not skipped.
+ * Progress    A running update on Settings (#58): .nm-uprog#set-update-progress in the System card, hidden while there is none
+ *             to show; .is-warn while the download stalls, .is-crit once the update failed or the dashboard lost the monitor.
+ *             Made of the guard card's parts: .nm-verdict > three .nm-chip steps (Download, Check, Restart), each with
+ *             data-step=done|now|next|stalled|failed and the tones of the guard's chips (done is-ok, now acc, next neutral,
+ *             stalled solid is-warn, failed solid is-crit); div[role=progressbar] > .nm-cells (data-pending while the size is
+ *             not known; .hot once it failed); .nm-story (the sizes, as written); .nm-status (what it is doing). A theme tells
+ *             the three steps apart with what it has and adds no motion: an unknown size is the theme's own pending bar.
  * Help        .nm-msg.nm-help[role=region] is the status banner grown into a help panel, for the two statuses only the user can fix
  *             (no_credentials: the steps to sign in; stale: what to do about an expired sign-in). b (the heading) + p + ol (the steps;
  *             a li may hold a .nm-cmd[data-command] > code.nm-path + button.nm-btn[data-action=copy-command][data-command]; the stale
@@ -406,6 +413,7 @@
     guardLost: false,        // the last ask got no answer
     resumeBusy: false,       // "Resume now" is being sent
     setup: { busy: "", result: null },   // "install" or "remove" while a click runs; the result of the last click
+    progress: updateProgressState(),     // what the page knows of a running update (#58; see "The update's progress")
     check: { busy: false, sent: false, from: "", at: 0, still: false, failed: false },   // "Check again" on the sign-in help (see checkAgain)
     copy: "",                // the copy button's answer for a moment: "copied" or "select"
     copyOf: "",              // and which button gives it: "install" or "start"
@@ -3392,6 +3400,7 @@
         toggleRow("check_updates", "Check for updates", "Look for a newer release once in a while.") +
         '</div><div class="nm-actions" id="set-update-actions"><button class="nm-btn" type="button" data-action="check-update">Check for updates now</button>' +
         '<button class="nm-btn" type="button" data-action="install-update" hidden>Install update</button><button class="nm-btn" type="button" data-action="skip-update" hidden>Skip this version</button></div>' +
+        '<div class="nm-uprog" id="set-update-progress" hidden></div>' +
         '<p class="nm-status" id="set-update-status" role="status"></p></div></section>' +
         "</div>" +
         '<p class="nm-status" id="set-status" role="status" aria-live="polite"></p>';
@@ -3401,6 +3410,7 @@
       S.guardAt = 0;
       syncSettings(main);
       pollGuard();                                        // what was last known shows at once, and is asked for again
+      askUpdateStatus();                                  // the same for a running update, while a release is on offer
       return;
     }
     syncSettings(main);
@@ -4001,6 +4011,7 @@
     if (status) {
       status.textContent = updateLine();
     }
+    syncUpdateProgress(main);                          // a running update: its block, the line hidden under it, Install busy
   }
 
   /* The release the state offers, "" for none. */
@@ -4600,7 +4611,9 @@
         syncSettings($("#main"));
       });
     } else if (action === "install-update") {
-      installUpdate();
+      if (!updateRunBusy()) {                          // while a run goes the button is aria-disabled and a click sends nothing (#58)
+        installUpdate();
+      }
     } else if (action === "skip-update") {
       skipUpdate();
     } else if (action === "language-apply") {
@@ -4637,6 +4650,7 @@
         text = "OPENED THE RELEASE PAGE IN YOUR BROWSER.";
       } else if (mode === "installer") {
         text = "DOWNLOADING AND CHECKING THE UPDATE; IF IT CHECKS OUT, THE MONITOR CLOSES AND RESTARTS BY ITSELF.";
+        watchUpdateRun();
       } else {
         text = "NO UPDATE WAS STARTED.";
       }
@@ -4678,6 +4692,466 @@
     } else {
       renderPage();
     }
+  }
+
+  // ── The update's progress (#58) ─────────────────────────────────────────────────
+  // While an update runs, Settings → System shows its three steps, the limit cards' bar, the sizes and what it is doing, read
+  // from GET /api/update/status: the updater's record (update_check.PROGRESS), ids and numbers that the page words. The page
+  // asks every UPDATE_POLL_MS while a run is shown and every UPDATE_IDLE_POLL_MS while Settings is open with a release on offer
+  // (the tray can start a run too); never while the window is hidden, another page is open or nothing is on offer, and not
+  // again once the monitor has no such route (404 or 501: an older monitor, or the dev server without --update-demo). The
+  // banner on the other pages keeps its one line (#114).
+
+  var UPDATE_STATUS_PATH = "/api/update/status";
+  var UPDATE_POLL_MS = 500;                // while a run is shown
+  var UPDATE_IDLE_POLL_MS = 3000;          // while Settings is open with a release on offer (the guard card's cadence)
+  var UPDATE_LOST_AFTER = 3;               // asks in a row with no answer before a running update counts as lost
+  var UPDATE_CLICK_GRACE_MS = 3000;        // after Install update, how long its start shows before the record has the run
+  // Owner question 1 on #58: how long the Check step stays the current one once the record has passed it. The SHA-256 is worked
+  // out as the file arrives, so the check itself is one comparison; at 0 the Check chip shows done as soon as it has passed.
+  var UPDATE_CHECK_HOLD_MS = 0;
+  var UPDATE_CELLS = 32;                   // the limit cards' bar
+  var MB_TENTH = 104857.6;                 // bytes in a tenth of a megabyte (1 MB = 1,048,576 bytes, as Windows counts them)
+  // The step of each phase the record names (update_check.ACTIVE_PHASES): 0 Download, 1 Check, 2 Restart.
+  var UPDATE_STEP_OF = { downloading: 0, checking: 1, starting: 2, restarting: 2 };
+  // How a step chip is drawn, by how the step stands: [classes, data-tone], the guard card's tones.
+  var UPDATE_STEP_LOOK = {
+    done: ["is-ok", "ok"], now: ["", "acc"], next: ["", "neutral"], stalled: ["solid is-warn", "warn"], failed: ["solid is-crit", "alert"]
+  };
+  // The status line of an update that failed, by its code (update_check.REASONS), r being the record. Functions, so each text
+  // is the catalog's at the moment it is drawn.
+  var UPDATE_FAILED = {
+    timeout: function (r) { return tHtml("settings.update.progress.failed.timeout", { seconds: FMT.number(String(r.timeout_s)) }); },
+    network: function () { return tHtml("settings.update.progress.failed.network"); },
+    http: function (r) { return tHtml("settings.update.progress.failed.http", { status: String(r.http_status) }); },
+    redirect: function () { return tHtml("settings.update.progress.failed.redirect"); },
+    too_large: function (r) { return tHtml("settings.update.progress.failed.too_large", { limit: FMT.number(String(r.limit_mb)) }); },
+    cut_short: function () { return tHtml("settings.update.progress.failed.cut_short"); },
+    digest: function () { return tHtml("settings.update.progress.failed.digest"); },
+    rejected: function () { return tHtml("settings.update.progress.failed.rejected"); },
+    helper: function () { return tHtml("settings.update.progress.failed.helper"); },
+    local: function () { return tHtml("settings.update.progress.failed.local"); },
+    error: function () { return tHtml("settings.update.progress.failed.error"); }
+  };
+
+  /* What the page knows of a running update (S.progress). */
+  function updateProgressState() {
+    return {
+      status: null,        // the last record the route answered
+      flight: false,       // an ask is on its way
+      timer: 0,            // the next quick ask
+      askedAt: 0,          // when the last ask went (ms)
+      misses: 0,           // asks in a row that got no answer
+      none: false,         // the monitor has no status route: nothing more is asked in this page load
+      clickedAt: 0,        // when Install update started a run here (ms): the start view and the age rule count from it
+      active: "",          // the record's phase after the last answer while it showed a run ("downloading" for the start), else ""
+      checkAt: 0,          // when the record was first seen past the download (ms), for UPDATE_CHECK_HOLD_MS
+      over: null,          // the S.update the block was drawn over: that line is the run's own, and stays hidden under it
+      failOver: null       // the S.update when the failure was first shown: a click gives S.update a new answer and ends it
+    };
+  }
+
+  function updateCount(value) {
+    return typeof value === "number" && isFinite(value) && value >= 0 ? value : null;
+  }
+
+  function isRunPhase(phase) {
+    return Object.prototype.hasOwnProperty.call(UPDATE_STEP_OF, phase);
+  }
+
+  /* Whether a record is about the release on offer. A failed one may name no version (a link that is not this project's). */
+  function updateIsFor(rec, offered) {
+    return !!rec && (rec.version === offered || (rec.version === null && rec.phase === "failed"));
+  }
+
+  /* Just after Install update started a run, a record with no run in it yet (none answered, idle, or a failure older than the
+   * click) is the click's run not begun: the start view shows instead. A running record is shown as it is. */
+  function updateStale(p, rec, now) {
+    var since = now - p.clickedAt;
+    if (!p.clickedAt || since > UPDATE_CLICK_GRACE_MS) {
+      return false;
+    }
+    return !rec || rec.phase === "idle" || (rec.phase === "failed" && (updateCount(rec.age_s) || 0) * 1000 > since + 1000);
+  }
+
+  /* Owner question 4 on #58: how long a failure stays. Until the next click on an update button (Check for updates now, Install
+   * update, Skip this version, or the banner's), each of which gives S.update a new answer that then shows in its place, or
+   * until a new run starts. */
+  function updateFailureLasts(p, update) {
+    return p.failOver !== null && p.failOver === update;
+  }
+
+  /* What Settings shows of the update, from what the page knows (p is S.progress), or null for nothing (today's line). kind is
+   * "start" (just after Install update, before the record has the run), "run", "failed", "lost" (the monitor stopped answering
+   * while the update downloaded or was checked) or "gone" (it stopped answering once it had begun to close for the installer).
+   * hold is UPDATE_CHECK_HOLD_MS unless given. */
+  function progressView(p, now, offered, update, hold) {
+    if (p.none || !offered) {
+      return null;
+    }
+    var rec = p.status;
+    var phase = rec ? rec.phase : "";
+    if (p.misses >= UPDATE_LOST_AFTER && p.active) {       // never with no run: a monitor that quits keeps today's line
+      var last = isRunPhase(phase) && updateIsFor(rec, offered) ? rec : null;
+      var going = p.active === "starting" || p.active === "restarting";
+      return updateViewOf(going ? "gone" : "lost", going ? "restarting" : p.active, last, offered);
+    }
+    if (isRunPhase(phase) && updateIsFor(rec, offered)) {
+      var waited = hold === undefined ? UPDATE_CHECK_HOLD_MS : hold;
+      var held = (phase === "starting" || phase === "restarting") && waited > 0 && p.checkAt > 0 && now - p.checkAt < waited;
+      return updateViewOf("run", held ? "checking" : phase, rec, offered);
+    }
+    if (updateStale(p, rec, now)) {
+      return updateViewOf("start", "downloading", null, offered);
+    }
+    if (phase === "failed" && updateIsFor(rec, offered) && updateFailureLasts(p, update)) {
+      return updateViewOf("failed", rec.failed_in, rec, offered);
+    }
+    return null;
+  }
+
+  function updateViewOf(kind, phase, rec, offered) {
+    var step = isRunPhase(phase) ? UPDATE_STEP_OF[phase] : 0;        // a failure outside every phase is the download's
+    var stalled = kind === "run" && phase === "downloading" && rec.stalled === true;
+    return {
+      kind: kind, phase: isRunPhase(phase) ? phase : "downloading", step: step,
+      state: kind === "failed" || kind === "lost" ? "failed" : stalled ? "stalled" : "now",
+      done: rec ? updateCount(rec.done) || 0 : 0, total: rec ? updateCount(rec.total) : null,
+      full: step > 0,                                                // past the download: the whole file is in
+      stalled: stalled, version: rec && typeof rec.version === "string" ? rec.version : offered, record: rec,
+      busy: kind === "start" || kind === "run" || kind === "gone"
+    };
+  }
+
+  /* A megabyte figure from tenths, in the locale's numbers ("4.2"; French "4,2"). */
+  function mbText(tenths) {
+    return FMT.number((Math.max(0, tenths) / 10).toFixed(1));
+  }
+
+  /* done of total, to a tenth of a megabyte: the total rounded and the done floored, so the done never reads the total's figure
+   * before the last byte (it is written a tenth lower where the two would read the same) and reads it at the end. */
+  function updateSizes(done, total) {
+    var whole = Math.round(total / MB_TENTH);
+    var got = done >= total ? whole : Math.floor(done / MB_TENTH);
+    if (done < total && got >= whole) {
+      got = whole - 1;
+    }
+    return { done: mbText(got), total: mbText(whole) };
+  }
+
+  /* Which sizes line a view has, with its figures: "connecting" (no byte yet and no size), "size" (done of total), "so_far"
+   * (the size not known), or "" (nothing to say). A whole file of no announced size reads as done of itself. */
+  function updateSizeOf(view) {
+    if (view.kind === "start" || (view.kind === "run" && view.phase === "downloading" && view.done === 0 && view.total === null)) {
+      return { which: "connecting" };
+    }
+    if (view.total !== null || (view.full && view.done > 0)) {
+      var sizes = updateSizes(view.done, view.total !== null ? view.total : view.done);
+      return { which: "size", done: sizes.done, total: sizes.total };
+    }
+    return view.done > 0 ? { which: "so_far", done: mbText(Math.floor(view.done / MB_TENTH)) } : { which: "" };
+  }
+
+  function updateSizeHtml(size) {
+    if (size.which === "connecting") {
+      return tHtml("settings.update.progress.connecting");
+    }
+    if (size.which === "size") {
+      return tHtml("settings.update.progress.size", { done: size.done, total: size.total });
+    }
+    return size.which === "so_far" ? tHtml("settings.update.progress.size_unknown", { done: size.done }) : "";
+  }
+
+  /* The same as plain text, for what a screen reader says of the bar. */
+  function updateSizeText(size) {
+    if (size.which === "connecting") {
+      return t("settings.update.progress.connecting");
+    }
+    if (size.which === "size") {
+      return t("settings.update.progress.size", { done: size.done, total: size.total });
+    }
+    return size.which === "so_far" ? t("settings.update.progress.size_unknown", { done: size.done }) : "";
+  }
+
+  /* The steps as three chips: those before the current one done, the current one as the view stands, the rest next. */
+  function updateStepsHtml(view) {
+    var words = [tHtml("settings.update.progress.step.download"), tHtml("settings.update.progress.step.check"),
+      tHtml("settings.update.progress.step.restart")];
+    return words.map(function (word, i) {
+      var stand = i < view.step ? "done" : i === view.step ? view.state : "next";
+      var look = UPDATE_STEP_LOOK[stand];
+      return '<span class="nm-chip' + (look[0] ? " " + look[0] : "") + '" data-tone="' + look[1] + '" data-step="' + stand + '">' +
+        word + "</span>";
+    }).join("");
+  }
+
+  /* The bar: the share written so far, whole once the download is in, the theme's pending bar while the size is not known
+   * (data-pending, which motion.js marks), and hot once the update failed. */
+  function updateBar(view) {
+    var pending = (view.kind === "start" || view.kind === "run") && !view.full && view.total === null;
+    var pct = view.full ? 100 : view.total ? clamp(view.done / view.total * 100, 0, 100) : 0;
+    return { pct: pending ? 0 : pct, pending: pending, hot: view.state === "failed" };
+  }
+
+  /* What the bar shows, as its data-sig: the lit cells and the part of the next one, to a tenth as cellsHTML writes it, so the
+   * bar moves with every block that arrives and not only once a whole cell (a 32nd of the file) is full. */
+  function updateBarSig(bar) {
+    var x = bar.pct / 100 * UPDATE_CELLS;
+    var lit = Math.floor(x);
+    return (bar.pending ? "pending:" : "") + (bar.hot ? "hot:" : "") + lit + ":" + ((x - lit) * 100).toFixed(1);
+  }
+
+  /* The status line: what the update is doing, or why it stopped. */
+  function updateLineHtml(view) {
+    if (view.kind === "lost") {
+      return tHtml("settings.update.progress.lost");
+    }
+    if (view.kind === "gone") {
+      return tHtml("settings.update.progress.gone");                 // no version: if the installer cannot run, the old one comes back
+    }
+    if (view.kind === "failed") {
+      var r = view.record;
+      var code = Object.prototype.hasOwnProperty.call(UPDATE_FAILED, r.reason) ? r.reason : "error";
+      var number = { http: r.http_status, timeout: r.timeout_s, too_large: r.limit_mb }[code];
+      return UPDATE_FAILED[number === undefined || updateCount(number) !== null ? code : "error"](r);
+    }
+    if (view.stalled) {
+      return tHtml("settings.update.progress.stalled");
+    }
+    if (view.phase === "checking") {
+      return tHtml("settings.update.progress.checking");
+    }
+    if (view.phase === "starting") {
+      return tHtml("settings.update.progress.starting");
+    }
+    if (view.phase === "restarting") {
+      return tHtml("settings.update.progress.restarting", { version: view.version });
+    }
+    return view.total === null && view.done > 0 ? tHtml("settings.update.progress.downloading_unknown", { version: view.version }) :
+      tHtml("settings.update.progress.downloading", { version: view.version });
+  }
+
+  /* The parts of the block for a view: its tone, the chips, the bar, the sizes and the status line. */
+  function progressParts(view) {
+    var bar = updateBar(view);
+    var size = updateSizeOf(view);
+    return {
+      tone: view.state === "failed" ? "is-crit" : view.state === "stalled" ? "is-warn" : "",
+      steps: updateStepsHtml(view), bar: bar, barSig: updateBarSig(bar), cells: cellsHTML(UPDATE_CELLS, bar.pct),
+      now: bar.pending ? null : Math.floor(bar.pct), text: updateSizeText(size), size: updateSizeHtml(size),
+      line: updateLineHtml(view), err: view.state === "failed"
+    };
+  }
+
+  /* The block's markup as it is first drawn; later answers patch its parts (patchUpdateBlock). */
+  function progressHtml(parts) {
+    return '<div class="nm-verdict" data-part="steps" data-sig="' + esc(parts.steps) + '">' + parts.steps + "</div>" +
+      '<div role="progressbar" data-part="bar" aria-label="' + esc(t("settings.update.progress.label")) + '" aria-valuemin="0" aria-valuemax="100"' +
+      (parts.now === null ? "" : ' aria-valuenow="' + parts.now + '"') + (parts.text ? ' aria-valuetext="' + esc(parts.text) + '"' : "") + ">" +
+      '<div class="nm-cells' + (parts.bar.hot ? " hot" : "") + '" aria-hidden="true" data-sig="' + esc(parts.barSig) + '"' +
+      (parts.bar.pending ? ' data-pending=""' : "") + ">" + parts.cells + "</div></div>" +
+      '<p class="nm-story" data-part="size" data-sig="' + esc(parts.size) + '">' + parts.size + "</p>" +
+      '<p class="nm-status' + (parts.err ? " is-err" : "") + '" role="status" data-part="line" data-sig="' + esc(parts.line) + '">' +
+      parts.line + "</p>";
+  }
+
+  /* Draws the block, or patches only the parts that changed (each keeps its data-sig), so an answer every half second leaves
+   * alone what did not move: the chips are rebuilt only when a step changes (Gates tones a chip when it is added), the cells
+   * when the bar moves, and the status line, a live region, only when its words change. */
+  function patchUpdateBlock(box, parts) {
+    if (!parts) {
+      if (!box.hidden || box.getAttribute("data-sig")) {
+        box.hidden = true;
+        box.className = "nm-uprog";
+        box.removeAttribute("data-sig");
+        box.innerHTML = "";
+      }
+      return;
+    }
+    var tone = "nm-uprog" + (parts.tone ? " " + parts.tone : "");
+    if (box.className !== tone) {
+      box.className = tone;
+    }
+    box.hidden = false;
+    var steps = $('[data-part="steps"]', box);
+    var bar = $('[data-part="bar"]', box);
+    var cells = bar ? $(".nm-cells", bar) : null;
+    var size = $('[data-part="size"]', box);
+    var line = $('[data-part="line"]', box);
+    if (!box.getAttribute("data-sig") || !steps || !cells || !size || !line) {
+      box.setAttribute("data-sig", "drawn");
+      box.innerHTML = progressHtml(parts);
+      return;
+    }
+    if (steps.getAttribute("data-sig") !== parts.steps) {
+      steps.setAttribute("data-sig", parts.steps);
+      steps.innerHTML = parts.steps;
+    }
+    if (parts.now === null) {
+      bar.removeAttribute("aria-valuenow");
+    } else {
+      bar.setAttribute("aria-valuenow", String(parts.now));
+    }
+    if (parts.text) {
+      bar.setAttribute("aria-valuetext", parts.text);
+    } else {
+      bar.removeAttribute("aria-valuetext");
+    }
+    if (cells.getAttribute("data-sig") !== parts.barSig) {
+      cells.setAttribute("data-sig", parts.barSig);
+      cells.className = "nm-cells" + (parts.bar.hot ? " hot" : "");
+      cells.innerHTML = parts.cells;
+      if (parts.bar.pending) {
+        cells.setAttribute("data-pending", "");
+      } else {
+        cells.removeAttribute("data-pending");                       // the size came: the theme's arrival plays (motion.js)
+      }
+    }
+    if (size.getAttribute("data-sig") !== parts.size) {
+      size.setAttribute("data-sig", parts.size);
+      size.innerHTML = parts.size;
+    }
+    var lineClass = "nm-status" + (parts.err ? " is-err" : "");
+    if (line.className !== lineClass) {
+      line.className = lineClass;
+    }
+    if (line.getAttribute("data-sig") !== parts.line) {
+      line.setAttribute("data-sig", parts.line);
+      line.innerHTML = parts.line;
+    }
+  }
+
+  /* Puts Settings' update rows in step with what the page knows: the block; the line under the buttons, hidden while it is the
+   * run's own (an answer given after the run began shows under the block); and Install update, aria-disabled while a run goes
+   * (it keeps the keyboard focus, and a click sends nothing). */
+  function syncUpdateProgress(main) {
+    main = main || $("#main");
+    var box = main ? $("#set-update-progress", main) : null;
+    if (!box) {
+      return;
+    }
+    var p = S.progress;
+    var view = progressView(p, Date.now(), offeredVersion(), S.update);
+    p.over = view ? (p.over === null ? S.update : p.over) : null;
+    patchUpdateBlock(box, view ? progressParts(view) : null);
+    var hide = !!view && S.update === p.over;
+    var status = $("#set-update-status", main);
+    if (status) {
+      var text = hide ? "" : updateLine();
+      status.hidden = hide;
+      if (status.textContent !== text) {
+        status.textContent = text;
+      }
+    }
+    var install = $('[data-action="install-update"]', main);
+    if (install) {
+      if (view && view.busy) {
+        install.setAttribute("aria-disabled", "true");
+      } else {
+        install.removeAttribute("aria-disabled");
+      }
+    }
+  }
+
+  /* A run is going, or the monitor is closing for it: Install update sends nothing. */
+  function updateRunBusy() {
+    var view = progressView(S.progress, Date.now(), offeredVersion(), S.update);
+    return !!view && view.busy;
+  }
+
+  /* Whether the page asks about an update now: Settings is on screen, the window is visible, a release is on offer (without one
+   * no run can start: the monitor needs its link) and the monitor has the route. */
+  function updateAsksWanted() {
+    return !S.progress.none && S.page === "settings" && S.formKey === "settings" && document.visibilityState !== "hidden" &&
+      offeredVersion() !== "";
+  }
+
+  /* Asks GET /api/update/status, one ask at a time. */
+  function askUpdateStatus() {
+    var p = S.progress;
+    window.clearTimeout(p.timer);
+    p.timer = 0;
+    if (p.flight || !updateAsksWanted()) {
+      return;
+    }
+    p.flight = true;
+    p.askedAt = Date.now();
+    api("GET", UPDATE_STATUS_PATH).then(function (res) {
+      p.flight = false;
+      if (res.status === 404 || res.status === 501) {
+        p.none = true;                                               // an older monitor, or a dev server without the demo
+      } else if (res.ok && res.data && typeof res.data.phase === "string") {
+        takeUpdateStatus(res.data);
+      } else {
+        p.misses += 1;
+      }
+      updateAnswered();
+    }, function () {
+      p.flight = false;
+      p.misses += 1;
+      updateAnswered();
+    });
+  }
+
+  /* A record the monitor answered. A running one for the release on offer ends a failure shown before it; a failure is shown
+   * from the first answer that has it (not one older than a click that started a new run). */
+  function takeUpdateStatus(rec) {
+    var p = S.progress;
+    var now = Date.now();
+    var mine = isRunPhase(rec.phase) && updateIsFor(rec, offeredVersion());
+    p.status = rec;
+    p.misses = 0;
+    if (mine) {
+      p.failOver = null;
+    } else if (rec.phase === "failed" && p.failOver === null && !updateStale(p, rec, now)) {
+      p.failOver = S.update;
+    }
+    p.checkAt = mine && rec.phase !== "downloading" ? p.checkAt || now : 0;
+    p.active = mine ? rec.phase : updateStale(p, rec, now) ? "downloading" : "";
+  }
+
+  /* After an answer, or an ask that got none: the rows follow, and while a run shows the next ask is due in UPDATE_POLL_MS. */
+  function updateAnswered() {
+    syncUpdateProgress();
+    var p = S.progress;
+    var view = progressView(p, Date.now(), offeredVersion(), S.update);
+    if (view && (view.kind === "start" || view.kind === "run") && updateAsksWanted()) {
+      p.timer = window.setTimeout(askUpdateStatus, UPDATE_POLL_MS);
+    }
+  }
+
+  /* Once a second, from tick(): ask every UPDATE_IDLE_POLL_MS unless the quick asks of a run are going (a tray click can start a
+   * run while Settings is open), and let the start view and a lost link follow the clock. Nothing is asked once the monitor has
+   * gone to install the update. */
+  function updateTick() {
+    if (!updateAsksWanted()) {
+      return;
+    }
+    var p = S.progress;
+    var view = progressView(p, Date.now(), offeredVersion(), S.update);
+    if (!p.flight && !p.timer && !(view && view.kind === "gone") && Date.now() - p.askedAt >= UPDATE_IDLE_POLL_MS) {
+      askUpdateStatus();
+    }
+    syncUpdateProgress();
+  }
+
+  /* Another page opened: the quick asks are Settings' own. */
+  function stopUpdateAsks() {
+    window.clearTimeout(S.progress.timer);
+    S.progress.timer = 0;
+  }
+
+  /* Install update started the checked silent update (the monitor answered "installer"): the run shows at once, as its start
+   * until the record has it, and is asked for every UPDATE_POLL_MS. Called from installUpdate. */
+  function watchUpdateRun() {
+    var p = S.progress;
+    p.clickedAt = Date.now();
+    p.active = "downloading";
+    p.misses = 0;
+    p.checkAt = 0;
+    p.over = null;
+    p.failOver = null;
+    askUpdateStatus();
   }
 
   // ── Export ──────────────────────────────────────────────────────────────────────
@@ -5045,6 +5519,7 @@
     var opened = key !== S.page;
     if (opened) {
       cancelFx(main);
+      stopUpdateAsks();                                  // the update's quick asks are Settings' own
       S.page = key;
       S.formKey = null;
       S.sig = "";
@@ -5243,6 +5718,7 @@
     renderAge();
     renderHealth();
     guardTick();
+    updateTick();
     if (syncCheck()) {
       renderPage();                                    // a check that waited too long ends, or the sign-in was found
     }
@@ -5300,6 +5776,7 @@
         }
         poll();
         ensureStats();
+        askUpdateStatus();                             // a running update is asked for again at once (none while hidden)
       }
     });
     window.addEventListener("pywebviewready", function () {
@@ -5439,7 +5916,14 @@
       // and the date, word and case sites of steps 2.3 to 2.7
       dayLabel: dayLabel, monthLabel: monthLabel, whoWords: whoWords, workWords: workWords, surfaceCard: surfaceCard,
       // and #91's review: the alert levels, the pending money notes and the month-by-month chart
-      syncAlerts: syncAlerts, addLevel: addLevel, costToolbar: costToolbar, monthlyCard: monthlyCard
+      syncAlerts: syncAlerts, addLevel: addLevel, costToolbar: costToolbar, monthlyCard: monthlyCard,
+      // and the update's progress (#58)
+      progressView: progressView, progressParts: progressParts, progressHtml: progressHtml, patchUpdateBlock: patchUpdateBlock,
+      syncUpdateProgress: syncUpdateProgress, askUpdateStatus: askUpdateStatus, takeUpdateStatus: takeUpdateStatus,
+      updateTick: updateTick, watchUpdateRun: watchUpdateRun, stopUpdateAsks: stopUpdateAsks, updateRunBusy: updateRunBusy,
+      updateSizes: updateSizes, updateProgressState: updateProgressState, syncUpdate: syncUpdate, updateLine: updateLine,
+      UPDATE_POLL_MS: UPDATE_POLL_MS, UPDATE_IDLE_POLL_MS: UPDATE_IDLE_POLL_MS, UPDATE_LOST_AFTER: UPDATE_LOST_AFTER,
+      UPDATE_CLICK_GRACE_MS: UPDATE_CLICK_GRACE_MS, UPDATE_CHECK_HOLD_MS: UPDATE_CHECK_HOLD_MS
     };
     return;
   }

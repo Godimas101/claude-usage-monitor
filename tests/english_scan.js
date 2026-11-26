@@ -21,6 +21,9 @@
  *   reports-failed  ... when the request itself fails
  *   lookups-failed  every page when what it looks up besides the state and the reports fails (themes, supporters...)
  *   posts-failed    actions and the update banner when every change the page sends fails
+ *   update-run:S    Settings while the monitor installs an update itself, in state S of the run (downloading, unknown,
+ *                   connecting, checking, starting, restarting, stalled, or failed-CODE for each failure code): the
+ *                   update status route answers that state, and Settings shows it at its first ask (#58)
  *
  *   node tests/english_scan.js <webui folder> <the page's URL, with its key> <now, in ms since 1970> <passes as JSON>
  *
@@ -45,6 +48,24 @@ const origin = page.origin;
 const WIDTH = 640;
 const UPDATE = { available: true, version: "9.9.9", url: "https://github.com/example/example/releases/tag/v9.9.9" };
 const STAT_PAGES = ["overview", "limits", "cost", "efficiency", "history"];
+// A run of the self-update (#58), as GET /api/update/status answers it: 4.2 of 21.0 MB of the release on offer, and what
+// each update-run pass changes in it. A failed-CODE pass fails with that code, in the step it fails in.
+const UPDATE_RUN = { phase: "downloading", version: UPDATE.version, done: 4404020, total: 22020096, age_s: 3, idle_s: 0,
+  stalled: false, reason: null, failed_in: null, http_status: null, limit_mb: 512, timeout_s: 60 };
+const UPDATE_RUNS = {
+  downloading: {}, unknown: { total: null }, connecting: { done: 0, total: null },
+  checking: { phase: "checking", done: 22020096 }, starting: { phase: "starting", done: 22020096 },
+  restarting: { phase: "restarting", done: 22020096 }, stalled: { stalled: true, idle_s: 16 },
+};
+const FAILED_IN = { digest: "checking", helper: "starting" };
+function updateRun(state) {
+  if (state.startsWith("failed-")) {
+    const code = state.slice("failed-".length);
+    return { ...UPDATE_RUN, phase: "failed", reason: code, failed_in: FAILED_IN[code] || "downloading",
+      http_status: code === "http" ? 404 : code === "redirect" ? 302 : null };
+  }
+  return Object.prototype.hasOwnProperty.call(UPDATE_RUNS, state) ? { ...UPDATE_RUN, ...UPDATE_RUNS[state] } : null;
+}
 
 const problems = [];
 const snapshots = [];
@@ -66,6 +87,15 @@ function rulesFor(pass) {
     }
     if (pass === "posts-failed" && method !== "GET") {
       return "fail";
+    }
+    if (pass.startsWith("update-run:")) {
+      if (api === "/api/state") {
+        // a release the monitor installs itself, with the check's info, so Settings has one on offer and asks
+        return state(() => ({ dev: false, update: { ...UPDATE, can_self_update: true, info: { version: UPDATE.version, can_self_update: true } } }));
+      }
+      if (api === "/api/update/status") {
+        return { status: 200, body: updateRun(pass.slice("update-run:".length)) };
+      }
     }
     if (api === "/api/state") {
       if (pass === "update" || pass === "posts-failed") {
@@ -326,6 +356,12 @@ async function everyAction(pass, key, scope) {
         for (const key of STAT_PAGES) {
           await open(view, pass, key);
         }
+      } else if (pass.startsWith("update-run:")) {
+        if (!updateRun(pass.slice("update-run:".length))) {
+          problems.push("no such update run: " + pass);
+          continue;
+        }
+        await open(await load(pass), pass, "settings");
       } else if (pass === "posts-failed") {
         await everyAction(pass, "settings", "#main");
         await everyAction(pass, "about", "#main");

@@ -27,7 +27,8 @@ names, the widget half takes out the dev instance's "(dev)" mark and, as whole w
 The dashboard: tests/english_scan.js runs the page (index.html, formats.js, the catalog, charts.js and app.js, from the
 dev server) on a small DOM, for every scenario of the dev server under the pseudo-locale, in the passes PASSES lists:
 every page and segment as an installed monitor and as a dev instance shows them, and in some scenarios every action
-and control, the update banner, the reports' loading and failed states, and every change failing. The theme scripts'
+and control, the update banner, Settings during an update in each state of its run (#58), the reports' loading and
+failed states, and every change failing. The theme scripts'
 boot texts and the words in the stylesheets are not in it (#101 moves them).
 
 Both halves run in a fresh Python with the time zone pinned (the dev server's clock and the page's are pinned too), so
@@ -60,6 +61,7 @@ REPO = Path(__file__).resolve().parent.parent
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
+import update_check  # noqa: E402
 from usage_monitor import i18n  # noqa: E402
 
 RECORD = Path(__file__).resolve().parent / "fixtures" / "english_left.json"
@@ -87,9 +89,12 @@ ATTRIBUTES = ("aria-label", "title", "data-tip", "placeholder", "alt")
 # installed monitor and as a dev instance; the actions in the scenarios that have their own (the sign-in help, the
 # guard); the rest in "normal".
 EVERY_SCENARIO = ("installed", "dev")
+# The states of a running update that Settings shows (#58): one update-run pass each, in "normal".
+UPDATE_RUNS: tuple[str, ...] = ("downloading", "unknown", "connecting", "checking", "starting", "restarting", "stalled",
+                                *(f"failed-{code}" for code in update_check.REASONS))
 PASSES: dict[str, tuple[str, ...]] = {
     "normal": (*EVERY_SCENARIO, "actions", "update", "update-self", "pending", "reports-503", "reports-501",
-               "reports-failed", "lookups-failed", "posts-failed"),
+               "reports-failed", "lookups-failed", "posts-failed", *(f"update-run:{state}" for state in UPDATE_RUNS)),
     "no_login": (*EVERY_SCENARIO, "actions", "posts-failed"),
     "refused": (*EVERY_SCENARIO, "actions"),
     "stale": (*EVERY_SCENARIO, "actions"),
@@ -467,34 +472,42 @@ def _widgets_english() -> dict[str, str]:
 
 # ── The dashboard ────────────────────────────────────────────────────────────────────────────────────────────────
 
-def _dashboard_english() -> dict[str, str]:
-    """Every scenario of the dev server under the pseudo-locale, in its passes, through tests/english_scan.js (in this
-    process). Raises when the page met an error or wrote anything to the console."""
+def scan_dashboard(scenario: str, passes: Sequence[str], folder: Path) -> dict[str, Any]:
+    """One run of tests/english_scan.js: the dev server's ``scenario`` under the pseudo-locale (its settings under
+    ``folder``), in ``passes``. Raises when the scan failed, or the page met an error or wrote anything to the console."""
     from usage_monitor.ui import devserver
 
     node = shutil.which("node")
     if node is None:
         raise RuntimeError("node is not installed, so the dashboard cannot be scanned")
+    server, settings = devserver.make_server(scenario, 0, settings_dir=folder / scenario, lang=i18n.PSEUDO,
+                                             clock=lambda: SCAN_NOW)
+    try:
+        server.start()
+        run = subprocess.run([node, str(SCAN_JS), str(WEBUI), server.url, str(int(SCAN_NOW.timestamp() * 1000)),
+                              json.dumps(list(passes))], env={**os.environ, "TZ": NODE_TZ}, capture_output=True,
+                             encoding="utf-8", timeout=1200, check=False, creationflags=NO_WINDOW)
+    finally:
+        server.stop()
+        settings.close()
+    if run.returncode or run.stderr.strip():
+        raise RuntimeError(f"tests/english_scan.js failed on the {scenario} scenario (exit {run.returncode}):\n"
+                           f"{run.stderr[-3000:]}")
+    result: dict[str, Any] = json.loads(run.stdout)
+    if result["problems"]:
+        raise RuntimeError(f"the page met errors on the {scenario} scenario:\n" + "\n".join(result["problems"][:40]))
+    return result
+
+
+def _dashboard_english() -> dict[str, str]:
+    """Every scenario of the dev server under the pseudo-locale, in its passes, through tests/english_scan.js (in this
+    process). Raises when the page met an error or wrote anything to the console."""
+    from usage_monitor.ui import devserver
+
     found: dict[str, str] = {}
     with tempfile.TemporaryDirectory(prefix="english-left-") as folder:
         for scenario in devserver.SCENARIOS:
-            passes = PASSES.get(scenario, EVERY_SCENARIO)
-            server, settings = devserver.make_server(scenario, 0, settings_dir=Path(folder) / scenario,
-                                                     lang=i18n.PSEUDO, clock=lambda: SCAN_NOW)
-            try:
-                server.start()
-                run = subprocess.run([node, str(SCAN_JS), str(WEBUI), server.url, str(int(SCAN_NOW.timestamp() * 1000)),
-                                      json.dumps(passes)], env={**os.environ, "TZ": NODE_TZ}, capture_output=True,
-                                     encoding="utf-8", timeout=1200, check=False, creationflags=NO_WINDOW)
-            finally:
-                server.stop()
-                settings.close()
-            if run.returncode or run.stderr.strip():
-                raise RuntimeError(f"tests/english_scan.js failed on the {scenario} scenario (exit {run.returncode}):\n"
-                                   f"{run.stderr[-3000:]}")
-            result = json.loads(run.stdout)
-            if result["problems"]:
-                raise RuntimeError(f"the page met errors on the {scenario} scenario:\n" + "\n".join(result["problems"][:40]))
+            result = scan_dashboard(scenario, PASSES.get(scenario, EVERY_SCENARIO), Path(folder))
             for text, where in scan_english(result).items():
                 found.setdefault(text, f"{scenario}/{where}")
     return dict(sorted(found.items()))

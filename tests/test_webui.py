@@ -2250,6 +2250,365 @@ def test_every_failure_status_line_goes_through_failed_text() -> None:
         assert f'failedText("{prefix}", res)' in code, prefix
 
 
+# ── A running update on Settings (#58) ────────────────────────────────────────────
+
+# The status line of each failure code (update_check.REASONS), as en.json words it.
+UPDATE_FAILURE_TEXTS = {
+    "timeout": "The download stopped: nothing arrived for 60 seconds.",
+    "network": "The download stopped: the connection to GitHub failed.",
+    "http": "The download stopped: GitHub answered HTTP 404.",
+    "redirect": "The download stopped: it was redirected to an address that is not HTTPS, which the monitor does not follow.",
+    "too_large": "The download stopped: the installer is larger than 512 MB.",
+    "cut_short": "The download stopped before the whole installer arrived.",
+    "digest": "The download did not match the release's SHA-256 and was deleted; the release page was opened in your browser.",
+    "rejected": "The installer link is not this project's release download; the release page was opened in your browser.",
+    "helper": "The installer could not be started.",
+    "local": "The update stopped: a file it needs could not be written or moved on this PC.",
+    "error": "The update could not be installed.",
+}
+UPDATE_LOST = "The dashboard lost its link to the monitor during the update."
+UPDATE_GONE = "The monitor is closing to install the update. Open the dashboard again from the tray icon once it is back."
+UPDATE_STALLED = "The download has stalled; it carries on if data starts to arrive again."
+STEP_TONE = {"done": "ok", "now": "acc", "next": "neutral", "stalled": "warn", "failed": "alert"}
+STEP_CLASSES = {"done": "is-ok", "now": "", "next": "", "stalled": "solid is-warn", "failed": "solid is-crit"}
+NOTHING = {"view": None, "html": ""}
+
+
+def update_run(checks: dict[str, Any]) -> dict[str, Any]:
+    return checks["updateProgress"]
+
+
+def test_the_update_reasons_agree_with_the_updater() -> None:
+    """The page words every code and every phase the updater's record can hold (update_check.REASONS, ACTIVE_PHASES), and
+    builds each failure's words when it draws them: the table holds functions, not texts taken at load time."""
+    import update_check
+
+    table = APP[APP.index("  var UPDATE_FAILED = {"):]
+    table = table[:table.index("\n  };")]
+    assert re.findall(r"^    (\w+): ", table, re.M) == list(update_check.REASONS)
+    assert re.findall(r"^    (\w+): function \(", table, re.M) == list(update_check.REASONS)
+    steps = re.search(r"var UPDATE_STEP_OF = \{([^}]*)\};", APP).group(1)
+    assert re.findall(r"(\w+): \d", steps) == list(update_check.ACTIVE_PHASES)
+    assert set(update_check.PHASES) == {*update_check.ACTIVE_PHASES, "idle", "failed"}
+    assert f'var UPDATE_STATUS_PATH = "{server.UPDATE_STATUS_PATH}";' in APP
+    assert 'api("GET", UPDATE_STATUS_PATH)' in function_body(APP_CODE, "askUpdateStatus")
+
+
+def test_the_update_asks_and_the_check_hold_are_one_number_each() -> None:
+    """The cadence of #58's plan, and owner question 1's hold on the Check step: 0, so the Check chip shows done as soon as
+    the record has passed it (the SHA-256 is worked out as the file arrives)."""
+    for line in ("var UPDATE_POLL_MS = 500;", "var UPDATE_IDLE_POLL_MS = 3000;", "var UPDATE_LOST_AFTER = 3;",
+                 "var UPDATE_CLICK_GRACE_MS = 3000;", "var UPDATE_CHECK_HOLD_MS = 0;"):
+        assert APP_CODE.count(line) == 1, line
+    assert "UPDATE_CHECK_HOLD_MS" in function_body(APP_CODE, "progressView")
+
+
+@ui_only
+def test_the_update_shows_its_bytes_and_a_bar_that_fills(checks: dict[str, Any]) -> None:
+    """4404020 of 22020096 bytes is 4.2 of 21.0 MB (1 MB = 1,048,576 bytes, one decimal), six of the 32 cells lit and the next
+    one partly, and 20 for a screen reader. The done is floored and the total rounded: 4466934 bytes (4.26 MB) reads 4.2, and
+    22015000 of the same total reads 20.9, where rounding both would read 21.0 before the end."""
+    b = update_run(checks)["bytes"]
+    fifth = b["fifth"]
+    assert fifth["size"] == fifth["text"] == "4.2 of 21.0 MB"
+    assert (fifth["lit"], fifth["part"], fifth["partFill"], fifth["now"], fifth["pending"]) == (6, 1, "40.0", 20, False)
+    for attribute in ('role="progressbar"', 'aria-label="Update download"', 'aria-valuemin="0"', 'aria-valuemax="100"',
+                      'aria-valuenow="20"', 'aria-valuetext="4.2 of 21.0 MB"'):
+        assert attribute in fifth["html"], attribute
+    assert "data-pending" not in fifth["html"]
+    assert b["nearlyRoundsUp"]["size"] == "20.9 of 21.0 MB" and b["nearlyRoundsUp"]["now"] == 99
+    assert b["midTenth"]["size"] == "4.2 of 21.0 MB"                       # 4.26 MB: floored, never rounded up
+    assert b["whole"]["size"] == "21.0 of 21.0 MB" and (b["whole"]["lit"], b["whole"]["now"]) == (32, 100)
+    assert b["nothingYet"]["size"] == "0.0 of 21.0 MB" and b["nothingYet"]["lit"] == 0 and not b["nothingYet"]["pending"]
+
+
+@ui_only
+def test_the_done_never_reads_the_totals_figure_before_the_end(checks: dict[str, Any]) -> None:
+    """A total of 22,060,000 bytes rounds to 21.0 and a done of 22,030,000 floors to 21.0 as well: the done is written a tenth
+    lower until the last byte, and as the total at the end."""
+    b = update_run(checks)["bytes"]
+    assert b["sameTenth"]["size"] == "20.9 of 21.0 MB"
+    assert b["sameTenthEnd"]["size"] == "21.0 of 21.0 MB"
+    assert b["sizes"] == [{"done": "4.2", "total": "21.0"}, {"done": "20.9", "total": "21.0"}, {"done": "20.9", "total": "21.0"},
+                          {"done": "0.0", "total": "1.0"}, {"done": "0.9", "total": "1.0"}, {"done": "0.0", "total": "100.0"}]
+
+
+@ui_only
+def test_an_unknown_size_is_a_pending_bar(checks: dict[str, Any]) -> None:
+    """No Content-Length: the bar carries data-pending, so each theme draws its own placeholder bar, with no figure for a
+    screen reader and no cell lit; the sizes line counts what has arrived. Before the first byte it says it is connecting."""
+    u = update_run(checks)["unknown"]
+    so_far = u["soFar"]
+    assert so_far["pending"] and so_far["now"] is None and so_far["lit"] == 0
+    assert 'data-pending=""' in so_far["html"] and "aria-valuenow" not in so_far["html"]
+    assert so_far["size"] == so_far["text"] == "4.2 MB so far"
+    assert so_far["line"] == "Downloading version 2.4.0; the server did not say how large it is."
+    assert u["connecting"]["size"] == "Connecting to GitHub…" and u["connecting"]["pending"]
+    assert u["connecting"]["line"] == "Downloading version 2.4.0."
+    assert u["stalledUnknown"]["pending"] and u["stalledUnknown"]["tone"] == "is-warn"
+
+
+@ui_only
+def test_the_steps_follow_the_phase(checks: dict[str, Any]) -> None:
+    """Download, Check and Restart: the steps before the current one done, the current one under way (or stalled, or
+    failed), the rest still to come, each with the guard card's tone for it. The words are natural case: Nostromo and Night
+    City set the chips in capitals in their CSS."""
+    run = update_run(checks)
+    expected = {"connecting": ["now", "next", "next"], "downloading": ["now", "next", "next"],
+                "stalled": ["stalled", "next", "next"], "checking": ["done", "now", "next"],
+                "starting": ["done", "done", "now"], "restarting": ["done", "done", "now"]}
+    failed = {"downloading": ["failed", "next", "next"], "checking": ["done", "failed", "next"],
+              "starting": ["done", "done", "failed"], "restarting": ["done", "done", "failed"], "none": ["failed", "next", "next"]}
+    for views, wanted in ((run["steps"], expected), (run["failedIn"], failed)):
+        for name, stands in wanted.items():
+            view = views[name]
+            assert view["steps"] == stands, name
+            assert view["tones"] == [STEP_TONE[s] for s in stands], name
+            assert view["classes"] == [STEP_CLASSES[s] for s in stands], name
+    assert re.findall(r'data-step="\w+">([^<]+)<', run["steps"]["checking"]["html"]) == ["Download", "Check", "Restart"]
+
+
+@ui_only
+def test_a_stall_and_each_failure_say_so(checks: dict[str, Any]) -> None:
+    """A stall: the warn look and its own line, the run still going. A failure: the crit look, the line in the error tone,
+    the bar drawn hot where it stopped, and Install update free again. Every code the updater can record has words of its
+    own; an unknown code, or an HTTP failure with no status, reads as the plain failure."""
+    import update_check
+
+    run = update_run(checks)
+    stall = run["stall"]
+    assert (stall["tone"], stall["err"], stall["busy"], stall["hot"]) == ("is-warn", False, True, False)
+    assert stall["line"] == UPDATE_STALLED and stall["size"] == "7.3 of 21.0 MB" and stall["lit"] == 11
+    failures = run["failures"]
+    assert set(UPDATE_FAILURE_TEXTS) == set(update_check.REASONS)
+    for code, text in UPDATE_FAILURE_TEXTS.items():
+        view = failures[code]
+        assert unescape(view["line"]) == text, code
+        assert (view["kind"], view["tone"], view["err"], view["hot"], view["busy"]) == ("failed", "is-crit", True, True, False), code
+        assert 'class="nm-status is-err"' in view["html"] and 'class="nm-cells hot"' in view["html"], code
+    assert unescape(failures["unknownCode"]["line"]) == unescape(failures["httpWithoutStatus"]["line"]) == UPDATE_FAILURE_TEXTS["error"]
+    assert failures["tooLargeAnnounced"]["size"] == "0.0 of 600.0 MB" and failures["tooLargeAnnounced"]["lit"] == 0
+    assert failures["rejectedNoVersion"]["size"] == ""
+    assert unescape(failures["rejectedNoVersion"]["line"]) == UPDATE_FAILURE_TEXTS["rejected"]
+
+
+@ui_only
+def test_the_failure_words_are_the_catalogs_when_they_are_drawn(checks: dict[str, Any]) -> None:
+    """A text changed in the catalog after the page loaded shows at the next draw: nothing holds a copy taken at load."""
+    assert update_run(checks)["drawnAtDrawTime"] == "Changed after the page loaded."
+
+
+@ui_only
+def test_the_sizes_are_written_in_the_locale(checks: dict[str, Any]) -> None:
+    """A French page (fr-FR) whose catalog has no update text yet: the figures in French numbers inside English's words,
+    which are marked lang="en" (so a theme's capitals follow English's rules)."""
+    fr = checks["updateFrench"]
+    assert fr["size"] == '<span lang="en">4,2 of 21,0 MB</span>'
+    assert fr["text"] == "4,2 of 21,0 MB"
+    assert fr["soFar"] == '<span lang="en">4,2 MB so far</span>'
+    assert fr["step"].count('<span lang="en">') == 3
+    assert fr["timeout"] == '<span lang="en">The download stopped: nothing arrived for 60 seconds.</span>'
+    assert fr["tooLarge"] == '<span lang="en">The download stopped: the installer is larger than 512 MB.</span>'
+
+
+@ui_only
+def test_only_the_release_on_offer_shows_its_run(checks: dict[str, Any]) -> None:
+    """A run, or a failure, of another version, no release on offer, no run, or a monitor with no status route: nothing,
+    and the line under the buttons as it is today. A failure whose link named no version is the offer's."""
+    offer = update_run(checks)["offer"]
+    assert offer == {name: NOTHING for name in ("otherVersion", "otherVersionFailed", "nothingOnOffer", "idle", "none")}
+    assert update_run(checks)["failures"]["rejectedNoVersion"]["kind"] == "failed"
+
+
+@ui_only
+def test_a_page_opened_mid_update_shows_it_at_the_first_ask(checks: dict[str, Any]) -> None:
+    """Settings opened while a run goes (a tray click, another window): the first ask, made as the page is built, shows it,
+    the line under the buttons gives way to it and Install update is busy."""
+    opened = update_run(checks)["flow"]["opened"]
+    assert opened["calls"] == ["GET /api/update/status"]
+    assert opened["shown"] and opened["cls"] == "nm-uprog" and opened["steps"] == ["now", "next", "next"]
+    assert opened["size"] == "4.2 of 21.0 MB" and opened["said"] == "Downloading version 2.4.0."
+    assert opened["lineHidden"] and opened["line"] == "" and opened["busy"] == "true" and opened["quick"] == 1
+
+
+@ui_only
+def test_the_status_is_asked_only_while_it_matters(checks: dict[str, Any]) -> None:
+    """Every half second while a run shows; every 3 s from the page's tick while Settings is open with a release on offer;
+    none while the window is hidden, on another page or with nothing on offer; none after a 404 or a 501 (an older monitor,
+    the dev server without its demo); and a page change stops the quick asks."""
+    flow = update_run(checks)["flow"]
+    asks = {name: len(flow[name]["calls"]) for name in flow if "calls" in flow[name]}
+    assert asks["again"] == 2 and flow["again"]["quick"] == 1
+    assert asks["idle"] == 3 and flow["idle"]["quick"] == 0
+    assert not flow["idle"]["shown"] and flow["idle"]["line"] == "Version 2.4.0 is available." and not flow["idle"]["lineHidden"]
+    assert flow["idle"]["busy"] is None                                   # no run: today's line, Install free
+    assert asks["tickEarly"] == 3 and asks["tickDue"] == 4
+    assert asks["hidden"] == asks["otherPage"] == asks["noOffer"] == 4
+    assert asks["notFound"] == 5                                          # the 404 is asked once, then nothing more
+    assert flow["notAvailable"]["calls"] == ["GET /api/update/status"] and flow["notAvailable"]["none"] is True
+    assert flow["pageChange"] == {"quickBefore": 1, "calledOff": True, "timer": 0, "calls": ["GET /api/update/status"]}
+
+
+@ui_only
+def test_an_older_failure_does_not_show_after_a_click(checks: dict[str, Any]) -> None:
+    """For 3 s after Install update started a run, a record with no run in it yet (none, idle, or a failure older than the
+    click) shows the run's start; a failure younger than the click is the new run's; a running record is shown as it is,
+    however old (a run the tray started, which the click's request joined)."""
+    after = update_run(checks)["afterClick"]
+    for name in ("nothingYet", "idle", "olderFailure"):
+        view = after[name]
+        assert (view["kind"], view["size"], view["pending"], view["busy"]) == ("start", "Connecting to GitHub…", True, True), name
+        assert view["steps"] == ["now", "next", "next"] and view["line"] == "Downloading version 2.4.0.", name
+    assert after["newFailure"]["kind"] == "failed"
+    assert after["olderRun"]["kind"] == "run" and after["olderRun"]["size"] == "4.2 of 21.0 MB"
+    assert after["graceOver"] == NOTHING
+    click = update_run(checks)["click"]
+    assert click["started"]["calls"] == ["POST /api/update/apply", "GET /api/update/status"]
+    assert click["started"]["size"] == "Connecting to GitHub…" and click["started"]["busy"] == "true"
+    assert click["started"]["lineHidden"] and click["started"]["quick"] == 1
+    assert click["running"]["size"] == "4.2 of 21.0 MB"
+
+
+@ui_only
+def test_a_lost_link_and_a_restart_read_differently(checks: dict[str, Any]) -> None:
+    """Three asks with no answer: while the update downloads or is checked, the dashboard lost its link (the crit look, the
+    step it was on failed, asked again every 3 s); once the monitor has begun to close for the installer, it is closing (no
+    version claimed: if the installer cannot run, the old version starts again) and nothing more is asked. Never with no run:
+    a monitor that quits keeps today's line (the header says the link is lost)."""
+    lost = update_run(checks)["lost"]
+    down = lost["downloading"]
+    assert (down["kind"], unescape(down["line"]), down["tone"], down["err"]) == ("lost", UPDATE_LOST, "is-crit", True)
+    assert down["steps"] == ["failed", "next", "next"] and down["size"] == "4.2 of 21.0 MB" and down["hot"]
+    assert lost["checking"]["kind"] == "lost" and lost["checking"]["steps"] == ["done", "failed", "next"]
+    for name in ("restarting", "starting"):
+        view = lost[name]
+        assert (view["kind"], unescape(view["line"]), view["tone"], view["err"]) == ("gone", UPDATE_GONE, "", False), name
+        assert view["steps"] == ["done", "done", "now"] and view["busy"] and view["lit"] == 32, name
+    assert lost["twoMisses"]["kind"] == "run"
+    assert lost["noRun"] == NOTHING
+    assert lost["afterClickNoAnswer"]["kind"] == "lost" and lost["afterClickNoAnswer"]["size"] == ""
+    paths = update_run(checks)["linkLost"]
+    down, gone, idle = paths["downloading"], paths["restarting"], paths["idle"]
+    assert [s["said"] for s in down["seen"]] == ["Downloading version 2.4.0."] * 2 + [UPDATE_LOST]
+    assert down["seen"][2]["cls"] == "nm-uprog is-crit" and down["seen"][2]["busy"] is None and down["seen"][2]["quick"] == 0
+    assert len(down["after"]["calls"]) == len(down["seen"][2]["calls"]) + 1          # still asked, every 3 s
+    assert gone["seen"][2]["said"] == UPDATE_GONE and gone["seen"][2]["busy"] == "true"
+    assert gone["after"]["calls"] == gone["seen"][2]["calls"]                        # nothing asked once it has gone
+    assert not any(s["shown"] for s in idle["seen"]) and not idle["after"]["shown"]
+    assert idle["after"]["line"] == "Version 2.4.0 is available."
+
+
+@ui_only
+def test_a_failure_lasts_until_the_next_click_on_an_update_button(checks: dict[str, Any]) -> None:
+    """Owner question 4 on #58: a failure stays while its release is on offer, until a click on Check for updates now,
+    Install update or Skip this version gives the line under the buttons a new answer, which then shows; or until a new run
+    starts. An answer given while a run goes stays under the run's block."""
+    run = update_run(checks)
+    assert run["lasts"]["sameAnswer"]["kind"] == "failed"
+    assert run["lasts"]["newAnswer"] == run["lasts"]["neverShown"] == NOTHING
+    click = run["click"]
+    old = click["oldFailure"]
+    assert old["shown"] and old["cls"] == "nm-uprog is-crit" and old["lineHidden"] and old["busy"] is None
+    assert unescape(old["said"]) == UPDATE_FAILURE_TEXTS["network"]
+    checked = click["checked"]
+    assert not checked["shown"] and checked["line"] == "AN UPDATE IS AVAILABLE." and not checked["lineHidden"]
+    failed = click["failed"]
+    assert failed["shown"] and failed["cls"] == "nm-uprog is-crit" and unescape(failed["said"]) == UPDATE_FAILURE_TEXTS["cut_short"]
+    assert failed["line"] == "AN UPDATE IS AVAILABLE." and not failed["lineHidden"] and failed["busy"] is None
+    assert not click["skipped"]["shown"] and click["skipped"]["line"] == "THIS VERSION WILL BE SKIPPED."
+    assert click["trayRun"]["shown"] and click["trayRun"]["steps"] == ["now", "next", "next"]
+    assert click["trayFailed"]["shown"] and click["trayFailed"]["steps"] == ["done", "done", "failed"]
+    assert unescape(click["trayFailed"]["said"]) == UPDATE_FAILURE_TEXTS["helper"] and click["trayFailed"]["lineHidden"]
+
+
+@ui_only
+def test_a_second_click_on_install_sends_nothing_while_a_run_goes(checks: dict[str, Any]) -> None:
+    """Install update is aria-disabled while a run goes (it keeps the keyboard focus) and settingsClick sends nothing for it;
+    the other buttons still work, and their answers show under the run."""
+    click = update_run(checks)["click"]
+    assert click["secondClick"]["calls"] == [] and click["secondClick"]["busy"] == "true"
+    during = click["checkDuringRun"]
+    assert during["calls"] == ["POST /api/update/check"]
+    assert during["shown"] and during["line"] == "AN UPDATE IS AVAILABLE." and not during["lineHidden"]
+    assert re.search(r'action === "install-update"\) \{\s*if \(!updateRunBusy\(\)\) \{[^\n]*\n\s*installUpdate\(\);',
+                     function_body(APP_CODE, "settingsClick"))
+
+
+@ui_only
+def test_the_hold_on_the_check_step_is_off_and_works_when_set(checks: dict[str, Any]) -> None:
+    """Owner question 1: no hold today. Set (here to 1 s, through progressView's own argument), the Check chip stays the current
+    step for that long after the record passed it, and no longer."""
+    hold = update_run(checks)["hold"]
+    assert hold["constant"] == 0
+    assert hold["byDefault"]["steps"] == ["done", "done", "now"]           # the Check chip shows done at once
+    assert hold["holding"]["steps"] == ["done", "now", "next"]             # a hold of 1 s, 0.3 s after the check passed
+    assert unescape(hold["holding"]["line"]) == "Checking the download against the release's SHA-256."
+    assert hold["heldLongEnough"]["steps"] == ["done", "done", "now"]
+
+
+@ui_only
+def test_the_bar_is_redrawn_when_part_of_a_cell_fills(checks: dict[str, Any]) -> None:
+    """The block is drawn once and then patched part by part: the same answer touches nothing, a block that moves only the
+    part of a cell redraws the cells (a 32nd of 21 MB can take many seconds on a slow line), a new step redraws the chips."""
+    patches = update_run(checks)["patches"]
+    assert patches["first"] == patches["same"] == {"box": 1, "steps": 0, "cells": 0, "size": 0, "line": 0}
+    assert patches["partMoved"] == {"box": 1, "steps": 0, "cells": 1, "size": 0, "line": 0}
+    assert patches["cellsHtml"].count('class="on"') == 6 and "--f:53.9%" in patches["cellsHtml"]
+    assert patches["nextStep"] == {"box": 1, "steps": 1, "cells": 2, "size": 1, "line": 1}
+    assert patches["hiddenAfter"] and patches["emptyAfter"]
+
+
+@ui_only
+def test_the_banner_and_the_update_line_are_untouched_by_a_run(checks: dict[str, Any]) -> None:
+    """The banner on the other pages and the line under Settings' buttons say what they said before #58, run or no run
+    (showing the run in the banner is #114)."""
+    untouched = update_run(checks)["untouched"]
+    assert untouched["busy"] is True
+    assert untouched["with"] == untouched["without"]
+    assert "DOWNLOADING AND CHECKING THE UPDATE" in untouched["with"]["banner"]
+
+
+@ui_only
+def test_the_block_holds_no_figure_night_city_glitches(checks: dict[str, Any]) -> None:
+    """Night City glitches .nm-big, .nm-stat-v and .nm-cmp-n whenever their text changes, which would be twice a second
+    here; the block is the guard card's parts only, and the page sets no motion mark of its own."""
+    run = update_run(checks)
+    views = [run["stall"]]
+    for group in ("bytes", "unknown", "steps", "failedIn", "failures", "afterClick", "lost", "hold", "lasts"):
+        views += [view for view in run[group].values() if isinstance(view, dict) and "html" in view]
+    markup = [view["html"] for view in views if view["html"]]
+    assert len(markup) > 40
+    allowed = {"nm-verdict", "nm-chip", "nm-chip is-ok", "nm-chip solid is-warn", "nm-chip solid is-crit", "nm-cells",
+               "nm-cells hot", "nm-story", "nm-status", "nm-status is-err", "on", "part"}
+    for html in markup:
+        assert not re.search(r"nm-big|nm-stat-v|nm-cmp-n|data-fx", html), html[:200]
+        assert set(re.findall(r'class="([^"]+)"', html)) <= allowed, html[:200]
+
+
+@pytest.mark.parametrize("theme_id", THEME_IDS)
+def test_every_theme_draws_the_update_block_with_what_it_has(theme_id: str) -> None:
+    """Each sheet lays the block out and lets its chips wrap (a long word in another language fits a narrow window), tells
+    the three steps apart (Gates by the chips' own tones, which gates.js reads from data-tone), and colours a stalled and a
+    failed bar its own way. No rule of the block moves anything."""
+    css = THEME_CSS[theme_id]
+    assert re.search(r"\.nm-uprog \{ display: flex; flex-direction: column;", css)
+    assert re.search(r"\.nm-uprog \.nm-verdict \{ flex-wrap: wrap;", css)
+    rules = re.findall(r"([^{}\n]*\.nm-uprog[^{}]*)\{([^}]*)\}", css)
+    assert rules and not any(re.search(r"\b(?:animation|transition)\b", body) for _, body in rules)
+    if theme_id == "gates":
+        assert ".nm-uprog.is-warn { --g-fill: var(--warn); }" in css and ".nm-uprog.is-crit { --g-fill: var(--alert); }" in css
+        assert re.search(r'\.nm-chip\[data-g-tone="acc"\] \{[^}]*color: var\(--text\)', css)
+        assert re.search(r'\.nm-chip\[data-g-tone="neutral"\] \{[^}]*color: var\(--text-dim\)', css)
+    else:
+        assert re.search(r'\.nm-uprog \.nm-chip\[data-step="done"\] \{[^}]+\}', css)
+        assert re.search(r'\.nm-uprog \.nm-chip\[data-step="next"\] \{[^}]*opacity: \.45;', css)    # as a disabled control is
+    if theme_id == "nostromo":
+        assert ".nm-cells.hot i.on { background: var(--hot); }" in css and ".nm-cells.hot i.part {" in css
+    if theme_id == "night_city":
+        for tone in ("is-warn", "is-crit"):
+            assert f".nm-uprog.{tone} .nm-cells i.on" in css and f".nm-uprog.{tone} .nm-cells i.part" in css
+
+
 # ── The theme picker ──────────────────────────────────────────────────────────────
 
 @ui_only

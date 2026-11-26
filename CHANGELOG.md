@@ -4,6 +4,9 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Added
+- Settings → System shows an update as it goes, in your theme's own style: the download, the check and the restart as three steps, a bar that fills with how much has arrived ("4.2 of 21.0 MB") and a line that says what is happening. If the download stalls or stops, it says so, and why ([#58](https://github.com/Godimas101/claude-usage-monitor/issues/58)).
+
 ### Fixed
 - On the Gates theme, the Settings card Data and plan now has its icon, as the theme always meant it to. The icons follow the cards, not their titles ([#90](https://github.com/Godimas101/claude-usage-monitor/issues/90)).
 - The dashboard keeps its choices (the Cost and Efficiency windows, the folder grouping and the chart metrics) after its window closes and when the monitor restarts or updates. Before, they were lost each time: the dashboard window keeps nothing once it closes, and in the browser the storage was tied to a port that changes each run ([#54](https://github.com/Godimas101/claude-usage-monitor/issues/54)).
