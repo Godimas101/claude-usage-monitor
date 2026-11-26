@@ -24,6 +24,11 @@
  *   update-run:S    Settings while the monitor installs an update itself, in state S of the run (downloading, unknown,
  *                   connecting, checking, starting, restarting, stalled, or failed-CODE for each failure code): the
  *                   update status route answers that state, and Settings shows it at its first ask (#58)
+ *   update-said:A   what each update button says (#97): a release on offer that the monitor installs itself, and every
+ *                   POST to /api/update/<check|apply|skip> answered A (found, none, unchecked: the three results of each;
+ *                   error, internal, unavailable, token, http: the monitor's refusals; lost: no answer; hang: none yet);
+ *                   Settings' three update buttons and the banner's Update now and Skip this version are pressed, each on
+ *                   a page opened afresh (in the hang pass the page is then opened again, as its next state redraws it)
  *
  *   node tests/english_scan.js <webui folder> <the page's URL, with its key> <now, in ms since 1970> <passes as JSON>
  *
@@ -58,6 +63,28 @@ const UPDATE_RUNS = {
   restarting: { phase: "restarting", done: 22020096 }, stalled: { stalled: true, idle_s: 16 },
 };
 const FAILED_IN = { digest: "checking", helper: "starting" };
+// What the monitor answers each update button in an update-said pass (#97), as ui/server.py does: the result of a check, an
+// apply and a skip, or the refusal of each (ROUTE_STEP names the step a refusal names).
+const ROUTE_STEP = { "/api/update/check": "check", "/api/update/apply": "apply", "/api/update/skip": "skip" };
+const UPDATE_SAID = {
+  found: { check: { available: true, version: UPDATE.version, checked: true }, apply: { started: true, mode: "browser" } },
+  none: { check: { available: false, version: null, checked: true }, apply: { started: false, mode: "none" } },
+  unchecked: { check: { available: false, version: null, checked: false }, apply: { started: true, mode: "installer" } },
+  error: (step) => ({ status: 500, body: { error: "update " + step + " failed" } }),
+  internal: () => ({ status: 500, body: { error: "internal error" } }),
+  unavailable: (step) => ({ status: 501, body: { error: "update " + step + " is not available" } }),
+  token: () => ({ status: 401, body: { error: "missing or wrong token" } }),
+  http: () => ({ status: 502, body: null }),
+};
+function updateSaid(answer, api) {
+  const step = ROUTE_STEP[api];
+  if (answer === "lost") { return "fail"; }
+  if (answer === "hang") { return "hang"; }
+  const said = UPDATE_SAID[answer];
+  if (typeof said === "function") { return said(step); }
+  return { status: 200, body: step === "skip" ? { ok: true } : { ok: true, result: said[step] } };
+}
+
 function updateRun(state) {
   if (state.startsWith("failed-")) {
     const code = state.slice("failed-".length);
@@ -87,6 +114,14 @@ function rulesFor(pass) {
     }
     if (pass === "posts-failed" && method !== "GET") {
       return "fail";
+    }
+    if (pass.startsWith("update-said:")) {
+      if (api === "/api/state") {
+        return state(() => ({ dev: false, update: { ...UPDATE, can_self_update: true, info: { version: UPDATE.version, can_self_update: true } } }));
+      }
+      if (method === "POST" && ROUTE_STEP[api]) {
+        return updateSaid(pass.slice("update-said:".length), api);
+      }
     }
     if (pass.startsWith("update-run:")) {
       if (api === "/api/state") {
@@ -355,6 +390,32 @@ async function everyAction(pass, key, scope) {
         const view = await load(pass);
         for (const key of STAT_PAGES) {
           await open(view, pass, key);
+        }
+      } else if (pass.startsWith("update-said:")) {
+        const answer = pass.slice("update-said:".length);
+        if (!Object.prototype.hasOwnProperty.call(UPDATE_SAID, answer) && answer !== "lost" && answer !== "hang") {
+          problems.push("no such update answer: " + pass);
+          continue;
+        }
+        for (const [key, scope, actions] of [["settings", "#main", ["check-update", "install-update", "skip-update"]],
+          ["overview", "#main .nm-update", ["update-now", "update-skip"]]]) {
+          for (const action of actions) {
+            const view = await load(pass);
+            await open(view, pass, key);
+            const el = view.doc.querySelectorAll(scope + " [data-action]").find((b) => label(b) === action);
+            if (!el) {
+              problems.push(pass + "/" + key + ": no " + action + " button");
+              continue;
+            }
+            await press(view, pass, key + ":" + action, el);
+            if (answer === "hang") {
+              // a check that waits shows its line at the page's next draw (the next state, in 2 s): the page opened again
+              current = pass + "/" + key + ":" + action + " again";
+              view.box._fire(new D.Event("hashchange"), (e) => problems.push(current + ": hashchange threw: " + describe(e)));
+              await settle(view.box, view.waiting);
+              keep(view.doc, pass, key + ":" + action + " again");
+            }
+          }
         }
       } else if (pass.startsWith("update-run:")) {
         if (!updateRun(pass.slice("update-run:".length))) {

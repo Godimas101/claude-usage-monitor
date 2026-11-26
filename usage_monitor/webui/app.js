@@ -32,7 +32,9 @@
  * Update      .nm-update[role=status] > .nm-update-t (b: "Claude Usage Monitor vX.Y is available", span: what Update now
  *             does) + .nm-actions (button.nm-btn[data-action=update-now | update-notes | update-skip]) + .nm-status.
  *             The first banner of every page but Settings (which has the same buttons in its System card), present only while
- *             /api/state reports a release that was not skipped.
+ *             /api/state reports a release that was not skipped. Its words and the System card's update rows, buttons and line
+ *             are the catalog's (#97: banner.update.*, settings.update.*), in natural case: a theme sets them in capitals with
+ *             text-transform. A line that is English on another language's page carries lang="en".
  * Progress    A running update on Settings (#58): .nm-uprog#set-update-progress in the System card, hidden while there is none
  *             to show; .is-warn while the download stalls, .is-crit once the update failed or the dashboard lost the monitor.
  *             Made of the guard card's parts: .nm-verdict > three .nm-chip steps (Download, Check, Restart), each with
@@ -843,25 +845,101 @@
     return res && res.data && res.data.error ? res.data.error : "HTTP " + (res ? res.status : "?");
   }
 
-  /* A status line written in capitals ("UPDATE FAILED: UPDATE APPLY FAILED"): the monitor's reason is lower case, and the Gates
-   * theme sets a line in sentence case only when all of it is capitals, so a reason left as it came would be shouted in
-   * Nostromo and Night City (which upper-case it in CSS) and left half and half in Gates. */
+  /* A status line written in capitals ("REFRESH FAILED: …"): the monitor's reason is lower case, and the Gates theme sets a
+   * line in sentence case only when all of it is capitals, so a reason left as it came would be shouted in Nostromo and Night
+   * City (which upper-case it in CSS) and left half and half in Gates. Refresh and resume (#100's); the update buttons' lines
+   * are the catalog's since #97 (updateRefusal). */
   function failedText(prefix, res) {
     return prefix + ": " + FMT.upper(errorText(res), "en");
   }
 
-  /* The status line after "Check for updates now". `checked` is false when the monitor could not look (offline, GitHub's rate
-   * limit, a slow answer): that is not "up to date". A monitor that sends no `checked` is taken to have looked. One sentence:
-   * the Gates theme capitalises only the first letter of a line. */
+  // ── The update buttons' words (#97) ─────────────────────────────────────────────
+  // What a click on an update button says (S.update) is a line: the catalog's text and the language it came from, so the
+  // element that shows it is marked lang="en" when it is English on another language's page. Stored in natural case:
+  // Nostromo and Night City set the lines in capitals by CSS, Gates shows them as written.
+
+  var APP_NAME = "Claude Usage Monitor";         // the product's name, as written (#86): the update banner's heading
+
+  /* The line for key, its placeholders filled: { text, lang }. */
+  function tLine(key, values) {
+    var found = lookupText(key);
+    return { text: found && typeof found.value === "string" ? fillText(found.value, values) : key, lang: found ? found.lang : "en" };
+  }
+
+  /* S.update: a line and the release it is about. A click on Install update or Skip this version gives "version" (the banner
+   * shows its line too); a check gives "offered" (its words stay out of the banner; see updateLine). */
+  function updateAnswer(line, about, version) {
+    var answer = { text: line.text, lang: line.lang };
+    answer[about] = version;
+    return answer;
+  }
+
+  /* The words of each update button's refusal, by its reason (updateRefusal). One literal key per line, so the catalog check
+   * and a translator's tools read them all. */
+  var UPDATE_REFUSED = {
+    check: {
+      error: function () { return tLine("settings.update.failed.check.error"); },
+      internal: function () { return tLine("settings.update.failed.check.internal"); },
+      unavailable: function () { return tLine("settings.update.failed.check.unavailable"); },
+      token: function () { return tLine("settings.update.failed.check.token"); },
+      http: function (status) { return tLine("settings.update.failed.check.http", { status: status }); },
+      lost: function () { return tLine("settings.update.failed.check.lost"); }
+    },
+    install: {
+      error: function () { return tLine("settings.update.failed.install.error"); },
+      internal: function () { return tLine("settings.update.failed.install.internal"); },
+      unavailable: function () { return tLine("settings.update.failed.install.unavailable"); },
+      token: function () { return tLine("settings.update.failed.install.token"); },
+      http: function (status) { return tLine("settings.update.failed.install.http", { status: status }); },
+      lost: function () { return tLine("settings.update.failed.install.lost"); }
+    },
+    skip: {
+      error: function () { return tLine("settings.update.failed.skip.error"); },
+      internal: function () { return tLine("settings.update.failed.skip.internal"); },
+      unavailable: function () { return tLine("settings.update.failed.skip.unavailable"); },
+      token: function () { return tLine("settings.update.failed.skip.token"); },
+      http: function (status) { return tLine("settings.update.failed.skip.http", { status: status }); },
+      lost: function () { return tLine("settings.update.failed.skip.lost"); }
+    }
+  };
+
+  /* The line for an update button the monitor refused: op is "check", "install" or "skip", res its answer (null when the
+   * request itself failed: the dashboard lost its link). Worded by the answer's HTTP status, never by the English `error`
+   * it carries. On these routes each status has one reason (ui/server.py): 501, this monitor has no such step; 500, the
+   * step failed, or, rarely, "internal error" (a handler that raised: the one error that is read, and only to tell the two
+   * apart); 401, the dashboard's token. Any other status, which the page's own requests do not get, is named by its number.
+   * #102 may give these answers a code: it changes this function only. */
+  function updateRefusal(op, res) {
+    var reason = !res ? "lost" : res.status === 501 ? "unavailable" : res.status === 401 ? "token" : res.status !== 500 ? "http" :
+      res.data && res.data.error === "internal error" ? "internal" : "error";
+    return UPDATE_REFUSED[op][reason](res ? String(res.status) : "");
+  }
+
+  /* The lang of an element that shows a line: "en" while the line is English on another language's page, none otherwise. */
+  function markLineLang(el, lang) {
+    if (lang && lang !== I18N.language) {
+      el.setAttribute("lang", lang);
+    } else {
+      el.removeAttribute("lang");
+    }
+  }
+
+  /* The same in markup (the banner's line): ' lang="en"' or nothing. */
+  function lineLangAttr(lang) {
+    return lang && lang !== I18N.language ? ' lang="' + esc(lang) + '"' : "";
+  }
+
+  /* The line after "Check for updates now". `checked` is false when the monitor could not look (offline, GitHub's rate
+   * limit, a slow answer): that is not "up to date". A monitor that sends no `checked` is taken to have looked. */
   function checkUpdateText(res) {
     if (!res.ok) {
-      return failedText("CHECK FAILED", res);
+      return updateRefusal("check", res);
     }
     var result = res.data && res.data.result ? res.data.result : {};
     if (result.available) {
-      return "AN UPDATE IS AVAILABLE.";
+      return tLine("settings.update.status.found");
     }
-    return result.checked === false ? "COULD NOT REACH GITHUB; TRY AGAIN LATER." : "YOU ARE UP TO DATE.";
+    return result.checked === false ? tLine("settings.update.status.unreached") : tLine("settings.update.status.up_to_date");
   }
 
   /* A short stable digest of a string: enough to tell whether a report changed. */
@@ -3295,8 +3373,13 @@
 
   // ── Settings ────────────────────────────────────────────────────────────────────
 
+  /* A row's words: plain text, escaped, or markup this file built (a catalog text through tHtml, #97's update row). */
+  function htmlOf(value) {
+    return isMarkup(value) ? value.html : esc(value);
+  }
+
   function toggleRow(key, title, desc, attrs, descId) {
-    return '<label class="nm-row-set"><span><span class="t">' + esc(title) + '</span><span class="d"' + (descId ? ' id="' + descId + '"' : "") + ">" + esc(desc) +
+    return '<label class="nm-row-set"><span><span class="t">' + htmlOf(title) + '</span><span class="d"' + (descId ? ' id="' + descId + '"' : "") + ">" + htmlOf(desc) +
       '</span></span><span class="nm-toggle"><input type="checkbox" data-key="' + esc(key) + '" data-kind="bool"' + (attrs || "") + '><span class="box" aria-hidden="true"></span><span class="lbl" data-lbl-for="' +
       esc(key) + '">OFF</span></span></label>';
   }
@@ -3398,9 +3481,11 @@
         guardCard() +
         '<section class="nm-card wide" aria-label="System" data-card="system"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">System</h2><span class="nm-meta-t">start-up and updates</span></div><div class="nm-set">' +
         toggleRow("launch_on_startup", "Start with Windows", startupHintText(), "", "startup-hint") +
-        toggleRow("check_updates", "Check for updates", "Look for a newer release once in a while.") +
-        '</div><div class="nm-actions" id="set-update-actions"><button class="nm-btn" type="button" data-action="check-update">Check for updates now</button>' +
-        '<button class="nm-btn" type="button" data-action="install-update" hidden>Install update</button><button class="nm-btn" type="button" data-action="skip-update" hidden>Skip this version</button></div>' +
+        toggleRow("check_updates", markup(tHtml("settings.update.row.label")), markup(tHtml("settings.update.row.help"))) +
+        '</div><div class="nm-actions" id="set-update-actions"><button class="nm-btn" type="button" data-action="check-update">' +
+        tHtml("settings.update.button.check") + "</button>" +
+        '<button class="nm-btn" type="button" data-action="install-update" hidden>' + tHtml("settings.update.button.install") +
+        '</button><button class="nm-btn" type="button" data-action="skip-update" hidden>' + tHtml("settings.update.button.skip") + "</button></div>" +
         '<div class="nm-uprog" id="set-update-progress" hidden></div>' +
         '<p class="nm-status" id="set-update-status" role="status"></p></div></section>' +
         "</div>" +
@@ -4010,7 +4095,9 @@
     }
     var status = $("#set-update-status", main);
     if (status) {
-      status.textContent = updateLine();
+      var line = updateLineSaid();
+      status.textContent = line.text;
+      markLineLang(status, line.lang);                 // syncUpdateProgress writes the same text again, or hides it
     }
     syncUpdateProgress(main);                          // a running update: its block, the line hidden under it, Install busy
   }
@@ -4022,15 +4109,20 @@
   }
 
   /* The line under the update buttons. What a click said stays while nothing is on offer, or while it is about the release that is:
-   * "YOU ARE UP TO DATE." beside an Install button says nothing true. A check keeps `offered`, not `version`, which would also put
+   * "You are up to date." beside an Install button says nothing true. A check keeps `offered`, not `version`, which would also put
    * its words in the banner. */
   function updateLine() {
+    return updateLineSaid().text;
+  }
+
+  /* The same line with the language it is in: { text, lang }. */
+  function updateLineSaid() {
     var offered = offeredVersion();
     var about = S.update.version !== undefined ? S.update.version : S.update.offered;
     if (S.update.text && (!offered || about === offered)) {
-      return S.update.text;
+      return { text: S.update.text, lang: S.update.lang };
     }
-    return offered ? "Version " + offered + " is available." : "";
+    return offered ? tLine("settings.update.offered", { version: offered }) : { text: "", lang: "" };
   }
 
   // ── The update banner ───────────────────────────────────────────────────────────
@@ -4064,12 +4156,15 @@
     if (!found) {
       return "";
     }
-    return '<div class="nm-update" role="status" aria-label="Update available"><div class="nm-update-t"><b>Claude Usage Monitor v' + esc(found.version) + " is available</b>" +
-      "<span>" + (found.self ? "Update now installs it and restarts the monitor." : "Update now opens the release page.") + "</span></div>" +
-      '<div class="nm-actions"><button class="nm-btn solid" type="button" data-action="update-now" data-fid="update-now">Update now</button>' +
-      (found.url ? '<button class="nm-btn" type="button" data-action="update-notes" data-fid="update-notes">Release notes</button>' : "") +
-      '<button class="nm-btn" type="button" data-action="update-skip" data-fid="update-skip">Skip this version</button></div>' +
-      '<p class="nm-status" role="status">' + esc(S.update.version === found.version ? S.update.text || "" : "") + "</p></div>";
+    var said = S.update.version === found.version && S.update.text ? S.update : { text: "", lang: "" };
+    return '<div class="nm-update" role="status" aria-label="' + esc(t("banner.update.label")) + '"><div class="nm-update-t"><b>' +
+      tHtml("banner.update.title", { app: tName(APP_NAME), version: found.version }) + "</b>" +
+      "<span>" + (found.self ? tHtml("banner.update.installs") : tHtml("banner.update.opens")) + "</span></div>" +
+      '<div class="nm-actions"><button class="nm-btn solid" type="button" data-action="update-now" data-fid="update-now">' +
+      tHtml("banner.update.button.now") + "</button>" +
+      (found.url ? '<button class="nm-btn" type="button" data-action="update-notes" data-fid="update-notes">' + tHtml("banner.update.button.notes") + "</button>" : "") +
+      '<button class="nm-btn" type="button" data-action="update-skip" data-fid="update-skip">' + tHtml("banner.update.button.skip") + "</button></div>" +
+      '<p class="nm-status" role="status"' + lineLangAttr(said.lang) + ">" + esc(said.text) + "</p></div>";
   }
 
   /* The banner's three buttons. */
@@ -4603,12 +4698,12 @@
         setStatus("REFRESH FAILED: THE DASHBOARD LOST ITS LINK", true);
       });
     } else if (action === "check-update") {
-      S.update = { text: "CHECKING\u2026", offered: offeredVersion() };
+      S.update = updateAnswer(tLine("settings.update.status.checking"), "offered", offeredVersion());
       api("POST", "/api/update/check").then(function (res) {
-        S.update = { text: checkUpdateText(res), offered: offeredVersion() };
+        S.update = updateAnswer(checkUpdateText(res), "offered", offeredVersion());
         api("GET", "/api/state").then(function (r) { if (r.ok) { S.data = r.data; S.etag = r.etag; } syncSettings($("#main")); });
       }, function () {
-        S.update = { text: "CHECK FAILED: THE DASHBOARD LOST ITS LINK", offered: offeredVersion() };
+        S.update = updateAnswer(updateRefusal("check", null), "offered", offeredVersion());
         syncSettings($("#main"));
       });
     } else if (action === "install-update") {
@@ -4636,29 +4731,29 @@
 
   /* Update now. The monitor says what it did. "browser": it opened the release page (a source run, or a release it will not
    * install silently). "installer": it started the checked silent update, and only restarts if the download passes the check.
-   * One sentence per text: the Gates theme writes sentence case and capitalises only the first letter of a string. */
+   * One sentence per line, as before #97. */
   function installUpdate() {
     var found = pendingUpdate();
     var forVersion = found ? found.version : offeredVersion();  // a skipped release is still on offer here, and the click gets its answer
-    S.update = { text: "INSTALLING\u2026", version: forVersion };
+    S.update = updateAnswer(tLine("settings.update.status.installing"), "version", forVersion);
     refreshUpdateViews();
     api("POST", "/api/update/apply").then(function (res) {
       var mode = res.ok && res.data && res.data.result ? res.data.result.mode : "";
-      var text;
+      var line;
       if (!res.ok) {
-        text = failedText("UPDATE FAILED", res);
+        line = updateRefusal("install", res);
       } else if (mode === "browser") {
-        text = "OPENED THE RELEASE PAGE IN YOUR BROWSER.";
+        line = tLine("settings.update.status.browser");
       } else if (mode === "installer") {
-        text = "DOWNLOADING AND CHECKING THE UPDATE; IF IT CHECKS OUT, THE MONITOR CLOSES AND RESTARTS BY ITSELF.";
+        line = tLine("settings.update.status.installer");
         watchUpdateRun();
       } else {
-        text = "NO UPDATE WAS STARTED.";
+        line = tLine("settings.update.status.not_started");
       }
-      S.update = { text: text, version: forVersion };
+      S.update = updateAnswer(line, "version", forVersion);
       refreshUpdateViews();
     }, function () {
-      S.update = { text: "UPDATE FAILED: THE DASHBOARD LOST ITS LINK", version: forVersion };
+      S.update = updateAnswer(updateRefusal("install", null), "version", forVersion);
       refreshUpdateViews();
     });
   }
@@ -4670,18 +4765,18 @@
     if (found) {
       S.skipped = found.version;
     }
-    S.update = { text: "THIS VERSION WILL BE SKIPPED.", version: forVersion };
+    S.update = updateAnswer(tLine("settings.update.status.skipping"), "version", forVersion);
     refreshUpdateViews();
     api("POST", "/api/update/skip").then(function (res) {
       if (!res.ok) {
         S.skipped = "";
-        S.update = { text: failedText("COULD NOT SKIP", res), version: forVersion };
+        S.update = updateAnswer(updateRefusal("skip", res), "version", forVersion);
       }
       refreshUpdateViews();
       poll(true);
     }, function () {
       S.skipped = "";
-      S.update = { text: "COULD NOT SKIP: THE DASHBOARD LOST ITS LINK", version: forVersion };
+      S.update = updateAnswer(updateRefusal("skip", null), "version", forVersion);
       refreshUpdateViews();
     });
   }
@@ -5943,6 +6038,7 @@
       localeReload: localeReload, localeMark: localeMark,
       PREF_CHOICES: PREF_CHOICES, SAVED_PREFS: SAVED_PREFS, PAGE_KEYS: PAGE_KEYS, clockText: clockText,
       errorText: errorText, failedText: failedText, checkUpdateText: checkUpdateText, settingsClick: settingsClick,
+      tLine: tLine, updateRefusal: updateRefusal, updateLineSaid: updateLineSaid, toggleRow: toggleRow, APP_NAME: APP_NAME,
       updateAction: updateAction, installUpdate: installUpdate, skipUpdate: skipUpdate, aboutPage: aboutPage,
       settingsPage: settingsPage, settingsChange: settingsChange, labelFor: labelFor, guardCard: guardCard, guardView: guardView,
       guardLiveHtml: guardLiveHtml, guardSetupHtml: guardSetupHtml, guardResultHtml: guardResultHtml, syncGuard: syncGuard,

@@ -32,7 +32,7 @@ from typing import Any
 
 import pytest
 
-from usage_monitor import cldr, formats, i18n, paths, themes
+from usage_monitor import casing, cldr, formats, i18n, paths, themes
 from usage_monitor.data import analytics, windows
 from usage_monitor.render import model as widget_model
 from usage_monitor.themes import colour
@@ -861,27 +861,28 @@ def test_the_plan_price_hint_says_what_the_latest_state_says(checks: dict[str, A
 
 @ui_only
 def test_the_settings_update_line_is_about_the_release_on_offer(checks: dict[str, Any]) -> None:
-    """Nothing cleared what the last click said, so a release found later stood beside "YOU ARE UP TO DATE." or the skip of an
-    older one until the window closed (#47). The banner already kept its text to one release."""
+    """Nothing cleared what the last click said, so a release found later stood beside "You are up to date." or the skip of an
+    older one until the window closed (#47). The banner already kept its text to one release. The lines are the catalog's in
+    natural case since #97 (Nostromo and Night City set them in capitals by CSS)."""
     line = checks["updateLine"]
 
     def offered(version: str) -> dict[str, Any]:
         return {"line": f"Version {version} is available.", "install": True}
 
-    assert line["upToDate"] == {"line": "YOU ARE UP TO DATE.", "install": False}
+    assert line["upToDate"] == {"line": "You are up to date.", "install": False}
     assert line["foundLater"] == offered("2.3.0")
-    assert line["checking"] == {"line": "CHECKING\u2026", "install": True}            # a state on the way changes nothing
-    assert line["checked"] == {"line": "AN UPDATE IS AVAILABLE.", "install": True}
+    assert line["checking"] == {"line": "Checking\u2026", "install": True}            # a state on the way changes nothing
+    assert line["checked"] == {"line": "An update is available.", "install": True}
     assert 'role="status"></p>' in line["banner"]                                      # a check's words stay out of the banner
-    assert line["linkLost"] == {"line": "CHECK FAILED: THE DASHBOARD LOST ITS LINK", "install": True}
-    assert line["noGithub"] == {"line": "COULD NOT REACH GITHUB; TRY AGAIN LATER.", "install": True}
+    assert line["linkLost"] == {"line": "Check failed: the dashboard lost its link", "install": True}
+    assert line["noGithub"] == {"line": "Could not reach GitHub; try again later.", "install": True}
     assert line["newerAfterThat"] == offered("2.4.0")
-    assert line["skipped"] == {"line": "THIS VERSION WILL BE SKIPPED.", "install": True}
+    assert line["skipped"] == {"line": "This version will be skipped.", "install": True}
     assert line["newerAfterSkip"] == offered("2.5.0")
-    assert line["installing"] == {"line": "OPENED THE RELEASE PAGE IN YOUR BROWSER.", "install": True}
+    assert line["installing"] == {"line": "Opened the release page in your browser.", "install": True}
     assert line["newerAfterInstall"] == offered("2.6.0")
-    assert line["installSkipped"] == {"line": "OPENED THE RELEASE PAGE IN YOUR BROWSER.", "install": True}   # a click on a skipped
-    assert line["skipSkipped"] == {"line": "THIS VERSION WILL BE SKIPPED.", "install": True}                 # release gets its answer
+    assert line["installSkipped"] == {"line": "Opened the release page in your browser.", "install": True}   # a click on a skipped
+    assert line["skipSkipped"] == {"line": "This version will be skipped.", "install": True}                 # release gets its answer
 
 
 @ui_only
@@ -1082,11 +1083,11 @@ def literal_names(text: str) -> set[str] | None:
 
 
 def i18n_calls(code: str) -> list[tuple[str, str, set[str] | None]]:
-    """Every t, tHtml, tLang and tPlural call with a literal key: (function, key, the placeholders it fills). The
+    """Every t, tHtml, tLang, tPlural and tLine call with a literal key: (function, key, the placeholders it fills). The
     placeholders are None when the scan cannot read them: a key built from parts, values not written in the call as an
     object literal, or arguments the function does not take."""
     calls = []
-    for m in re.finditer(r'(?<![\w.$])(t|tHtml|tLang|tPlural)\("([^"]+)"', code):
+    for m in re.finditer(r'(?<![\w.$])(t|tHtml|tLang|tPlural|tLine)\("([^"]+)"', code):
         name, key = m.group(1), m.group(2)
         first, *rest = split_top(call_tail(code, m.end()))
         given: set[str] | None
@@ -1113,6 +1114,8 @@ def test_the_key_scan_reads_every_shape_of_call() -> None:
         ('tPlural("p", n, { a: [1, 2], b: "x, y" })', ("tPlural", "p", {"count", "a", "b"})),
         ('tPlural("p", count)', ("tPlural", "p", {"count"})),
         ('tLang("k")', ("tLang", "k", set())),
+        ('tLine("k", { status: status })', ("tLine", "k", {"status"})),
+        ('tLine("k")', ("tLine", "k", set())),
         ('t("x.fn", pick(a, b))', ("t", "x.fn", None)),
         ('t("x.v", values)', ("t", "x.v", None)),
         ('t("x." + part)', ("t", "x.", None)),
@@ -1128,7 +1131,7 @@ def test_every_key_the_page_and_the_shell_use_is_in_english_with_its_placeholder
     this scan (and a translator's tools) can read them."""
     english = json.loads((WEBUI / "i18n" / "en.json").read_text(encoding="utf-8"))
     code = strip_comments(APP_CODE)
-    assert not re.findall(r'(?<![\w.$])(?<!function )(?:t|tHtml|tLang|tPlural)\((?!")', code), "a key that is not a literal"
+    assert not re.findall(r'(?<![\w.$])(?<!function )(?:t|tHtml|tLang|tPlural|tLine)\((?!")', code), "a key that is not a literal"
     calls = i18n_calls(code)
     shell = re.findall(r'\sdata-i18n(?:-[a-z-]+)?="([^"]+)"', INDEX)
     assert calls and shell
@@ -2125,7 +2128,8 @@ def test_the_update_banner_is_there_only_while_an_unskipped_release_is_waiting(c
 
 @ui_only
 def test_the_update_banner_status_is_shown_only_for_the_release_it_is_about(checks: dict[str, Any]) -> None:
-    assert "SKIPPED" not in checks["banner"]["staleStatus"]
+    assert "skipped" not in checks["banner"]["staleStatus"]
+    assert 'role="status"></p>' in checks["banner"]["staleStatus"]
 
 
 def test_the_update_banner_uses_the_update_routes_and_sits_first_on_every_page() -> None:
@@ -2217,37 +2221,52 @@ def test_the_placeholder_threads_have_a_request_count_as_long_as_a_real_one(chec
 
 @ui_only
 def test_a_status_line_in_capitals_is_in_capitals_all_the_way(checks: dict[str, Any]) -> None:
-    """The Gates theme sets a line in sentence case only when all of it is capitals (gates.js isCaps). The monitor's reason is lower
-    case ("update apply failed"), so each failure path raises it, or Gates shows a shouting prefix over a lower-case tail."""
+    """The Gates theme sets a line in sentence case only when all of it is capitals (gates.js isCaps). The refresh line is still
+    written in capitals (#100's) and raises the monitor's lower-case reason ("update apply failed") with it, or Gates would
+    show a shouting prefix over a lower-case tail. The update buttons' lines follow #87's case rule since #97: the catalog's
+    whole sentences in natural case (Nostromo and Night City set them in capitals by CSS, Gates shows them as written),
+    worded by the answer's status, so a 503 that gives a reason is "HTTP 503" (test_each_answer_is_worded_by_its_status)."""
     lines = checks["failureLines"]
     assert lines["reason"] == {
-        "refresh": "REFRESH FAILED: UPDATE APPLY FAILED", "check": "CHECK FAILED: UPDATE APPLY FAILED",
-        "install": "UPDATE FAILED: UPDATE APPLY FAILED", "skip": "COULD NOT SKIP: UPDATE APPLY FAILED"}
-    assert lines["status"]["install"] == "UPDATE FAILED: HTTP 502"                     # no reason from the monitor: its status
+        "refresh": "REFRESH FAILED: UPDATE APPLY FAILED", "check": "Check failed: HTTP 503",
+        "install": "Update failed: HTTP 503", "skip": "Could not skip: HTTP 503"}
+    assert lines["status"] == {
+        "refresh": "REFRESH FAILED: HTTP 502", "check": "Check failed: HTTP 502",
+        "install": "Update failed: HTTP 502", "skip": "Could not skip: HTTP 502"}                # no reason from the monitor: its status
+    assert lines["lost"] == {"refresh": "REFRESH FAILED: THE DASHBOARD LOST ITS LINK", "check": "Check failed: the dashboard lost its link"}
     assert set(lines) == {"reason", "status", "lost"}
     assert checks["failureLinesCaps"] is True
     for group in lines.values():
-        for text in group.values():
-            assert re.search(r"[A-Z]", text) and not re.search(r"[a-z]", text), text
+        assert re.search(r"[A-Z]", group["refresh"]) and not re.search(r"[a-z]", group["refresh"]), group["refresh"]
 
 
 @ui_only
 def test_check_for_updates_does_not_say_up_to_date_when_it_could_not_look(checks: dict[str, Any]) -> None:
     said = checks["checkText"]
-    assert said["notChecked"] == "COULD NOT REACH GITHUB; TRY AGAIN LATER."            # one sentence: Gates capitalises only the first letter
-    assert said["upToDate"] == said["oldMonitor"] == said["noResult"] == "YOU ARE UP TO DATE."
-    assert said["found"] == said["foundBefore"] == "AN UPDATE IS AVAILABLE."          # a release an earlier check found is still on offer
-    for text in said.values():
-        assert re.search(r"[A-Z]", text) and not re.search(r"[a-z]", text), text
+    assert said["notChecked"] == "Could not reach GitHub; try again later."
+    assert said["upToDate"] == said["oldMonitor"] == said["noResult"] == "You are up to date."
+    assert said["found"] == said["foundBefore"] == "An update is available."          # a release an earlier check found is still on offer
 
 
 def test_every_failure_status_line_goes_through_failed_text() -> None:
-    """The static half of the check above: no line is built as an upper-case prefix plus the monitor's own reason."""
+    """The static half of the checks above: no line is built as an upper-case prefix plus the monitor's own reason. Refresh
+    and resume go through failedText (#100's); the update buttons' lines go through updateRefusal since #97, which words
+    the answer's status and reads its error only to tell a 500's rare "internal error" from the step's own failure."""
     code = strip_comments(APP_CODE)
     assert not re.search(r'"[A-Z][A-Z ]*: " \+ errorText\(', code)
     assert function_body(APP_CODE, "failedText").count('FMT.upper(errorText(res), "en")') == 1      # English's rule (#91)
-    for prefix in ("REFRESH FAILED", "CHECK FAILED", "UPDATE FAILED", "COULD NOT SKIP"):
+    for prefix in ("REFRESH FAILED", "RESUME FAILED"):
         assert f'failedText("{prefix}", res)' in code, prefix
+    for prefix in ("CHECK FAILED", "UPDATE FAILED", "COULD NOT SKIP"):
+        assert prefix not in code, prefix
+    for name in ("checkUpdateText", "installUpdate", "skipUpdate", "updateRefusal"):
+        body = strip_comments(function_body(APP_CODE, name))
+        assert "failedText(" not in body and "errorText(" not in body, name
+    click = function_body(APP_CODE, "settingsClick")
+    check = click[click.index('action === "check-update"'):click.index('action === "install-update"')]
+    assert "failedText(" not in check and "errorText(" not in check
+    refusal = strip_comments(function_body(APP_CODE, "updateRefusal"))
+    assert refusal.count(".error") == 1 and 'res.data.error === "internal error"' in refusal
 
 
 # ── The update lines (#97) ────────────────────────────────────────────────────────
@@ -2277,11 +2296,104 @@ def test_the_update_lines_record_is_whole() -> None:
 
 @ui_only
 def test_the_update_lines_render_todays_english(checks: dict[str, Any]) -> None:
-    """Each update button's answer, through the page's real click paths, says what it said before #97."""
+    """#87's case rule for the update lines (#97): each update button's answer, through the page's real click paths, is its
+    catalog key's sentence in natural case, which is what the Gates theme showed before the move (gates.js leaves it as it
+    is: test_motion.py), and in English's capitals, which Nostromo and Night City set by CSS
+    (test_the_update_texts_take_their_capitals_from_css_in_every_look), it is the line they showed."""
+    english = json.loads((WEBUI / "i18n" / "en.json").read_text(encoding="utf-8"))
     said = checks["updateSaid"]
     assert set(said) == {line["said"] for line in UPDATE_LINES}
     for line in UPDATE_LINES:
-        assert said[line["said"]]["text"] == line["today"], line["said"]
+        name = line["said"]
+        text = english[line["key"]]
+        for placeholder, value in line["values"].items():
+            text = text.replace("{" + placeholder + "}", value)
+        assert said[name] == {"text": line["gates"], "lang": "en"}, name
+        assert text == line["gates"], name
+        assert casing.upper(text, "en") == line["today"].upper() and (name == "offered" or casing.upper(text, "en") == line["today"]), name
+
+
+@ui_only
+def test_each_answer_is_worded_by_its_status(checks: dict[str, Any]) -> None:
+    """The failure lines word the HTTP status of the monitor's answer (#97; the server's codes are #102's): on the update routes
+    501 is a step this monitor does not have, 500 a step that failed, or its rare "internal error" (that exact error only), 401
+    the dashboard's token; any other status is named by its number, and no answer at all is a lost link."""
+    english = json.loads((WEBUI / "i18n" / "en.json").read_text(encoding="utf-8"))
+    for op, words in checks["updateRefusals"].items():
+        key = f"settings.update.failed.{op}."
+        en = {reason: {"text": english[key + reason], "lang": "en"} for reason in ("error", "internal", "unavailable", "token", "lost")}
+        assert words["failed"] == words["bare500"] == words["internalOtherwise"] == en["error"], op
+        assert words["internal"] == en["internal"] and words["unavailable"] == en["unavailable"], op
+        assert words["token"] == en["token"] and words["lost"] == en["lost"], op
+        assert words["forbidden"] == {"text": english[key + "http"].replace("{status}", "403"), "lang": "en"}, op
+        assert words["teapot"] == {"text": english[key + "http"].replace("{status}", "418"), "lang": "en"}, op
+
+
+@ui_only
+def test_an_update_failure_never_shows_the_servers_words(checks: dict[str, Any]) -> None:
+    """The monitor's `error` is English, and the page never puts it on an update line: through each button's click, every
+    status the server can answer with carries an error of its own words here, and no line shows them."""
+    shown = checks["updateServerWords"]
+    assert len(shown) == 18 and checks["updateServerWordsSeen"] == []
+    assert shown["install:403"] == "Update failed: HTTP 403" and shown["skip:500"] == "Could not skip: update skip failed"
+
+
+@ui_only
+def test_english_on_a_french_page_is_marked(checks: dict[str, Any]) -> None:
+    """On another language's page an update line its catalog lacks is English's, and the element that shows it carries
+    lang="en" (the line under Settings' buttons, set by syncUpdate; the banner's line, in its markup), so it is cased by
+    English's rules; a line the catalog has is not marked. The buttons' and the banner's words go through tHtml's lang="en"
+    span, the toggle row's too, and the product's name through tName (translate="no")."""
+    french = checks["updateFrench97"]
+    assert french["offered"] == {"text": "Version 2.4.0 is available.", "lang": "en"}
+    assert french["found"] == {"text": "Une mise à jour est disponible.", "lang": None}
+    assert french["failed"] == {"text": "Check failed: update check failed", "lang": "en"}
+    installed = french["installed"]
+    assert installed["said"] == {"text": "Opened the release page in your browser.", "lang": "en"}
+    assert installed["line"] == {"text": "Opened the release page in your browser.", "lang": "en"}
+    banner = installed["banner"]
+    assert '<p class="nm-status" role="status" lang="en">Opened the release page in your browser.</p>' in banner
+    assert '<b><span lang="en"><span translate="no">Claude Usage Monitor</span> v2.4.0 is available</span></b>' in banner
+    for words in ("Update now", "Release notes", "Skip this version", "Update now installs it and restarts the monitor."):
+        assert f'<span lang="en">{words}</span>' in banner, words
+    assert 'aria-label="Update available"' in banner
+    assert '<p class="nm-status" role="status"></p>' in french["bannerEmpty"]
+    settings = french["settings"]
+    for words in ("Check for updates", "Look for a newer release once in a while.", "Check for updates now", "Install update",
+                  "Skip this version"):
+        assert f'<span lang="en">{words}</span>' in settings, words
+
+
+# What each look does to the update texts' case (text-transform): Nostromo sets them all in capitals, Night City (Blackwall
+# and Edgerun) all but the banner's sentence and the toggle row's help, Gates none.
+UPDATE_CASE = {
+    "nostromo": {"settings.line": "uppercase", "settings.check": "uppercase", "settings.install": "uppercase",
+                 "settings.skip": "uppercase", "settings.rowLabel": "uppercase", "settings.rowHelp": "none",
+                 "banner.title": "uppercase", "banner.sentence": "uppercase", "banner.now": "uppercase",
+                 "banner.notes": "uppercase", "banner.skip": "uppercase", "banner.line": "uppercase"},
+}
+UPDATE_CASE["night_city"] = UPDATE_CASE["edgerun"] = {**UPDATE_CASE["nostromo"], "banner.sentence": "none"}
+UPDATE_CASE["gates-dark"] = UPDATE_CASE["gates-light"] = {name: "none" for name in UPDATE_CASE["nostromo"]}
+
+
+@ui_only
+def test_the_update_texts_take_their_capitals_from_css_in_every_look(checks: dict[str, Any]) -> None:
+    """#97 (critic 11 of its plan): the case of each update text as the cascade of its look's stylesheets gives it, on the
+    page's own markup (webui_checks.js's updateCase reads every rule that sets text-transform and matches the element or an
+    ancestor, by importance, specificity and order), not one rule read alone, so a more specific rule that undid the capitals
+    (".nm-update .nm-status { text-transform: none }") fails here. Each update line is stored in natural case, and where
+    the look sets capitals, English's capitals of it are the line before #97; Gates shows it as stored. The page's own
+    structural styles set no case."""
+    assert "text-transform" not in strip_comments(APP_CODE) and "text-transform" not in strip_comments(CHARTS)
+    found = checks["updateCase"]
+    assert set(found) == set(UPDATE_CASE)
+    for look, wanted in UPDATE_CASE.items():
+        assert {name: (shown or {}).get("value") for name, shown in found[look].items()} == wanted, look
+    for look in ("nostromo", "night_city", "edgerun"):
+        assert found[look]["settings.line"]["value"] == found[look]["banner.line"]["value"] == "uppercase"
+    lines = {line["gates"]: line["today"] for line in UPDATE_LINES}
+    for line, today in lines.items():
+        assert casing.upper(line, "en") == today.upper()
 
 
 # ── A running update on Settings (#58) ────────────────────────────────────────────
@@ -2545,11 +2657,11 @@ def test_a_failure_lasts_until_the_next_click_on_an_update_button(checks: dict[s
     assert old["shown"] and old["cls"] == "nm-uprog is-crit" and old["lineHidden"] and old["busy"] is None
     assert unescape(old["said"]) == UPDATE_FAILURE_TEXTS["network"]
     checked = click["checked"]
-    assert not checked["shown"] and checked["line"] == "AN UPDATE IS AVAILABLE." and not checked["lineHidden"]
+    assert not checked["shown"] and checked["line"] == "An update is available." and not checked["lineHidden"]
     failed = click["failed"]
     assert failed["shown"] and failed["cls"] == "nm-uprog is-crit" and unescape(failed["said"]) == UPDATE_FAILURE_TEXTS["cut_short"]
-    assert failed["line"] == "AN UPDATE IS AVAILABLE." and not failed["lineHidden"] and failed["busy"] is None
-    assert not click["skipped"]["shown"] and click["skipped"]["line"] == "THIS VERSION WILL BE SKIPPED."
+    assert failed["line"] == "An update is available." and not failed["lineHidden"] and failed["busy"] is None
+    assert not click["skipped"]["shown"] and click["skipped"]["line"] == "This version will be skipped."
     assert click["trayRun"]["shown"] and click["trayRun"]["steps"] == ["now", "next", "next"]
     assert click["trayFailed"]["shown"] and click["trayFailed"]["steps"] == ["done", "done", "failed"]
     assert unescape(click["trayFailed"]["said"]) == UPDATE_FAILURE_TEXTS["helper"] and click["trayFailed"]["lineHidden"]
@@ -2564,7 +2676,7 @@ def test_a_failure_a_click_ended_stays_ended_and_a_later_runs_failure_shows(chec
     assert again["shown"]["shown"] and unescape(again["shown"]["said"]) == UPDATE_FAILURE_TEXTS["network"]
     for name in ("checked", "sameRun", "laterRunEnded"):
         view = again[name]
-        assert not view["shown"] and view["line"] == "AN UPDATE IS AVAILABLE." and not view["lineHidden"], name
+        assert not view["shown"] and view["line"] == "An update is available." and not view["lineHidden"], name
     later = again["laterRun"]
     assert later["shown"] and later["cls"] == "nm-uprog is-crit" and later["lineHidden"]
     assert unescape(later["said"]) == UPDATE_FAILURE_TEXTS["http"].replace("{status}", "404")
@@ -2612,7 +2724,7 @@ def test_the_link_back_shows_the_run_again_and_misses_count_only_in_a_row(checks
 @ui_only
 def test_install_update_over_a_failure_keeps_the_block_while_the_click_is_answered(checks: dict[str, Any]) -> None:
     """Install update again over a failure that shows: the block becomes the new run's start at once and stays while the
-    monitor answers (the card neither drops to the one line nor grows back), Install busy and its INSTALLING… line hidden.
+    monitor answers (the card neither drops to the one line nor grows back), Install busy and its Installing… line hidden.
     Started: the start until the record has the run, and a failure of the new run shows at its first answer, even a second
     after the last one began. Any other answer shows in the block's place; an answer that never comes leaves the line once
     the click's grace is over."""
@@ -2628,12 +2740,12 @@ def test_install_update_over_a_failure_keeps_the_block_while_the_click_is_answer
     assert again["shown"] and unescape(again["said"]) == UPDATE_FAILURE_TEXTS["cut_short"] and again["lineHidden"]
     started = rerun["started"]["answered"]
     assert started["shown"] and started["size"] == "Connecting to GitHub…" and started["lineHidden"] and started["busy"] == "true"
-    for name, line in (("browser", "OPENED THE RELEASE PAGE IN YOUR BROWSER."), ("linkLost", "UPDATE FAILED: THE DASHBOARD LOST ITS LINK")):
+    for name, line in (("browser", "Opened the release page in your browser."), ("linkLost", "Update failed: the dashboard lost its link")):
         answered = rerun[name]["answered"]
         assert not answered["shown"] and answered["line"] == line and not answered["lineHidden"] and answered["busy"] is None, name
     assert rerun["hung"]["answered"]["shown"] and rerun["hung"]["answered"]["lineHidden"]
     after = rerun["hung"]["afterGrace"]
-    assert not after["shown"] and after["line"] == "INSTALLING…" and not after["lineHidden"] and after["busy"] is None
+    assert not after["shown"] and after["line"] == "Installing…" and not after["lineHidden"] and after["busy"] is None
 
 
 @ui_only
@@ -2644,7 +2756,7 @@ def test_a_second_click_on_install_sends_nothing_while_a_run_goes(checks: dict[s
     assert click["secondClick"]["calls"] == [] and click["secondClick"]["busy"] == "true"
     during = click["checkDuringRun"]
     assert during["calls"] == ["POST /api/update/check"]
-    assert during["shown"] and during["line"] == "AN UPDATE IS AVAILABLE." and not during["lineHidden"]
+    assert during["shown"] and during["line"] == "An update is available." and not during["lineHidden"]
     assert re.search(r'action === "install-update"\) \{\s*if \(!updateRunBusy\(\)\) \{[^\n]*\n\s*installUpdateFromSettings\(\);',
                      function_body(APP_CODE, "settingsClick"))
     assert "\n    installUpdate();\n" in function_body(APP_CODE, "installUpdateFromSettings")
@@ -2681,7 +2793,7 @@ def test_the_banner_and_the_update_line_are_untouched_by_a_run(checks: dict[str,
     untouched = update_run(checks)["untouched"]
     assert untouched["busy"] is True
     assert untouched["with"] == untouched["without"]
-    assert "DOWNLOADING AND CHECKING THE UPDATE" in untouched["with"]["banner"]
+    assert "Downloading and checking the update" in untouched["with"]["banner"]
 
 
 @ui_only

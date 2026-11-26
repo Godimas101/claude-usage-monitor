@@ -844,7 +844,7 @@ S.data = { state: { status: "live" }, model_names: {}, update: { available: true
 S.skipped = "2.1.0";
 out.banner.skippedHere = api.updateBanner();
 S.skipped = "";
-S.update = { text: "THIS VERSION WILL BE SKIPPED.", version: "2.0.9" };
+S.update = { text: "This version will be skipped.", lang: "en", version: "2.0.9" };
 out.banner.staleStatus = api.updateBanner();
 S.update = { text: "" };
 
@@ -1094,7 +1094,8 @@ out.firstIngest = { overview: states("overview"), cost: states("cost"), efficien
 forget();
 
 // ── a status line written in capitals is capitals all the way: the Gates theme sets a line in sentence case only when all of it is ──
-// (isCaps is gates.js's own test). The monitor's reason is lower case ("update apply failed"), so each failure path has to raise it.
+// (isCaps is gates.js's own test). The monitor's reason is lower case ("update apply failed"), so the refresh line raises it. The
+// update buttons' lines are the catalog's since #97, in natural case, worded by the answer's status (updateSaid below).
 const isCaps = (text) => /[A-Z]/.test(text) && !/[a-z]/.test(text);
 const answer = (status, body) => () => Promise.resolve({ ok: status >= 200 && status < 300, status, headers: { get: () => null }, text: () => Promise.resolve(body === undefined ? "" : JSON.stringify(body)) });
 const settle = async () => { for (let i = 0; i < 12; i++) { await new Promise((resolve) => setImmediate(resolve)); } };
@@ -1153,7 +1154,7 @@ async function failures() {
     noResult: await checkText(undefined),
   };
   out.failureLines = lines;
-  out.failureLinesCaps = Object.keys(lines).every((label) => Object.keys(lines[label]).every((name) => isCaps(lines[label][name])));
+  out.failureLinesCaps = Object.keys(lines).every((label) => isCaps(lines[label].refresh));
   box.document.querySelector = savedQuery;
   box.fetch = () => { throw new Error("no network in the script tests"); };
   reset();
@@ -1217,10 +1218,32 @@ async function updateSaid() {
       said[op + ":" + reason] = await press(op, UPDATE_REFUSALS[reason](op));
     }
   }
+  // the monitor's own words never reach a line: every status, its error a phrase of its own
+  const WORDS = "xyzzy plugh words of the server";
+  out.updateServerWords = {};
+  for (const op of ["check", "install", "skip"]) {
+    for (const status of [500, 501, 401, 403, 404, 503]) {
+      out.updateServerWords[op + ":" + status] = (await press(op, () => answer(status, { error: WORDS })())).text;
+    }
+  }
+  out.updateServerWordsSeen = Object.values(out.updateServerWords).filter((line) => /xyzzy|plugh|server/i.test(line));
+  // the reason of each answer, as updateRefusal reads it: the status, and for a 500 whether its error is "internal error"
+  const res = (status, data) => ({ status, ok: false, data: data === undefined ? null : data });
+  out.updateRefusals = {};
+  for (const op of ["check", "install", "skip"]) {
+    out.updateRefusals[op] = {
+      failed: api.updateRefusal(op, res(500, { error: "update " + op + " failed" })), bare500: api.updateRefusal(op, res(500)),
+      internal: api.updateRefusal(op, res(500, { error: "internal error" })),
+      internalOtherwise: api.updateRefusal(op, res(500, { error: "Internal error" })),
+      unavailable: api.updateRefusal(op, res(501, { error: "update " + op + " is not available" })),
+      token: api.updateRefusal(op, res(401, { error: "missing or wrong token" })), forbidden: api.updateRefusal(op, res(403, { error: "forbidden host" })),
+      teapot: api.updateRefusal(op, res(418)), lost: api.updateRefusal(op, null),
+    };
+  }
   reset();
   S.update = { text: "" };
   S.data = { state: { status: "live" }, model_names: {}, update: UPDATE_OFFER };
-  said.offered = { text: api.updateLine(), lang: null };
+  said.offered = api.updateLineSaid();
   out.updateSaid = said;
   box.fetch = saved.fetch;
   box.clearTimeout = saved.clear;
@@ -1228,6 +1251,244 @@ async function updateSaid() {
   S.progress = api.updateProgressState();
   S.update = { text: "" };
   S.skipped = "";
+  reset();
+}
+
+// The update lines on another language's page (#97): a French page (fr-FR) whose catalog has one update line of its own and
+// English's for the rest. An English line is marked lang="en" where it shows (the element of the line under Settings' buttons,
+// the banner's line in its markup), and the buttons' and the banner's words are in tHtml's lang="en" span; a French one is not.
+async function updateFrenchLines() {
+  const french = { setting: "fr", language: "fr", system: "fr", format: "fr-FR", clock: 24, offered: ["en", "fr"] };
+  const statusLine = element("set-update-status");
+  const frMain = element("main");
+  let drawn = "";
+  Object.defineProperty(frMain, "innerHTML", { get: () => drawn, set: (html) => { drawn = html; } });
+  frMain.querySelector = (sel) => (sel === "#set-update-status" ? statusLine : null);
+  const meta = { getAttribute: (k) => (k === "content" ? JSON.stringify(french) : null) };
+  const query = (sel) => (sel === 'meta[name="monitor-locale"]' ? meta : sel === "#main" ? frMain : null);
+  const own = { "settings.update.status.found": "Une mise à jour est disponible." };
+  const loaded = load(query, { MonitorI18n: { language: "fr", strings: own, fallback: EN_CATALOG.fallback } });
+  const fr = loaded.api;
+  const F = fr.S;
+  loaded.elements.main = frMain;
+  loaded.box.clearTimeout = () => {};
+  let reply = null;
+  loaded.box.fetch = (url) => {
+    const where = String(url);
+    if (where.indexOf("/api/update/") >= 0 && where.indexOf("/api/update/status") < 0) { return reply(); }
+    if (where.indexOf("/api/state") >= 0) { return answer(200, F.data)(); }
+    return answer(404, { error: "not in this test" })();
+  };
+  const line = () => ({ text: statusLine.textContent, lang: statusLine.getAttribute("lang") });
+  F.page = "settings";
+  F.data = { state: { status: "live" }, model_names: {}, update: UPDATE_OFFER };
+  F.update = { text: "" };
+  fr.syncUpdate(frMain);
+  const result = { offered: line() };
+  reply = () => answer(200, { ok: true, result: { available: true, version: "2.4.0", checked: true } })();
+  fr.settingsClick(click("check-update"));
+  await settle();
+  result.found = line();
+  reply = () => answer(500, { error: "update check failed" })();
+  fr.settingsClick(click("check-update"));
+  await settle();
+  result.failed = line();
+  reply = () => answer(200, { ok: true, result: { started: true, mode: "browser" } })();
+  fr.installUpdate();
+  await settle();
+  result.installed = { said: { text: F.update.text, lang: F.update.lang }, line: line(), banner: fr.updateBanner() };
+  F.update = { text: "" };
+  result.bannerEmpty = fr.updateBanner();
+  F.formKey = null;
+  fr.settingsPage(frMain);
+  await settle();
+  result.settings = drawn;
+  out.updateFrench97 = result;
+}
+
+// ── how each look cases the update texts (#97): text-transform as the cascade gives it ─────────────────────────────────
+// The look's stylesheets (its theme sheet, motion.css and the three motion sheets, as index.html links them) are read rule
+// by rule. For an element, the rules whose selectors match it (tests/mini_dom.js's matching, :root read as html) give their
+// text-transform by importance, specificity and order, else its parent's does (the property is inherited), as a browser's
+// cascade does. The markup is the page's own: index.html's shell with, in #main, Settings' System card or the Overview's top
+// parts with the update banner, as app.js draws them. A text-transform inside an at-rule, on ::first-letter or
+// ::first-line, or behind a pseudo-class this cannot judge is an error, so no rule is skipped unread.
+const DOM = require("./mini_dom.js");
+const AS_DRAWN_FALSE = new Set(["hover", "focus", "focus-visible", "focus-within", "active", "empty"]);  // never true of these texts as drawn
+const SHEETS = (theme) => ["themes/" + theme + ".css", "motion.css", "themes/nostromo.motion.css", "themes/night_city.motion.css",
+  "themes/gates.motion.css"];
+
+function splitTopLevel(text, sep) {
+  const out = [];
+  let depth = 0;
+  let quote = null;
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quote) { if (c === quote) { quote = null; } continue; }
+    if (c === '"' || c === "'") { quote = c; } else if (c === "(" || c === "[") { depth++; } else if (c === ")" || c === "]") { depth--; }
+    else if (c === sep && depth === 0) { out.push(text.slice(start, i)); start = i + 1; }
+  }
+  out.push(text.slice(start));
+  return out.map((part) => part.trim()).filter(Boolean);
+}
+
+function declared(body, property) {
+  let found = null;
+  for (const declaration of splitTopLevel(body, ";")) {
+    const colon = declaration.indexOf(":");
+    if (colon > 0 && declaration.slice(0, colon).trim().toLowerCase() === property) {
+      const value = declaration.slice(colon + 1).trim();
+      const important = /!\s*important$/i.test(value);
+      if (!found || important || !found.important) {
+        found = { value: value.replace(/!\s*important$/i, "").trim().toLowerCase(), important };
+      }
+    }
+  }
+  return found;
+}
+
+function specificity(selector) {
+  let a = 0;
+  let b = 0;
+  let c = 0;
+  let rest = selector.replace(/\[[^\]]*\]/g, () => { b += 1; return " "; });
+  rest = rest.replace(/:not\(([^()]*)\)/g, (whole, inner) => { const [x, y, z] = specificity(inner); a += x; b += y; c += z; return " "; });
+  rest = rest.replace(/::?(before|after|placeholder|selection|marker|backdrop)\b/g, () => { c += 1; return " "; });
+  rest = rest.replace(/#[\w-]+/g, () => { a += 1; return " "; });
+  rest = rest.replace(/\.[\w-]+/g, () => { b += 1; return " "; });
+  rest = rest.replace(/:[\w-]+/g, () => { b += 1; return " "; });
+  rest.replace(/(^|[\s>+~])([A-Za-z][\w-]*)/g, (whole) => { c += 1; return whole; });
+  return [a, b, c];
+}
+
+function caseRule(selector, where) {
+  const bare = selector.replace(/\[[^\]]*\]/g, "");
+  if (/::?(first-letter|first-line)\b/.test(bare)) {
+    throw new Error(where + ": " + selector + " sets the case of a first letter or line, which the case check cannot judge");
+  }
+  if (/::?(before|after|placeholder|selection|marker|backdrop)\b/.test(bare)) {
+    return null;                                               // generated text, not the element's own
+  }
+  for (const m of bare.matchAll(/(?<!:):([\w-]+)/g)) {
+    if (m[1] !== "not" && m[1] !== "root" && !AS_DRAWN_FALSE.has(m[1])) {
+      throw new Error(where + ": " + selector + " has :" + m[1] + ", which the case check cannot judge");
+    }
+  }
+  return { test: DOM.compile(selector.replace(/:root\b/g, "html")), spec: specificity(selector) };
+}
+
+function caseRules(theme) {
+  const rules = [];
+  for (const sheet of SHEETS(theme)) {
+    const css = fs.readFileSync(path.join(webui, sheet), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    const block = (text, at) => {
+      let i = 0;
+      while (i < text.length) {
+        const open = text.indexOf("{", i);
+        if (open < 0) { break; }
+        const prelude = text.slice(i, open).trim();
+        let depth = 0;
+        let j = open;
+        for (; j < text.length; j++) {
+          if (text[j] === "{") { depth += 1; } else if (text[j] === "}") { depth -= 1; if (depth === 0) { break; } }
+        }
+        const body = text.slice(open + 1, j);
+        i = j + 1;
+        if (prelude.startsWith("@")) {
+          if (/^@(media|supports|container|layer|scope)\b/.test(prelude)) { block(body, prelude); }
+          continue;                                            // @keyframes, @font-face: no element's case
+        }
+        const transform = declared(body, "text-transform");
+        if (transform === null) { continue; }
+        if (at) { throw new Error(sheet + ": a text-transform inside " + at + " (" + prelude + "), which the case check cannot judge"); }
+        for (const selector of splitTopLevel(prelude, ",")) {
+          const rule = caseRule(selector, sheet);
+          if (rule) { rules.push({ ...rule, selector, sheet, value: transform.value, important: transform.important, order: rules.length }); }
+        }
+      }
+    };
+    block(css, "");
+  }
+  return rules;
+}
+
+function caseOf(el, rules) {
+  const rank = (r) => [r.important ? 1 : 0, ...r.spec, r.order];
+  const higher = (x, y) => { for (let i = 0; i < x.length; i++) { if (x[i] !== y[i]) { return x[i] > y[i]; } } return false; };
+  for (let node = el; node && node.nodeType === 1; node = node.parentNode) {
+    let best = null;
+    for (const rule of rules) {
+      if (rule.test(node) && (!best || higher(rank(rule), rank(best)))) { best = rule; }
+    }
+    if (best && best.value !== "inherit" && best.value !== "unset") {
+      return { value: best.value === "initial" ? "none" : best.value, by: best.sheet + " " + best.selector + (node === el ? "" : " (inherited)") };
+    }
+  }
+  return { value: "none", by: "" };
+}
+
+const CASE_LOOKS = {
+  nostromo: { theme: "nostromo", variant: "amber" }, night_city: { theme: "night_city", variant: "blackwall" },
+  edgerun: { theme: "night_city", variant: "edgerun" }, "gates-dark": { theme: "gates", variant: "blue-dark" },
+  "gates-light": { theme: "gates", variant: "blue-light" },
+};
+const CASE_TARGETS = {
+  settings: {
+    line: "#set-update-status", check: '[data-action="check-update"]', install: '[data-action="install-update"]',
+    skip: '[data-action="skip-update"]', rowLabel: "label.nm-row-set.check-updates-row .t", rowHelp: "label.nm-row-set.check-updates-row .d",
+  },
+  banner: {
+    title: ".nm-update-t > b", sentence: ".nm-update-t > span", now: '[data-action="update-now"]', notes: '[data-action="update-notes"]',
+    skip: '[data-action="update-skip"]', line: ".nm-update > .nm-status",
+  },
+};
+
+async function updateCase() {
+  const shell = fs.readFileSync(path.join(webui, "index.html"), "utf8");
+  const saved = { fetch: box.fetch, clear: box.clearTimeout, query: box.document.querySelector };
+  box.clearTimeout = () => {};
+  box.fetch = () => answer(404, { error: "not in this test" })();
+  // Settings' System card and the Overview's top parts, as the page draws them, with a release on offer and a line said
+  reset();
+  S.skipped = "";
+  S.data = { state: { status: "live", plan: { name: "Max 5x", monthly_price_usd: 100 }, windows: {}, ingest: null, unpriced_models: [] },
+    model_names: {}, settings: {}, update: UPDATE_OFFER };
+  S.update = { text: "Opened the release page in your browser.", lang: "en", version: "2.4.0" };
+  let drawn = "";
+  const capture = element("main");
+  Object.defineProperty(capture, "innerHTML", { get: () => drawn, set: (html) => { drawn = html; } });
+  box.document.querySelector = (selector) => (selector === "#main" ? capture : null);
+  S.formKey = null;
+  api.settingsPage(capture);
+  await settle();
+  const pages = { settings: drawn, banner: api.buildModel("overview").top.map((part) => part.html).join("") };
+  const found = {};
+  for (const [look, set] of Object.entries(CASE_LOOKS)) {
+    const rules = caseRules(set.theme);
+    found[look] = {};
+    for (const [page, targets] of Object.entries(CASE_TARGETS)) {
+      const doc = DOM.createDocument(shell);
+      const root = doc.documentElement;
+      root.setAttribute("data-theme", set.theme);
+      root.setAttribute("data-variant", set.variant);
+      if (set.theme === "gates") { root.setAttribute("data-g-icons", ""); root.setAttribute("data-g-swatches", ""); }
+      const main = doc.querySelector("#main");
+      main.innerHTML = pages[page];
+      const row = doc.querySelector('input[data-key="check_updates"]');
+      if (row) { row.closest("label").classList.add("check-updates-row"); }   // a hook for the two row targets, matched by no sheet
+      for (const [name, selector] of Object.entries(targets)) {
+        const el = doc.querySelector(selector);
+        found[look][page + "." + name] = el ? { ...caseOf(el, rules), text: el.textContent } : null;
+      }
+    }
+  }
+  out.updateCase = found;
+  box.fetch = saved.fetch;
+  box.clearTimeout = saved.clear;
+  box.document.querySelector = saved.query;
+  S.formKey = null;
+  S.update = { text: "" };
   reset();
 }
 
@@ -2027,7 +2288,7 @@ async function updateProgress() {
   // 9. a failure lasts until the next click on an update button gives S.update a new answer
   U.lasts = {
     sameAnswer: failed("network", "downloading"),
-    newAnswer: runOf(a, Object.assign(R({ phase: "failed", reason: "network", failed_in: "downloading" }), { failOver: SUB }), { text: "CHECKING…" }),
+    newAnswer: runOf(a, Object.assign(R({ phase: "failed", reason: "network", failed_in: "downloading" }), { failOver: SUB }), { text: "Checking…", lang: "en" }),
     neverShown: runOf(a, R({ phase: "failed", reason: "network", failed_in: "downloading" }), SUB),
   };
   // 10. the texts are the catalog's when they are drawn, not when the page loaded
@@ -2343,7 +2604,7 @@ async function updateProgress() {
   // 15. the banner and the line under the buttons are what they were, with a run and without
   fresh();
   S.data = Object.assign(offering(OFFERED), { update: { available: true, version: OFFERED, url: RELEASE, can_self_update: true, skipped: false, skip_version: "", info: { version: OFFERED } } });
-  S.update = { text: "DOWNLOADING AND CHECKING THE UPDATE; IF IT CHECKS OUT, THE MONITOR CLOSES AND RESTARTS BY ITSELF.", version: OFFERED };
+  S.update = { text: "Downloading and checking the update; if it checks out, the monitor closes and restarts by itself.", lang: "en", version: OFFERED };
   const without = { banner: a.updateBanner(), line: a.updateLine() };
   S.progress = Object.assign(a.updateProgressState(), { status: record({ done: 4404020, total: 22020096 }), clickedAt: Date.now() });
   U.untouched = { without, with: { banner: a.updateBanner(), line: a.updateLine() }, busy: a.updateRunBusy() };
@@ -2380,4 +2641,4 @@ async function updateProgress() {
   };
 }
 
-failures().then(updateSaid).then(guardPolling).then(guardActions).then(signInActions).then(colourSaves).then(planHint).then(staleTexts).then(updateProgress).then(() => console.log(JSON.stringify(out)), (error) => { console.error(error && error.stack ? error.stack : String(error)); process.exit(1); });
+failures().then(updateSaid).then(updateFrenchLines).then(updateCase).then(guardPolling).then(guardActions).then(signInActions).then(colourSaves).then(planHint).then(staleTexts).then(updateProgress).then(() => console.log(JSON.stringify(out)), (error) => { console.error(error && error.stack ? error.stack : String(error)); process.exit(1); });

@@ -8,6 +8,7 @@ The widgets' scan runs the frame dump in a fresh Python, as the golden frames do
 dev server, so it needs USAGE_MONITOR_UI_TESTS=1, like every test that starts node."""
 from __future__ import annotations
 
+import html
 import json
 import os
 import re
@@ -90,6 +91,71 @@ def test_the_update_run_passes_reach_every_phase(tmp_path: Path) -> None:
         assert line.startswith("[") and line.endswith("]"), (state, line)              # the pseudo-locale's, not English
     assert "data-pending" in shown["update-run:unknown"] and "data-pending" in shown["update-run:connecting"]
     assert 'class="nm-cells hot"' in shown["update-run:failed-network"]
+
+
+@ui_only
+def test_the_update_said_passes_reach_every_outcome(tmp_path: Path) -> None:
+    """#97: each update-said pass offers a release the monitor installs itself and answers every update button's POST one
+    way; Settings' three buttons and the banner's Update now and Skip this version are pressed. So the scan above sees every
+    line an update button can say, in the pseudo-locale: each step shows its key's pseudo text, and every key is seen."""
+    node()
+    english = json.loads((english_left.WEBUI / "i18n" / "en.json").read_text(encoding="utf-8"))
+    said = [name for name in english_left.PASSES["normal"] if name.startswith("update-said:")]
+    assert said == [f"update-said:{answer}" for answer in english_left.UPDATE_SAID]
+
+    def line(key: str, **values: str) -> str:
+        text = P(english[key])
+        for name, value in values.items():
+            text = text.replace("{" + name + "}", value)
+        return text
+
+    def status(name: str) -> str:
+        return f"settings.update.status.{name}"
+
+    def failed(op: str, reason: str) -> str:
+        return line(f"settings.update.failed.{op}.{reason}", status="502")
+
+    refusals = ("error", "internal", "unavailable", "token", "http", "lost")
+    wanted: dict[tuple[str, str], tuple[str | None, str | None]] = {}    # (pass, step): (Settings' line, the banner's line)
+    results = {"found": ("found", "browser"), "none": ("up_to_date", "not_started"), "unchecked": ("unreached", "installer")}
+    for answer, (check, apply) in results.items():
+        name = f"update-said:{answer}"
+        wanted[(name, "settings:check-update")] = (line(status(check)), None)
+        if apply != "installer":                             # the installer's line hides under the run's block (#58)
+            wanted[(name, "settings:install-update")] = (line(status(apply)), None)
+        wanted[(name, "settings:skip-update")] = (line(status("skipping")), None)
+        wanted[(name, "overview:update-now")] = (None, line(status(apply)))
+    for reason in refusals:
+        name = f"update-said:{reason}"
+        wanted[(name, "settings:check-update")] = (failed("check", reason), None)
+        wanted[(name, "settings:install-update")] = (failed("install", reason), None)
+        wanted[(name, "settings:skip-update")] = (failed("skip", reason), None)
+        wanted[(name, "overview:update-now")] = (None, failed("install", reason))
+        wanted[(name, "overview:update-skip")] = (None, failed("skip", reason))
+    wanted[("update-said:hang", "settings:check-update again")] = (line(status("checking")), None)   # at the next draw
+    wanted[("update-said:hang", "settings:install-update")] = (line(status("installing")), None)
+    wanted[("update-said:hang", "settings:skip-update")] = (line(status("skipping")), None)
+    wanted[("update-said:hang", "overview:update-now")] = (None, line(status("installing")))
+
+    def shown(body: str, pattern: str) -> str | None:
+        found = re.search(pattern, body, re.S)
+        return html.unescape(found.group(1)) if found else None
+
+    seen: dict[tuple[str, str], tuple[str | None, str | None]] = {}
+    for snap in english_left.scan_dashboard("normal", said, tmp_path)["snapshots"]:
+        settings = shown(snap["body"], r'<p class="nm-status" id="set-update-status" role="status"[^>]*>(.*?)</p>')
+        banner = shown(snap["body"], r'<div class="nm-update".*?<p class="nm-status" role="status"[^>]*>(.*?)</p>')
+        seen[(snap["pass"], snap["step"])] = (settings, banner)
+    for where, (settings, banner) in wanted.items():
+        if where in seen:                                    # a step that showed what an earlier one did is not kept again
+            got = seen[where]
+            assert (settings is None or got[0] == settings) and (banner is None or got[1] == banner), (where, got)
+    in_settings = {pair[0] for pair in seen.values() if pair[0]}
+    in_banner = {pair[1] for pair in seen.values() if pair[1]}
+    for settings, banner in wanted.values():
+        assert settings is None or settings in in_settings, settings
+        assert banner is None or banner in in_banner, banner
+    assert all(text.startswith("[") and text.endswith("]") for text in in_settings | in_banner), sorted(in_settings | in_banner)
 
 
 def test_the_record_holds_sorted_entries_each_of_them_english() -> None:

@@ -3402,12 +3402,17 @@ def test_the_install_update_button_reports_what_the_monitor_actually_did() -> No
     for mode in ("browser", "installer"):
         assert f'mode === "{mode}"' in handler, mode
     assert "THE UPDATE WILL INSTALL WHEN THE MONITOR RESTARTS" not in script
-    assert re.search(r'mode === "browser"\)\s*\{\s*text = "[^"]*RELEASE PAGE', handler)
-    assert re.search(r'mode === "installer"\)\s*\{\s*text = "[^"]*IF IT CHECKS OUT[^"]*RESTARTS', handler)
-    # One sentence each: the Gates theme writes sentence case and capitalises only the first letter of a string, so a
-    # second sentence would come out as "... the update. if it checks out ...".
-    texts = re.findall(r'text = "([^"]+)";', handler)
-    assert len(texts) == 3 and all(". " not in text for text in texts), texts
+    # The lines are catalog keys since #97 (en.json holds their English): one for each mode, and the installer's is followed
+    # by watchUpdateRun(), which shows the run (#58).
+    english = json.loads((ROOT / "usage_monitor" / "webui" / "i18n" / "en.json").read_text(encoding="utf-8"))
+    keys = dict(re.findall(r'mode === "(\w+)"\)\s*\{\s*line = tLine\("(settings\.update\.status\.\w+)"\);', handler))
+    assert set(keys) == {"browser", "installer"}, keys
+    assert "release page" in english[keys["browser"]]
+    assert "if it checks out" in english[keys["installer"]] and "restarts" in english[keys["installer"]]
+    assert re.search(r'line = tLine\("' + re.escape(keys["installer"]) + r'"\);\s*watchUpdateRun\(\);', handler)
+    # One sentence each, as before #97 (when Gates' re-casing lowered the first letter of a second sentence).
+    said = re.findall(r'line = tLine\("(settings\.update\.status\.\w+)"\);', handler)
+    assert len(said) == 3 and all(". " not in english[key] for key in said), said
 
 
 def test_the_dashboard_reads_only_what_the_server_sends_about_an_update() -> None:

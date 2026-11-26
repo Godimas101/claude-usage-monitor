@@ -30,8 +30,8 @@ currency codes and the release versions.
 The dashboard: tests/english_scan.js runs the page (index.html, formats.js, the catalog, charts.js and app.js, from the
 dev server) on a small DOM, for every scenario of the dev server under the pseudo-locale, in the passes PASSES lists:
 every page and segment as an installed monitor and as a dev instance shows them, and in some scenarios every action
-and control, the update banner, Settings during an update in each state of its run (#58), the reports' loading and
-failed states, and every change failing. The theme scripts'
+and control, the update banner, Settings during an update in each state of its run (#58), what each update button says
+for every answer the monitor gives (#97), the reports' loading and failed states, and every change failing. The theme scripts'
 boot texts and the words in the stylesheets are not in it (#101 moves them).
 
 Both halves run in a fresh Python with the time zone pinned (the dev server's clock and the page's are pinned too), so
@@ -95,9 +95,12 @@ EVERY_SCENARIO = ("installed", "dev")
 # The states of a running update that Settings shows (#58): one update-run pass each, in "normal".
 UPDATE_RUNS: tuple[str, ...] = ("downloading", "unknown", "connecting", "checking", "starting", "restarting", "stalled",
                                 *(f"failed-{code}" for code in update_check.REASONS))
+# The monitor's answers to the update buttons (#97): one update-said pass each, in "normal".
+UPDATE_SAID: tuple[str, ...] = ("found", "none", "unchecked", "error", "internal", "unavailable", "token", "http", "lost", "hang")
 PASSES: dict[str, tuple[str, ...]] = {
     "normal": (*EVERY_SCENARIO, "actions", "update", "update-self", "pending", "reports-503", "reports-501",
-               "reports-failed", "lookups-failed", "posts-failed", *(f"update-run:{state}" for state in UPDATE_RUNS)),
+               "reports-failed", "lookups-failed", "posts-failed", *(f"update-run:{state}" for state in UPDATE_RUNS),
+               *(f"update-said:{answer}" for answer in UPDATE_SAID)),
     "no_login": (*EVERY_SCENARIO, "actions", "posts-failed"),
     "refused": (*EVERY_SCENARIO, "actions"),
     "stale": (*EVERY_SCENARIO, "actions"),
