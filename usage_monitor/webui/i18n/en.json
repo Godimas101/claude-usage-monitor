@@ -125,6 +125,8 @@
   "widget.nostromo.pace.ahead": "AHEAD {points} PTS",
   "_note.widget.nostromo.pace.behind": "Nostromo's hover card, right of the reset: usage is behind the time gone in the window. {points} is by how many percentage points, signed (-18). In capitals.",
   "widget.nostromo.pace.behind": "BEHIND {points} PTS",
+  "_note.widget.nostromo.pace.points": "Nostromo's hover card, right of the reset: the short form of widget.nostromo.pace.ahead and .behind, for a line too tight for them (a long reset time). {points} is the signed percentage points (+21, -18); the tone says ahead or behind. English never shows it. In capitals.",
+  "widget.nostromo.pace.points": "{points} PTS",
   "_note.tray.tip.lead": "A brand mark: keep it as written (#86's default).",
   "tray.tip.lead": "Claude usage",
   "_budget.tray.tip.lead": "the whole tooltip: 127 UTF-16 units (app.tray.tooltip, drop); past it the guard's countdown, then its resume time, drop",

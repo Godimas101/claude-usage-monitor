@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import functools
 import math
+import unicodedata
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -209,6 +210,46 @@ SCOPED_KEY = "widget.nostromo.limit.scoped"
 UNNAMED_SCOPED_KEY = "widget.nostromo.limit.scoped_unnamed"
 # The session and weekly rows' tags ("5H", "7D"), which the strip's labels are too (STRIP_GROUPS).
 WINDOW_KEYS: dict[str, str] = {"session": "widget.nostromo.window.session", "weekly": "widget.nostromo.window.weekly"}
+
+# ── Fits (#94): what gives way where a language's words are longer than English's ──
+# English never meets any of them (tests/test_skin_nostromo_fit.py), so its frames are as before #94.
+
+# Q2, an owner default on #94 that Chris may overturn: what the header gives up, in this order, while its left side
+# (the pill and the age) and its right side (the state word or chip) do not fit QUALIFIER_GAP apart. The armed mark
+# goes before any of them, as before #94: it is drawn only in the room the rest leaves. The state word, or the CRITICAL
+# chip, is cut first (with an ellipsis): it mostly repeats the pill, and in LIVE the colours and the hazard band carry
+# the severity. Then the age goes, then the pill's word is cut (one letter at least), and last the hold chip drops its
+# countdown and reads HOLD alone: the age and the countdown are facts the floating widget shows nowhere else. A word cut
+# at one step takes back the room a later step frees, as far as its whole text. _header_plan follows this tuple.
+HEADER_GIVE_WAY = ("state_word", "age", "pill", "countdown")
+# The hover card's reset-and-pace line: the pace shortens to its signed points ("+21 PTS"), then is left out. The reset
+# never gives way: it is what people look for there. _info_plan follows this tuple.
+INFO_GIVE_WAY = ("pace", "pace_short")
+# The sign-in box's lines shrink before anything is cut: the tracking to 0, then 9 px. Only a line still too long at
+# 9 px is cut, with an ellipsis. Both lines take the same step, so the box reads as one (_message_fit).
+MESSAGE_STEPS = ((LABEL_SIZE, MESSAGE_TRACKING), (LABEL_SIZE, 0.0), (9.0, 0.0))
+# The strip's window tags shrink from 11 px to 9 px, their tracking with them (0.1 em), then are left out: the bars'
+# order still tells the two windows apart (_strip_tag).
+STRIP_TAG_SIZES = (11.0, 10.5, 10.0, 9.5, 9.0)
+
+# Q1, an owner default on #94 that Chris may overturn: the status pill, the header's chip (CRITICAL, HOLD) and a cap tag
+# grow round a word whose marks would touch their edge. It is decided by the word's characters, so a box is the same at
+# every scale (_mark_growth). A capital with a mark above (É, Ñ, İ, Ğ) reaches the 12 px box's top edge, so an outlined
+# box (the pill, a cap tag) grows MARK_GROWTH_UP px up to keep its 1 px stroke off the mark, and the filled chip
+# CHIP_GROWTH_UP px to keep the mark inside it. A mark below (Ç, Ş, Ą, Ș), or a glyph that drops below the line
+# (DESCENDERS), grows any of them MARK_GROWTH_DOWN px down: the header's box then ends 1 px over the rule (RULE_Y).
+# English and every word without such characters never move. The conflict: the grown pill's top is then y = 4, the
+# hazard band's bottom edge (HAZARD_H), so in a LIVE frame with a critical limit (the only one with the band) the two
+# meet with no air between, though they never overlap; 1 px up would keep that air but leaves the stroke on the mark
+# in the hover card at 1.25x (that canvas's height rounds its vertical scale up to 0.5 % off its horizontal one, and a
+# 1 px growth has no slack). The chip, a fill, keeps 1 px of air under the band.
+MARK_GROWTH_UP = 2
+CHIP_GROWTH_UP = 1
+MARK_GROWTH_DOWN = 2
+# The characters with no mark below whose ink reaches the 12 px box's bottom edge in IBM Plex Mono SemiBold at 10 px at
+# some display scale (tests/test_skin_nostromo_fit.py holds the list to the face).
+DESCENDERS = frozenset("$(),/;@Q[\\]_gjpqy{|}¡¿")
+_ABOVE, _BELOW = 230, (202, 220)        # the canonical combining classes of a mark above, and of one below
 
 
 # ── Palette ───────────────────────────────────────────────────────────────────
@@ -524,6 +565,180 @@ def _state_word(model: WidgetModel) -> tuple[str, str]:
     return words.text(STATE_KEYS[keys[status]]), "label"
 
 
+# ── Fits: the decisions, as pure helpers the tests read ───────────────────────
+
+PILL_X = LEFT + 6 + 6           # the status pill's left edge: past the 6 px status mark and a 6 px gap
+
+
+@dataclass(frozen=True, slots=True)
+class HeaderPlan:
+    """What the header draws (_header_plan): each text as drawn, the armed guard's mark (None when there is none or no
+    room for it), and the HEADER_GIVE_WAY steps taken, in order (none while the line fits)."""
+    pill: str
+    age: str | None
+    word: str
+    style: str
+    mark: str | None
+    gave_way: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class InfoPlan:
+    """What the hover card's reset-and-pace line draws (_info_plan): the reset, the pace as drawn (whole, its short form
+    or None) and the INFO_GIVE_WAY steps taken."""
+    reset: str
+    pace: str | None
+    gave_way: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class MessageFit:
+    """The sign-in box's lines as drawn (_message_fit): their size and tracking (MESSAGE_STEPS) and the lines, each cut
+    only when it does not fit at the last step."""
+    size: float
+    tracking: float
+    lines: tuple[str, ...]
+
+
+def _cut(cv: Canvas, text: str, room: float, font: Any, tracking: float) -> str:
+    """``text`` whole when it fits ``room``, else cut with an ellipsis to fit, keeping one letter at least."""
+    if cv.advance(text, font, tracking) <= room:
+        return text
+    cut = text
+    while len(cut) > 1 and cv.advance(cut.rstrip() + ELLIPSIS, font, tracking) > room:
+        cut = cut[:-1]
+    return cut.rstrip() + ELLIPSIS
+
+
+def _header_plan(cv: Canvas, model: WidgetModel, left: float = PILL_X, right: float = RIGHT) -> HeaderPlan:
+    """The header's texts as they fit between ``left`` (the pill's edge) and ``right``, measured on ``cv``: the pill
+    (10 px wider than its word) and the age 6 px after it on the left, the state word or chip (8 px wider) on the right,
+    QUALIFIER_GAP apart. While they do not fit, the HEADER_GIVE_WAY steps are taken in order until they do. The armed
+    mark ([GUARD], else [G]) is chosen last, in the room left, ARMED_GAP off each side."""
+    semi = cv.font(FONT_SEMI, LABEL_SIZE)
+    reg = cv.font(FONT_REG, LABEL_SIZE)
+    words = _words(model.locale)
+    pill, age = str(model.status_text), _age_text(model)
+    word, style = _state_word(model)
+    holding = _hold_word(model) is not None
+    pad = 8 if style == "chip" else 0
+    room = right - left
+
+    def pill_w(text: str) -> float:
+        return 10 + cv.advance(text, semi, LABEL_TRACKING)
+
+    def age_w(text: str | None) -> float:
+        return 6 + cv.advance(text, reg, QUALIFIER_TRACKING) if text else 0.0
+
+    def word_w(text: str) -> float:
+        return cv.advance(text, semi, LABEL_TRACKING) + pad
+
+    def fits(p: str, a: str | None, w: str) -> bool:
+        return pill_w(p) + age_w(a) + QUALIFIER_GAP + word_w(w) <= room
+
+    drawn_pill, drawn_age, drawn_word = pill, age, word
+    taken: list[str] = []
+    if not fits(pill, age, word):
+        for step in HEADER_GIVE_WAY:
+            if step == "state_word" and not holding:
+                drawn_word = _cut(cv, word, room - pill_w(pill) - age_w(age) - QUALIFIER_GAP - pad, semi,
+                                  LABEL_TRACKING)
+            elif step == "age" and drawn_age is not None:
+                drawn_age = None
+                if "state_word" in taken:       # the word takes back what the age leaves
+                    drawn_word = _cut(cv, word, room - pill_w(pill) - QUALIFIER_GAP - pad, semi, LABEL_TRACKING)
+            elif step == "pill":
+                if "state_word" in taken:       # the word gave way first: it keeps its one letter
+                    drawn_word = _cut(cv, word, 0.0, semi, LABEL_TRACKING)
+                drawn_pill = _cut(cv, pill, room - 10 - age_w(drawn_age) - QUALIFIER_GAP - word_w(drawn_word), semi,
+                                  LABEL_TRACKING)
+            elif step == "countdown" and holding and model.guard is not None \
+                    and model.guard.resume_seconds is not None:
+                drawn_word = str(words.text("widget.nostromo.guard.hold"))
+                drawn_pill = _cut(cv, pill, room - 10 - age_w(drawn_age) - QUALIFIER_GAP - word_w(drawn_word), semi,
+                                  LABEL_TRACKING)
+            else:
+                continue
+            taken.append(step)
+            if fits(drawn_pill, drawn_age, drawn_word):
+                break
+    mark = None
+    if model.guard is not None and not model.guard.holding:
+        left_end = left + pill_w(drawn_pill) + age_w(drawn_age)
+        word_left = right - word_w(drawn_word)
+        for key in ("widget.nostromo.guard.mark", "widget.nostromo.guard.mark_short"):
+            text = str(words.text(key))
+            if left_end + ARMED_GAP + cv.advance(text, semi, LABEL_TRACKING) <= word_left - ARMED_GAP:
+                mark = text
+                break
+    return HeaderPlan(drawn_pill, drawn_age, drawn_word, style, mark, tuple(taken))
+
+
+def _pace_short(row: Row, *, locale: Locale = ENGLISH) -> str | None:
+    """The pace's short form for a tight hover line: the signed points alone ("+21 PTS"), in the full form's tone.
+    None for a pace that has no points ("ON PACE", "PACE --"). English never draws it: its lines fit whole."""
+    delta = pace_delta(row.percent, row.time_fraction)
+    if delta is None or row.pace not in ("ahead", "behind"):
+        return None
+    return _words(locale).text("widget.nostromo.pace.points", {"points": f"{'+' if delta >= 0 else '-'}{abs(delta):.0f}"})
+
+
+def _info_plan(cv: Canvas, row: Row, locale: Locale) -> InfoPlan:
+    """The hover line's reset (from LEFT) and pace (right-aligned at RIGHT), QUALIFIER_GAP apart at least, measured on
+    ``cv``: while they do not fit, the pace takes its short form (_pace_short), then is left out (INFO_GIVE_WAY)."""
+    semi = cv.font(FONT_SEMI, LABEL_SIZE)
+    reg = cv.font(FONT_REG, LABEL_SIZE)
+    reset = _reset_text(row, locale)
+    room = RIGHT - LEFT - cv.advance(reset, reg, QUALIFIER_TRACKING) - QUALIFIER_GAP
+    pace: str | None = _pace_word(row, locale)
+    forms = {"pace": _pace_short(row, locale=locale), "pace_short": None}
+    taken: list[str] = []
+    for step in INFO_GIVE_WAY:
+        if pace is None or cv.advance(pace, semi, LABEL_TRACKING) <= room:
+            break
+        pace = forms[step]
+        taken.append(step)
+    return InfoPlan(reset, pace, tuple(taken))
+
+
+def _message_fit(cv: Canvas, lines: tuple[str, ...], room: float) -> MessageFit:
+    """The sign-in box's lines at the first of MESSAGE_STEPS where every one fits ``room``; at the last step a line that
+    still does not fit is cut with an ellipsis."""
+    for size, tracking in MESSAGE_STEPS:
+        semi = cv.font(FONT_SEMI, size)
+        if all(cv.advance(line, semi, tracking) <= room for line in lines):
+            return MessageFit(size, tracking, lines)
+    return MessageFit(size, tracking, tuple(_cut(cv, line, room, semi, tracking) for line in lines))
+
+
+def _strip_tag(cv: Canvas, text: str, room: float) -> tuple[float, float] | None:
+    """(size, tracking) the strip draws a window tag at: the first of STRIP_TAG_SIZES where it fits ``room``, its
+    tracking 0.1 em. None when it does not fit even at the last: the tag is left out."""
+    for size in STRIP_TAG_SIZES:
+        tracking = STRIP_LABEL_TRACKING * (size / STRIP_LABEL_SIZE)     # exactly STRIP_LABEL_TRACKING at 11 px
+        if cv.advance(text, cv.font(FONT_SEMI, size), tracking) <= room:
+            return size, tracking
+    return None
+
+
+def _mark_growth(text: str, *, filled: bool = False) -> tuple[int, int]:
+    """(px up, px down) an outlined pill or cap tag, or with ``filled`` the header's chip, grows round ``text`` (Q1, see
+    MARK_GROWTH_UP): up for a capital with a mark above, down for a mark below or one of DESCENDERS; (0, 0) for
+    English's words."""
+    up = down = False
+    base = ""
+    for ch in unicodedata.normalize("NFD", text):
+        mark = unicodedata.combining(ch)
+        if not mark:
+            base = ch
+            down = down or ch in DESCENDERS
+        elif mark == _ABOVE:
+            up = up or base.isupper()
+        elif mark in _BELOW:
+            down = True
+    return ((CHIP_GROWTH_UP if filled else MARK_GROWTH_UP) if up else 0), (MARK_GROWTH_DOWN if down else 0)
+
+
 # ── Painting plan: halos first, then marks ────────────────────────────────────
 
 class _Plan:
@@ -596,17 +811,17 @@ def _alive_mark(plan: _Plan, cv: Canvas, pal: Palette, model: WidgetModel, opts:
     plan.stamp(layer, with_alpha(pal.bright, alpha))
 
 
-def _pill(plan: _Plan, cv: Canvas, pal: Palette, model: WidgetModel, x: float, y: float) -> float:
-    """Status pill (1 px outline, 12 px tall) and the age after it. Returns the age's right edge."""
+def _pill(plan: _Plan, cv: Canvas, pal: Palette, text: str, age: str | None, x: float, y: float) -> float:
+    """Status pill (1 px outline, 12 px tall, grown round marks: _mark_growth) and the age after it. Returns the age's
+    right edge."""
     semi = cv.font(FONT_SEMI, LABEL_SIZE)
     reg = cv.font(FONT_REG, LABEL_SIZE)
-    text = model.status_text
     width = 2 + 4 + cv.advance(text, semi, LABEL_TRACKING) + 4
-    plan.mark(lambda c: c.outline_rect(x, y, x + width, y + HEADER_H, pal.rule_strong, 1))
+    up, down = _mark_growth(text)
+    plan.mark(lambda c: c.outline_rect(x, y - up, x + width, y + HEADER_H + down, pal.rule_strong, 1))
     text_layer, _ = cv.text_layer(text, x + 5, cv.baseline_in_box(y + 1, 10, semi), semi, LABEL_TRACKING)
     plan.stamp(text_layer, pal.bright)
     right = x + width
-    age = _age_text(model)
     if age:
         age_layer, advance = cv.text_layer(age, right + 6, cv.baseline_in_box(y + 1, 10, reg), reg,
                                            QUALIFIER_TRACKING)
@@ -617,41 +832,35 @@ def _pill(plan: _Plan, cv: Canvas, pal: Palette, model: WidgetModel, x: float, y
 
 def _header(plan: _Plan, cv: Canvas, pal: Palette, model: WidgetModel, opts: RenderOptions,
             dot_x: float, dot_y: float, top: float, right: float, dot_size: float = 6.0) -> None:
-    """Status mark, pill and age on the left, severity word on the right. The usage guard adds nothing to the
-    left while it holds (its chip takes the right-hand word, see _state_word) and a quiet [GUARD] after the age
-    while it is armed."""
+    """Status mark, pill and age on the left, severity word on the right, as _header_plan fits them. The usage guard
+    adds nothing to the left while it holds (its chip takes the right-hand word, see _state_word) and a quiet [GUARD]
+    after the age while it is armed."""
     _alive_mark(plan, cv, pal, model, opts, dot_x, dot_y, dot_size)
-    left_end = _pill(plan, cv, pal, model, dot_x + dot_size + 6, top)
+    head = _header_plan(cv, model, dot_x + dot_size + 6, right)
+    left_end = _pill(plan, cv, pal, head.pill, head.age, dot_x + dot_size + 6, top)
     semi = cv.font(FONT_SEMI, LABEL_SIZE)
-    word, style = _state_word(model)
+    word = head.word
     baseline = cv.baseline_in_box(top, HEADER_H, semi)
-    word_w = cv.advance(word, semi, LABEL_TRACKING)
-    if style == "chip":
-        chip_w = word_w + 8
-        plan.mark(lambda c: c.fill_rect(right - chip_w, top, right, top + HEADER_H, pal.bright))
+    if head.style == "chip":
+        chip_w = cv.advance(word, semi, LABEL_TRACKING) + 8
+        up, down = _mark_growth(word, filled=True)
+        plan.mark(lambda c: c.fill_rect(right - chip_w, top - up, right, top + HEADER_H + down, pal.bright))
         layer, _ = cv.text_layer(word, right - 4, baseline, semi, LABEL_TRACKING, align="right")
         plan.stamp(layer, pal.ink)
     else:
         layer, _ = cv.text_layer(word, right, baseline, semi, LABEL_TRACKING, align="right")
-        plan.stamp(layer, pal.bright if style == "bright" else pal.label)
-    if model.guard is not None and not model.guard.holding:
-        _armed_mark(plan, cv, pal, left_end, right - word_w - (8 if style == "chip" else 0), top, model.locale)
+        plan.stamp(layer, pal.bright if head.style == "bright" else pal.label)
+    if head.mark is not None:
+        _armed_mark(plan, cv, pal, head.mark, left_end, top)
 
 
-def _armed_mark(plan: _Plan, cv: Canvas, pal: Palette, left_end: float, word_left: float, top: float,
-                locale: Locale) -> None:
+def _armed_mark(plan: _Plan, cv: Canvas, pal: Palette, text: str, left_end: float, top: float) -> None:
     """The armed guard: "[GUARD]" in the label tone after the age, in the free stretch before the state word. A
     long status ("RATE LIMITED" and its age) leaves room for the short "[G]" only, and a header with no room at
-    all draws nothing: the mark is quiet by design."""
+    all draws nothing (_header_plan chooses): the mark is quiet by design."""
     semi = cv.font(FONT_SEMI, LABEL_SIZE)
-    words = _words(locale)
-    for key in ("widget.nostromo.guard.mark", "widget.nostromo.guard.mark_short"):
-        text = words.text(key)
-        x = left_end + ARMED_GAP
-        if x + cv.advance(text, semi, LABEL_TRACKING) <= word_left - ARMED_GAP:
-            layer, _ = cv.text_layer(text, x, cv.baseline_in_box(top + 1, 10, semi), semi, LABEL_TRACKING)
-            plan.stamp(layer, pal.label)
-            return
+    layer, _ = cv.text_layer(text, left_end + ARMED_GAP, cv.baseline_in_box(top + 1, 10, semi), semi, LABEL_TRACKING)
+    plan.stamp(layer, pal.label)
 
 
 def _dashed_box(plan: _Plan, cv: Canvas, pal: Palette, x0: float, y0: float, x1: float, y1: float) -> None:
@@ -681,12 +890,14 @@ def _message_lines(model: WidgetModel) -> tuple[str, ...] | None:
 
 def _message(plan: _Plan, cv: Canvas, pal: Palette, lines: tuple[str, ...], top: float, x0: float, x1: float,
              y1: float) -> None:
-    """Dashed auth box with one or two lines of 10 px SemiBold text (see _message_lines)."""
+    """Dashed auth box with one or two lines of 10 px SemiBold text (see _message_lines), from 9 px in from its left
+    edge to its right border; a line too long shrinks (_message_fit)."""
     _dashed_box(plan, cv, pal, x0, top, x1, y1)
-    semi = cv.font(FONT_SEMI, LABEL_SIZE)
-    for index, line in enumerate(lines[:2]):
+    fit = _message_fit(cv, tuple(lines[:2]), (x1 - 1) - (x0 + 9))
+    semi = cv.font(FONT_SEMI, fit.size)
+    for index, line in enumerate(fit.lines):
         line_top = top + 2 + 12 * index
-        layer, _ = cv.text_layer(line, x0 + 9, cv.baseline_in_box(line_top, 12, semi), semi, MESSAGE_TRACKING)
+        layer, _ = cv.text_layer(line, x0 + 9, cv.baseline_in_box(line_top, 12, semi), semi, fit.tracking)
         plan.stamp(layer, pal.message)
 
 
@@ -727,7 +938,8 @@ def _cap_tag(plan: _Plan, cv: Canvas, pal: Palette, model: WidgetModel, row: Row
     width = 2 + 4 + cv.advance(text, semi, LABEL_TRACKING) + 4
     if x + width > value_left - VALUE_CLEARANCE:
         return
-    plan.mark(lambda c: c.outline_rect(x, top, x + width, top + HEADER_H, pal.bright, 1))
+    up, down = _mark_growth(text)
+    plan.mark(lambda c: c.outline_rect(x, top - up, x + width, top + HEADER_H + down, pal.bright, 1))
     layer, _ = cv.text_layer(text, x + 5, cv.baseline_in_box(top + 1, 10, semi), semi, LABEL_TRACKING)
     plan.stamp(layer, pal.bright)
 
@@ -959,13 +1171,14 @@ def _row_tooltip(plan: _Plan, cv: Canvas, pal: Palette, model: WidgetModel, row:
     _cell_bar(plan, cv, pal, LEFT, top + PIP_OFFSET, PIP_STEP, PIP_W, 8, PIP_CELLS, full, partial_w, lit)
 
     info_top = top + TOOLTIP_INFO_OFFSET
-    info_layer, _ = cv.text_layer(_reset_text(row, model.locale), LEFT, cv.baseline_in_box(info_top, 12, reg), reg,
-                                  QUALIFIER_TRACKING)
+    info = _info_plan(cv, row, model.locale)
+    info_layer, _ = cv.text_layer(info.reset, LEFT, cv.baseline_in_box(info_top, 12, reg), reg, QUALIFIER_TRACKING)
     plan.stamp(info_layer, pal.label)
-    pace_text, pace_color = _pace_text(pal, row, locale=model.locale)
-    pace_layer, _ = cv.text_layer(pace_text, RIGHT, cv.baseline_in_box(info_top, 12, semi), semi,
-                                  LABEL_TRACKING, align="right")
-    plan.stamp(pace_layer, pace_color)
+    if info.pace is not None:
+        _, pace_color = _pace_text(pal, row, locale=model.locale)
+        pace_layer, _ = cv.text_layer(info.pace, RIGHT, cv.baseline_in_box(info_top, 12, semi), semi,
+                                      LABEL_TRACKING, align="right")
+        plan.stamp(pace_layer, pace_color)
 
 
 def _reset_text(row: Row, locale: Locale) -> str:
@@ -1077,16 +1290,23 @@ def _pace_text(pal: Palette, row: Row, *, locale: Locale = ENGLISH) -> tuple[str
     """The hover card's pace and its tone: "AHEAD +21 PTS" (bright), "BEHIND -18 PTS", "ON PACE", or "PACE --" with
     no reading or no reset time. The points are signed ASCII digits, as before #94: a whole number under 1000 and its
     sign are written alike in every language the app has (no group sign; CLDR's minus is "-" in each)."""
+    text = _pace_word(row, locale)
+    return text, pal.bright if row.pace == "ahead" and pace_delta(row.percent, row.time_fraction) is not None \
+        else pal.label
+
+
+def _pace_word(row: Row, locale: Locale) -> str:
+    """_pace_text's words, without the tone."""
     words = _words(locale)
     delta = pace_delta(row.percent, row.time_fraction)
     if delta is None or row.pace is None:
-        return words.text("widget.nostromo.pace.none"), pal.label
+        return words.text("widget.nostromo.pace.none")
     if row.pace == "on_pace":
-        return words.text("widget.nostromo.pace.on"), pal.label
+        return words.text("widget.nostromo.pace.on")
     points = f"{'+' if delta >= 0 else '-'}{abs(delta):.0f}"
     if row.pace == "ahead":
-        return words.text("widget.nostromo.pace.ahead", {"points": points}), pal.bright
-    return words.text("widget.nostromo.pace.behind", {"points": points}), pal.label
+        return words.text("widget.nostromo.pace.ahead", {"points": points})
+    return words.text("widget.nostromo.pace.behind", {"points": points})
 
 
 # ── Taskbar strip ─────────────────────────────────────────────────────────────
@@ -1112,8 +1332,14 @@ def _render_strip(model: WidgetModel, pal: Palette, scale: float, opts: RenderOp
         row = rows[index] if index < len(rows) else None
         percent = row.percent if row is not None else None
         emphasis = _row_emphasis(model, row) if row is not None else "normal"
-        label_layer, _ = cv.text_layer(words.text(window), label_x, label_baseline, semi, STRIP_LABEL_TRACKING)
-        plan.stamp(label_layer, pal.label)
+        tag = words.text(window)
+        fit = _strip_tag(cv, tag, bar_x - label_x)
+        if fit is not None:
+            size, tracking = fit
+            font = semi if size == STRIP_LABEL_SIZE else cv.font(FONT_SEMI, size)
+            baseline = label_baseline if size == STRIP_LABEL_SIZE else cv.baseline_in_box(STRIP_LABEL_TOP, 12, font)
+            label_layer, _ = cv.text_layer(tag, label_x, baseline, font, tracking)
+            plan.stamp(label_layer, pal.label)
 
         lit = _lit_color(pal, emphasis)
         full, fraction = engine.split_segments(percent, STRIP_CELLS)

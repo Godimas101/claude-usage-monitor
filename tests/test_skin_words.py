@@ -68,6 +68,7 @@ NOSTROMO_KEYS = (
     *(f"auth.{reason}.line{line}" for reason in ("expired", "refused", "no_login") for line in (1, 2)),
     "limit.session", "limit.weekly", "limit.scoped", "limit.scoped_unnamed", "window.session", "window.weekly",
     "share.of", "cap.tag", "resets.at", "resets.unknown", "pace.none", "pace.on", "pace.ahead", "pace.behind",
+    "pace.points",
 )
 
 
@@ -81,8 +82,10 @@ def test_the_english_catalog_is_nostromos_english() -> None:
     """Each widget.nostromo key of en.json, filled with the values English gives it, is the text Nostromo drew before
     #94 (the record above), so a retyped value fails. The fills: {countdown} 2H 14M, {name} SESSION, WEEKLY or FABLE,
     {percent} the percent, {clock} the reset or resume time, {time_left} the glued countdown, {product} CLAUDE CODE,
-    {command} /login, {points} the signed points. One key has no English text of its own: guard.holding, the lead of
-    a guard holding with nothing to list, is holding_list without its colon, as the code gave such a lead."""
+    {command} /login, {points} the signed points. Two keys have no English text of their own: guard.holding, the lead
+    of a guard holding with nothing to list, is holding_list without its colon, as the code gave such a lead; and
+    pace.points, the pace's short form for a tight line (#94's fits), which English never draws, is pace.ahead's and
+    pace.behind's tail."""
     from usage_monitor import i18n
     from usage_monitor.render import engine
 
@@ -131,6 +134,8 @@ def test_the_english_catalog_is_nostromos_english() -> None:
     paces = [helpers[f"pace/{shape}"]["rows"][0]["pace"][0] for shape in ("none", "on", "ahead_100", "behind_100")]
     assert [text("pace.none"), text("pace.on"), text("pace.ahead", points="+100"),
             text("pace.behind", points="-100")] == paces
+    assert paces[2].endswith(" " + text("pace.points", points="+100")) and \
+        paces[3].endswith(" " + text("pace.points", points="-100"))
 
 
 # ── The skin's words come from the catalog (#94 steps 2 and 3) ────────────────

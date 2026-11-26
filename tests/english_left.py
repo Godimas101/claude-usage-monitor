@@ -109,8 +109,10 @@ def _kind(word: str) -> str | None:
 
 def _english_runs(runs: Sequence[str], names: Iterable[str], format_words: Iterable[str] = ()) -> list[str]:
     """The runs of one block that hold English, as given. A word that reads the same both ways is English only outside
-    a bracketed string with a pseudo word in it; the brackets are followed from run to run. ``names`` are taken out
-    wherever they stand, ``format_words`` only as whole words ("Mon" is no part of "Monthly")."""
+    a bracketed string with a pseudo word in it; the brackets are followed from run to run. A bracketed string that a
+    run ends inside with an ellipsis was cut (#94's fits): it is pseudo_text's, whose bracket opened it, even when the
+    letters left ("[THR…") read the same both ways. ``names`` are taken out wherever they stand, ``format_words`` only
+    as whole words ("Mon" is no part of "Monthly")."""
     names = sorted(set(names), key=len, reverse=True)          # a longer name first: "Claude Code" before "Claude"
     words_out = sorted(set(format_words), key=len, reverse=True)
     as_words = re.compile(r"(?<!\w)(?:" + "|".join(map(re.escape, words_out)) + r")(?!\w)") if words_out else None
@@ -141,6 +143,9 @@ def _english_runs(runs: Sequence[str], names: Iterable[str], format_words: Itera
                         spans[span] = True
                 if kind in ("english", "either"):
                     found.append((kind, tuple(open_)))
+        if rest.rstrip().endswith("…"):
+            for span in open_:                                 # cut inside its brackets
+                spans[span] = True
         words.append(found)
     return [run for run, found in zip(runs, words)
             if any(kind == "english" or not any(spans[s] for s in inside) for kind, inside in found)]

@@ -93,6 +93,16 @@ def test_a_word_that_reads_the_same_both_ways_is_english_only_outside_a_pseudo_s
     assert english(["MB", "PM", "[MB]"]) == {"MB", "PM", "[MB]"}              # brackets with no pseudo word in them
 
 
+def test_a_bracketed_string_cut_with_an_ellipsis_is_the_pseudo_locales() -> None:
+    """A widget cuts a long word with an ellipsis (#94's fits), and the letters a cut leaves of a pseudo word can read
+    the same both ways ("[THRÖTTLÉD" cut to "[THR…"). A run that ends inside its brackets with the ellipsis was cut
+    from pseudo_text's string, so its words are the pseudo-locale's; English, and a word outside brackets or in closed
+    ones, is still found."""
+    cut = P("THROTTLED")[:4] + "…"
+    assert cut == "[THR…" and english([cut]) == set()
+    assert english(["THR…", "[THR…]", "[GUA…"]) == {"THR…", "[THR…]", "[GUA…"}
+
+
 def test_digits_fold_and_spaces_collapse() -> None:
     assert english(["Resets 4:12\u202fPM", "Resets  4:59 PM", " Resets 11:59 PM "]) == {"Resets #:## PM",
                                                                                          "Resets ##:## PM"}
