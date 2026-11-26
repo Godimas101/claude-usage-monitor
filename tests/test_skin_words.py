@@ -289,6 +289,7 @@ def test_night_citys_english_records_are_the_catalogs() -> None:
              ApiStatus.PAUSED: "paused", ApiStatus.LOADING: "loading", ApiStatus.RATE_LIMITED: "rate_limited",
              ApiStatus.NO_CREDENTIALS: "no_credentials"}
     assert set(nc.STRIP_WORDS) == set(ApiStatus) == set(codes)
+    assert nc.STATE_KEYS == {status: f"widget.night_city.state.{code}" for status, code in codes.items()}
     assert {status: word for status, word in nc.STRIP_WORDS.items()} == {
         status: text(f"state.{code}") for status, code in codes.items()}
     copy = dump.load_theme_objects()["night_city"].extras["copy"]
@@ -465,3 +466,179 @@ def test_the_guard_lead_keeps_its_colon_on_its_line(monkeypatch: pytest.MonkeyPa
                 reading = statement[1].replace(engine.NO_BREAK, " ")
                 assert head == shown and " ".join([tail.strip(), *lines[1:]]).strip() == reading, (state, space,
                                                                                                     length, lines)
+
+
+# ── Night City's words come from the catalog (#95 step 2) ─────────────────────
+
+def _data_marked(english: str) -> str:
+    """``english`` with the last letter of each word in lower case ("PAUSEd", "RATe LIMITEd"): the view model's status
+    words as the marker test below draws them, so they pass neither for Night City's own words (which are the same
+    English words on the strip) nor for those words marked."""
+    return re.sub(r"[A-Z](?![A-Za-z])", lambda m: m.group(0).lower(), english)
+
+
+def _resolved(surfaces: dict[str, Any], surface: str) -> list[Any]:
+    found = surfaces[surface]
+    return surfaces[found] if isinstance(found, str) else found
+
+
+def test_night_city_takes_every_word_from_the_catalog_as_written(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every word Night City draws comes from a Catalog.text call on one of its keys, drawn as the catalog writes it,
+    as Nostromo's test above holds Nostromo: each widget.night_city text has each word's first letter in lower case
+    ("lIVE", "hOLD {countdown}"), Catalog.text is spied on, and every recorded state is drawn on every surface at 1.0
+    in Blackwall's, Relic's and Edgerun's looks. Night City also draws the view model's status word (the header's
+    chip, the throttled band), whose English is the same as its own strip words, so the view model's words are marked
+    otherwise (_data_marked) and taken out of each run, with the data the skin read (a kind's name from its code, a
+    guard label). After that no word of a run may be one of the marked words in another case: a word drawn as a
+    literal, or a catalog text cased again, fails (a word of one letter, "5H", is marked all in lower case, so only
+    capitals are seen there). The skin reads every one of its keys and no other. Its body face is not monospaced, so
+    the marked frames do not lay out as English's; a marked word is narrower, and every run English draws is drawn in
+    the marked frames too, its case aside (checked), so each key is drawn where English draws it."""
+    from usage_monitor import casing, i18n
+    from usage_monitor.render import dump
+    from usage_monitor.render.skins import get_skin
+    from usage_monitor.render.skins import night_city
+
+    theme = dump.load_theme_objects()["night_city"]
+    skin = get_skin("night_city")
+    variants = (theme.variants[0], *(theme.variant(look) for look in skin_words.NIGHT_CITY_LOOKS))
+
+    def draw(models: dict[str, Any]) -> dict[tuple[str, str], dict[str, Any]]:
+        return {(name, variant.id): skin_words.runs(skin, model, theme, variant, dump.TASKBAR_HEIGHTS_AT_1X,
+                                                    scales=(1.0,))
+                for name, model in models.items() for variant in variants}
+
+    english_runs = draw(skin_words.models(skin_words._night_city_states))
+    english = i18n.load_catalog("en").english()
+    own = {key: _marked(value) for key, value in english.items() if key.startswith("widget.night_city.")}
+    status = {key: _data_marked(value) for key, value in english.items() if key.startswith("widget.status.")}
+    catalog = i18n.Catalog("en", {}, {**english, **status, **own})
+    monkeypatch.setattr(i18n, "app_catalog", lambda language: catalog)
+    models = skin_words.models(skin_words._night_city_states)
+    data = {str(model.status_text) for model in models.values()}
+    assert data == set(status.values())                          # every status word, marked as the view model's
+    read: set[str] = set()
+    real_text, real_names = i18n.Catalog.text, night_city.unknown_kind_names
+
+    def text(self: Any, key: str, values: Any = None) -> Any:
+        read.add(key)
+        return real_text(self, key, values)
+
+    def unknown_kind_names(kind: str) -> tuple[str, str]:
+        names = real_names(kind)
+        data.update(names)
+        return names
+
+    class Labels(dict):  # type: ignore[type-arg]
+        """A guard's labels, saying which the skin read."""
+
+        def get(self, key: str, default: Any = None) -> Any:
+            label = super().get(key, default)
+            data.add(str(casing.upper(label)))
+            return label
+
+    monkeypatch.setattr(i18n.Catalog, "text", text)
+    monkeypatch.setattr(night_city, "unknown_kind_names", unknown_kind_names)
+    for name, model in models.items():
+        if model.guard is not None:
+            models[name] = dataclasses.replace(model, guard=dataclasses.replace(model.guard,
+                                                                               labels=Labels(model.guard.labels)))
+    drawn = draw(models)
+    marked = {token.upper(): token for value in own.values() for token in _tokens(value)
+              if re.search("[A-Za-z]", token) and not token.startswith("{")}
+    wrong, missing, words = [], [], 0
+    for where, surfaces in drawn.items():
+        for surface in surfaces:
+            if not {run[0].upper() for run in _resolved(english_runs[where], surface)} <= {
+                    run[0].upper() for run in _resolved(surfaces, surface)}:
+                missing.append((where, surface))
+            if isinstance(surfaces[surface], str):
+                continue
+            for run in surfaces[surface]:
+                rest = run[0]
+                for piece in sorted(filter(None, data), key=len, reverse=True):
+                    rest = rest.replace(piece, " ")
+                for token in _tokens(rest):
+                    if token.upper() in marked:
+                        words += token == marked[token.upper()]
+                        if token != marked[token.upper()]:
+                            wrong.append((where, surface, run[0], token))
+    assert wrong == []
+    assert read == set(own), sorted(read ^ set(own))
+    assert missing == []
+    assert words > 3000
+
+
+def test_night_citys_row_chips_are_measured_round_the_words_they_draw(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A row's layout makes room for its chip (_chip_width), and _draw_row draws the chip round the catalog's word: the
+    two are the same word in every language, so a longer WARN or CRIT moves the name, not the chip onto it (#95's
+    plan critic 6). English keeps its widths."""
+    from usage_monitor import i18n
+    from usage_monitor.render import dump
+    from usage_monitor.render.skins import RenderOptions
+    from usage_monitor.render.skins import night_city as nc
+
+    theme = dump.load_theme_objects()["night_city"]
+    ink = nc._Ink(nc._canvas(nc.FLOAT_W, 96, 1.0, theme), nc.Palette.for_variant(theme, theme.variants[0]),
+                  RenderOptions())
+    colour = ink.pal.warn
+    english = (nc._chip_width(ink, "warning"), nc._chip_width(ink, "critical"))
+    assert english == (nc._chip_out(ink, 0, 0, "WARN", colour, colour), nc._chip_crit(ink, 0, 0, "CRIT"))
+    words = {"widget.night_city.state.warning": "AVERTISSEMENT", "widget.night_city.state.critical": "CRITIQUE"}
+    catalog, real = i18n.Catalog("fr", words, i18n.load_catalog("en").english()), i18n.app_catalog
+    monkeypatch.setattr(i18n, "app_catalog", lambda language: catalog if language == "fr" else real(language))
+    french = i18n.dev_locale("fr")
+    warn = nc._chip_out(ink, 0, 0, "AVERTISSEMENT", colour, colour)
+    assert nc._chip_width(ink, "warning", locale=french) == warn
+    assert nc._chip_width(ink, "critical", locale=french) == nc._chip_crit(ink, 0, 0, "CRITIQUE")
+    assert nc._chip_width(ink, "critical", "CAP 95", locale=french) == nc._chip_crit(ink, 0, 0, "CAP 95")
+    assert warn > english[0] and nc._chip_width(ink, "warning") == english[0] and nc._chip_width(ink, "normal") == 0
+    row = dump.sample_model("warning", locale=french).rows[0]
+    boxes = nc._layout_row(ink, nc.look_for(theme.variants[0]), row, "warning", "78", None, locale=french)
+    assert boxes.chip is not None and boxes.chip[1] - boxes.chip[0] == warn             # the row's room for the chip
+
+
+# What Night City draws in English in every language, by design: data, not words. Nostromo's DATA_LEFTOVERS, and a
+# scoped row's short name, which Night City shows alone.
+NIGHT_CITY_DATA_LEFTOVERS: dict[str, str] = {
+    **DATA_LEFTOVERS,
+    "DESIGN": "a scoped row of a kind no catalog has words for: the row shows its short name, from its code "
+              "(model.unknown_kind_names, #93 D4)",
+}
+
+
+def test_no_night_city_run_is_english_in_the_pseudo_locale() -> None:
+    """Every run Night City draws in the pseudo-locale is the pseudo-locale's, as tests/english_left.py judges it: in
+    every recorded state (the refused band, the edge and guard states and the states Night City's words hang on, which
+    the frame dump lacks), on every surface, at 1.0, in Blackwall's, Relic's and Edgerun's looks. Names are taken out
+    (the scan's widget names, the states' scope names as given and in capitals, the commands), and so are the
+    pseudo-locale's format words (its weekdays, AM and PM). What stays English is data: NIGHT_CITY_DATA_LEFTOVERS,
+    each drawn."""
+    from usage_monitor import casing, i18n
+    from usage_monitor.render import dump
+    from usage_monitor.render.skins import get_skin
+
+    pseudo = i18n.dev_locale(i18n.PSEUDO)
+    models = skin_words.models(skin_words._night_city_states, pseudo)
+    scopes = {scope for model in models.values()
+              for scope in [*(row.scope_name for row in model.rows),
+                            *(model.guard.scope_names.values() if model.guard is not None else ())] if scope}
+    names = (*english_left.widget_names(), *i18n.COMMANDS, *sorted(scopes),
+             *sorted(casing.upper(scope, pseudo.language) for scope in scopes))
+    theme = dump.load_theme_objects()["night_city"]
+    skin = get_skin("night_city")
+    texts: dict[str, str] = {}
+    for variant in (theme.variants[0], *(theme.variant(look) for look in skin_words.NIGHT_CITY_LOOKS)):
+        for name, model in models.items():
+            for surface, found in skin_words.runs(skin, model, theme, variant, dump.TASKBAR_HEIGHTS_AT_1X,
+                                                  scales=(1.0,)).items():
+                for run in ([] if isinstance(found, str) else found):
+                    texts.setdefault(run[0], f"{variant.id} {name} {surface}")
+    format_words = english_left.pseudo_format_words()
+    left = english_left.english(texts, (*names, *NIGHT_CITY_DATA_LEFTOVERS), format_words)
+    assert left == set(), {text: where for text, where in texts.items() if english_left.entry(text) in left}
+    assert all(any(leftover in text for text in texts) for leftover in NIGHT_CITY_DATA_LEFTOVERS)
+    assert {"Claude Code", "claude_code", "Haiku"} <= scopes
+    refused = RECORDED["night_city"]["refused"]["runs"]["floating@1"]
+    assert english_left.english([run[0] for run in refused], names, format_words) >= {
+        "RELINK // RUN /login", "SESSION"}                                 # English is caught

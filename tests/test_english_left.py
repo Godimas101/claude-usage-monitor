@@ -103,6 +103,28 @@ def test_a_bracketed_string_cut_with_an_ellipsis_is_the_pseudo_locales() -> None
     assert english(["THR…", "[THR…]", "[GUA…"]) == {"THR…", "[THR…]", "[GUA…"}
 
 
+def test_a_bracketed_string_cut_with_dots_is_the_pseudo_locales() -> None:
+    """Night City cuts with three dots, its own mark (#95), where the other skins cut with an ellipsis: a run that
+    ends inside its brackets with them was cut too. English, and a word outside brackets or in closed ones, is still
+    found."""
+    cut = P("THROTTLED")[:4] + "..."
+    assert cut == "[THR..." and english([cut]) == set()
+    assert english(["THR...", "[THR...]", "[GUA..."]) == {"THR...", "[THR...]", "[GUA..."}
+
+
+def test_a_name_a_cut_ends_inside_is_a_name() -> None:
+    """A Night City band cuts its cause where the room ends, which can be inside the product's name (#95): "CLAUDE
+    CO..." is the start of a name, not English. Only the name's start at a word's start goes, and only before a cut
+    mark: English before it, a word that only looks like a name's start, and a name cut with no mark are found."""
+    names = ("CLAUDE CODE",)
+    cause = P("RELINK // USE {product}").replace("{product}", "CLAUDE CODE")
+    for size in range(1, len("CLAUDE CODE")):
+        cut = cause[:cause.index("CLAUDE") + size] + "..."
+        assert english([cut], names) == set(), cut
+    assert english(["USE CLAUDE CO...", "[ÜŞÉ XCLAUDE...", "[ÜŞÉ CLAUDE CO", "[ÜŞÉ CLAUDE CO…]"], names) == {
+        "USE CLAUDE CO...", "[ÜŞÉ XCLAUDE...", "[ÜŞÉ CLAUDE CO", "[ÜŞÉ CLAUDE CO…]"}
+
+
 def test_digits_fold_and_spaces_collapse() -> None:
     assert english(["Resets 4:12\u202fPM", "Resets  4:59 PM", " Resets 11:59 PM "]) == {"Resets #:## PM",
                                                                                          "Resets ##:## PM"}

@@ -415,6 +415,30 @@ def test_nostromo_writes_names_and_units_in_the_language(runs):
         assert not [text for text in floating + tooltip if COMBINING_DOT in text], locale.format
 
 
+def test_night_city_writes_names_and_units_in_the_language(runs):
+    """#95: Night City's words come from the catalog (English's while a language has none of its own), a scope's name
+    in the language's capitals on its row and in the guard's line (Turkish's dotted İ, Chris's answer on #86), and its
+    hold chip and its band's age as the view model writes them: CLDR's narrow units in capitals outside English."""
+    at = NOW + timedelta(days=2, hours=3)
+    state = held(at, NOW, label="", scope_model="Haiku")
+    over = [*state.guard["over"], {"name": "Haiku weekly", "label": "Haiku weekly", "percent": 12.0, "cap": 10}]
+    state = dataclasses.replace(state, guard={**state.guard, "over": over})
+    stale = dataclasses.replace(state, status=ApiStatus.STALE, guard=None, usage_fetched_at=NOW - timedelta(minutes=41))
+    for locale, name, hold, age in ((loc("tr-TR"), "HAİKU", "HOLD 2G 3S", "41D OLD"),
+                                    (loc("fr-FR"), "HAIKU", "HOLD 2J 3H", "41MIN OLD"),
+                                    (EN, "HAIKU", "HOLD 2D 3H", "41 M OLD")):
+        model = build_model(state, NOW, show_scoped="always", locale=locale)
+        floating, tooltip = (texts(drawn(runs, "night_city", surface, model)) for surface in ("floating", "tooltip"))
+        assert {name, hold} <= set(floating) and name in tooltip, (locale.format, floating)
+        guard_line = " ".join(tooltip[tooltip.index("GUARD // HOLDING:"):]).replace(engine.NO_BREAK, " ")
+        assert f"{name} WEEKLY " in guard_line, (locale.format, tooltip)
+        band = texts(drawn(runs, "night_city", "floating", build_model(stale, NOW, show_scoped="always", locale=locale)))
+        assert age in band and "RELINK // USE CLAUDE CODE" in band, (locale.format, band)
+        shown = floating + tooltip + band
+        assert not [text for text in shown if COMBINING_DOT in text], locale.format
+        assert locale.language != "tr" or not [text for text in shown if "HAIKU" in text], shown
+
+
 # ── The tray's percent (step 1.7) and words (#93) ─────────────────────────────
 
 def test_the_tray_tooltip_writes_its_percents_in_the_locale():
@@ -693,7 +717,7 @@ def turkish_frames() -> dict[str, list[str]]:
 
 def test_no_turkish_frame_draws_a_combining_dot(turkish_frames):
     """A U+0307 comes from lower-casing Turkish's İ by the default rule (str.lower, str.capitalize); casing never
-    writes one. Nostromo's own case calls moved to casing in #94, Night City's and Gates' do in #95 and #96: this holds
+    writes one. Nostromo's own case calls moved to casing in #94 and Night City's in #95; Gates' do in #96: this holds
     every frame meanwhile."""
     assert set(turkish_frames) == {"24 Fable", "24 Haiku", "12 Fable", "12 Haiku"}
     for frames, runs in turkish_frames.items():
@@ -715,10 +739,11 @@ def test_turkish_frames_draw_turkish_weekdays_percents_and_clocks(turkish_frames
 
 def test_a_name_with_an_i_reaches_the_turkish_frames(turkish_frames):
     """Haiku, scoped in place of Fable, is drawn in every skin's own case, so the combining-dot check above has an i to
-    see: in Nostromo's Turkish capitals since #94 ("HAİKU WEEKLY"), still by English's rule in Night City until #95
-    ("HAIKU"), and as written in Gates ("Haiku weekly")."""
+    see: in Turkish capitals in Nostromo since #94 ("HAİKU WEEKLY") and in Night City since #95 ("HAİKU", a scoped row
+    shows the name alone), and as written in Gates ("Haiku weekly"). No skin writes it by English's rule ("HAIKU")."""
     for clock in (24, 12):
         runs = turkish_frames[f"{clock} Haiku"]
-        assert {"HAIKU", "Haiku weekly", "HAİKU WEEKLY"} <= set(runs), clock
+        assert {"HAİKU", "Haiku weekly", "HAİKU WEEKLY"} <= set(runs), clock
+        assert not [run for run in runs if "HAIKU" in run], clock
         assert not [run for run in runs if "Fable" in run or "FABLE" in run], clock
     assert any(re.search("Fable|FABLE", run) for run in turkish_frames["24 Fable"])

@@ -7,7 +7,7 @@ id (a limit kind, a key, the guard's identity strings, a tag or a currency code)
 always was. The files the widgets', the tray's and the alerts' words come from may hold only the calls listed here, each
 with its reason; a new one fails until it goes through casing or is listed. A listed call that goes away is struck, so
 the list only shrinks. The skins' own calls move to casing in #94 to #96, and each adds its skin here: Nostromo (#94)
-has none left.
+and Night City (#95) have none left.
 """
 from __future__ import annotations
 
@@ -66,7 +66,7 @@ ALLOWED: dict[tuple[str, str, str], str] = {
 }
 SCANNED = ("usage_monitor/render/model.py", "usage_monitor/app.py", "usage_monitor/data/alerts.py",
            "usage_monitor/data/identity.py", "usage_monitor/data/usage_api.py", "usage_monitor/formats.py",
-           "usage_monitor/render/skins/nostromo.py")
+           "usage_monitor/render/skins/nostromo.py", "usage_monitor/render/skins/night_city.py")
 
 
 class _Finder(ast.NodeVisitor):

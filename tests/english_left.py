@@ -74,6 +74,8 @@ HALVES = ("widgets", "dashboard")
 # The look-alikes pseudo_text writes, and the plain letters it never leaves plain.
 PSEUDO_LETTERS = frozenset(i18n.pseudo_text(string.ascii_letters)) - frozenset(string.ascii_letters + "[] ")
 MAPPED_LETTERS = frozenset(ch for ch in string.ascii_letters if i18n.pseudo_text(ch)[1] != ch)
+# The marks a cut ends with: the ellipsis, and Night City's three dots (its own mark, kept by #95).
+CUT_MARKS: tuple[str, ...] = ("…", "...")
 PRODUCT = "Claude Usage Monitor"
 # #86's brand marks, kept as written. The dashboard header draws its mark, "CLAUDE USAGE MONITOR // ONBOARD COMPUTER",
 # in two pieces. Night City's NC//USAGE and Usage // Monitor sit in its stylesheet and boot script, outside this scan.
@@ -110,8 +112,9 @@ def _kind(word: str) -> str | None:
 def _english_runs(runs: Sequence[str], names: Iterable[str], format_words: Iterable[str] = ()) -> list[str]:
     """The runs of one block that hold English, as given. A word that reads the same both ways is English only outside
     a bracketed string with a pseudo word in it; the brackets are followed from run to run. A bracketed string that a
-    run ends inside with an ellipsis was cut (#94's fits): it is pseudo_text's, whose bracket opened it, even when the
-    letters left ("[THR…") read the same both ways. ``names`` are taken out wherever they stand, ``format_words`` only
+    run ends inside with an ellipsis, or Night City's three dots, was cut (#94's and #95's fits, CUT_MARKS): it is
+    pseudo_text's, whose bracket opened it, even when the letters left ("[THR…", "[THR...") read the same both ways;
+    and a name the cut ends inside is a name ("CLAUDE CO..." of "CLAUDE CODE", _cut_name). ``names`` are taken out wherever they stand, ``format_words`` only
     as whole words ("Mon" is no part of "Monthly")."""
     names = sorted(set(names), key=len, reverse=True)          # a longer name first: "Claude Code" before "Claude"
     words_out = sorted(set(format_words), key=len, reverse=True)
@@ -123,6 +126,7 @@ def _english_runs(runs: Sequence[str], names: Iterable[str], format_words: Itera
         rest = run
         for name in names:
             rest = rest.replace(name, " ")
+        rest = _cut_name(rest, names)
         if as_words is not None:
             rest = as_words.sub(" ", rest)
         found = []
@@ -143,12 +147,26 @@ def _english_runs(runs: Sequence[str], names: Iterable[str], format_words: Itera
                         spans[span] = True
                 if kind in ("english", "either"):
                     found.append((kind, tuple(open_)))
-        if rest.rstrip().endswith("…"):
+        if rest.rstrip().endswith(CUT_MARKS):
             for span in open_:                                 # cut inside its brackets
                 spans[span] = True
         words.append(found)
     return [run for run, found in zip(runs, words)
             if any(kind == "english" or not any(spans[s] for s in inside) for kind, inside in found)]
+
+
+def _cut_name(rest: str, names: Sequence[str]) -> str:
+    """``rest`` with the start of a name taken out where a cut ends inside it: a run cut with a CUT_MARK whose last
+    letters before the mark begin one of ``names`` at a word's start ("USE CLAUDE CO..." of CLAUDE CODE, which a
+    Night City band cuts, #95). The longest such start goes; a run with no cut mark comes back as it was."""
+    stripped = rest.rstrip()
+    mark = next((mark for mark in CUT_MARKS if stripped.endswith(mark)), None)
+    if mark is None:
+        return rest
+    body = stripped[:-len(mark)]
+    starts = [name[:size] for name in names for size in range(1, len(name))
+              if body.endswith(name[:size]) and (size == len(body) or not body[-size - 1].isalnum())]
+    return body[:-len(max(starts, key=len))] + " " + mark if starts else rest
 
 
 def entry(text: str) -> str:

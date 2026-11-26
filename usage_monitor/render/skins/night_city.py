@@ -19,6 +19,11 @@ eased pulse of the alive mark (0 is fully lit). Its integer part is the frame of
 split of the value numerals: 1 splits by 2 px, 2 by 1 px, 3 and up is settled. animation_phase() builds the
 value. reduce_motion pins both, so the mark stays lit and no split is ever drawn. The theme never steps or
 flickers; a mark that is dark because model.blink_on is False drops to the pulse minimum instead.
+
+Words. They are catalog keys (widget.night_city.*, #95), read in the model's language with English behind it and drawn
+as written: their text is in capitals in every language. A name or a clock put into one is in the language's capitals
+first (casing), and an age or a countdown is written by the view model (format_age_short, format_countdown). The brand
+mark is drawn as written (#86), and a cut ends with the theme's three dots ("...").
 """
 from __future__ import annotations
 
@@ -31,10 +36,10 @@ from typing import Any, NamedTuple
 
 from PIL import Image, ImageFilter
 
-from usage_monitor import formats
+from usage_monitor import casing, formats, i18n
 from usage_monitor import themes as theme_registry
 from usage_monitor.data.models import ApiStatus
-from usage_monitor.i18n import Locale
+from usage_monitor.i18n import ENGLISH, Locale
 from usage_monitor.log import get_logger
 from usage_monitor.render import engine
 from usage_monitor.render.engine import Canvas, Color, Layer, Point, TRANSPARENT, parse_color, with_alpha
@@ -43,24 +48,22 @@ from usage_monitor.render.model import (
     LAMP_LIVE,
     LAMP_OFFLINE,
     LAMP_PAUSED,
+    LOGIN_COMMAND,
     NO_INSETS,
+    PRODUCT,
     SEVERITY_CRITICAL,
     SEVERITY_NORMAL,
     SEVERITY_WARNING,
     STALE_REFUSED,
     SURFACE_FLOATING,
     SURFACE_TASKBAR,
-    UNIT_DAYS,
-    UNIT_HOURS,
-    UNIT_MINUTES,
-    UNIT_SECONDS,
     GuardMark,
     HoverPlay,
     Insets,
     Row,
     WidgetModel,
-    age_unit,
-    countdown_units,
+    format_age_short,
+    format_countdown,
     pace_delta,
     unknown_kind_names,
 )
@@ -123,7 +126,6 @@ STRIP_W = 240
 STRIP_H = 38
 STRIP_CHAMFER = 7.0
 STRIP_ROWS = (6, 22)
-STRIP_LABELS = ("5H", "7D")
 STRIP_LABEL_X = 10
 STRIP_BAR_X = 28
 STRIP_BAR_W = 124
@@ -185,12 +187,50 @@ VALUE = Type(FONT_MONO, 15.0, 0.0, 0.7)
 UNIT = Type(FONT_MONO, 11.0, 0.0, 0.85)
 STRIP_PCT = Type(FONT_MONO, 11.0, 0.0, 0.85)
 
+BAND_STATUSES = frozenset({ApiStatus.STALE, ApiStatus.NO_CREDENTIALS, ApiStatus.OFFLINE, ApiStatus.RATE_LIMITED})
+AGE_STATUSES = frozenset({ApiStatus.STALE, ApiStatus.OFFLINE, ApiStatus.RATE_LIMITED})
+
+# The skin's words (#95): catalog keys, in capitals in every language (_words). en.json's English for each is what the
+# skin drew before #95 (tests/fixtures/skin_words_english.json). The status words: the strip's status tag, for every
+# status, and the header's LIVE tag (STATE_KEYS[ApiStatus.LIVE]).
+STATE_KEYS: dict[ApiStatus, str] = {
+    ApiStatus.LIVE: "widget.night_city.state.live",                         # LIVE
+    ApiStatus.STALE: "widget.night_city.state.stale",                       # STALE
+    ApiStatus.OFFLINE: "widget.night_city.state.offline",                   # OFFLINE
+    ApiStatus.PAUSED: "widget.night_city.state.paused",                     # PAUSED
+    ApiStatus.LOADING: "widget.night_city.state.loading",                   # LOADING
+    ApiStatus.RATE_LIMITED: "widget.night_city.state.rate_limited",         # LIMITED
+    ApiStatus.NO_CREDENTIALS: "widget.night_city.state.no_credentials",     # NO LOGIN
+}
+# A row's severity chip: the outlined WARN, the filled CRIT.
+CHIP_KEYS: dict[str, str] = {SEVERITY_WARNING: "widget.night_city.state.warning",
+                             SEVERITY_CRITICAL: "widget.night_city.state.critical"}
+# The stale band's cause (_band_text): no connection; the sign-in ran out (using Claude Code renews it); the usage API
+# turned it down (HTTP 403: only a new sign-in fixes it, #55); there is none (the dashboard has the steps, #28).
+# {product} is Claude Code's name in the language's capitals, {command} the command as typed.
+BAND_KEYS: dict[str, str] = {
+    "offline": "widget.night_city.band.offline",
+    "expired": "widget.night_city.band.expired",
+    "refused": "widget.night_city.band.refused",
+    "no_login": "widget.night_city.band.no_login",
+}
+# A row's or a guarded limit's name by kind. A scoped row is named for its model or surface alone, the name in the
+# language's capitals; the hover card's guard line adds its WEEKLY (SCOPED_KEY).
+LIMIT_KEYS: dict[str, str] = {"session": "widget.night_city.limit.session",
+                              "weekly_all": "widget.night_city.limit.weekly"}
+SCOPED_KEY = "widget.night_city.limit.scoped"
+UNNAMED_SCOPED_KEY = "widget.night_city.limit.scoped_unnamed"
+# The strip's labels of its two bars, by row: the 5-hour and the 7-day window ("5H", "7D").
+WINDOW_KEYS: tuple[str, str] = ("widget.night_city.window.session", "widget.night_city.window.weekly")
+HOLD_KEY = "widget.night_city.guard.hold"           # the guard's chip without its countdown ("HOLD")
+
+# English records, never drawn: en.json's English for the band's causes and the strip's status words, kept for the
+# older tests that read them (tests/test_skin_night_city.py); tests/test_skin_words.py holds them to en.json. The theme
+# file's extras.copy holds the same four causes, as the mockup's record; the skin no longer reads it.
 DEFAULT_STALE_AUTH = "RELINK // USE CLAUDE CODE"
 DEFAULT_STALE_REFUSED = "RELINK // RUN /login"   # HTTP 403: only a new sign-in fixes it; the command keeps its case (#55)
 DEFAULT_NO_LOGIN = "NO LOGIN // OPEN DASHBOARD"   # no sign-in at all: the dashboard has the steps (#28)
 DEFAULT_OFFLINE = "NO SIGNAL // NET DOWN"
-BAND_STATUSES = frozenset({ApiStatus.STALE, ApiStatus.NO_CREDENTIALS, ApiStatus.OFFLINE, ApiStatus.RATE_LIMITED})
-AGE_STATUSES = frozenset({ApiStatus.STALE, ApiStatus.OFFLINE, ApiStatus.RATE_LIMITED})
 STRIP_WORDS: dict[ApiStatus, str] = {
     ApiStatus.LIVE: "LIVE",
     ApiStatus.STALE: "STALE",
@@ -200,15 +240,6 @@ STRIP_WORDS: dict[ApiStatus, str] = {
     ApiStatus.RATE_LIMITED: "LIMITED",
     ApiStatus.NO_CREDENTIALS: "NO LOGIN",
 }
-# The skin's words for the view model's values: a row's or a guarded limit's name by kind (a scoped row is named for
-# its model or surface alone; the hover card's guard line adds WEEKLY), and the units of an age ("41 M OLD") and of a
-# countdown ("HOLD 2H 14M").
-LIMIT_NAMES: dict[str, str] = {"session": "SESSION", "weekly_all": "WEEKLY"}
-SCOPED_SUFFIX = " WEEKLY"
-UNNAMED_SCOPED = "WEEKLY SCOPED"
-UNITS: dict[str, str] = {UNIT_SECONDS: "S", UNIT_MINUTES: "M", UNIT_HOURS: "H", UNIT_DAYS: "D"}
-UNDER_A_MINUTE = "<1M"
-HOLD = "HOLD"
 
 
 # ── Looks and palette ─────────────────────────────────────────────────────────
@@ -580,6 +611,12 @@ def _hazard(cv: Canvas, rect: tuple[float, float, float, float], a: Color, b: Co
 
 # ── Shared model reading ──────────────────────────────────────────────────────
 
+def _words(locale: Locale) -> i18n.Catalog:
+    """The catalog the skin's words come from: the locale's language's, English behind it (#95). It comes with the
+    model, so the skin never works out a language itself."""
+    return i18n.app_catalog(locale.language)
+
+
 def _frame_height(rows: int) -> int:
     return ROW_TOP + ROW_PITCH * max(2, rows) + BOTTOM_PAD
 
@@ -620,12 +657,16 @@ def _row_emphasis(model: WidgetModel, row: Row) -> str:
 
 
 def _chip_word(model: WidgetModel, row: Row) -> str:
-    """The word of a row's critical chip: CRIT, or the cap ("CAP 95") for a row the guard holds on."""
-    guard = model.guard
+    """The word of a row's critical chip: CRIT, or the cap ("CAP 95", a number without its sign) for a row the guard
+    holds on, HOLD for one held with no cap."""
+    guard, words = model.guard, _words(model.locale)
     if model.stale or not _over_cap(model, row) or guard is None:
-        return "CRIT"
+        return words.text(CHIP_KEYS[SEVERITY_CRITICAL])
     cap = guard.caps.get(row.key)
-    return HOLD if cap is None else f"CAP {formats.number(_number(cap), model.locale, group=False)}"
+    if cap is None:
+        return words.text(HOLD_KEY)
+    return words.text("widget.night_city.cap.tag",
+                      {"number": formats.number(_number(cap), model.locale, group=False)})
 
 
 def _number(value: float) -> str:
@@ -633,18 +674,18 @@ def _number(value: float) -> str:
     return str(int(value)) if float(value).is_integer() else f"{value:g}"
 
 
-def _countdown(seconds: int) -> str:
-    """The time left as the chip and the hover card say it: "2D 3H", "2H 14M", "9M", or "<1M" under a minute."""
-    return " ".join(f"{count}{UNITS[unit]}" for count, unit in countdown_units(seconds)) or UNDER_A_MINUTE
-
-
 def _hold_word(model: WidgetModel) -> str | None:
     """The hold chip's text while the guard holds: "HOLD 2H 14M", or "HOLD" when no reset time is known. None while
-    the guard is off or only armed. The countdown is always the time left ("HOLD 2D 3H"); the hover card has the clock."""
+    the guard is off or only armed. The countdown is always the time left ("HOLD 2D 3H"), as the view model writes it
+    (format_countdown); the hover card has the clock."""
     guard = model.guard
     if guard is None or not guard.holding:
         return None
-    return f"{HOLD} {_countdown(guard.resume_seconds)}" if guard.resume_seconds is not None else HOLD
+    words = _words(model.locale)
+    if guard.resume_seconds is None:
+        return words.text(HOLD_KEY)
+    return words.text("widget.night_city.guard.hold_for",
+                      {"countdown": format_countdown(guard.resume_seconds, model.locale)})
 
 
 def _digits(percent: float | None) -> str:
@@ -664,21 +705,23 @@ def _is_scoped(row: Row) -> bool:
     return row.key.startswith("scoped:")
 
 
-def _row_name(row: Row) -> str:
+def _row_name(row: Row, *, locale: Locale = ENGLISH) -> str:
     """The row's name as the design shows it, in capitals: "SESSION", "WEEKLY", and a scoped limit named for its model,
-    else its surface ("FABLE"), or "WEEKLY SCOPED" when it has neither. A kind this skin has no words for is named
-    from its code, its short name when it is scoped ("DESIGN" for design_weekly, unknown_kind_names); a row built
-    without a kind keeps its label."""
-    if row.kind in LIMIT_NAMES:
-        return LIMIT_NAMES[row.kind]
+    else its surface ("FABLE"; in the language's capitals, "HAİKU" in Turkish), or "WEEKLY SCOPED" when it has
+    neither. A kind this skin has no words for is named from its code, its short name when it is scoped ("DESIGN" for
+    design_weekly, unknown_kind_names); a row built without a kind keeps its label, in its own language's capitals."""
+    words = _words(locale)
+    if row.kind in LIMIT_KEYS:
+        return words.text(LIMIT_KEYS[row.kind])
     if row.kind == "weekly_scoped":
         if not row.scope_name:
-            return UNNAMED_SCOPED
-        return row.scope_name.strip().upper() or LIMIT_NAMES["weekly_all"]     # a name of spaces leaves its WEEKLY
+            return words.text(UNNAMED_SCOPED_KEY)
+        name = casing.upper(row.scope_name.strip(), locale.language)
+        return name or words.text(LIMIT_KEYS["weekly_all"])     # a name of spaces leaves its WEEKLY
     if row.kind:
         name, short = unknown_kind_names(row.kind)
         return short if _is_scoped(row) else name
-    return row.label.strip().upper()
+    return casing.upper(row.label).strip()
 
 
 def _share_tag(row: Row, locale: Locale) -> str | None:
@@ -686,7 +729,8 @@ def _share_tag(row: Row, locale: Locale) -> str | None:
     a scoped one without it."""
     if not _is_scoped(row) or row.share_pct is None:
         return None
-    return f"{formats.percent(str(round(row.share_pct)), locale)} SHARE"
+    return _words(locale).text("widget.night_city.share.of",
+                               {"percent": formats.percent(str(round(row.share_pct)), locale)})
 
 
 def _sign_first(locale: Locale) -> bool:
@@ -694,29 +738,29 @@ def _sign_first(locale: Locale) -> bool:
     return bool(formats.percent_parts("0", locale, tight=True)[0])
 
 
-def _copy(theme: Any, key: str, default: str) -> str:
-    value = _mapping(_mapping(getattr(theme, "extras", None)).get("copy")).get(key)
-    return value if isinstance(value, str) and value.strip() else default
-
-
 def _band_text(theme: Any, model: WidgetModel) -> str:
+    """The stale band's cause (BAND_KEYS); while the usage API throttles the monitor, the view model's status word,
+    which is in capitals already. ``theme`` stays for the callers: its extras.copy is the mockup's record of the causes,
+    and the catalog's words are drawn."""
+    words = _words(model.locale)
     if model.status is ApiStatus.OFFLINE:
-        return _copy(theme, "offline", DEFAULT_OFFLINE)
+        return words.text(BAND_KEYS["offline"])
     if model.status is ApiStatus.RATE_LIMITED:
-        return model.status_text.upper()
+        return model.status_text
     if model.status is ApiStatus.NO_CREDENTIALS:
-        return _copy(theme, "no_login", DEFAULT_NO_LOGIN)
+        return words.text(BAND_KEYS["no_login"])
+    names = {"product": casing.upper(PRODUCT, model.locale.language), "command": LOGIN_COMMAND}
     if model.stale_reason == STALE_REFUSED:
-        return _copy(theme, "stale_refused", DEFAULT_STALE_REFUSED)
-    return _copy(theme, "stale_auth", DEFAULT_STALE_AUTH)
+        return words.text(BAND_KEYS["refused"], names)
+    return words.text(BAND_KEYS["expired"], names)
 
 
 def _age_tag(model: WidgetModel) -> str | None:
-    """"41 M OLD" for the band: the model's age in this skin's units."""
+    """"41 M OLD" for the band: the model's age in its one unit, as the view model writes it (format_age_short)."""
     if model.age_seconds is None or model.status not in AGE_STATUSES:
         return None
-    count, unit = age_unit(model.age_seconds)
-    return f"{count} {UNITS[unit]} OLD"
+    return _words(model.locale).text("widget.night_city.age.old",
+                                     {"age": format_age_short(model.age_seconds, model.locale)})
 
 
 def _fit(ink: _Ink, text: str, spec: Type, limit: float) -> str:
@@ -793,10 +837,11 @@ def _chip_out(ink: _Ink, x: float, y: float, text: str, outline: Color, color: C
     return width
 
 
-def _chip_crit(ink: _Ink, x: float, y: float, word: str = "CRIT") -> float:
+def _chip_crit(ink: _Ink, x: float, y: float, word: str | None = None) -> float:
     """CRIT: an ink box with a 7 px hazard cap and a 5 px top-right chamfer. Returns its width. The usage guard
-    puts its own word in it: the cap a row is held on ("CAP 95")."""
+    puts its own word in it: the cap a row is held on ("CAP 95"). With no ``word``, English's CRIT."""
     pal = ink.pal
+    word = _words(ENGLISH).text(CHIP_KEYS[SEVERITY_CRITICAL]) if word is None else word
     width = ink.width(word, CHIP) + 17
     x0, x1 = ink.snap(x), ink.snap(x + width)
     ink.polygon([(x0, y), (x1 - CHIP_CUT, y), (x1, y + CHIP_CUT), (x1, y + CHIP_H), (x0, y + CHIP_H)], pal.ink)
@@ -861,6 +906,7 @@ def _draw_header(ink: _Ink, look: Look, model: WidgetModel, motion: Motion) -> N
     place is the HOLD chip (the status is in the pulse and the dim of the rows); while it is only armed, a quiet
     GUARD chip sits before the status word, if the brand leaves room."""
     pal = ink.pal
+    words = _words(model.locale)
     live = model.status is ApiStatus.LIVE and not model.stale
     brand_x = LEFT
     if not pal.plate:
@@ -872,16 +918,17 @@ def _draw_header(ink: _Ink, look: Look, model: WidgetModel, motion: Motion) -> N
         _chip_hold(ink, RIGHT - _chip_hold_width(ink, hold), HEADER_TOP - 1, hold, glitch=not model.stale)
         return
     if live:
-        tag_left = _live_tag(ink, look, motion, "LIVE")
+        tag_left = _live_tag(ink, look, motion, words.text(STATE_KEYS[ApiStatus.LIVE]))
     else:
-        text = model.status_text.upper()
+        text = model.status_text            # the view model's word, in capitals already
         tag_left = RIGHT - _chip_out_width(ink, text)
         _chip_out(ink, tag_left, HEADER_TOP - 1, text, pal.ink3, pal.ink2)
     if model.guard is not None:
-        width = _chip_out_width(ink, "GUARD")
+        mark = words.text("widget.night_city.guard.mark")
+        width = _chip_out_width(ink, mark)
         left = tag_left - GUARD_GAP - width
         if left >= brand_end + GUARD_GAP:
-            _chip_out(ink, left, HEADER_TOP - 1, "GUARD", pal.ink3, pal.ink2)
+            _chip_out(ink, left, HEADER_TOP - 1, mark, pal.ink3, pal.ink2)
 
 
 def _draw_band(ink: _Ink, theme: Any, model: WidgetModel) -> None:
@@ -907,13 +954,15 @@ def _draw_band(ink: _Ink, theme: Any, model: WidgetModel) -> None:
         ink.text(age, RESET, BAND_AGE_RIGHT, BAND_BASE, pal.signal if pal.plate else pal.ink2, align="right")
 
 
-def _draw_band_hold(ink: _Ink, model: WidgetModel, text: str, age: str | None, hold: str, short: str = HOLD) -> None:
+def _draw_band_hold(ink: _Ink, model: WidgetModel, text: str, age: str | None, hold: str,
+                    short: str | None = None) -> None:
     """The stale band while the guard holds. The cause stays whole (it is what the user acts on), the HOLD chip
     sits at the right end between the hazard strips, and the age keeps its place before it when the band has room
-    for all three. What gives way, in order: the countdown (the chip is then ``short``, HOLD alone), the age, and last
-    the end of the cause. ``hold`` is the chip's full word; with no countdown it is ``short`` itself, and the first
-    two tries are the same."""
+    for all three. What gives way, in order: the countdown (the chip is then ``short``, HOLD alone, the language's
+    when None), the age, and last the end of the cause. ``hold`` is the chip's full word; with no countdown it is
+    ``short`` itself, and the first two tries are the same."""
     pal = ink.pal
+    short = _words(model.locale).text(HOLD_KEY) if short is None else short
     x0, y0, x1, y1 = BAND
     text_w = ink.width(text, BAND_TYPE)
     age_w = ink.width(age, RESET) + 10 if age else 0.0
@@ -944,27 +993,29 @@ class RowBoxes(NamedTuple):
     value: tuple[float, float]
 
 
-def _chip_width(ink: _Ink, emphasis: str, word: str = "CRIT") -> float:
+def _chip_width(ink: _Ink, emphasis: str, word: str | None = None, *, locale: Locale = ENGLISH) -> float:
+    """The width of a row's severity chip: the filled one round ``word`` (the language's CRIT when None), the outlined
+    one round the language's WARN (as _draw_row draws them), none for a normal row."""
     if emphasis == SEVERITY_CRITICAL:
-        return ink.width(word, CHIP) + 17
+        return ink.width(_words(locale).text(CHIP_KEYS[SEVERITY_CRITICAL]) if word is None else word, CHIP) + 17
     if emphasis == SEVERITY_WARNING:
-        return _chip_out_width(ink, "WARN")
+        return _chip_out_width(ink, _words(locale).text(CHIP_KEYS[SEVERITY_WARNING]))
     return 0.0
 
 
 def _layout_row(ink: _Ink, look: Look, row: Row, emphasis: str, digits: str, reset: str | None,
-                chip_word: str = "CRIT", *, locale: Locale) -> RowBoxes:
+                chip_word: str | None = None, *, locale: Locale) -> RowBoxes:
     """Fit a row's name side against its value side. A row too wide for both gives up its reset text first,
     then its share tag, and then the end of its name; the value and the severity chip always stay. The value is
     as wide on either side of its sign (_draw_value)."""
     unit_w = ink.width("%", UNIT) if row.percent is not None else 0.0
     value_w = ink.width(digits, VALUE) + (UNIT_GAP + unit_w if unit_w else 0.0)
     value = (RIGHT - value_w, float(RIGHT))
-    name = _row_name(row)
+    name = _row_name(row, locale=locale)
     name_w = ink.width(name, NAME)
     tag = _share_tag(row, locale)
     tag_w = ink.width(tag, TAG) if tag else 0.0
-    chip_w = _chip_width(ink, emphasis, chip_word)
+    chip_w = _chip_width(ink, emphasis, chip_word, locale=locale)
 
     def end_of(name_width: float, with_tag: bool) -> float:
         end = LEFT + name_width + ((6 + tag_w) if with_tag and tag else 0.0)
@@ -1087,11 +1138,12 @@ def _draw_bar(ink: _Ink, look: Look, row: Row, emphasis: str, top: float) -> Non
     ink.rect(RIGHT - 1, top + END_TICK_TOP, RIGHT, top + END_TICK_TOP + END_TICK_H, ink.pal.ink3)   # the 100 % mark
 
 
-def _reset_text(row: Row, tooltip: bool) -> str | None:
-    """The reset text of a row. The widget leaves it off scoped rows, which reset with the weekly limit."""
+def _reset_text(row: Row, tooltip: bool, *, locale: Locale = ENGLISH) -> str | None:
+    """The reset text of a row: "RST 11:39 PM", the clock in the language's capitals ("RST CMT 20:12" in Turkish).
+    The widget leaves it off scoped rows, which reset with the weekly limit."""
     if not row.resets_text or (_is_scoped(row) and not tooltip):
         return None
-    return f"RST {row.resets_text.upper()}"
+    return _words(locale).text("widget.night_city.resets.at", {"clock": casing.upper(row.resets_text, locale.language)})
 
 
 def _draw_reset(ink: _Ink, look: Look, text: str, box: tuple[float, float], top: float) -> None:
@@ -1111,9 +1163,9 @@ def _draw_row(ink: _Ink, look: Look, model: WidgetModel, row: Row, top: float, m
     emphasis = _row_emphasis(model, row)
     word = _chip_word(model, row)
     digits = formats.number(_exact_digits(row.percent) if tooltip else _digits(row.percent), model.locale, group=False)
-    reset = _reset_text(row, tooltip)
+    reset = _reset_text(row, tooltip, locale=model.locale)
     boxes = _layout_row(ink, look, row, emphasis, digits, None if tooltip else reset, word, locale=model.locale)
-    name = _row_name(row)
+    name = _row_name(row, locale=model.locale)
     if ink.width(name, NAME) > boxes.name[1] - boxes.name[0] + 0.01:
         name = _fit(ink, name, NAME, boxes.name[1] - boxes.name[0])
     ink.text(name, NAME, LEFT, top + NAME_BASE, pal.fg)
@@ -1125,7 +1177,8 @@ def _draw_row(ink: _Ink, look: Look, model: WidgetModel, row: Row, top: float, m
             _chip_crit(ink, boxes.chip[0], top, word)
         else:
             colour = pal.ink if pal.plate else pal.warn
-            _chip_out(ink, boxes.chip[0], top, "WARN", colour, colour)
+            warn = _words(model.locale).text(CHIP_KEYS[SEVERITY_WARNING])
+            _chip_out(ink, boxes.chip[0], top, warn, colour, colour)
     if boxes.reset is not None and reset is not None:
         _draw_reset(ink, look, reset, boxes.reset, top)
     _draw_value(ink, row, emphasis, motion, top, digits, model.locale)
@@ -1137,17 +1190,20 @@ def _draw_row(ink: _Ink, look: Look, model: WidgetModel, row: Row, top: float, m
 
 # ── Tooltip info line ─────────────────────────────────────────────────────────
 
-def _pace_text(row: Row) -> tuple[str, str]:
-    """(text, kind) for the pace of a row. kind is "ahead" (a warn chip), "behind" (an accent chip) or "plain"."""
+def _pace_text(row: Row, *, locale: Locale = ENGLISH) -> tuple[str, str]:
+    """(text, kind) for the pace of a row. kind is "ahead" (a warn chip), "behind" (an accent chip) or "plain". The
+    points are signed ASCII digits, as before #95: a whole number under 1000 and its sign are written alike in every
+    language the app has (no group sign; CLDR's minus is "-" in each)."""
+    words = _words(locale)
     delta = pace_delta(row.percent, row.time_fraction)
     if delta is None or row.pace is None:
-        return "PACE --", "plain"
+        return words.text("widget.night_city.pace.none"), "plain"
     if row.pace == "on_pace":
-        return "ON PACE", "plain"
+        return words.text("widget.night_city.pace.on"), "plain"
     points = round(abs(delta))
     if row.pace == "ahead":
-        return f"AHEAD +{points}", "ahead"
-    return f"UNDER PACE -{points}", "behind"
+        return words.text("widget.night_city.pace.ahead", {"points": f"+{points}"}), "ahead"
+    return words.text("widget.night_city.pace.behind", {"points": f"-{points}"}), "behind"
 
 
 def _draw_info(ink: _Ink, look: Look, model: WidgetModel, row: Row, reset: str | None, top: float) -> None:
@@ -1156,7 +1212,7 @@ def _draw_info(ink: _Ink, look: Look, model: WidgetModel, row: Row, reset: str |
     if reset is not None:
         width = ink.width(reset, RESET) + (8 if look.boxed else 0)
         _draw_reset(ink, look, reset, (LEFT, LEFT + width), top)
-    text, kind = _pace_text(row)
+    text, kind = _pace_text(row, locale=model.locale)
     if kind == "plain" or model.stale:
         ink.text(text, CHIP, RIGHT, top + TAG_BASE, pal.ink2 if row.pace else pal.ink3, align="right")
         return
@@ -1183,56 +1239,71 @@ def _tooltip_height(rows: int) -> int:
 
 # ── Tooltip: the usage guard's line ───────────────────────────────────────────
 
-def _guard_name(guard: GuardMark, key: str) -> str:
-    """A limit the guard watches, in capitals, worded from its kind: "SESSION", "WEEKLY", "FABLE WEEKLY",
-    "WEEKLY SCOPED". A kind this skin has no words for, and a limit the reading no longer carries, keep the guard's own
-    label for it."""
+def _guard_name(guard: GuardMark, key: str, locale: Locale) -> str:
+    """A limit the guard watches, in capitals, worded from its kind as the rows are: "SESSION", "WEEKLY",
+    "FABLE WEEKLY" (the name in the language's capitals), "WEEKLY SCOPED". A kind this skin has no words for, and a
+    limit the reading no longer carries, keep the guard's own label for it, in its own language's capitals (English's
+    for a label that is data)."""
+    words = _words(locale)
     kind = guard.kinds.get(key)
-    if kind in LIMIT_NAMES:
-        return LIMIT_NAMES[kind]
+    if kind in LIMIT_KEYS:
+        return words.text(LIMIT_KEYS[kind])
     if kind == "weekly_scoped":
         scope = guard.scope_names.get(key)
-        return scope.upper() + SCOPED_SUFFIX if scope else UNNAMED_SCOPED
-    return guard.labels.get(key, key).upper()
+        if scope:
+            return words.text(SCOPED_KEY, {"name": casing.upper(scope, locale.language)})
+        return words.text(UNNAMED_SCOPED_KEY)
+    return casing.upper(guard.labels.get(key, key))
 
 
-def _lead(words: str, rest: str) -> tuple[str, str]:
-    """(lead, rest): the lead takes its colon only when something follows it."""
-    return (f"{words}:" if rest else words), rest
+def _lead(lead: str, lead_to_list: str, rest: str) -> tuple[str, str]:
+    """(lead, rest): the lead that introduces a list ("GUARD // ARMED:", its colon the language's) only when something
+    follows it."""
+    return (lead_to_list if rest else lead), rest
 
 
 def _guard_statement(model: WidgetModel) -> tuple[str, str] | None:
     """(lead, rest) of the hover card's guard line, in capitals and the theme's slashes, or None while the guard is
     off: ("GUARD // ARMED:", "SESSION 95%, WEEKLY 90%") and ("GUARD // HOLDING:",
     "WEEKLY 91% (CAP 90%). RESUMES FRI 7:12 PM (IN 2D 3H)."). A guard with nothing to list (no caps) is its lead
-    alone, without the colon: ("GUARD // ARMED", "")."""
+    alone, without the colon: ("GUARD // ARMED", ""). Each limit, its cap, the resume time and the time left are glued,
+    so a wrap keeps each on one line. The ", " between limits, the space before a cap and the closing periods are the
+    code's: the four languages write them alike."""
     guard, locale = model.guard, model.locale
     if guard is None:
         return None
+    words = _words(locale)
     if not guard.holding:
-        caps = ", ".join(engine.glue(f"{_guard_name(guard, key)} {formats.percent(_number(cap), locale)}")
-                         for key, cap in guard.caps.items())
-        return _lead("GUARD // ARMED", caps)
+        caps = ", ".join(engine.glue(words.text("widget.night_city.guard.limit", {
+            "name": _guard_name(guard, key, locale), "percent": formats.percent(_number(cap), locale)}))
+            for key, cap in guard.caps.items())
+        return _lead(words.text("widget.night_city.guard.armed"), words.text("widget.night_city.guard.armed_list"),
+                     caps)
     limits = []
     for key in guard.over_keys:
-        name, reading, cap = _guard_name(guard, key), guard.readings.get(key), guard.caps.get(key)
-        text = engine.glue(name if reading is None else f"{name} {formats.percent(_digits(reading), locale)}")
+        name, reading, cap = _guard_name(guard, key, locale), guard.readings.get(key), guard.caps.get(key)
+        text = engine.glue(name if reading is None else words.text("widget.night_city.guard.limit", {
+            "name": name, "percent": formats.percent(_digits(reading), locale)}))
         if cap is not None:
-            text += " " + engine.glue(f"(CAP {formats.percent(_number(cap), locale)})")
+            text += " " + engine.glue(words.text("widget.night_city.guard.cap",
+                                                 {"percent": formats.percent(_number(cap), locale)}))
         limits.append(text)
     rest = ", ".join(limits)
     rest = f"{rest}." if rest else ""
     if guard.resume_seconds is not None and guard.resume_clock:
-        clock = engine.glue(guard.resume_clock.upper())
-        countdown = engine.glue(f"(IN {_countdown(guard.resume_seconds)})")
-        rest = f"{rest} RESUMES {clock} {countdown}."
-    return _lead("GUARD // HOLDING", rest.strip())
+        clock = engine.glue(casing.upper(guard.resume_clock, locale.language))
+        time_left = engine.glue(words.text("widget.night_city.guard.time_left",
+                                           {"countdown": format_countdown(guard.resume_seconds, locale)}))
+        rest = f"{rest} {words.text('widget.night_city.guard.resumes', {'clock': clock, 'time_left': time_left})}."
+    return _lead(words.text("widget.night_city.guard.holding"), words.text("widget.night_city.guard.holding_list"),
+                 rest.strip())
 
 
 def _guard_lines(ink: _Ink, model: WidgetModel) -> tuple[str, list[str]]:
     """(the lead, the rest of the guard's line broken to the card's width), measured on ``ink`` (any canvas of the
     frame's scale). The first line leaves room for the lead. No lines while the guard is off; a guard with nothing to
-    list is its lead alone."""
+    list is its lead alone. The lead is a run of its own, never wrapped and never glued, so it comes back as the
+    catalog writes it and its colon stays with it, whatever space the language puts before it."""
     statement = _guard_statement(model)
     if statement is None:
         return "", []
@@ -1297,9 +1368,10 @@ def _draw_strip_status(ink: _Ink, look: Look, model: WidgetModel, motion: Motion
     the dot and centres its word, dim, in the tag. While the usage guard holds, the tag is the HOLD chip instead:
     the strip has no room for the countdown, and the status is in the dim of the rows."""
     pal = ink.pal
+    words = _words(model.locale)
     x0, y0, x1, y1 = STRIP_TAG
     if _hold_word(model) is not None:
-        word = HOLD
+        word = words.text(HOLD_KEY)
         _chip_hold(ink, (x0 + x1 - _chip_hold_width(ink, word)) / 2, y0, word, y1 - y0, glitch=not model.stale)
         return
     if pal.plate:
@@ -1307,7 +1379,7 @@ def _draw_strip_status(ink: _Ink, look: Look, model: WidgetModel, motion: Motion
     elif look.boxed:
         ink.outline(x0, y0, x1, y1, pal.line)
     live = model.status is ApiStatus.LIVE and not model.stale
-    word = STRIP_WORDS.get(model.status, model.status_text.upper())
+    word = words.text(STATE_KEYS[model.status])
     if live:
         _pip(ink, STRIP_DOT[0], STRIP_DOT[1], pal.ok, motion.pulse, glow=False)
         ink.text(word, STATUS, STRIP_WORD_X, STRIP_WORD_BASE, pal.ok)
@@ -1324,8 +1396,9 @@ def _render_strip(model: WidgetModel, theme: Any, variant: Any, scale: float, op
     _paint_frame(cv, pal, STRIP_W, STRIP_H, STRIP_CHAMFER, opts)
     ink = _Ink(cv, pal, opts)
     rows = _rows(model)[:2]
+    labels = [_words(model.locale).text(key) for key in WINDOW_KEYS]
     for index, top in enumerate(STRIP_ROWS):
-        _draw_strip_row(ink, look, model, rows[index] if index < len(rows) else None, top, STRIP_LABELS[index])
+        _draw_strip_row(ink, look, model, rows[index] if index < len(rows) else None, top, labels[index])
     _draw_strip_status(ink, look, model, motion_for(model, opts))
     ink.run()
     return cv.finish()
