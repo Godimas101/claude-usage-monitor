@@ -11,7 +11,8 @@ frame's 1 px edge, chamfered corners and all. A frame fails when:
 - two runs on one line (their ink shares at least half the rows of the shorter) have less than MIN_GAP logical px of
   air between their ink ("runs too close"): the skins keep 6 px (QUALIFIER_GAP) and more between advances;
 - a run's ink is on an outline's stroke, a rule, a dashed line or the hazard band ("run on an outline", "run on a
-  rule", "run on the hazard band");
+  rule", "run on the hazard band"), or within TOUCH buffer px of an outline's stroke, with no air between ("run
+  touches an outline": Q1 keeps a mark's ink off the 1 px outline of the box it grows);
 - a run's ink is partly inside a filled box and partly outside it ("run across a fill"): a chip's word stays in it;
 - a run's ink is on a bar's cells ("run on a bar");
 - a run's ink is outside the body ("run leaves the body"), in x or in y.
@@ -47,12 +48,14 @@ PINNED_TZ = "UTC0"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 INK = 64                        # the coverage (of 255) that counts as ink, as the probes for #94's plan count it
 MIN_GAP = 2.0                   # logical px of air between the ink of two runs on one line
+TOUCH = 1                       # buffer px round an outline's stroke that a run's ink must keep clear of
 THEMES: tuple[str, ...] = ("nostromo",)
 LANGUAGES: tuple[str, ...] = ("en", "pseudo", "fr", "es", "tr")
 # What English already draws so, by design, and every language with it: (theme, surface, what, the run as a pattern),
 # each with the budgets' record of it. Nostromo's 5H value at 100 % (tight: "100%", Turkish "%100") meets the 5H bar's
 # last cells on a short taskbar's strip (budgets.KNOWN_ENGLISH_OVERRUNS, "nostromo.strip.value_5h"). A known overlap
-# that is no longer found fails test_frame_layout.py, so this list only shrinks.
+# that is no longer found fails test_frame_layout.py, so this list only shrinks. Each is held to the place it names
+# (KNOWN_WHERE): the 5H value only on the 5H bar's cells, never the 7D value on its own.
 KNOWN: dict[tuple[str, str, str, str], str] = {
     ("nostromo", "strip", "run on a bar", r"%?100%?"): "nostromo.strip.value_5h",
 }
@@ -246,11 +249,18 @@ def check(frame: Frame) -> list[tuple[str, str, str]]:
             if gap < MIN_GAP * frame.kx:
                 found.append(("runs too close", a.text, f"{b.text} ({gap / frame.kx:.2f} px)"))
     for run in runs:
+        on: set[str] = set()
         for what, rects in (("run on an outline", frame.strokes), ("run on a rule", frame.rules),
                             ("run on a bar", frame.cells), ("run on the hazard band", frame.hazard)):
             for rect in rects:
                 if _meets(run, rect):
                     found.append((what, run.text, logical(rect)))
+                    on.add(what)
+                    break
+        if "run on an outline" not in on:
+            for rect in frame.strokes:
+                if _meets(run, (rect[0] - TOUCH, rect[1] - TOUCH, rect[2] + TOUCH, rect[3] + TOUCH)):
+                    found.append(("run touches an outline", run.text, logical(rect)))
                     break
         for rect in frame.fills:
             if _meets(run, rect) and not (rect[0] <= run.box[0] and rect[1] <= run.box[1]
@@ -291,12 +301,28 @@ def models(language: str) -> dict[str, Any]:
     return skin_words.models(skin_words._nostromo_states, i18n.dev_locale(language))
 
 
+def _strip_bar(group: int) -> tuple[float, float]:
+    """Where Nostromo's strip draws a group's bar, in logical px: from its first cell's left to its last cell's right."""
+    from usage_monitor.render.skins import nostromo
+
+    bar_x = nostromo.STRIP_GROUPS[group][1]
+    return bar_x, bar_x + nostromo.STRIP_CELL_STEP * (nostromo.STRIP_CELLS - 1) + nostromo.STRIP_CELL_W
+
+
+# The x span (logical px) a KNOWN entry's box must lie in: the bar its box id names.
+KNOWN_WHERE: dict[str, Callable[[], tuple[float, float]]] = {"nostromo.strip.value_5h": lambda: _strip_bar(0)}
+
+
 def known(theme_id: str, finding: list[str]) -> tuple[str, str, str, str] | None:
-    """The KNOWN entry a finding ([state, surface, what, run, other]) is, or None."""
-    _state, surface, what, text, _other = finding
-    for entry in KNOWN:
+    """The KNOWN entry a finding ([state, surface, what, run, other]) is, or None: its surface, kind and run, and the
+    box it meets ("other", "(x0, y0, x1, y1)" in logical px) inside the span its entry names (KNOWN_WHERE)."""
+    _state, surface, what, text, other = finding
+    for entry, box_id in KNOWN.items():
         if entry[:3] == (theme_id, surface.split("@")[0], what) and re.fullmatch(entry[3], text):
-            return entry
+            found = re.fullmatch(r"\(([-\d.]+), [-\d.]+, ([-\d.]+), [-\d.]+\)", other)
+            low, high = KNOWN_WHERE[box_id]()
+            if found and low - 1 <= float(found[1]) and float(found[2]) <= high + 1:      # a px of rounding
+                return entry
     return None
 
 

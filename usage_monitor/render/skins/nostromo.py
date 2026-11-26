@@ -220,7 +220,9 @@ WINDOW_KEYS: dict[str, str] = {"session": "widget.nostromo.window.session", "wee
 # chip, is cut first (with an ellipsis): it mostly repeats the pill, and in LIVE the colours and the hazard band carry
 # the severity. Then the age goes, then the pill's word is cut (one letter at least), and last the hold chip drops its
 # countdown and reads HOLD alone: the age and the countdown are facts the floating widget shows nowhere else. A word cut
-# at one step takes back the room a later step frees, as far as its whole text. _header_plan follows this tuple.
+# at one step takes back the room a later step frees, as far as its whole text. _header_plan takes the steps in this
+# tuple's order, whatever it is, and tests/budgets.py derives the header line's give-way and its boxes' rooms from it:
+# an answer changes this tuple alone (then test_budgets.py's LIMITS and the _budget notes are printed again).
 HEADER_GIVE_WAY = ("state_word", "age", "pill", "countdown")
 # The hover card's reset-and-pace line: the pace shortens to its signed points ("+21 PTS"), then is left out. The reset
 # never gives way: it is what people look for there. _info_plan follows this tuple.
@@ -229,26 +231,40 @@ INFO_GIVE_WAY = ("pace", "pace_short")
 # 9 px is cut, with an ellipsis. Both lines take the same step, so the box reads as one (_message_fit).
 MESSAGE_STEPS = ((LABEL_SIZE, MESSAGE_TRACKING), (LABEL_SIZE, 0.0), (9.0, 0.0))
 # The strip's window tags shrink from 11 px to 9 px, their tracking with them (0.1 em), then are left out: the bars'
-# order still tells the two windows apart (_strip_tag).
+# order still tells the two windows apart (_strip_tag). A tag's advance keeps STRIP_TAG_AIR off its bar's first cell, so
+# a shrunk tag never reads as part of the bar (English's 5H takes 16.04 px at most, of the 20 left).
 STRIP_TAG_SIZES = (11.0, 10.5, 10.0, 9.5, 9.0)
+STRIP_TAG_AIR = 2.0
 
 # Q1, an owner default on #94 that Chris may overturn: the status pill, the header's chip (CRITICAL, HOLD) and a cap tag
 # grow round a word whose marks would touch their edge. It is decided by the word's characters, so a box is the same at
 # every scale (_mark_growth). A capital with a mark above (É, Ñ, İ, Ğ) reaches the 12 px box's top edge, so an outlined
 # box (the pill, a cap tag) grows MARK_GROWTH_UP px up to keep its 1 px stroke off the mark, and the filled chip
-# CHIP_GROWTH_UP px to keep the mark inside it. A mark below (Ç, Ş, Ą, Ș), or a glyph that drops below the line
-# (DESCENDERS), grows any of them MARK_GROWTH_DOWN px down: the header's box then ends 1 px over the rule (RULE_Y).
-# English and every word without such characters never move. The conflict: the grown pill's top is then y = 4, the
-# hazard band's bottom edge (HAZARD_H), so in a LIVE frame with a critical limit (the only one with the band) the two
-# meet with no air between, though they never overlap; 1 px up would keep that air but leaves the stroke on the mark
-# in the hover card at 1.25x (that canvas's height rounds its vertical scale up to 0.5 % off its horizontal one, and a
-# 1 px growth has no slack). The chip, a fill, keeps 1 px of air under the band.
+# CHIP_GROWTH_UP px to keep the mark inside it. A mark below (Ç, Ş, Ą), or a glyph that drops below the line
+# (DESCENDERS), grows any of them MARK_GROWTH_DOWN px down: the header's box then ends 1 px over the rule (RULE_Y), a
+# cap tag 1 px over its row's tick. English never moves. Three conflicts with the default, each recorded on #94:
+# - The default says a word without marks never moves, but a DESCENDERS glyph with no mark (Q, a comma, a bracket, a
+#   parenthesis, $, @) reaches the box's edge too, so such a word also grows down (CRITIQUE, QUOTA, CAP 95,5 %):
+#   without it, its ink lands on the stroke.
+# - The grown pill's top is y = 4, the hazard band's bottom edge (HAZARD_H), so in a LIVE frame with a critical limit
+#   (the only one with the band) the two meet with no air between, though they never overlap; 1 px up would keep that
+#   air but leaves the stroke on the mark in the hover card at 1.25x (that canvas's height rounds its vertical scale up
+#   to 0.5 % off its horizontal one, and a 1 px growth has no slack). The chip, a fill, keeps 1 px of air under the band.
+# - The deepest glyphs (DEEP_DESCENDERS, and a comma below, DEEP_MARKS: ¡ Ș ș Ț ț) reach 1 px past the box, so at
+#   MARK_GROWTH_DOWN their ink meets the outline with no air. An outlined box grows MARK_GROWTH_DEEP px down for them,
+#   the least growth that keeps ink off it, as the default says where no growth satisfies it all: the pill's bottom
+#   then meets the rule (y = 21), and a cap tag's its row's tick, with no air but never overlapping. The chip, a fill,
+#   keeps 1 px of fill under them at MARK_GROWTH_DOWN.
 MARK_GROWTH_UP = 2
 CHIP_GROWTH_UP = 1
 MARK_GROWTH_DOWN = 2
+MARK_GROWTH_DEEP = 3
 # The characters with no mark below whose ink reaches the 12 px box's bottom edge in IBM Plex Mono SemiBold at 10 px at
 # some display scale (tests/test_skin_nostromo_fit.py holds the list to the face).
 DESCENDERS = frozenset("$(),/;@Q[\\]_gjpqy{|}¡¿")
+# Of those and of the marks below, the ones whose ink reaches 1 px past that edge (held to the face as well).
+DEEP_DESCENDERS = frozenset("¡")
+DEEP_MARKS = frozenset({unicodedata.lookup("COMBINING COMMA BELOW")})
 _ABOVE, _BELOW = 230, (202, 220)        # the canonical combining classes of a mark above, and of one below
 
 
@@ -568,6 +584,7 @@ def _state_word(model: WidgetModel) -> tuple[str, str]:
 # ── Fits: the decisions, as pure helpers the tests read ───────────────────────
 
 PILL_X = LEFT + 6 + 6           # the status pill's left edge: past the 6 px status mark and a 6 px gap
+FIT_SLACK = 1e-6                # float error in a sum of advances: a header exactly as wide as its room fits
 
 
 @dataclass(frozen=True, slots=True)
@@ -634,32 +651,41 @@ def _header_plan(cv: Canvas, model: WidgetModel, left: float = PILL_X, right: fl
         return cv.advance(text, semi, LABEL_TRACKING) + pad
 
     def fits(p: str, a: str | None, w: str) -> bool:
-        return pill_w(p) + age_w(a) + QUALIFIER_GAP + word_w(w) <= room
+        return pill_w(p) + age_w(a) + QUALIFIER_GAP + word_w(w) <= room + FIT_SLACK
+
+    # A step a header cannot take is skipped: the hold chip is never cut, and only it has a countdown to drop.
+    can = {"state_word": not holding, "age": age is not None, "pill": True,
+           "countdown": holding and model.guard is not None and model.guard.resume_seconds is not None}
+    taken: list[str] = []
+
+    def refit() -> tuple[str, str | None, str]:
+        """The texts as the steps taken leave them, whatever their order: each step only lets its text be cut, or
+        leaves it out. What stays whole takes its room; the texts that may be cut share the rest, the one whose step
+        came last first, down to the floors of the others (one letter each), and an earlier one takes what is left,
+        as far as its whole text."""
+        whole = {"pill": pill, "state_word": str(words.text("widget.nostromo.guard.hold")) if "countdown" in taken
+                 else word}
+        drawn_age = None if "age" in taken else age
+        cuts = [step for step in taken if step in whole]
+        left = room - 10 - age_w(drawn_age) - QUALIFIER_GAP - pad - sum(
+            cv.advance(text, semi, LABEL_TRACKING) for step, text in whole.items() if step not in cuts)
+        floors = [min(cv.advance(text, semi, LABEL_TRACKING) for text in (whole[step], _cut(cv, whole[step], 0.0, semi,
+                                                                                              LABEL_TRACKING)))
+                  for step in cuts]               # a one-letter text is its own floor
+        drawn = dict(whole)
+        for index in reversed(range(len(cuts))):
+            drawn[cuts[index]] = _cut(cv, whole[cuts[index]], left - sum(floors[:index]) + FIT_SLACK, semi,
+                                      LABEL_TRACKING)
+            left -= cv.advance(drawn[cuts[index]], semi, LABEL_TRACKING)
+        return drawn["pill"], drawn_age, drawn["state_word"]
 
     drawn_pill, drawn_age, drawn_word = pill, age, word
-    taken: list[str] = []
     if not fits(pill, age, word):
         for step in HEADER_GIVE_WAY:
-            if step == "state_word" and not holding:
-                drawn_word = _cut(cv, word, room - pill_w(pill) - age_w(age) - QUALIFIER_GAP - pad, semi,
-                                  LABEL_TRACKING)
-            elif step == "age" and drawn_age is not None:
-                drawn_age = None
-                if "state_word" in taken:       # the word takes back what the age leaves
-                    drawn_word = _cut(cv, word, room - pill_w(pill) - QUALIFIER_GAP - pad, semi, LABEL_TRACKING)
-            elif step == "pill":
-                if "state_word" in taken:       # the word gave way first: it keeps its one letter
-                    drawn_word = _cut(cv, word, 0.0, semi, LABEL_TRACKING)
-                drawn_pill = _cut(cv, pill, room - 10 - age_w(drawn_age) - QUALIFIER_GAP - word_w(drawn_word), semi,
-                                  LABEL_TRACKING)
-            elif step == "countdown" and holding and model.guard is not None \
-                    and model.guard.resume_seconds is not None:
-                drawn_word = str(words.text("widget.nostromo.guard.hold"))
-                drawn_pill = _cut(cv, pill, room - 10 - age_w(drawn_age) - QUALIFIER_GAP - word_w(drawn_word), semi,
-                                  LABEL_TRACKING)
-            else:
+            if not can[step]:
                 continue
             taken.append(step)
+            drawn_pill, drawn_age, drawn_word = refit()
             if fits(drawn_pill, drawn_age, drawn_word):
                 break
     mark = None
@@ -724,20 +750,23 @@ def _strip_tag(cv: Canvas, text: str, room: float) -> tuple[float, float] | None
 
 def _mark_growth(text: str, *, filled: bool = False) -> tuple[int, int]:
     """(px up, px down) an outlined pill or cap tag, or with ``filled`` the header's chip, grows round ``text`` (Q1, see
-    MARK_GROWTH_UP): up for a capital with a mark above, down for a mark below or one of DESCENDERS; (0, 0) for
-    English's words."""
-    up = down = False
+    MARK_GROWTH_UP): up for a capital with a mark above, down for a mark below or one of DESCENDERS, and an outlined
+    box further down for one of the deepest (DEEP_DESCENDERS, DEEP_MARKS); (0, 0) for English's words."""
+    up = down = deep = False
     base = ""
     for ch in unicodedata.normalize("NFD", text):
         mark = unicodedata.combining(ch)
         if not mark:
             base = ch
             down = down or ch in DESCENDERS
+            deep = deep or ch in DEEP_DESCENDERS
         elif mark == _ABOVE:
             up = up or base.isupper()
         elif mark in _BELOW:
             down = True
-    return ((CHIP_GROWTH_UP if filled else MARK_GROWTH_UP) if up else 0), (MARK_GROWTH_DOWN if down else 0)
+            deep = deep or ch in DEEP_MARKS
+    grow_down = (MARK_GROWTH_DEEP if deep and not filled else MARK_GROWTH_DOWN) if down else 0
+    return ((CHIP_GROWTH_UP if filled else MARK_GROWTH_UP) if up else 0), grow_down
 
 
 # ── Painting plan: halos first, then marks ────────────────────────────────────
@@ -1253,14 +1282,16 @@ def _guard_statement(model: WidgetModel) -> tuple[str, str] | None:
 def _guard_lines(cv: Canvas, model: WidgetModel) -> tuple[str, list[str]]:
     """(the lead, the guard's line broken to the card's width), measured on ``cv`` (any canvas of the frame's scale).
     No lines while the guard is off; a guard with nothing to list is its lead alone. The lead is glued, so its
-    colon stays with it (a French " :" never starts a line)."""
+    colon stays with it (a French " :" never starts a line). The lead comes back as the lines give it back: wrap_words
+    turns every U+00A0 into a plain space, a translator's before the colon too, so the first line starts with it."""
     statement = _guard_statement(model)
     if statement is None:
         return "", []
     lead, rest = statement
     reg = cv.font(FONT_REG, LABEL_SIZE)
     text = engine.glue(lead) + (f" {rest}" if rest else "")
-    return lead, engine.wrap_words(text, lambda line: cv.advance(line, reg, QUALIFIER_TRACKING), RIGHT - LEFT)
+    return (lead.replace(engine.NO_BREAK, " "),
+            engine.wrap_words(text, lambda line: cv.advance(line, reg, QUALIFIER_TRACKING), RIGHT - LEFT))
 
 
 def _split_lead(line: str, lead: str) -> tuple[str, str]:
@@ -1334,7 +1365,7 @@ def _render_strip(model: WidgetModel, pal: Palette, scale: float, opts: RenderOp
         percent = row.percent if row is not None else None
         emphasis = _row_emphasis(model, row) if row is not None else "normal"
         tag = words.text(window)
-        fit = _strip_tag(cv, tag, bar_x - label_x)
+        fit = _strip_tag(cv, tag, bar_x - label_x - STRIP_TAG_AIR)
         if fit is not None:
             size, tracking = fit
             font = semi if size == STRIP_LABEL_SIZE else cv.font(FONT_SEMI, size)

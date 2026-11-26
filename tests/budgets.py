@@ -69,7 +69,8 @@ if str(REPO) not in sys.path:
 
 from usage_monitor import casing, formats, i18n  # noqa: E402
 from usage_monitor.render import dump, engine  # noqa: E402
-from usage_monitor.render.model import LOGIN_COMMAND, PRODUCT, STATUS_KEYS  # noqa: E402
+from usage_monitor.render.model import (LOGIN_COMMAND, PRODUCT, STATUS_KEYS, format_age_short,  # noqa: E402
+                                         format_countdown)
 from usage_monitor.render.skins import RenderOptions  # noqa: E402
 from usage_monitor.render.skins import gates as g  # noqa: E402
 from usage_monitor.render.skins import night_city as nc  # noqa: E402
@@ -361,9 +362,6 @@ class Line:
 
 SEMI, REG, VT = nos.FONT_SEMI, nos.FONT_REG, nos.FONT_VT
 HEADER = nos.RIGHT - (nos.LEFT + 6.0 + 6)                        # the header line's room: past the dot, to RIGHT
-_HOLD_WIDEST = W_nos("HOLD 23H 59M", SEMI, 10, 1.2)               # the widest state chip text (monospaced)
-_PILL_WIDEST = W_nos("RATE LIMITED", SEMI, 10, 1.2)
-_AGE_WIDEST = W_nos("59 M", REG, 10, 0.6)
 _NOS_VALUE = W_nos("100%", VT, 22, 0)
 _NOS_EXACT = W_nos("99.5%", VT, 22, 0)
 # The name line gives way to the value down to one letter and the ellipsis (_name_line): the value's floor.
@@ -376,7 +374,7 @@ _NOS_STRIP_ROOM = [grp[2] - (grp[1] + nos.STRIP_CELL_STEP * (nos.STRIP_CELLS - 1
 _TRAY = nos._tray_geometry(TRAY_SIZE)
 _GAP = nos.QUALIFIER_GAP                                           # between the header's sides, a reset and its pace
 _NOS_MESSAGE = (nos.RIGHT - 1) - (nos.LEFT + 9)                    # a sign-in line, inside the dashed border
-_NOS_TAG_ROOM = nos.STRIP_GROUPS[0][1] - nos.STRIP_GROUPS[0][0]    # a strip tag, from its group's start to its bar
+_NOS_TAG_ROOM = nos.STRIP_GROUPS[0][1] - nos.STRIP_GROUPS[0][0] - nos.STRIP_TAG_AIR    # a strip tag, to its bar's air
 _NOS_TAG_STEPS = tuple((size, nos.STRIP_LABEL_TRACKING * (size / nos.STRIP_LABEL_SIZE)) for size in nos.STRIP_TAG_SIZES)
 
 
@@ -462,6 +460,96 @@ _WAIT_1 = "A session waiting on the usage guard was let go early."
 _WAIT_N = "12 sessions waiting on the usage guard were let go early."
 
 
+# ── Nostromo's header line, by Q2's order (nostromo.HEADER_GIVE_WAY, an owner default on #94) ──
+# Its slots (the pill, its age, the word or chip on the right), what the skin adds beside each box's text there (the
+# pill's frame, the age's gap, a chip's 8 px, QUALIFIER_GAP between the sides), and what each of the tuple's steps does
+# to its boxes: the line's give-way and each box's room are worked out from the tuple, so an answer to Q2 changes the
+# tuple alone (LIMITS and the _budget notes are then printed again).
+_PILL, _AGE = "nostromo.floating.status_pill", "nostromo.floating.age"
+_WORD, _CHIP = "nostromo.floating.state_word", "nostromo.floating.state_chip"
+_HOLD, _HOLD_ALONE = "nostromo.floating.hold_chip", "nostromo.floating.hold_word"
+HEADER_SLOTS: tuple[tuple[str, ...], ...] = ((_PILL,), (_AGE,), (_WORD, _CHIP, _HOLD, _HOLD_ALONE))
+HEADER_ADDED: dict[str, float] = {_PILL: 10, _AGE: 6, _WORD: _GAP, _CHIP: 8 + _GAP, _HOLD: 8 + _GAP,
+                                  _HOLD_ALONE: 8 + _GAP}
+HEADER_STEPS: dict[str, tuple[tuple[str, str], ...]] = {
+    "state_word": ((_WORD, "cut"), (_CHIP, "cut")), "age": ((_AGE, "drop"),), "pill": ((_PILL, "cut"),),
+    "countdown": ((_HOLD, _HOLD_ALONE),)}
+_HEADER_NAMES = {_PILL: "the pill", _AGE: "the age", _WORD: "the state word", _CHIP: "the CRITICAL chip",
+                 _HOLD: "the hold chip", _HOLD_ALONE: "HOLD"}
+_HEADER_OWN = {_PILL: "its 10 px frame", _AGE: "its 6 px gap", _WORD: "the gap", _CHIP: "its 8 px and the gap",
+               _HOLD: "its 8 px and the gap", _HOLD_ALONE: "its 8 px and the gap"}
+# English's widest text in each (as the boxes list it), at 1.0, for the rooms LIMITS pins.
+_STATE_WORDS = ("NOMINAL", "ADVISORY", "LAST KNOWN", "NO CARRIER", "HOLD", "ACQUIRING", "THROTTLED", "AUTH REQUIRED")
+_NOS_AGES = ("12 S", "41 M", "6 M", "59 M", "3 H", "47 H", "2 D")
+_NOS_HOLDS = ("HOLD <1M", "HOLD 9M", "HOLD 2H", "HOLD 2H 14M", "HOLD 23H 59M", "HOLD 1D", "HOLD 2D", "HOLD 2D 3H",
+              "HOLD 6D 23H")
+_HEADER_WIDEST: dict[str, float] = {
+    _PILL: max(W_nos(t, SEMI, 10, 1.2) for t in _STATUS_WORDS), _AGE: max(W_nos(t, REG, 10, 0.6) for t in _NOS_AGES),
+    _WORD: max(W_nos(t, SEMI, 10, 1.2) for t in _STATE_WORDS), _CHIP: W_nos("CRITICAL", SEMI, 10, 1.2),
+    _HOLD: max(W_nos(t, SEMI, 10, 1.2) for t in _NOS_HOLDS), _HOLD_ALONE: W_nos("HOLD", SEMI, 10, 1.2)}
+
+
+def header_gives_way() -> tuple[tuple[str, str], ...]:
+    """The header line's give-way (Line.gives_way): each step of nostromo.HEADER_GIVE_WAY, in its order, as its boxes."""
+    return tuple(item for step in nos.HEADER_GIVE_WAY for item in HEADER_STEPS[step])
+
+
+def header_rank(box_id: str) -> int:
+    """Where a header box gives way in Q2's order: its step's place in nostromo.HEADER_GIVE_WAY; HOLD alone, what the
+    last step leaves, after them all."""
+    return next((index for index, step in enumerate(nos.HEADER_GIVE_WAY)
+                 if any(box == box_id for box, _then in HEADER_STEPS[step])), len(nos.HEADER_GIVE_WAY))
+
+
+def _header_then(box_id: str) -> str:
+    return next(then for items in HEADER_STEPS.values() for box, then in items if box == box_id)
+
+
+def _header_beside(box_id: str, other: str, widest: Callable[[str], float], floor: float) -> float:
+    """What ``other`` takes on the line while ``box_id`` holds: left as Q2's order leaves it if it gives way first
+    (out, cut to one letter, or replaced), else its widest text, with what the skin adds beside it."""
+    if header_rank(other) < header_rank(box_id):
+        then = _header_then(other)
+        if then == "drop":
+            return 0.0
+        if then == "cut":
+            return floor + HEADER_ADDED[other]
+        return widest(then) + HEADER_ADDED[then]
+    return widest(other) + HEADER_ADDED[other]
+
+
+def _header_room(box_id: str, widest: Callable[[str], float], floor: float) -> float:
+    """A header box's room: the line's, less what the skin adds beside the box's text and, in each other slot, the most
+    any box there takes beside it (_header_beside), with ``widest`` each box's widest text and ``floor`` a cut's."""
+    room = HEADER - HEADER_ADDED[box_id]
+    for slot in HEADER_SLOTS:
+        if box_id not in slot:
+            room -= max(_header_beside(box_id, other, widest, floor) for other in slot)
+    return room
+
+
+def _header_why(box_id: str) -> str:
+    """How a header box's room follows from Q2's order, in words."""
+    parts = []
+    for slot in HEADER_SLOTS:
+        if box_id in slot:
+            continue
+        for other in slot:
+            if header_rank(other) < header_rank(box_id):
+                then = _header_then(other)
+                state = {"drop": "left out", "cut": "cut to one letter"}.get(then, f"as {_HEADER_NAMES.get(then)}")
+            else:
+                state = "whole, its widest"
+            parts.append(f"{_HEADER_NAMES[other]} {state}")
+    return (f"the header's room less {_HEADER_OWN[box_id]}, beside the others as Q2's order (nostromo.HEADER_GIVE_WAY) "
+            f"leaves them while it holds, the widest of each slot: {'; '.join(parts)}")
+
+
+def _header_box(id_: str, font: str, tracking: float, fit: str, **kwargs: Any) -> Box:
+    return _nos(id_, font, 10, tracking, _header_room(id_, _HEADER_WIDEST.__getitem__, _NOS_NAME_FLOOR),
+                _header_why(id_), fit, **kwargs)
+
+
 def _nos(id_: str, font: str, size: float, tracking: float, limit: float, why: str, fit: str = "none", *,
          english: tuple[str, ...], kinds: tuple[str, ...] = (), templates: tuple[str, ...] = ("{}",),
          canvas: str = "frame", tight: bool = False, keys: tuple[str, ...] = (),
@@ -515,29 +603,17 @@ def _tooltips(language: str) -> list[str]:
 
 BOXES: tuple[Box, ...] = (
     # ── Nostromo: the floating widget's header (nostromo._header_plan, _pill, _state_word): its rooms follow Q2's order
-    # (nostromo.HEADER_GIVE_WAY): a box is never cut or left out while a box that gives way before it can make room ──
-    _nos("nostromo.floating.status_pill", SEMI, 10, 1.2, HEADER - 10 - _GAP - (_HOLD_WIDEST + 8),
-         "header room less the pill's frame, the gap and the widest hold chip, which gives way last (the state word "
-         "and the age go first)", "ellipsis", english=_STATUS_WORDS, keys=_status_keys(*_STATUS_WORDS)),
-    _nos("nostromo.floating.age", REG, 10, 0.6, HEADER - (10 + _PILL_WIDEST) - 6 - _GAP - (_HOLD_WIDEST + 8),
-         "from the widest pill's end to the widest hold chip, less the gap; left out before the pill is cut", "drop",
-         kinds=("age",), english=("12 S", "41 M", "6 M", "59 M", "3 H", "47 H", "2 D"), words=False),
-    _nos("nostromo.floating.state_word", SEMI, 10, 1.2, HEADER - (10 + _PILL_WIDEST) - (6 + _AGE_WIDEST) - _GAP,
-         "right-aligned at RIGHT, back to the widest pill and age and the gap; cut first", "ellipsis",
-         english=("NOMINAL", "ADVISORY", "LAST KNOWN", "NO CARRIER", "HOLD", "ACQUIRING", "THROTTLED", "AUTH REQUIRED"),
-         keys=_nos_keys("state.normal", "state.warning", "state.stale", "state.offline", "state.paused",
-                        "state.loading", "state.rate_limited", "state.no_credentials")),
-    _nos("nostromo.floating.state_chip", SEMI, 10, 1.2, HEADER - (10 + _PILL_WIDEST) - (6 + _AGE_WIDEST) - _GAP - 8,
-         "the state word's room less the chip's 8 px: CRITICAL, cut first", "ellipsis", english=("CRITICAL",),
-         keys=_nos_keys("state.critical")),
-    _nos("nostromo.floating.hold_chip", SEMI, 10, 1.2, HEADER - (10 + _NOS_NAME_FLOOR) - _GAP - 8,
-         "beside the pill cut to one letter, the chip 8 px wider than its text; never cut, its countdown goes last",
-         "drop", kinds=("duration",), templates=("HOLD {}",),
-         english=("HOLD <1M", "HOLD 9M", "HOLD 2H", "HOLD 2H 14M", "HOLD 23H 59M", "HOLD 1D", "HOLD 2D", "HOLD 2D 3H",
-                  "HOLD 6D 23H"), keys=_nos_keys("guard.hold_for"), fills=(("countdown", "duration"),)),
-    _nos("nostromo.floating.hold_word", SEMI, 10, 1.2, HEADER - (10 + _NOS_NAME_FLOOR) - _GAP - 8,
-         "the hold chip with no countdown, beside the pill cut to one letter", english=("HOLD",),
-         keys=_nos_keys("guard.hold")),
+    # (nostromo.HEADER_GIVE_WAY, _header_room): a box is never cut or left out while a box that gives way before it can
+    # make room. Each language's own widest texts give its own rooms (header_room), which over() reports by ──
+    _header_box(_PILL, SEMI, 1.2, "ellipsis", english=_STATUS_WORDS, keys=_status_keys(*_STATUS_WORDS)),
+    _header_box(_AGE, REG, 0.6, "drop", kinds=("age",), english=_NOS_AGES, words=False),
+    _header_box(_WORD, SEMI, 1.2, "ellipsis", english=_STATE_WORDS,
+                keys=_nos_keys("state.normal", "state.warning", "state.stale", "state.offline", "state.paused",
+                               "state.loading", "state.rate_limited", "state.no_credentials")),
+    _header_box(_CHIP, SEMI, 1.2, "ellipsis", english=("CRITICAL",), keys=_nos_keys("state.critical")),
+    _header_box(_HOLD, SEMI, 1.2, "drop", kinds=("duration",), templates=("HOLD {}",), english=_NOS_HOLDS,
+                keys=_nos_keys("guard.hold_for"), fills=(("countdown", "duration"),)),
+    _header_box(_HOLD_ALONE, SEMI, 1.2, "none", english=("HOLD",), keys=_nos_keys("guard.hold")),
     _nos("nostromo.floating.armed_guard", SEMI, 10, 1.2, W_nos("[GUARD]", SEMI, 10, 1.2),
          "drawn in the header's free stretch only where it fits (_header_plan), else [G]", "drop", english=("[GUARD]",),
          keys=_nos_keys("guard.mark")),
@@ -621,7 +697,7 @@ BOXES: tuple[Box, ...] = (
         kinds=("percent", "clock", "duration"), keys=_NOS_GUARD_KEYS, compose=_guard_statements),
     # ── Nostromo: the taskbar strip (_render_strip, _strip_tag) and the tray (_tray_text) ──
     Box("nostromo.strip.window_tag", Measure("nostromo_fit", (SEMI, _NOS_TAG_STEPS, _NOS_TAG_ROOM, "strip")),
-        _NOS_TAG_ROOM, "from the group's start to its bar (STRIP_GROUPS), at the size it shrinks to "
+        _NOS_TAG_ROOM, "from the group's start to its bar (STRIP_GROUPS) less STRIP_TAG_AIR, at the size it shrinks to "
         "(nostromo.STRIP_TAG_SIZES: 11 px down to 9 px), left out where 9 px does not fit", "drop", ("5H", "7D"),
         keys=_nos_keys("window.session", "window.weekly"),
         note=f"{_NOS_TAG_ROOM:g} px at 11 px (nostromo.strip.window_tag, drop): a longer tag shrinks to 9 px, then is "
@@ -895,19 +971,12 @@ BOX: dict[str, Box] = {box.id: box for box in BOXES}
 LINES: tuple[Line, ...] = (
     Line("nostromo.floating.header_line", HEADER, "the pill (and its age) from the dot, the word or chip right-aligned "
          "at RIGHT, QUALIFIER_GAP apart; while over, it gives way in Q2's order (nostromo.HEADER_GIVE_WAY)", "none",
-         (("nostromo.floating.status_pill",), ("nostromo.floating.age",),
-          ("nostromo.floating.state_word", "nostromo.floating.state_chip", "nostromo.floating.hold_chip",
-           "nostromo.floating.hold_word")),
-         (("nostromo.floating.status_pill", 10), ("nostromo.floating.age", 6), ("nostromo.floating.state_word", _GAP),
-          ("nostromo.floating.state_chip", 8 + _GAP), ("nostromo.floating.hold_chip", 8 + _GAP),
-          ("nostromo.floating.hold_word", 8 + _GAP)),
+         HEADER_SLOTS, tuple(HEADER_ADDED.items()),
          (("LIVE", "12 S", "NOMINAL"), ("LIVE", "12 S", "ADVISORY"), ("LIVE", "12 S", "CRITICAL"),
           ("LIVE", "12 S", "HOLD 2H 14M"), ("LIVE", "12 S", "HOLD 2D 3H"), ("STALE", "41 M", "LAST KNOWN"),
           ("OFFLINE", "", "NO CARRIER"), ("PAUSED", "", "HOLD"), ("RATE LIMITED", "6 M", "THROTTLED"),
           ("NO LOGIN", "", "AUTH REQUIRED"), ("LOADING", "", "ACQUIRING"), ("RATE LIMITED", "59 M", "HOLD 23H 59M")),
-         (("nostromo.floating.state_word", "cut"), ("nostromo.floating.state_chip", "cut"),
-          ("nostromo.floating.age", "drop"), ("nostromo.floating.status_pill", "cut"),
-          ("nostromo.floating.hold_chip", "nostromo.floating.hold_word"))),
+         header_gives_way()),
     Line("nostromo.floating.row_name_line", nos.RIGHT - nos.LEFT - nos.VALUE_CLEARANCE - nos.VALUE_CHIP_PAD - _NOS_VALUE,
          "the name and its qualifier, left of the chipped value", "ellipsis",
          (("nostromo.floating.row_name",), ("nostromo.floating.row_qualifier",)),
@@ -1181,6 +1250,64 @@ def worst_runs(line: Line, language: str, scale: float) -> list[tuple[str, str]]
     return runs
 
 
+# The header's figures each format tag writes (header_tags): an age of each unit at FIGURES' widest, and the hold chip
+# at FIGURES' widest two countdowns.
+_HEADER_AGES = (59, 59 * 60, 47 * 3600, 100 * 86400)
+_HEADER_COUNTDOWNS = (23 * 3600 + 59 * 60, 6 * 86400 + 23 * 3600)
+_TAG_FIGURES = (_AGE, _HOLD)
+
+
+@lru_cache(maxsize=None)
+def header_tags(language: str) -> dict[str, dict[str, tuple[str, ...]]]:
+    """Each format tag's own figures in Nostromo's header, as the skin words them: {tag: {box id: texts}} for the age
+    (format_age_short) and the hold chip (its key filled with format_countdown). A tag's age stands beside its own hold
+    chip, never another tag's (es-CO's "HOLD 23 H 59 MIN" beside es-ES's "59S" is no frame). English and the
+    pseudo-locale have one, "", whose figures are their boxes' own (English keeps #89's figures, as FIGURES says)."""
+    from widget_words import sweep_locales
+
+    if language in (i18n.DEFAULT, i18n.PSEUDO):
+        return {"": {}}
+    words = i18n.app_catalog(language)
+    found: dict[str, dict[str, tuple[str, ...]]] = {}
+    for locale in sweep_locales(language):
+        found.setdefault(locale.format, {
+            _AGE: tuple(dict.fromkeys(format_age_short(seconds, locale) for seconds in _HEADER_AGES)),
+            _HOLD: tuple(dict.fromkeys(str(words.text("widget.nostromo.guard.hold_for",
+                                                      {"countdown": format_countdown(seconds, locale)}))
+                                       for seconds in _HEADER_COUNTDOWNS))})
+    return found
+
+
+def header_room(box_id: str, language: str, scale: float, tag: str | None = None) -> float:
+    """A header box's room in ``language`` at ``scale``, worked out as its limit is (_header_room, Q2's order) beside
+    the language's own widest texts: its words', and the figures of format tag ``tag`` (header_tags), or, with no tag,
+    of the tag that leaves the box least. A French or Spanish hold chip is wider than English's, so the age has less
+    room there. English's at 1.0 is the box's limit."""
+    if tag is None:
+        return min(header_room(box_id, language, scale, each) for each in header_tags(language))
+    figures = header_tags(language)[tag]
+    floor = max(BOX[_PILL].width(c + nos.ELLIPSIS, scale) for c in string.ascii_uppercase + string.digits)
+
+    def widest(other: str) -> float:
+        box = BOX[other]
+        found = figures[other] if other in figures else (widest_text(box, language, scale),)
+        return max(box.width(text, scale) for text in found)
+    return _header_room(box_id, widest, floor)
+
+
+def allowed(box: Box, language: str, text: str, scale: float) -> float:
+    """The room ``text`` of ``language`` has in ``box`` at ``scale``: the box's budget, and in Nostromo's header no more
+    than its room in the language (header_room) in the tags that write it (a figure) or in any tag (a word), so what
+    the header leaves out beside the language's own wider texts is reported too."""
+    room = budget(box, scale)
+    if language == i18n.DEFAULT or box.id not in HEADER_ADDED:
+        return room
+    tags = header_tags(language)
+    writing = [tag for tag, figures in tags.items() if text in figures.get(box.id, ())] if box.id in _TAG_FIGURES \
+        else []
+    return min(room, *(header_room(box.id, language, scale, tag) for tag in (writing or tags)))
+
+
 def line_budget(line: Line, scale: float = 1.0) -> float:
     """A line keeps its limit: English that runs past it is listed in KNOWN_ENGLISH_OVERRUNS."""
     return line.limit
@@ -1220,7 +1347,8 @@ def over(language: str, boxes: Sequence[Box | Line] | None = None) -> list[Over]
         for text in texts(box, language):
             if (box.id, text) in KNOWN_ENGLISH_OVERRUNS:
                 continue
-            hit = _worst(box, language, text, lambda s, t=text, b=box: b.width(t, s), lambda s, b=box: budget(b, s))
+            hit = _worst(box, language, text, lambda s, t=text, b=box: b.width(t, s),
+                         lambda s, t=text, b=box: allowed(b, language, t, s))
             if hit:
                 found.append(hit)
     return found

@@ -657,18 +657,26 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
     carry the severity; then the age goes; then the pill's word is cut, to one letter at least; last the hold chip drops
     its countdown and reads `HOLD` alone. The age and the countdown are facts the floating widget shows nowhere else.
     The two sides keep `QUALIFIER_GAP` (6 px) apart, and a word cut at one step takes back the room a later step frees.
+    `_header_plan` takes the steps in the tuple's order, whatever it is (a text a later step cuts keeps the most room;
+    one an earlier step cut is at its floor first), and `tests/budgets.py` derives the header line's give-way and its
+    boxes' rooms from the tuple, so an answer changes `HEADER_GIVE_WAY` alone (then `LIMITS` and the `_budget` notes
+    are printed again).
   - The hover card's reset line (`_info_plan`): the pace takes its short form, the signed points alone
     (`widget.nostromo.pace.points`, `+21 PTS`), then is left out; the reset never gives way.
   - The sign-in box (`_message_fit`): both lines take one step of `MESSAGE_STEPS`, the tracking to 0 and then 9 px; only
     a line too long at 9 px is cut. The strip's window tags (`_strip_tag`) shrink from 11 px to 9 px (`STRIP_TAG_SIZES`,
-    the tracking 0.1 em), then are left out.
+    the tracking 0.1 em), keeping `STRIP_TAG_AIR` (2 px) off the bar, then are left out.
   - Marks (Q1, an owner default Chris may overturn): the status pill, the header's chip and a cap tag grow round a word
     whose marks would touch their edge, decided by its characters (`_mark_growth`), so a box is the same at every scale.
     A capital with a mark above grows an outlined box (the pill, a cap tag) 2 px up and the filled chip 1 px; a mark
-    below, or a glyph that drops below the line (`DESCENDERS`), grows any of them 2 px down, to 1 px over the rule. The
-    conflict, recorded in `MARK_GROWTH_UP`: the grown pill's top is then y = 4, the hazard band's bottom edge, so in a
-    LIVE frame with a critical limit the two meet with no air between (they never overlap); 1 px up would keep the air
-    but leaves the stroke on the mark in the hover card at 1.25x.
+    below, or a glyph that drops below the line (`DESCENDERS`), grows any of them 2 px down: the header's pill and chip
+    then end 1 px over the rule, and a cap tag 1 px over its row's tick (top + 15). English never moves. The conflicts
+    with the default, recorded in `MARK_GROWTH_UP`'s comment: a word with no mark but a `DESCENDERS` glyph (Q, a comma,
+    a bracket) grows down too (`CRITIQUE`, `CAP 95,5 %`), since its ink reaches the edge; the grown pill's top is y = 4,
+    the hazard band's bottom edge, so in a LIVE frame with a critical limit the two meet with no air between (they never
+    overlap), where 1 px up would keep the air but leaves the stroke on the mark in the hover card at 1.25x; and the
+    deepest glyphs (`¡ Ș ș Ț ț`: `DEEP_DESCENDERS`, `DEEP_MARKS`) grow an outlined box 3 px down (`MARK_GROWTH_DEEP`),
+    the least that keeps their ink off it, so the pill then meets the rule and a cap tag its tick.
   - `tests/test_skin_nostromo_fit.py` reads each decision; `tests/test_budgets.py` holds the budgets' give-way to the
     skin's; the frame check (`tests/frame_layout.py`, below) holds every frame clear.
 - **Test tools (#89).** The pseudo-locale (`i18n.PSEUDO`, `pseudo`) is `en.json` made longer (about 40%), accented
@@ -706,8 +714,12 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   made pseudo, and a box of figures alone (`Box.words=False`) by the figures as the pseudo-locale writes them. A line
   gives way as its skin does (`Line.gives_way`: a box cut to its first letter and the ellipsis, left out, or replaced by
   another box) and is reported only if it is still over after its last step; Nostromo's sign-in lines and strip tags
-  are measured at the step they shrink to (`nostromo_fit`). `ACCEPTED_CUTS` in `test_budgets.py` holds, apart from
-  `FOR_91`, the cuts a CLDR format causes (Spanish ages that Nostromo's header leaves out), which no draft can settle.
+  are measured at the step they shrink to (`nostromo_fit`). Nostromo's header boxes take their rooms from Q2's order
+  (`_header_room`), and in a language its own rooms (`header_room`): beside its own widest texts and each format tag's
+  own age and hold chip, so a text past them is reported as the cut the header makes. `ACCEPTED_CUTS` in
+  `test_budgets.py` holds, apart from `FOR_91`, the cuts a CLDR format causes, which no draft can settle: the ages the
+  header leaves out beside a tag's own hold chip (every French tag's but fr-CA's, every Spanish tag's, and in es-CO
+  every age) and the state word Spanish's widest ages leave less room.
   `python tests/budgets.py --tooltips` prints each language's
   longest tooltip, which `test_budgets.py` pins as `TOOLTIPS` (en 113, fr 120, es 121, tr 114, pseudo 127 units today;
   the pseudo-locale's is a same-day resume that keeps its countdown at the shell's limit).
@@ -735,9 +747,10 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   hover card at every display scale up to 200 % (1.75 too) and the strip at every scale a taskbar draws it at, first
   variant (every variant's runs are the first's, checked at 1.0 in the pseudo-locale). It fails a run whose ink
   (coverage 64 of 255 and up) shares a pixel with another run or comes within 2 px of one on its line, meets an
-  outline, a rule, a bar or the hazard band, crosses a fill's edge, or leaves the frame's body, its chamfered
-  corners included. `KNOWN` lists what English draws so by design (the strip's 5H value at 100 %, on the budgets'
-  record too). A cut a fit makes in the pseudo-locale (`[THR…`) is the pseudo-locale's to the English scan: a
+  outline (or touches its stroke with no buffer px of air), a rule, a bar or the hazard band, crosses a fill's edge,
+  or leaves the frame's body, its chamfered corners included. `KNOWN` lists what English draws so by design (the
+  strip's 5H value at 100 % on its own bar's cells, on the budgets' record too). A cut a fit makes in the
+  pseudo-locale (`[THR…`) is the pseudo-locale's to the English scan: a
   bracketed string a run ends inside with the ellipsis was cut.
 - **Fonts (#92).** The widgets draw U+202F, the narrow no-break space of French grouping and of some 12-hour clocks, as
   U+00A0 (`engine.drawn`), in all three run builders. No bundled face has U+202F, and U+00A0 is as wide as a space in

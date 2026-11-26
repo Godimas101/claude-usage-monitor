@@ -5,6 +5,7 @@ or tuple in nostromo.py."""
 from __future__ import annotations
 
 import dataclasses
+import itertools
 import string
 from typing import Any
 
@@ -87,6 +88,48 @@ def test_the_header_gives_way_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
             assert _width(plan) <= ROOM or taken == ("state_word", "age", "pill"), (pill, word)
 
 
+LENGTHS = (1, 5, 9, 14, 19, 24, 30, 38)
+
+
+@pytest.mark.parametrize("order", list(itertools.permutations(nos.HEADER_GIVE_WAY)))
+def test_the_header_plan_follows_any_order_of_its_steps(order: tuple[str, ...], monkeypatch: pytest.MonkeyPatch) -> None:
+    """Q2 is HEADER_GIVE_WAY alone: in any order of its steps, at every scale, holding or not, and at every length of
+    the pill and the word, _header_plan takes the steps in that order and only while the line is over; the line then
+    fits; a step that came earlier gives up all it can (a text it cut is at its floor) before a later one gives up
+    anything; and no text it cut could take one more letter and still fit."""
+    monkeypatch.setattr(nos, "HEADER_GIVE_WAY", order)
+    for scale in budgets.SCALES:
+        for holding in (False, True):
+            can = [step for step in order if step != ("countdown" if not holding else "state_word")]
+            for pill in LENGTHS:
+                for length in LENGTHS:
+                    word = "HOLD " + "9" * length if holding else "W" * length
+                    plan = _plan(monkeypatch, "P" * pill, "12 S", word, "chip" if holding else "label",
+                                 holding=holding, scale=scale)
+                    where = (order, scale, holding, pill, length, plan)
+                    assert list(plan.gave_way) == can[:len(plan.gave_way)], where
+                    assert _width(plan, scale) <= ROOM + nos.FIT_SLACK or plan.gave_way == tuple(can), where
+                    whole = {"pill": "P" * pill, "state_word": "HOLD" if "countdown" in plan.gave_way else word}
+                    drawn = {"pill": plan.pill, "state_word": plan.word}
+                    for step in ("pill", "state_word"):
+                        if drawn[step] == whole[step]:
+                            continue
+                        assert step in plan.gave_way and drawn[step].endswith(nos.ELLIPSIS), where
+                        kept = len(drawn[step]) - 1
+                        more = whole[step] if kept + 1 >= len(whole[step]) else whole[step][:kept + 1] + nos.ELLIPSIS
+                        longer = dataclasses.replace(plan, **{"pill" if step == "pill" else "word": more})
+                        assert _width(longer, scale) > ROOM, where
+                    cut = [step for step in plan.gave_way if step in drawn and drawn[step] != whole[step]]
+                    if len(cut) == 2 and len(drawn[cut[1]]) < len(whole[cut[1]]):
+                        assert len(drawn[cut[0]]) == 2, where           # the earlier one at its floor
+                    if plan.gave_way and scale == 1.0:                  # the last step was taken while over
+                        monkeypatch.setattr(nos, "HEADER_GIVE_WAY", order[:order.index(plan.gave_way[-1])])
+                        before = _plan(monkeypatch, "P" * pill, "12 S", word, "chip" if holding else "label",
+                                       holding=holding, scale=scale)
+                        monkeypatch.setattr(nos, "HEADER_GIVE_WAY", order)
+                        assert _width(before, scale) > ROOM + nos.FIT_SLACK, (where, before)
+
+
 def test_the_header_takes_no_step_while_it_fits(english: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
     """Every English header, in every recorded state at every scale, draws its texts whole; and a header is left whole
     up to its room, and gives way 1 px past it."""
@@ -157,11 +200,12 @@ def test_a_long_sign_in_line_shrinks_before_it_is_cut(scale: float) -> None:
 
 @pytest.mark.parametrize("scale", budgets.STRIP_SCALES)
 def test_a_strip_tag_past_its_room_shrinks_then_is_left_out(scale: float, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A tag is drawn whole at 11 px where it fits its 22 px, smaller (down to 9 px, its tracking 0.1 em) where it does
-    not, and left out where even 9 px does not fit: "5H" stays, a three-letter tag shrinks where it must (at 1.0 it
-    must: 23.1 px at 11 px), "[5H ı]" goes."""
+    """A tag is drawn whole at 11 px where it fits its 20 px (to its bar, less STRIP_TAG_AIR), smaller (down to 9 px,
+    its tracking 0.1 em) where it does not, and left out where even 9 px does not fit: "5H" stays, a three-letter tag
+    shrinks where it must (at 1.0 it must: 23.1 px at 11 px), "[5H ı]" goes. A shrunk tag's ink keeps the frame check's
+    MIN_GAP off its bar's first cell, so it never reads as part of the bar."""
     cv = _cv(scale, strip=True)
-    room = nos.STRIP_GROUPS[0][1] - nos.STRIP_GROUPS[0][0]
+    room = nos.STRIP_GROUPS[0][1] - nos.STRIP_GROUPS[0][0] - nos.STRIP_TAG_AIR
     assert nos._strip_tag(cv, "5H", room) == (nos.STRIP_LABEL_SIZE, nos.STRIP_LABEL_TRACKING)
     fit = nos._strip_tag(cv, "7GN", room)
     assert fit is not None
@@ -179,16 +223,19 @@ def test_a_strip_tag_past_its_room_shrinks_then_is_left_out(scale: float, monkey
     frame = frame_layout.drawn(lambda: SKIN.render_taskbar(model, THEME, VARIANT, round(nos.STRIP_H * scale), scale))
     texts = [run.text for run in frame.runs]
     assert "7GN" in texts and "[5H ı]" not in texts and frame_layout.check(frame) == []
+    tag = next(run for run in frame.runs if run.text == "7GN")
+    assert tag.box[2] <= (nos.STRIP_GROUPS[0][1] - frame_layout.MIN_GAP) * frame.kx, (tag.box, frame.kx)
 
 
 # ── Marks (Q1) ────────────────────────────────────────────────────────────────
 
 def _letters() -> list[str]:
     """Printable ASCII, the French, Spanish and Turkish letters (test_font_coverage's floor) in both cases by each
-    language's rule, the pseudo-locale's letters and the ellipsis."""
+    language's rule, the pseudo-locale's letters, the ellipsis, and the letters with a comma below (Ș ș Ț ț), the
+    deepest marks the face has."""
     from test_font_coverage import FLOOR
 
-    found = set(string.printable.strip()) | set(i18n.pseudo_text(string.ascii_letters)) | {nos.ELLIPSIS}
+    found = set(string.printable.strip()) | set(i18n.pseudo_text(string.ascii_letters)) | {nos.ELLIPSIS} | set("ȘșȚț")
     for language, text in FLOOR.items():
         found |= set(text) | set(casing.upper(text, language))
     return sorted(ch for ch in found if len(ch) == 1)
@@ -208,17 +255,62 @@ def _ink_reach(ch: str) -> tuple[float, float]:
     return above, below
 
 
+# The tops a grown box stands at: the header's, and each row's on the floating widget and the hover card.
+BOX_TOPS = (nos.HEADER_TOP, *(nos.ROW_TOP + pitch * index for pitch in (nos.ROW_PITCH, nos.TOOLTIP_ROW_PITCH)
+                              for index in range(3)))
+
+
+def _air_below(ch: str, down: int) -> int:
+    """The least air, in buffer px, between ``ch``'s ink and the bottom stroke of an outlined box grown ``down`` px,
+    over every scale, every box top and canvases of the floating widget's and the hover card's heights (a canvas's
+    height rounds its vertical scale)."""
+    least = 99
+    for scale in budgets.SCALES:
+        for height in (100, nos.FLOAT_BASE_H, 134, 170, 190, 194):
+            cv = nos._canvas(nos.FLOAT_W, height, scale, THEME)
+            semi = cv.font(nos.FONT_SEMI, nos.LABEL_SIZE)
+            for top in BOX_TOPS:
+                layer, _ = cv.text_layer(ch, 30, cv.baseline_in_box(top + 1, 10, semi), semi, nos.LABEL_TRACKING)
+                box = layer.mask.point(lambda value: 255 if value >= frame_layout.INK else 0).getbbox()
+                if box is not None:
+                    bottom = top + nos.HEADER_H + down
+                    least = min(least, cv._rect_px(0, bottom - 1, 1, bottom)[1] - (layer.y + box[3]))
+    return least
+
+
 def test_the_marks_that_grow_a_box_are_the_ones_that_reach_its_edge() -> None:
     """Q1 decides by characters: a capital with a mark above grows a box up, a mark below or one of DESCENDERS grows it
-    down. Held to the face: of every letter the four languages and the pseudo-locale draw, exactly those whose ink comes
-    within 1 px (an outline's width) of the 12 px box's edge at some scale grow it."""
+    down, and the deepest of them (DEEP_DESCENDERS, DEEP_MARKS) grow an outlined box further. Held to the face: of
+    every letter the four languages and the pseudo-locale draw, and the comma-below letters, exactly those whose ink
+    comes within 1 px (an outline's width) of the 12 px box's edge at some scale grow it, and exactly those whose ink
+    keeps no air (frame_layout.TOUCH) over the stroke of a box grown MARK_GROWTH_DOWN grow it MARK_GROWTH_DEEP, which
+    keeps that air."""
     wrong = []
     for ch in _letters():
         above, below = _ink_reach(ch)
         up, down = nos._mark_growth(ch)
         if (up > 0) != (above < 1) or (down > 0) != (below < 1):
             wrong.append((ch, round(above, 2), round(below, 2), up, down))
+        if down:
+            touches = _air_below(ch, nos.MARK_GROWTH_DOWN) < frame_layout.TOUCH
+            if touches != (down == nos.MARK_GROWTH_DEEP) or _air_below(ch, down) < frame_layout.TOUCH:
+                wrong.append((ch, "deep", touches, down))
     assert wrong == []
+    assert {ch for ch in _letters() if nos._mark_growth(ch)[1] == nos.MARK_GROWTH_DEEP} == set("¡ȘșȚț")
+    # the chip, a fill, keeps a deep mark inside it at MARK_GROWTH_DOWN (1 px of fill under it)
+    assert {nos._mark_growth(ch, filled=True)[1] for ch in _letters()} == {0, nos.MARK_GROWTH_DOWN}
+    assert _air_below("Ș", nos.MARK_GROWTH_DOWN) >= 0
+
+
+def test_a_word_with_no_mark_but_a_descender_grows_down_too() -> None:
+    """The conflict MARK_GROWTH_UP's comment records with Q1's default ("every word without marks never moves"): a word
+    with no mark but a DESCENDERS glyph (Q, a comma) grows down as a marked one does, since its ink reaches the box's
+    edge (the frames of the test below show it). Likely drafts (#104 to #106 have none yet): French's CRITICAL and its
+    QUOTA, Spanish's LOADING, a cap at a decimal comma. A word without such glyphs stays put."""
+    for word in ("CRITIQUE", "QUOTA ATTEINT", "ADQUIRIENDO", "CAP 95,5 %"):
+        assert nos._mark_growth(word) == nos._mark_growth(word, filled=True) == (0, nos.MARK_GROWTH_DOWN), word
+    for word in ("LIVE", "EN LIGNE", "HORS LIGNE", "EN DIRECTO", "CANLI"):
+        assert nos._mark_growth(word) == nos._mark_growth(word, filled=True) == (0, 0), word
 
 
 def _english_box_words(models: dict[str, Any]) -> set[str]:
@@ -233,21 +325,22 @@ def _english_box_words(models: dict[str, Any]) -> set[str]:
     return words
 
 
-MARK_CHECKS = ("run on an outline", "run across a fill", "run on the hazard band", "run on a rule")
+MARK_CHECKS = ("run on an outline", "run touches an outline", "run across a fill", "run on the hazard band",
+               "run on a rule")
 
 
 def test_a_pill_grows_round_marks_and_never_round_english(english: dict[str, Any],
                                                           monkeypatch: pytest.MonkeyPatch) -> None:
     """No English pill, chip or cap tag grows (LIVE's pill keeps its 6 to 18 px), and a word with marks grows its
-    boxes so that no frame at any scale has a mark on an outline or out of a chip: real capitals (OBSOLÈTE, ÇEVRİMDIŞI,
-    CRÍTICO) and the deepest marks (¡, Ș)."""
+    boxes so that no frame at any scale has a mark on an outline, touching one with no air, or out of a chip: real
+    capitals (OBSOLÈTE, ÇEVRİMDIŞI, CRÍTICO) and the deepest marks (¡, Ș, Ț), with a mark above too (ȘȚĂ)."""
     assert {word: nos._mark_growth(word) for word in _english_box_words(english)
             if nos._mark_growth(word) != (0, 0)} == {}
     live = frame_layout.drawn(lambda: SKIN.render_floating(english["normal3/auto"], THEME, VARIANT, 1.0, None))
     pill_top = min(rect[1] for rect in live.strokes)
     assert (pill_top, max(rect[3] for rect in live.strokes)) == (nos.HEADER_TOP * 2, (nos.HEADER_TOP + 12) * 2)
     plain = i18n.load_catalog("en").english()
-    for word in ("OBSOLÈTE", "ÇEVRİMDIŞI", "CRÍTICO", "¡ȘQ"):
+    for word in ("OBSOLÈTE", "ÇEVRİMDIŞI", "CRÍTICO", "¡ȘQ", "ȘȚĂ"):
         catalog = i18n.Catalog("en", {}, {**plain, "widget.nostromo.state.critical": word,
                                           "widget.nostromo.cap.tag": word + " {percent}"})
         monkeypatch.setattr(i18n, "app_catalog", lambda language, catalog=catalog: catalog)
@@ -270,8 +363,9 @@ def test_a_pill_grows_round_marks_and_never_round_english(english: dict[str, Any
 @pytest.mark.parametrize("scale", budgets.SCALES)
 def test_the_grown_boxes_keep_off_the_hazard_band_and_the_rules(scale: float) -> None:
     """At every scale, in the buffer pixels the canvas draws: the grown chip keeps air under the hazard band and the
-    grown pill, chip and cap tags keep air over the rule and round the rows' bars, rails and ticks. The grown pill's top
-    meets the band's bottom edge and never overlaps it: the conflict MARK_GROWTH_UP's comment records."""
+    grown pill, chip and cap tags keep air over the rule and round the rows' bars, rails and ticks. The conflicts
+    MARK_GROWTH_UP's comment records: the grown pill's top meets the band's bottom edge, and a box grown round the
+    deepest marks (MARK_GROWTH_DEEP) meets the rule or its row's tick, each with no air and never overlapping."""
     for height in (nos.FLOAT_BASE_H, nos.FLOAT_BASE_H + 2 * nos.ROW_PITCH, 134, 190):
         cv = nos._canvas(nos.FLOAT_W, height, scale, THEME)
 
@@ -283,6 +377,8 @@ def test_the_grown_boxes_keep_off_the_hazard_band_and_the_rules(scale: float) ->
         pill = rows(nos.HEADER_TOP - nos.MARK_GROWTH_UP, nos.HEADER_TOP + nos.HEADER_H + nos.MARK_GROWTH_DOWN)
         chip = rows(nos.HEADER_TOP - nos.CHIP_GROWTH_UP, nos.HEADER_TOP + nos.HEADER_H + nos.MARK_GROWTH_DOWN)
         assert pill[0] == band[1] and chip[0] > band[1] and pill[1] < rule[0] and chip[1] < rule[0], (height, scale)
+        deep = rows(nos.HEADER_TOP - nos.MARK_GROWTH_UP, nos.HEADER_TOP + nos.HEADER_H + nos.MARK_GROWTH_DEEP)
+        assert deep[1] == rule[0], (height, scale)
         for pitch, above in ((nos.ROW_PITCH, nos.PIP_OFFSET + 8),
                              (nos.TOOLTIP_ROW_PITCH, nos.TOOLTIP_INFO_OFFSET + 12)):
             for index in range(3):
@@ -291,3 +387,6 @@ def test_the_grown_boxes_keep_off_the_hazard_band_and_the_rules(scale: float) ->
                 over = rule[1] if index == 0 else rows(0, top - pitch + above)[1]
                 tick = rows(top + 15, top + 20)
                 assert over < tag[0] and tag[1] < tick[0], (height, scale, pitch, index)
+                deep_tag = rows(top - nos.MARK_GROWTH_UP, top + nos.HEADER_H + nos.MARK_GROWTH_DEEP)
+                rail = rows(top + nos.RAIL_OFFSET, top + nos.RAIL_OFFSET + 1)
+                assert deep_tag[1] == tick[0] < rail[0], (height, scale, pitch, index)

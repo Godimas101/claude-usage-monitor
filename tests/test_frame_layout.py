@@ -13,6 +13,8 @@ from typing import Any
 
 import pytest
 
+from PIL import Image
+
 import budgets
 import frame_layout
 from usage_monitor.render import engine
@@ -128,9 +130,33 @@ def test_the_check_finds_each_kind_of_overlap(scale: float) -> None:
 
 
 def test_a_known_overlap_is_matched_by_its_surface_and_run() -> None:
+    """A finding is a KNOWN entry by its surface, its kind, its run and the place it names: the 5H value at 100 % on
+    the 5H bar's cells, never the 7D value on its own bar."""
     entry = next(iter(frame_layout.KNOWN))
-    assert frame_layout.known("nostromo", ["pace/ahead_100", "strip@1.176", "run on a bar", "100%", "(...)"]) == entry
-    assert frame_layout.known("nostromo", ["x", "strip@1", "run on a bar", "%100", "(...)"]) == entry
-    assert frame_layout.known("nostromo", ["x", "strip@1", "run on a bar", "99%", "(...)"]) is None
-    assert frame_layout.known("nostromo", ["x", "floating@1", "run on a bar", "100%", "(...)"]) is None
-    assert frame_layout.known("nostromo", ["x", "strip@1", "run on run", "100%", "(...)"]) is None
+    on_5h, on_7d = "(98.0, 13.0, 102.0, 21.0)", "(220.0, 13.0, 224.0, 21.0)"
+    assert frame_layout.known("nostromo", ["pace/ahead_100", "strip@1.176", "run on a bar", "100%", on_5h]) == entry
+    assert frame_layout.known("nostromo", ["x", "strip@1", "run on a bar", "%100", on_5h]) == entry
+    assert frame_layout.known("nostromo", ["x", "strip@1", "run on a bar", "100%", on_7d]) is None
+    assert frame_layout.known("nostromo", ["x", "strip@1", "run on a bar", "%100", on_7d]) is None
+    assert frame_layout.known("nostromo", ["x", "strip@1", "run on a bar", "100%", "(...)"]) is None
+    assert frame_layout.known("nostromo", ["x", "strip@1", "run on a bar", "99%", on_5h]) is None
+    assert frame_layout.known("nostromo", ["x", "floating@1", "run on a bar", "100%", on_5h]) is None
+    assert frame_layout.known("nostromo", ["x", "strip@1", "run on run", "100%", on_5h]) is None
+
+
+def test_ink_touching_an_outline_is_found() -> None:
+    """Q1 keeps a mark's ink off the 1 px outline round it: ink in the buffer row (or column) next to an outline's
+    stroke, with no air between, is "run touches an outline"; one buffer px of air passes; ink on the stroke is "run
+    on an outline" alone."""
+    def found(stroke: tuple[int, int, int, int]) -> list[str]:
+        frame = frame_layout.Frame(100, 60, 2.0, 2.0)
+        ink = Image.new("L", (10, 6), 255)
+        frame.runs.append(frame_layout.Run("AB", ink, 20, 20, (20, 20, 30, 26)))
+        frame.strokes.append(stroke)
+        return [what for what, _text, _other in frame_layout.check(frame)]
+
+    assert found((16, 26, 34, 28)) == ["run touches an outline"]          # the row under the ink
+    assert found((16, 12, 34, 20)) == ["run touches an outline"]          # the row over it
+    assert found((30, 18, 32, 30)) == ["run touches an outline"]          # the column after it
+    assert found((16, 27, 34, 29)) == []                                  # one row of air
+    assert found((16, 25, 34, 27)) == ["run on an outline"]

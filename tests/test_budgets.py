@@ -5,6 +5,7 @@ has no fallback or only shrinks; and every other language, the pseudo-locale amo
 from __future__ import annotations
 
 import ast
+import itertools
 import json
 import os
 import re
@@ -38,7 +39,7 @@ LIMITS: dict[str, float] = {
     "nostromo.floating.cap_tag": 112.4, "nostromo.floating.message": 242, "nostromo.tooltip.row_name": 199.0,
     "nostromo.tooltip.row_qualifier": 99.4, "nostromo.tooltip.row_value": 229.6, "nostromo.tooltip.cap_tag": 109.4,
     "nostromo.tooltip.resets": 252, "nostromo.tooltip.pace": 120.6, "nostromo.tooltip.pace_short": 120.6,
-    "nostromo.tooltip.guard_lead": 252, "nostromo.tooltip.guard_lines": 252, "nostromo.strip.window_tag": 22.0,
+    "nostromo.tooltip.guard_lead": 252, "nostromo.tooltip.guard_lines": 252, "nostromo.strip.window_tag": 20.0,
     "nostromo.strip.value_5h": 24.0, "nostromo.strip.value_5h_chip": 20.0, "nostromo.strip.value_7d": 32.0,
     "nostromo.strip.value_7d_chip": 28.0, "nostromo.tray.readout": 20.0, "night_city.floating.brand": 132.236,
     "night_city.floating.live_tag": 110.417, "night_city.floating.status_chip": 106.417,
@@ -113,14 +114,33 @@ FOR_91: dict[str, set[tuple[str, str]]] = {
 # from a CLDR format, not from a word, so no draft (#104 to #106) can shorten it. Each row says which format tags write
 # it and why the cut is right. A cut a draft's word causes is no row here: it goes in that draft's reviewer questions.
 # Recompute with budgets.over() after a change, never by hand.
+# Nostromo's header leaves its age out before it cuts the pill (Q2, nostromo.HEADER_GIVE_WAY), and its rooms in a
+# language are its own (budgets.header_room): beside the widest pill and a tag's own widest hold chip (CLDR's units:
+# fr-FR's and es-ES's HOLD 23H 59MIN, es-CO's HOLD 23 H 59 MIN, against English's HOLD 23H 59M) the age has 22.8 px, or
+# 8.4 in es-CO, where English's has 37.2; fr-CA's chip is English's width and keeps every age. The budgets pair each
+# box's widest texts, so a row is the worst a tag can draw, at every age of that shape ("59MIN" stands for "41MIN").
+_LEFT_OUT = "left out beside the tag's own HOLD 23H 59MIN"
+_ES_CO = "es-CO's narrow unit, spaced: beside its own HOLD 23 H 59 MIN no age fits (8.4 px)"
 ACCEPTED_CUTS: dict[str, dict[tuple[str, str], str]] = {
+    "fr": {
+        ("nostromo.floating.age", "59MIN"): f"the narrow minute of every French tag but fr-CA (59M): {_LEFT_OUT}",
+        ("nostromo.floating.age", "100J"): f"every French tag's narrow day: {_LEFT_OUT} (every tag's but fr-CA's)",
+    },
     "es": {
-        # Nostromo's header leaves its age out before it cuts the pill (Q2, nostromo.HEADER_GIVE_WAY): beside the widest
-        # English status and hold chip an age past 37.2 px is left out, and these ages are CLDR's narrow units.
-        ("nostromo.floating.age", "100 DÍAS"): "es-CO's narrow day: the age is left out beside a long hold chip",
-        ("nostromo.floating.age", "59 MIN"): "es-CO's narrow minute, as above",
-        ("nostromo.floating.age", "100DD."): "es-419's narrow day (and most Latin American tags'), as above",
-        ("nostromo.floating.age", "59SEG."): "es-AR's narrow second, as above",
+        ("nostromo.floating.age", "59MIN"): f"the narrow minute of every Spanish tag but es-CO: {_LEFT_OUT}",
+        ("nostromo.floating.age", "100D"): f"es-ES's narrow day (es-MX's, es-US's, es-EA's, es-GQ's, es-IC's and "
+                                           f"es-PH's too): {_LEFT_OUT}",
+        ("nostromo.floating.age", "100DD."): f"es-419's narrow day (es-AR's and most Latin American tags'): {_LEFT_OUT}",
+        ("nostromo.floating.age", "100D."): f"es-DO's narrow day: {_LEFT_OUT}",
+        ("nostromo.floating.age", "59SEG."): f"es-AR's narrow second: {_LEFT_OUT}",
+        ("nostromo.floating.age", "59 S"): _ES_CO,
+        ("nostromo.floating.age", "59 MIN"): _ES_CO,
+        ("nostromo.floating.age", "47 H"): _ES_CO,
+        ("nostromo.floating.age", "100 DÍAS"): _ES_CO,
+        # The state word is cut before the age goes: beside the widest pill and es-CO's 100 DÍAS (or es-419's 100DD.)
+        # English's widest word, which Spanish shows until #105, has 78.8 px. NO LOGIN, the state that words it, has no
+        # age, so no frame draws this pair: the budgets pair every box's widest.
+        ("nostromo.floating.state_word", "AUTH REQUIRED"): "beside es-CO's and es-419's widest ages, cut first (Q2)",
     },
 }
 
@@ -876,6 +896,90 @@ def test_the_budgets_give_way_as_the_skin_does(language: str, monkeypatch: pytes
         assert tuple(_STEP_BOXES[step] for step in plan.gave_way) == steps and width <= info.limit, (scale, plan)
         taken.append(steps)
     assert any(taken)                                       # each language's worst lines give way somewhere
+
+
+def _header_plan_of(monkeypatch: pytest.MonkeyPatch, pill: str, age: str, word: str, style: str,
+                    holding: bool) -> Any:
+    """nostromo._header_plan at 1.0 for a header that draws these texts (a holding guard's chip when ``holding``)."""
+    import dataclasses
+
+    monkeypatch.setattr(nos, "_age_text", lambda _model: age)
+    monkeypatch.setattr(nos, "_state_word", lambda _model: (word, style))
+    monkeypatch.setattr(nos, "_hold_word", lambda _model: word if holding else None)
+    model = dump.sample_model("guard_hold_session" if holding else "normal3")
+    return nos._header_plan(nos._canvas(nos.FLOAT_W, 100, 1.0, dump.load_theme_objects()["nostromo"]),
+                            dataclasses.replace(model, status_text=pill))
+
+
+# Each header box, the text of its shape it is tried with (n letters), its step, and how it is drawn.
+_HEADER_TRIES: dict[str, tuple[Any, str, str, bool]] = {
+    "nostromo.floating.status_pill": (lambda n: "P" * n, "pill", "label", False),
+    "nostromo.floating.age": (lambda n: "9" * n, "age", "label", False),
+    "nostromo.floating.state_word": (lambda n: "W" * n, "state_word", "label", False),
+    "nostromo.floating.state_chip": (lambda n: "C" * n, "state_word", "chip", False),
+    "nostromo.floating.hold_chip": (lambda n: "HOLD " + "9" * n, "countdown", "chip", True),
+}
+
+
+@pytest.mark.parametrize("order", list(itertools.permutations(nos.HEADER_GIVE_WAY)))
+def test_the_budgets_take_q2s_order_from_the_skins_tuple(order: tuple[str, ...], monkeypatch: pytest.MonkeyPatch) -> None:
+    """Q2 lives in nostromo.HEADER_GIVE_WAY alone: in any order of it, the header line's give-way
+    (budgets.header_gives_way) is the tuple's steps as boxes, and each header box's room (budgets._header_room, which
+    LIMITS pins for the order shipped) is where the skin's _header_plan stops keeping it whole beside English's widest
+    other texts, each right-hand word or chip in turn: the longest text of the box's shape it keeps fits the room, and
+    one letter more does not."""
+    header = next(item for item in budgets.LINES if item.id == "nostromo.floating.header_line")
+    assert header.gives_way == budgets.header_gives_way() and set(budgets.HEADER_STEPS) == set(nos.HEADER_GIVE_WAY)
+    monkeypatch.setattr(nos, "HEADER_GIVE_WAY", order)
+    assert budgets.header_gives_way() == tuple(item for step in order for item in budgets.HEADER_STEPS[step])
+    widest = {box_id: budgets.widest_text(budgets.BOX[box_id], i18n.DEFAULT, 1.0) for box_id in budgets.HEADER_ADDED}
+    rights = [(widest[box_id], style, holding) for box_id, style, holding in (
+        ("nostromo.floating.state_word", "label", False), ("nostromo.floating.state_chip", "chip", False),
+        ("nostromo.floating.hold_chip", "chip", True), ("nostromo.floating.hold_word", "chip", True))]
+    for box_id, (text_of, step, style, holding) in _HEADER_TRIES.items():
+        box = budgets.BOX[box_id]
+        room = budgets._header_room(box_id, budgets._HEADER_WIDEST.__getitem__, budgets._NOS_NAME_FLOOR)
+        kept = []
+        for right, right_style, right_holding in (rights if box_id in (budgets._PILL, budgets._AGE)
+                                                         else [(None, style, holding)]):
+            def whole(n: int) -> bool:
+                texts = {"pill": widest[budgets._PILL], "age": widest[budgets._AGE]}
+                if right is None:
+                    word, shown, hold = text_of(n), style, holding
+                else:
+                    word, shown, hold = right, right_style, right_holding
+                texts["pill" if box_id == budgets._PILL else "age" if box_id == budgets._AGE else "word"] = text_of(n)
+                plan = _header_plan_of(monkeypatch, texts["pill"], texts["age"], texts.get("word", word), shown, hold)
+                return step not in plan.gave_way
+            low, high = 0, 60                               # whole(low) holds (0 letters is no text), whole(high) not
+            while high - low > 1:
+                middle = (low + high) // 2
+                low, high = (middle, high) if whole(middle) else (low, middle)
+            kept.append(low)
+        most = min(kept)
+        assert (most == 0 or box.width(text_of(most)) <= room + 0.01) and box.width(text_of(most + 1)) > room + 0.01, (
+            box_id, order, most, room)
+
+
+def test_a_languages_header_rooms_are_its_own_tags() -> None:
+    """In a language, Nostromo's header boxes have the rooms their limits are worked out by, beside the language's own
+    widest texts and each format tag's own figures (budgets.header_room): English's at 1.0 are its limits; the age
+    has 22.8 px beside fr-FR's HOLD 23H 59MIN, 8.4 beside es-CO's HOLD 23 H 59 MIN and English's 37.2 beside fr-CA's
+    HOLD 23H 59M; and a figure is held to the rooms of the tags that write it (fr-CA's 59M keeps 37.2), a word to the
+    least of any tag's."""
+    for box_id in budgets.HEADER_ADDED:
+        assert budgets.header_room(box_id, i18n.DEFAULT, 1.0) == pytest.approx(budgets.BOX[box_id].limit), box_id
+    age, word = budgets.BOX["nostromo.floating.age"], budgets.BOX["nostromo.floating.state_word"]
+    assert budgets.header_room(age.id, "fr", 1.0, "fr-FR") == pytest.approx(22.8)
+    assert budgets.header_room(age.id, "fr", 1.0, "fr-CA") == pytest.approx(age.limit)
+    assert budgets.header_room(age.id, "es", 1.0) == pytest.approx(8.4) == budgets.header_room(age.id, "es", 1.0,
+                                                                                               "es-CO")
+    assert "59M" in budgets.header_tags("fr")["fr-CA"][age.id] and "59M" not in budgets.header_tags("fr")["fr-FR"][age.id]
+    assert budgets.allowed(age, "fr", "59M", 1.0) == pytest.approx(age.limit)
+    assert budgets.allowed(age, "fr", "59MIN", 1.0) == pytest.approx(22.8)
+    assert budgets.allowed(age, "es", "59S", 1.0) == pytest.approx(22.8)           # es-ES's, never beside es-CO's chip
+    assert budgets.allowed(word, "es", "THROTTLED", 1.0) == pytest.approx(budgets.header_room(word.id, "es", 1.0))
+    assert budgets.allowed(age, i18n.DEFAULT, "12 S", 1.0) == budgets.budget(age, 1.0)
 
 
 # ── The report ────────────────────────────────────────────────────────────────────────────────────────────────────

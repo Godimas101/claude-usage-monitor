@@ -277,10 +277,11 @@ def test_no_nostromo_run_is_english_in_the_pseudo_locale() -> None:
 
 def test_the_guard_lead_keeps_its_colon_on_its_line(monkeypatch: pytest.MonkeyPatch) -> None:
     """The guard line's lead is the language's, its colon too, and French writes a space before it ("GARDE EN
-    ATTENTE :"). The code keeps the lead on one line, so at no length of the lead, up to past the card's width, does a
-    line of the statement start with the colon: the first line starts with the whole lead."""
+    ATTENTE :"): a plain one, a U+00A0 or a U+202F. The code keeps the lead on one line, so at no length of the lead,
+    up to past the card's width, does a line of the statement start with the colon: the first line starts with the
+    whole lead, the card draws exactly the lead in its face (_split_lead) and the reading after it in its own."""
     from usage_monitor import i18n
-    from usage_monitor.render import dump
+    from usage_monitor.render import dump, engine
     from usage_monitor.render.skins import nostromo
 
     english = i18n.load_catalog("en").english()
@@ -288,10 +289,18 @@ def test_the_guard_lead_keeps_its_colon_on_its_line(monkeypatch: pytest.MonkeyPa
     for state, key in (("guard_hold_session", "widget.nostromo.guard.holding_list"),
                        ("guard_armed", "widget.nostromo.guard.armed_list")):
         model = dump.sample_model(state, locale=i18n.dev_locale("fr"))
-        for length in range(1, 60):
-            lead = ("GARDE EN ATTENTE " * 4)[:length].rstrip() + " :"
-            catalog = i18n.Catalog("fr", {key: lead}, english)
-            monkeypatch.setattr(i18n, "app_catalog", lambda language, catalog=catalog: catalog)
-            drawn, lines = nostromo._guard_lines(cv, model)
-            assert drawn == lead and lines[0].startswith(lead), (state, length, lines)
-            assert not [line for line in lines if line.startswith(":")], (state, length, lines)
+        for space in (" ", chr(0xA0), chr(0x202F)):
+            for length in range(1, 60):
+                lead = ("GARDE EN ATTENTE " * 4)[:length].rstrip() + space + ":"
+                catalog = i18n.Catalog("fr", {key: lead}, english)
+                monkeypatch.setattr(i18n, "app_catalog", lambda language, catalog=catalog: catalog)
+                drawn, lines = nostromo._guard_lines(cv, model)
+                shown = lead.replace(engine.NO_BREAK, " ")
+                assert drawn == shown and lines[0].startswith(shown), (state, length, lines)
+                assert not [line for line in lines if line.startswith(":")], (state, length, lines)
+                head, tail = nostromo._split_lead(lines[0], drawn)
+                statement = nostromo._guard_statement(model)
+                assert statement is not None
+                reading = statement[1].replace(engine.NO_BREAK, " ")
+                assert head == shown and " ".join([tail.strip(), *lines[1:]]).strip() == reading, (state, space,
+                                                                                                    length, lines)
