@@ -4,6 +4,7 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
+- Localization: the language core: catalogs, detection, English fallback and a Language setting ([#87](https://github.com/Godimas101/claude-usage-monitor/issues/87)) — closed 2026-11-26 by @Godimas101
 - Localization: test tools: pseudo-locale, per-language frame dumps, width budgets ([#89](https://github.com/Godimas101/claude-usage-monitor/issues/89)) — closed 2026-11-26 by @Godimas101
 - After an HTTP 403 the dashboard's sign-in help says to send Claude Code a message ([#55](https://github.com/Godimas101/claude-usage-monitor/issues/55)) — closed 2026-11-26 by @Godimas101
 - Localization: the choices only Chris can make ([#86](https://github.com/Godimas101/claude-usage-monitor/issues/86)) — closed 2026-11-26 by @Godimas101
