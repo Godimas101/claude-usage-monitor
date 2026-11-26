@@ -1,12 +1,14 @@
-"""No frame overlaps (#94; tests/frame_layout.py): every run of text a checked skin draws keeps off every other run and
-every box, rule, bar and edge of its frame, in English, the pseudo-locale and the French, Spanish and Turkish dev
-locales, at every display scale and every scale a taskbar draws the strip at. The skins whose frames are checked
-are frame_layout.THEMES (#95 and #96 add theirs). No window opens: the frames are drawn in memory, in a fresh Python
-with the time zone pinned, one per language, all started together."""
+"""No frame overlaps (#94, #95; tests/frame_layout.py): every run of text a checked skin draws keeps off every other run
+and every box, rule, bar and edge of its frame, in English, the pseudo-locale and the French, Spanish and Turkish dev
+locales (Night City also in fr-CA's and es-CO's formats), at every display scale and every scale a taskbar draws the
+strip at. The skins whose frames are checked are frame_layout.THEMES (#96 adds Gates'); Night City's jobs are per look
+(frame_layout.NIGHT_CITY_JOBS). No window opens: the frames are drawn in memory, in a fresh Python with the time zone
+pinned, one per job, all started together (frame_layout.jobs)."""
 from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from typing import Any
@@ -17,9 +19,10 @@ from PIL import Image
 
 import budgets
 import frame_layout
-from usage_monitor.render import engine
+import skin_words
+from usage_monitor.render import dump, engine
 
-CASES = [(theme, language) for theme in frame_layout.THEMES for language in frame_layout.LANGUAGES]
+CASES = [job[1:] + ("",) * (4 - len(job)) for job in frame_layout.jobs() if job[0] == "findings"]
 VARIANTS_IN = "pseudo"          # the language whose words give way the most
 
 
@@ -27,8 +30,7 @@ VARIANTS_IN = "pseudo"          # the language whose words give way the most
 def found() -> dict[tuple[str, str, str], Any]:
     """Each case's findings, and each theme's runs per variant, each worked out by frame_layout.py in a fresh Python
     with the time zone pinned; the processes run side by side."""
-    jobs = [("findings", theme, language) for theme, language in CASES]
-    jobs += [("variants", theme, VARIANTS_IN) for theme in frame_layout.THEMES]
+    jobs = frame_layout.jobs()
     env = {**os.environ, "TZ": frame_layout.PINNED_TZ,
            "PYTHONPATH": os.pathsep.join((str(frame_layout.REPO), str(frame_layout.HERE)))}
     running = {job: subprocess.Popen([sys.executable, str(frame_layout.HERE / "frame_layout.py"), *job],
@@ -43,11 +45,12 @@ def found() -> dict[tuple[str, str, str], Any]:
     return results
 
 
-@pytest.mark.parametrize(("theme", "language"), CASES)
-def test_no_frame_overlaps(found: dict[tuple[str, str, str], Any], theme: str, language: str) -> None:
-    """Every state tests/skin_words.py records, on the floating widget and the hover card at every display scale and on
-    the strip at every taskbar scale, first variant: no finding but the known ones (frame_layout.KNOWN)."""
-    findings = found["findings", theme, language]
+@pytest.mark.parametrize(("theme", "language", "variant"), CASES)
+def test_no_frame_overlaps(found: dict[tuple[str, ...], Any], theme: str, language: str, variant: str) -> None:
+    """Every state tests/skin_words.py records for the theme, on the floating widget and the hover card at every
+    display scale and on the strip at every taskbar scale, in the job's variant (the first when none): no finding but
+    the known ones (frame_layout.KNOWN)."""
+    findings = found[("findings", theme, language, variant) if variant else ("findings", theme, language)]
     left = [finding for finding in findings if frame_layout.known(theme, finding) is None]
     assert left == [], json.dumps(left[:20], ensure_ascii=False)
 
@@ -62,17 +65,79 @@ def test_the_known_overlaps_are_englishs_and_on_the_budgets_record(found: dict[t
 
 
 @pytest.mark.parametrize("theme", frame_layout.THEMES)
-def test_every_variant_draws_the_first_variants_runs(found: dict[tuple[str, str, str], Any], theme: str) -> None:
-    """The variants differ in colour only, so the check draws the first: in every recorded state, every variant's runs
-    at 1.0 (floating widget, hover card, strip) are the first variant's, text, place and ink alike."""
+def test_every_variant_draws_the_first_variants_runs(found: dict[tuple[str, ...], Any], theme: str) -> None:
+    """Variants that share a layout (frame_layout.layout_of) differ in colour only, so the check draws one of each: in
+    every recorded state, every variant's runs at 1.0 (floating widget, hover card, strip) are the first variant's of
+    its layout, text, place and ink alike. Nostromo's variants share one; Night City's are its looks (Blackwall boxed,
+    the Edgerun plate, Relic and Mox plain), and with transparent_bg (floating widget and strip) each draws the runs it
+    draws without it, but Edgerun, which drops its plate there for a layout of its own (segmented bars, no box). Each
+    layout is drawn by a findings job in the pseudo-locale."""
     runs = found["variants", theme, VARIANTS_IN]
     first: dict[str, Any] = {}
+    members: dict[str, set[str]] = {}
     differ = []
     for key, drawn in runs.items():
-        state, _variant = key.rsplit("|", 1)
-        if first.setdefault(state, drawn) != drawn:
+        group, variant = key.rsplit("|", 1)
+        members.setdefault(group.split("|", 1)[1], set()).add(variant)
+        if first.setdefault(group, drawn) != drawn:
             differ.append(key)
     assert len(first) > 50 and len(runs) > len(first) and differ == []
+    if theme != "night_city":
+        assert set(members) == {"all"}
+        return
+    assert members == {"boxed": {"blackwall"}, "plate": {"edgerun"}, "plain": {"relic", "mox"},
+                       "boxed/clear": {"blackwall"}, "plain/clear": {"relic", "mox"}, "cells/clear": {"edgerun"}}
+    for key, drawn in runs.items():                 # transparent_bg moves no run of a look it keeps
+        state, layout, variant = key.split("|")
+        if layout in ("boxed/clear", "plain/clear"):
+            opaque = runs[f"{state}|{layout.split('/')[0]}|{variant}"]
+            assert drawn == {surface: opaque[surface] for surface in drawn}, key
+    theme_object = dump.load_theme_objects()[theme]
+    looks = {frame_layout.layout_of(theme, theme_object.variant(variant.split("/")[0]), variant.endswith("/clear"))
+             + ("/clear" if variant.endswith("/clear") else "")
+             for language, variant in frame_layout.NIGHT_CITY_JOBS if language == VARIANTS_IN}
+    assert looks == {"boxed", "plate", "plain", "cells/clear"}
+
+
+def _value_parts(text: str) -> list[str]:
+    """A joined value run ("13%", "%13") as the two runs Night City draws it with, its numerals and its sign."""
+    found = re.fullmatch(r"(%?)([0-9.,]+)(%?)", text)
+    if found is None or not (found[1] or found[3]):
+        return [text]
+    return [found[2], "%"]
+
+
+def test_the_check_sees_night_citys_runs() -> None:
+    """Night City draws through its own ink queue (night_city._Ink), whose text layers are new ones, so the recorder
+    hooks it: every run tests/skin_words.py sees the skin draw (skin_words.runs, through engine.Canvas.text_layer, in
+    this process, so the clocks are this time zone's) is a run of the frame (a value's numerals and its sign joined
+    into one), each state's floating widget, hover card and strip at 1.0, Blackwall's; and the frame records the chips'
+    outlines and fills, the hazard strips, the bars and the body."""
+    from usage_monitor.render.skins import get_skin
+
+    theme = dump.load_theme_objects()["night_city"]
+    skin, variant = get_skin("night_city"), theme.variants[0]
+    models = frame_layout.models("en", "night_city")
+    seen = {"stroke_masks": 0, "fill_masks": 0, "hazard": 0, "cells": 0}
+    for name in ("normal3/auto", "warning/auto", "critical/auto", "stale3/auto", "paused/auto", "guard_hold_session/auto",
+                 "guard_armed/auto", "band_hold/stale3", "guard_armed_paused"):
+        model = models[name]
+        seen_runs = skin_words.runs(skin, model, theme, variant, (48,), (1.0,))
+        for surface, draw in (("floating@1", lambda: skin.render_floating(model, theme, variant, 1.0, None)),
+                              ("tooltip@1", lambda: skin.render_tooltip(model, theme, variant, 1.0)),
+                              ("strip/h48@1", lambda: skin.render_taskbar(model, theme, variant, 48, 1.0, None))):
+            frame = frame_layout.drawn(draw)
+            record = seen_runs[surface]
+            while isinstance(record, str):                       # a surface that drew what an earlier one did
+                record = seen_runs[record]
+            record = [run[0] for run in record]
+            texts = [part for run in frame.runs                   # the strip's percent is one run already
+                     for part in ([run.text] if surface.startswith("strip") else _value_parts(run.text))]
+            assert sorted(texts) == sorted(record), (name, surface, texts, record)
+            assert frame.body is not None, (name, surface)
+            for kind in seen:
+                seen[kind] += len(getattr(frame, kind))
+    assert all(seen.values()), seen
 
 
 # ── The check itself ──────────────────────────────────────────────────────────
@@ -160,3 +225,33 @@ def test_ink_touching_an_outline_is_found() -> None:
     assert found((30, 18, 32, 30)) == ["run touches an outline"]          # the column after it
     assert found((16, 27, 34, 29)) == []                                  # one row of air
     assert found((16, 25, 34, 27)) == ["run on an outline"]
+
+
+def test_a_shapes_outline_and_fill_are_checked_as_a_boxs() -> None:
+    """Night City's chips are polygons: their ring (stroke_masks) and their fill (fill_masks) are checked as an
+    outline's strokes and a fill are: ink on a ring is "run on an outline", ink within TOUCH of it "run touches an
+    outline", one row of air passes; ink partly in a fill and partly out is "run across a fill", ink wholly inside
+    passes."""
+    def found(stroke: Image.Image | None = None, fill: Image.Image | None = None, at: tuple[int, int] = (10, 10),
+              ink_at: tuple[int, int] = (20, 20)) -> list[str]:
+        frame = frame_layout.Frame(100, 60, 2.0, 2.0)
+        frame.runs.append(frame_layout.Run("AB", Image.new("L", (10, 6), 255), *ink_at,
+                                           (ink_at[0], ink_at[1], ink_at[0] + 10, ink_at[1] + 6)))
+        if stroke is not None:
+            frame.stroke_masks.append((stroke, *at))
+        if fill is not None:
+            frame.fill_masks.append((fill, *at))
+        return [what for what, _text, _other in frame_layout.check(frame)]
+
+    def ring(width: int, height: int) -> Image.Image:
+        mask = Image.new("L", (width, height), 255)
+        mask.paste(0, (2, 2, width - 2, height - 2))
+        return mask
+
+    assert found(ring(30, 20)) == []                                       # the ink inside the ring, 6 rows of air
+    assert found(ring(30, 13)) == ["run on an outline"]                    # the ring's bottom row across the ink
+    assert found(ring(30, 18)) == ["run touches an outline"]               # the ink right over the ring's bottom
+    assert found(ring(30, 19)) == []                                       # one row of air
+    assert found(fill=Image.new("L", (30, 20), 255)) == []                 # wholly inside the fill
+    assert found(fill=Image.new("L", (30, 14), 255)) == ["run across a fill"]
+    assert found(fill=Image.new("L", (30, 20), 255), at=(50, 10)) == []    # a fill elsewhere

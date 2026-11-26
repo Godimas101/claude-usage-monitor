@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import functools
 import math
+import unicodedata
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -240,6 +241,72 @@ STRIP_WORDS: dict[ApiStatus, str] = {
     ApiStatus.RATE_LIMITED: "LIMITED",
     ApiStatus.NO_CREDENTIALS: "NO LOGIN",
 }
+BRAND_MARK = "CLAUDE//USAGE"        # the brand mark, drawn as written in every language (#86); it never gives way
+
+# ── Fits (#95): what gives way where a language's words are longer than English's ──
+# English never meets any of them (tests/test_skin_night_city_fit.py), so its frames are as before #95.
+
+# Q2, an owner default on #95 that Chris may overturn: what the header's right-hand side gives up, in this order, while it
+# does not fit GUARD_GAP off the brand. The hold chip drops its countdown first (HOLD alone), the order the stale band
+# already takes (BAND_GIVE_WAY); then the right-hand word (the LIVE tag's, the status chip's, or the hold chip's) is cut
+# with the theme's dots, one letter at least. The brand never gives way, and the armed guard's GUARD chip is drawn only
+# in the room left, as before #95. Nostromo's default on #94 drops the countdown last. _header_plan takes the steps in
+# this tuple's order, whatever it is, and tests/budgets.py derives the header line's give-way and its boxes' rooms from
+# it: an answer changes this tuple alone (then test_budgets.py's LIMITS and the _budget notes are printed again).
+HEADER_GIVE_WAY = ("countdown", "word")
+# The hover card's reset-and-pace line: the pace shortens to its signed points ("-18", in its chip and colour; a stale
+# card's plain pace the same), then is left out; a pace with no points (ON PACE, PACE --) is left out at once. The reset
+# never gives way: it is what people look for there. _info_plan follows this tuple.
+INFO_GIVE_WAY = ("pace", "pace_short")
+# The stale band, while the guard holds or not: what gives way, in this order, while the cause, its age and the hold
+# chip do not fit the band together. The chip drops its countdown (HOLD alone), the age is left out, and last the cause
+# is cut: it is what the user acts on. _band_plan follows this tuple on both paths; a band without the hold chip skips
+# its step.
+BAND_GIVE_WAY = ("countdown", "age", "cause")
+# The strip's window labels shrink from 11 px to 9 px, their tracking with them (0.12 em), then are left out: the bars'
+# order still tells the two windows apart (_strip_label). A label's advance keeps STRIP_LABEL_AIR off its bar, so a
+# shrunk label never reads as part of the bar (English's 5H takes 14.5 px of the 16 left).
+STRIP_LABEL_SIZES = (11.0, 10.5, 10.0, 9.5, 9.0)
+STRIP_LABEL_AIR = 2.0
+# The strip's LIVE, status words and HOLD chip shrink to this size (_fit_type) before they are cut.
+STRIP_FLOOR = 9.0
+FIT_SLACK = 1e-6                    # float error in a sum of advances: a line exactly as wide as its room fits
+
+# Q1, an owner default on #95 that Chris may overturn (as Nostromo's on #94): the boxes Night City outlines round a word
+# grow round marks whose ink would touch their 1 px stroke, and the stale band round marks that would reach its top
+# hazard strip. It is decided by the word's characters, per face, so a box is the same at every scale (_mark_growth):
+# the least growth that keeps ink off the stroke, measured on the faces at every scale and card height (Rajdhani for the
+# chips, the tags and the band's cause; Share Tech Mono, with Consolas for ğ Ğ ş Ş İ, for the reset box and the band's
+# age). The boxes:
+# - up, round a capital with a mark above (É, Ñ, İ, Ğ) or one of the face's RISERS: the outlined chip (_chip_out: the
+#   header's status and GUARD chips, a row's WARN, the hover card's pace chip), Blackwall's outlined LIVE tag and strip
+#   tag MARK_GROWTH_UP["body"] px; Blackwall's outlined reset box MARK_GROWTH_UP["mono"]; the band as far as its
+#   cause's, its age's or its hold chip's word asks, its top hazard strip, outline and hold chip with it (the chip keeps
+#   its word on the band's baseline);
+# - down, round a cedilla or a comma below (Ç Ş Ș) or one of DESCENDERS: Blackwall's outlined LIVE tag and strip tag
+#   MARK_GROWTH_DOWN px; the outlined chip CHIP_GROWTH_DOWN px round a comma below alone (Ș ș: a cedilla keeps 1 px of air
+#   over its 4 px deeper edge).
+# The filled chips (CRIT, CAP, HOLD) and the Edgerun plate's tags never grow: every mark stays inside the fill. English
+# never moves: none of its boxed words holds such a character. A word with no mark but a DESCENDERS glyph (QUOTA, a
+# bracket) grows the tags down too: without it, its ink lands on the stroke. Where a grown box meets a neighbouring
+# stroke with no air (never overlapping), GROWN_MEETS says so (tests/test_skin_night_city_fit.py holds every other box to
+# keep air round its neighbours).
+MARK_GROWTH_UP: dict[str, int] = {"body": 1, "mono": 2}
+MARK_GROWTH_DOWN = 2
+CHIP_GROWTH_DOWN = 1
+# Per face, the characters with no mark whose ink reaches a box's top stroke at some scale; and Rajdhani's that reach
+# the outlined tags' bottom stroke. Held to the faces by tests/test_skin_night_city_fit.py.
+RISERS: dict[str, frozenset[str]] = {"body": frozenset(), "mono": frozenset("$()/[\\]^{|}")}
+DESCENDERS = frozenset("();Q[]gjpqy{}")
+REACHING_MARKS = frozenset({unicodedata.lookup("COMBINING CEDILLA"), unicodedata.lookup("COMBINING COMMA BELOW")})
+CHIP_REACHING_MARKS = frozenset({unicodedata.lookup("COMBINING COMMA BELOW")})
+_ABOVE = 230                        # the canonical combining class of a mark above
+# Which face each growing box's word is in, by the name _mark_growth takes.
+MARK_FACES: dict[str, str] = {"chip": "body", "tag": "body", "band": "body", "reset": "mono", "band_age": "mono"}
+# The neighbouring strokes a grown box meets with no air, never overlapping (Q1's recorded conflicts).
+GROWN_MEETS: tuple[str, ...] = (
+    "a row's WARN chip grown CHIP_GROWTH_DOWN px down round a comma below (Ș ș) meets its row's rail (top + 15)",
+)
 
 
 # ── Looks and palette ─────────────────────────────────────────────────────────
@@ -788,6 +855,222 @@ def _fit_type(ink: _Ink, text: str, spec: Type, limit: float, floor: float) -> T
     return spec._replace(size=floor, tracking=min(spec.tracking, 0.3))
 
 
+# ── Fits: the decisions, as pure helpers the tests read ───────────────────────
+
+def _cut(ink: _Ink, text: str, spec: Type, limit: float) -> str:
+    """``text`` whole when it fits ``limit``, else cut with the theme's dots (_fit), keeping one letter at least: a
+    one-letter text is its own floor."""
+    cut = _fit(ink, text, spec, limit + FIT_SLACK)
+    return text if cut != text and ink.width(cut, spec) >= ink.width(text, spec) else cut
+
+
+@dataclass(frozen=True, slots=True)
+class HeaderPlan:
+    """What the header's right-hand side draws (_header_plan): its word as drawn; what draws it ("hold" the HOLD chip,
+    "live" the LIVE tag, "chip" the status chip); the armed guard's GUARD chip, or None when there is none or no room
+    for it; and the HEADER_GIVE_WAY steps taken, in order (none while the line fits)."""
+    word: str
+    kind: str
+    mark: str | None
+    gave_way: tuple[str, ...] = ()
+
+
+def _brand_x(pal: Palette) -> float:
+    """Where the brand starts: after the pip, or at LEFT on the Edgerun plate, which has no pip."""
+    return LEFT if pal.plate else LEFT + PIP + BRAND_GAP
+
+
+def _right_pad(ink: _Ink, look: Look, kind: str) -> float:
+    """What a header's right-hand box adds to its word: the hold chip 17 px, the status chip 12, the LIVE tag 20 on the
+    plate (its dot), 8 outlined (Blackwall), none plain."""
+    if kind == "hold":
+        return 17.0
+    if kind == "chip":
+        return 12.0
+    return 20.0 if ink.pal.plate else 8.0 if look.boxed else 0.0
+
+
+def _header_plan(ink: _Ink, look: Look, model: WidgetModel) -> HeaderPlan:
+    """The header's right-hand word as it fits from GUARD_GAP after the brand to RIGHT, measured on ``ink`` (its palette
+    says whether the plate is on): the hold chip's word while the guard holds, else the LIVE tag's while live, else the
+    view model's status word in its chip. While it does not fit, the HEADER_GIVE_WAY steps are taken in order until it
+    does. The armed guard's GUARD chip is chosen last, in the room left, GUARD_GAP off each side."""
+    words = _words(model.locale)
+    brand_end = _brand_x(ink.pal) + ink.width(BRAND_MARK, BRAND)
+    room = RIGHT - brand_end - GUARD_GAP
+    hold = _hold_word(model)
+    live = model.status is ApiStatus.LIVE and not model.stale
+    kind = "hold" if hold is not None else "live" if live else "chip"
+    spec = STATUS if kind == "live" else CHIP
+    word = hold if hold is not None else words.text(STATE_KEYS[ApiStatus.LIVE]) if live else model.status_text
+    short = words.text(HOLD_KEY)
+    pad = _right_pad(ink, look, kind)
+
+    def fits(text: str) -> bool:
+        return ink.width(text, spec) + pad <= room + FIT_SLACK
+
+    # A step a header cannot take is skipped: only a hold chip with a countdown has one to drop.
+    can = {"countdown": hold is not None and hold != short, "word": True}
+    taken: list[str] = []
+
+    def refit() -> str:
+        """The word as the steps taken leave it, whatever their order: the countdown step leaves HOLD alone, the word
+        step lets the word be cut."""
+        whole = short if "countdown" in taken else word
+        return _cut(ink, whole, spec, room - pad) if "word" in taken else whole
+
+    drawn = word
+    if not fits(word):
+        for step in HEADER_GIVE_WAY:
+            if not can[step]:
+                continue
+            taken.append(step)
+            drawn = refit()
+            if fits(drawn):
+                break
+    mark = None
+    if model.guard is not None and hold is None:
+        text = words.text("widget.night_city.guard.mark")
+        tag_left = RIGHT - (ink.width(drawn, spec) + pad)
+        if tag_left - GUARD_GAP - _chip_out_width(ink, text) >= brand_end + GUARD_GAP:
+            mark = text
+    return HeaderPlan(drawn, kind, mark, tuple(taken))
+
+
+@dataclass(frozen=True, slots=True)
+class InfoPlan:
+    """What the hover card's reset-and-pace line draws (_info_plan): the reset (None when the row has none); the pace as
+    drawn (whole, its short form or None); whether it is a chip (its words are news: ahead or under pace, on a live
+    card) or plain text; and the INFO_GIVE_WAY steps taken."""
+    reset: str | None
+    pace: str | None
+    chip: bool
+    kind: str
+    gave_way: tuple[str, ...] = ()
+
+
+def _pace_short(row: Row) -> str | None:
+    """The pace's short form for a tight hover line: its signed points alone ("+41", "-18"), a figure with no words, in
+    the full form's chip or tone. None for a pace that has no points (ON PACE, PACE --). English never draws it: its
+    lines fit whole."""
+    delta = pace_delta(row.percent, row.time_fraction)
+    if delta is None or row.pace is None or row.pace == "on_pace":
+        return None
+    points = round(abs(delta))
+    return f"+{points}" if row.pace == "ahead" else f"-{points}"
+
+
+def _info_plan(ink: _Ink, look: Look, model: WidgetModel, row: Row) -> InfoPlan:
+    """The hover line's reset (from LEFT, in its box when ``look`` is boxed) and pace (right-aligned at RIGHT; a chip on
+    a live card when ahead or under pace, else plain text: a stale card's pace is plain), VALUE_GAP apart at least,
+    measured on ``ink``: while they do not fit, the pace takes its short form (_pace_short), then is left out
+    (INFO_GIVE_WAY)."""
+    reset = _reset_text(row, True, locale=model.locale)
+    text, kind = _pace_text(row, locale=model.locale)
+    chip = kind != "plain" and not model.stale
+    room = float(CONTENT_W)
+    if reset is not None:
+        room -= ink.width(reset, RESET) + (8 if look.boxed else 0) + VALUE_GAP
+    pace: str | None = text
+    forms = {"pace": _pace_short(row), "pace_short": None}
+    taken: list[str] = []
+    for step in INFO_GIVE_WAY:
+        if pace is None or ink.width(pace, CHIP) + (12 if chip else 0) <= room + FIT_SLACK:
+            break
+        pace = forms[step]
+        taken.append(step)
+    return InfoPlan(reset, pace, chip, kind, tuple(taken))
+
+
+@dataclass(frozen=True, slots=True)
+class BandPlan:
+    """What the stale band draws (_band_plan): the cause as drawn (whole or cut), the age (None when there is none or it
+    gave way), the hold chip's word (None while the guard does not hold; HOLD alone once its countdown gave way), and
+    the BAND_GIVE_WAY steps taken."""
+    cause: str
+    age: str | None
+    chip: str | None
+    gave_way: tuple[str, ...] = ()
+
+
+def _band_plan(ink: _Ink, model: WidgetModel, text: str, age: str | None, hold: str | None,
+               short: str | None = None) -> BandPlan:
+    """The band's cause from BAND_TEXT_X, its age 10 px after it and, while the guard holds, the hold chip (``hold``,
+    its word; ``short`` HOLD alone, the language's when None) GUARD_GAP after that, all to BAND_AGE_RIGHT. While they do
+    not fit, the BAND_GIVE_WAY steps are taken in order until they do; the cause is cut last, to the room left."""
+    short = _words(model.locale).text(HOLD_KEY) if short is None else short
+    room = BAND_AGE_RIGHT - BAND_TEXT_X
+
+    def others(age_on: bool, chip: str | None) -> float:
+        return ((ink.width(age, RESET) + 10 if age_on and age else 0.0)
+                + (GUARD_GAP + _chip_hold_width(ink, chip) if chip is not None else 0.0))
+
+    def fits(cause: str, age_on: bool, chip: str | None) -> bool:
+        return ink.width(cause, BAND_TYPE) + others(age_on, chip) <= room + FIT_SLACK
+
+    can = {"countdown": hold is not None and hold != short, "age": bool(age), "cause": True}
+    taken: list[str] = []
+
+    def refit() -> tuple[str, bool, str | None]:
+        """The texts as the steps taken leave them, whatever their order."""
+        chip = None if hold is None else short if "countdown" in taken else hold
+        age_on = bool(age) and "age" not in taken
+        cause = _cut(ink, text, BAND_TYPE, room - others(age_on, chip)) if "cause" in taken else text
+        return cause, age_on, chip
+
+    cause, age_on, chip = text, bool(age), hold
+    if not fits(cause, age_on, chip):
+        for step in BAND_GIVE_WAY:
+            if not can[step]:
+                continue
+            taken.append(step)
+            cause, age_on, chip = refit()
+            if fits(cause, age_on, chip):
+                break
+    return BandPlan(cause, age if age_on else None, chip, tuple(taken))
+
+
+def _strip_label(ink: _Ink, text: str, room: float) -> Type | None:
+    """The style the strip draws a window label in: the first of STRIP_LABEL_SIZES where it fits ``room``, its tracking
+    0.12 em (STATUS's at 11 px). None when it does not fit even at the last: the label is left out."""
+    for size in STRIP_LABEL_SIZES:
+        spec = STATUS if size == STATUS.size else STATUS._replace(size=size, tracking=STATUS.tracking * size / STATUS.size)
+        if ink.width(text, spec) <= room + FIT_SLACK:
+            return spec
+    return None
+
+
+def _mark_growth(text: str | None, box: str) -> tuple[int, int]:
+    """(px up, px down) the box named ``box`` (MARK_FACES: "chip" the outlined chip, "tag" Blackwall's outlined LIVE and
+    strip tags, "reset" its reset box, "band" and "band_age" the stale band round its cause or hold chip and round its
+    age) grows round ``text`` (Q1, see MARK_GROWTH_UP): up for a capital with a mark above or one of its face's RISERS;
+    the tags down for a cedilla or a comma below (REACHING_MARKS) or one of DESCENDERS, the chip down for a comma below.
+    (0, 0) for English's boxed words."""
+    face = MARK_FACES[box]
+    up = below = comma = False
+    base = ""
+    for ch in unicodedata.normalize("NFD", text or ""):
+        mark = unicodedata.combining(ch)
+        if not mark:
+            base = ch
+            up = up or ch in RISERS[face]
+            below = below or ch in DESCENDERS
+        elif mark == _ABOVE:
+            up = up or base.isupper()
+        elif ch in REACHING_MARKS:
+            below = True
+            comma = comma or ch in CHIP_REACHING_MARKS
+    down = (MARK_GROWTH_DOWN if below else 0) if box == "tag" else (CHIP_GROWTH_DOWN if comma else 0) \
+        if box == "chip" else 0
+    return (MARK_GROWTH_UP[face] if up else 0), down
+
+
+def _band_growth(plan: BandPlan) -> int:
+    """How far the band grows up (Q1): as far as its cause, its age or its hold chip's word asks, else 0."""
+    return max(_mark_growth(plan.cause, "band")[0], _mark_growth(plan.age, "band_age")[0],
+               _mark_growth(plan.chip, "band")[0])
+
+
 # ── Frame, brackets and the header ────────────────────────────────────────────
 
 def _paint_frame(cv: Canvas, pal: Palette, width: float, height: float, chamfer: float, opts: RenderOptions) -> None:
@@ -825,12 +1108,15 @@ def _chip_out_width(ink: _Ink, text: str) -> float:
 
 
 def _chip_out(ink: _Ink, x: float, y: float, text: str, outline: Color, color: Color) -> float:
-    """Outline chip, 14 px tall, 5 px top-left chamfer, filled with the panel. Returns its width."""
+    """Outline chip, 14 px tall, 5 px top-left chamfer, filled with the panel; grown round marks (Q1, _mark_growth), its
+    word where it was. Returns its width."""
     width = _chip_out_width(ink, text)
+    up, down = _mark_growth(text, "chip")
+    top, bottom = y - up, y + CHIP_H + down
     x0, x1 = ink.snap(x), ink.snap(x + width)
-    outer = [(x0 + CHIP_CUT, y), (x1, y), (x1, y + CHIP_H), (x0, y + CHIP_H), (x0, y + CHIP_CUT)]
-    inner = [(x0 + CHIP_CUT, y + 1), (x1 - 1, y + 1), (x1 - 1, y + CHIP_H - 1),
-             (x0 + 1, y + CHIP_H - 1), (x0 + 1, y + CHIP_CUT)]
+    outer = [(x0 + CHIP_CUT, top), (x1, top), (x1, bottom), (x0, bottom), (x0, top + CHIP_CUT)]
+    inner = [(x0 + CHIP_CUT, top + 1), (x1 - 1, top + 1), (x1 - 1, bottom - 1),
+             (x0 + 1, bottom - 1), (x0 + 1, top + CHIP_CUT)]
     ink.polygon(outer, outline)
     ink.polygon(inner, ink.pal.panel)
     ink.text(text, CHIP, x + 6, y + 10, color)
@@ -850,24 +1136,26 @@ def _chip_crit(ink: _Ink, x: float, y: float, word: str | None = None) -> float:
     return width
 
 
-def _chip_hold_width(ink: _Ink, word: str) -> float:
-    return ink.width(word, CHIP) + 17
+def _chip_hold_width(ink: _Ink, word: str, spec: Type = CHIP) -> float:
+    return ink.width(word, spec) + 17
 
 
-def _chip_hold(ink: _Ink, x: float, y: float, word: str, height: float = CHIP_H, glitch: bool = True) -> float:
+def _chip_hold(ink: _Ink, x: float, y: float, word: str, height: float = CHIP_H, glitch: bool = True, *,
+               spec: Type = CHIP, baseline: float | None = None) -> float:
     """The guard's HOLD chip: the CRIT chip's shape with the word in the bright tone and a glitch under it, the
     text drawn again a pixel either side in the selection and the danger colours, as a refresh hit splits the
     numerals. The split stays still: the chip is a state, not an event. The Edgerun plate has no bright tone (its
     text is ink, for the yellow) and no glow, so there the word is the CRIT chip's red and the split is left out,
     and so it is for a stale frame (``glitch`` False), which is drawn flat: the fringes would outshine the dimmed
-    word. ``height`` is the chip's, 14 px in the header and 12 inside the stale band, between its hazard strips.
-    Returns its width."""
+    word. ``height`` is the chip's, 14 px in the header and 12 inside the stale band, between its hazard strips (14 in a
+    band grown round marks, Q1). The word sits on ``baseline`` (the band's), else centred as in a 14 px chip; ``spec`` is
+    its style (the strip's shrinks, _fit_type). Returns its width."""
     pal = ink.pal
-    width = _chip_hold_width(ink, word)
+    width = _chip_hold_width(ink, word, spec)
     x0, x1 = ink.snap(x), ink.snap(x + width)
     ink.polygon([(x0, y), (x1 - CHIP_CUT, y), (x1, y + CHIP_CUT), (x1, y + height), (x0, y + height)], pal.ink)
     ink.hazard((x0, y, x0 + 7, y + height), *pal.crit_fill)
-    layer, _ = ink.layer(word, CHIP, x + 11, y + 10 - (CHIP_H - height) / 2)
+    layer, _ = ink.layer(word, spec, x + 11, y + 10 - (CHIP_H - height) / 2 if baseline is None else baseline)
     if pal.plate:
         ink.glyphs(layer, pal.hz_a)
         return width
@@ -893,7 +1181,8 @@ def _live_tag(ink: _Ink, look: Look, motion: Motion, text: str) -> float:
         ink.text(text, STATUS, left + 15, BOXED_BASE, pal.ok)
     elif look.boxed:
         left = RIGHT - (word_w + 8)
-        ink.outline(ink.snap(left), TAG_TOP, RIGHT, TAG_BOTTOM, pal.line)
+        up, down = _mark_growth(text, "tag")
+        ink.outline(ink.snap(left), TAG_TOP - up, RIGHT, TAG_BOTTOM + down, pal.line)
         ink.text(text, STATUS, left + 4, BOXED_BASE, pal.ok)
     else:
         left = RIGHT - word_w
@@ -902,83 +1191,70 @@ def _live_tag(ink: _Ink, look: Look, motion: Motion, text: str) -> float:
 
 
 def _draw_header(ink: _Ink, look: Look, model: WidgetModel, motion: Motion) -> None:
-    """Alive mark and brand on the left, the status word on the right. While the usage guard holds, the right-hand
-    place is the HOLD chip (the status is in the pulse and the dim of the rows); while it is only armed, a quiet
-    GUARD chip sits before the status word, if the brand leaves room."""
+    """Alive mark and brand on the left, the status word on the right, as _header_plan fits it. While the usage guard
+    holds, the right-hand place is the HOLD chip (the status is in the pulse and the dim of the rows); while it is only
+    armed, a quiet GUARD chip sits before the status word, if the brand leaves room."""
     pal = ink.pal
-    words = _words(model.locale)
     live = model.status is ApiStatus.LIVE and not model.stale
-    brand_x = LEFT
+    head = _header_plan(ink, look, model)
     if not pal.plate:
         _pip(ink, LEFT, PIP_Y, pal.ok if live else pal.stale, motion.pulse if live else 1.0, glow=live)
-        brand_x = LEFT + PIP + BRAND_GAP
-    brand_end = brand_x + ink.text("CLAUDE//USAGE", BRAND, brand_x, HEAD_BASE, pal.fg_hi)
-    hold = _hold_word(model)
-    if hold is not None:
-        _chip_hold(ink, RIGHT - _chip_hold_width(ink, hold), HEADER_TOP - 1, hold, glitch=not model.stale)
+    brand_x = _brand_x(pal)
+    ink.text(BRAND_MARK, BRAND, brand_x, HEAD_BASE, pal.fg_hi)
+    if head.kind == "hold":
+        _chip_hold(ink, RIGHT - _chip_hold_width(ink, head.word), HEADER_TOP - 1, head.word, glitch=not model.stale)
         return
-    if live:
-        tag_left = _live_tag(ink, look, motion, words.text(STATE_KEYS[ApiStatus.LIVE]))
+    if head.kind == "live":
+        tag_left = _live_tag(ink, look, motion, head.word)
     else:
-        text = model.status_text            # the view model's word, in capitals already
-        tag_left = RIGHT - _chip_out_width(ink, text)
-        _chip_out(ink, tag_left, HEADER_TOP - 1, text, pal.ink3, pal.ink2)
-    if model.guard is not None:
-        mark = words.text("widget.night_city.guard.mark")
-        width = _chip_out_width(ink, mark)
-        left = tag_left - GUARD_GAP - width
-        if left >= brand_end + GUARD_GAP:
-            _chip_out(ink, left, HEADER_TOP - 1, mark, pal.ink3, pal.ink2)
+        tag_left = RIGHT - _chip_out_width(ink, head.word)    # the view model's word, in capitals already
+        _chip_out(ink, tag_left, HEADER_TOP - 1, head.word, pal.ink3, pal.ink2)
+    if head.mark is not None:
+        _chip_out(ink, tag_left - GUARD_GAP - _chip_out_width(ink, head.mark), HEADER_TOP - 1, head.mark, pal.ink3,
+                  pal.ink2)
 
 
 def _draw_band(ink: _Ink, theme: Any, model: WidgetModel) -> None:
-    """The stale band: an ink box with a warn outline, hazard strips top and bottom, the cause and its age."""
+    """The stale band: an ink box with a warn outline, hazard strips top and bottom, the cause, its age and, while the
+    guard holds, the hold chip, as _band_plan fits them (BAND_GIVE_WAY). It grows up round marks (Q1, _band_growth)."""
     pal = ink.pal
+    plan = _band_plan(ink, model, _band_text(theme, model), _age_tag(model), _hold_word(model))
     x0, y0, x1, y1 = BAND
+    y0 -= _band_growth(plan)
     ink.rect(x0, y0, x1, y1, pal.ink)
     ink.outline(x0, y0, x1, y1, pal.warn)
     fill_a, fill_b = pal.crit_fill
     ink.hazard((x0, y0, x1, y0 + HAZARD_STRIP), fill_a, fill_b)
     ink.hazard((x0, y1 - HAZARD_STRIP, x1, y1), fill_a, fill_b)
-    text = _band_text(theme, model)
-    age = _age_tag(model)
-    hold = _hold_word(model)
-    if hold is not None:
-        _draw_band_hold(ink, model, text, age, hold)
-        return
-    age_w = ink.width(age, RESET) if age else 0.0
-    room = (BAND_AGE_RIGHT - age_w - 10 if age else BAND_AGE_RIGHT) - BAND_TEXT_X
-    fitted = _fit(ink, text, BAND_TYPE, room)
-    ink.text(fitted, BAND_TYPE, BAND_TEXT_X, BAND_BASE, pal.warn)
-    if age and fitted == text:
-        ink.text(age, RESET, BAND_AGE_RIGHT, BAND_BASE, pal.signal if pal.plate else pal.ink2, align="right")
+    _draw_band_words(ink, model, plan, y0)
 
 
 def _draw_band_hold(ink: _Ink, model: WidgetModel, text: str, age: str | None, hold: str,
                     short: str | None = None) -> None:
-    """The stale band while the guard holds. The cause stays whole (it is what the user acts on), the HOLD chip
-    sits at the right end between the hazard strips, and the age keeps its place before it when the band has room
-    for all three. What gives way, in order: the countdown (the chip is then ``short``, HOLD alone, the language's
-    when None), the age, and last the end of the cause. ``hold`` is the chip's full word; with no countdown it is
-    ``short`` itself, and the first two tries are the same."""
+    """The stale band's words while the guard holds. The cause stays whole (it is what the user acts on), the HOLD chip
+    sits at the right end between the hazard strips, and the age keeps its place before it when the band has room for
+    all three. What gives way, in BAND_GIVE_WAY's order: the countdown (the chip is then ``short``, HOLD alone, the
+    language's when None), the age, and last the end of the cause. ``hold`` is the chip's full word; with no countdown
+    it is ``short`` itself, and there is no countdown to drop."""
+    plan = _band_plan(ink, model, text, age, hold, short)
+    _draw_band_words(ink, model, plan, BAND[1] - _band_growth(plan))
+
+
+def _draw_band_words(ink: _Ink, model: WidgetModel, plan: BandPlan, top: float) -> None:
+    """The band's words as ``plan`` has them: the cause, the age right-aligned at BAND_AGE_RIGHT (GUARD_GAP before the
+    hold chip while there is one) and the chip between the hazard strips of a band whose top is ``top``, its word on
+    the band's baseline."""
     pal = ink.pal
-    short = _words(model.locale).text(HOLD_KEY) if short is None else short
-    x0, y0, x1, y1 = BAND
-    text_w = ink.width(text, BAND_TYPE)
-    age_w = ink.width(age, RESET) + 10 if age else 0.0
-    for word, with_age in ((hold, age_w), (short, age_w), (short, 0.0)):
-        chip_w = _chip_hold_width(ink, word)
-        if BAND_TEXT_X + text_w + with_age + GUARD_GAP + chip_w <= BAND_AGE_RIGHT:
-            break
-    else:
-        word, with_age = short, 0.0
-    chip_w = _chip_hold_width(ink, word)
-    left = BAND_AGE_RIGHT - chip_w
-    fitted = _fit(ink, text, BAND_TYPE, left - GUARD_GAP - with_age - BAND_TEXT_X)
-    ink.text(fitted, BAND_TYPE, BAND_TEXT_X, BAND_BASE, pal.warn)
-    if with_age and fitted == text and age:
-        ink.text(age, RESET, left - GUARD_GAP, BAND_BASE, pal.signal if pal.plate else pal.ink2, align="right")
-    _chip_hold(ink, left, y0 + HAZARD_STRIP, word, y1 - y0 - 2 * HAZARD_STRIP, glitch=not model.stale)
+    ink.text(plan.cause, BAND_TYPE, BAND_TEXT_X, BAND_BASE, pal.warn)
+    left = right = BAND_AGE_RIGHT
+    if plan.chip is not None:
+        left = BAND_AGE_RIGHT - _chip_hold_width(ink, plan.chip)
+        right = left - GUARD_GAP
+    if plan.age:
+        ink.text(plan.age, RESET, right, BAND_BASE, pal.signal if pal.plate else pal.ink2, align="right")
+    if plan.chip is not None:
+        _chip_hold(ink, left, top + HAZARD_STRIP, plan.chip, BAND[3] - top - 2 * HAZARD_STRIP, glitch=not model.stale,
+                   baseline=float(BAND_BASE))
 
 
 # ── Rows ──────────────────────────────────────────────────────────────────────
@@ -1147,9 +1423,10 @@ def _reset_text(row: Row, tooltip: bool, *, locale: Locale = ENGLISH) -> str | N
 
 
 def _draw_reset(ink: _Ink, look: Look, text: str, box: tuple[float, float], top: float) -> None:
+    """The reset text, in Blackwall's outlined box (grown up round marks, Q1) or plain, right-aligned in the box."""
     pal = ink.pal
     if look.boxed:
-        ink.outline(ink.snap(box[0]), top, ink.snap(box[1]), top + CHIP_H, pal.line)
+        ink.outline(ink.snap(box[0]), top - _mark_growth(text, "reset")[0], ink.snap(box[1]), top + CHIP_H, pal.line)
         ink.text(text, RESET, box[0] + 4, top + RESET_BASE, pal.ink2)
     else:
         ink.text(text, RESET, box[1], top + RESET_BASE, pal.ink2, align="right")
@@ -1207,17 +1484,20 @@ def _pace_text(row: Row, *, locale: Locale = ENGLISH) -> tuple[str, str]:
 
 
 def _draw_info(ink: _Ink, look: Look, model: WidgetModel, row: Row, reset: str | None, top: float) -> None:
-    """Reset time on the left, pace on the right: a chip when it is news (ahead, under), plain text otherwise."""
+    """Reset time on the left, pace on the right: a chip when it is news (ahead, under), plain text otherwise; the pace
+    shortens, then goes, where the line has no room for it (_info_plan). ``reset`` is the row's reset text."""
     pal = ink.pal
+    info = _info_plan(ink, look, model, row)
     if reset is not None:
         width = ink.width(reset, RESET) + (8 if look.boxed else 0)
         _draw_reset(ink, look, reset, (LEFT, LEFT + width), top)
-    text, kind = _pace_text(row, locale=model.locale)
-    if kind == "plain" or model.stale:
-        ink.text(text, CHIP, RIGHT, top + TAG_BASE, pal.ink2 if row.pace else pal.ink3, align="right")
+    if info.pace is None:
         return
-    colour = (pal.ink if pal.plate else pal.warn) if kind == "ahead" else pal.accent
-    _chip_out(ink, RIGHT - _chip_out_width(ink, text), top, text, colour, colour)
+    if not info.chip:
+        ink.text(info.pace, CHIP, RIGHT, top + TAG_BASE, pal.ink2 if row.pace else pal.ink3, align="right")
+        return
+    colour = (pal.ink if pal.plate else pal.warn) if info.kind == "ahead" else pal.accent
+    _chip_out(ink, RIGHT - _chip_out_width(ink, info.pace), top, info.pace, colour, colour)
 
 
 # ── Floating widget and tooltip ───────────────────────────────────────────────
@@ -1334,7 +1614,9 @@ def _draw_strip_row(ink: _Ink, look: Look, model: WidgetModel, row: Row | None, 
     pal = ink.pal
     percent = row.percent if row is not None else None
     emphasis = _row_emphasis(model, row) if row is not None else SEVERITY_NORMAL
-    ink.text(label, STATUS, STRIP_LABEL_X, top + STRIP_TEXT_BASE, pal.fg_hi)
+    spec = _strip_label(ink, label, STRIP_BAR_X - STRIP_LABEL_X - STRIP_LABEL_AIR)
+    if spec is not None:                # a label too long even at 9 px is left out: the bars' order tells them apart
+        ink.text(label, spec, STRIP_LABEL_X, top + STRIP_TEXT_BASE, pal.fg_hi)
 
     rail = top + STRIP_RAIL_Y
     ink.rect(STRIP_BAR_X, rail, STRIP_BAR_X + STRIP_BAR_W, rail + RAIL_H, pal.track)
@@ -1366,25 +1648,33 @@ def _draw_strip_row(ink: _Ink, look: Look, model: WidgetModel, row: Row | None, 
 def _draw_strip_status(ink: _Ink, look: Look, model: WidgetModel, motion: Motion) -> None:
     """The status word. While live it sits after the pulsing dot, as the design shows. Any other state drops
     the dot and centres its word, dim, in the tag. While the usage guard holds, the tag is the HOLD chip instead:
-    the strip has no room for the countdown, and the status is in the dim of the rows."""
+    the strip has no room for the countdown, and the status is in the dim of the rows. Each word shrinks to STRIP_FLOOR
+    (_fit_type) and only then is cut; Blackwall's outlined tag grows down round marks below (Q1)."""
     pal = ink.pal
     words = _words(model.locale)
     x0, y0, x1, y1 = STRIP_TAG
     if _hold_word(model) is not None:
         word = words.text(HOLD_KEY)
-        _chip_hold(ink, (x0 + x1 - _chip_hold_width(ink, word)) / 2, y0, word, y1 - y0, glitch=not model.stale)
+        room = x1 - x0 - 17
+        spec = _fit_type(ink, word, CHIP, room, STRIP_FLOOR)
+        word = _cut(ink, word, spec, room)
+        _chip_hold(ink, (x0 + x1 - _chip_hold_width(ink, word, spec)) / 2, y0, word, y1 - y0, glitch=not model.stale,
+                   spec=spec)
         return
+    live = model.status is ApiStatus.LIVE and not model.stale
+    word = words.text(STATE_KEYS[model.status])
+    room = x1 - 4 - STRIP_WORD_X if live else x1 - x0 - 8
+    spec = _fit_type(ink, word, STATUS, room, STRIP_FLOOR)
+    word = _cut(ink, word, spec, room)
     if pal.plate:
         ink.rect(x0, y0, x1, y1, pal.ink)
     elif look.boxed:
-        ink.outline(x0, y0, x1, y1, pal.line)
-    live = model.status is ApiStatus.LIVE and not model.stale
-    word = words.text(STATE_KEYS[model.status])
+        up, down = _mark_growth(word, "tag")
+        ink.outline(x0, y0 - up, x1, y1 + down, pal.line)
     if live:
         _pip(ink, STRIP_DOT[0], STRIP_DOT[1], pal.ok, motion.pulse, glow=False)
-        ink.text(word, STATUS, STRIP_WORD_X, STRIP_WORD_BASE, pal.ok)
+        ink.text(word, spec, STRIP_WORD_X, STRIP_WORD_BASE, pal.ok)
         return
-    spec = _fit_type(ink, word, STATUS, x1 - x0 - 8, 9.0)
     centre = (x0 + x1) / 2 + spec.tracking / 2
     ink.text(word, spec, centre, STRIP_WORD_BASE, pal.stale, align="centre")
 

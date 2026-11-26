@@ -17,10 +17,19 @@ frame's 1 px edge, chamfered corners and all. A frame fails when:
 - a run's ink is on a bar's cells ("run on a bar");
 - a run's ink is outside the body ("run leaves the body"), in x or in y.
 
-The skins whose frames are checked are THEMES: Nostromo (#94). #95 and #96 add Night City and Gates when their words
-fit, and with them what their own drawing code needs recorded (Night City's ink and Gates' Ink.put).
+The skins whose frames are checked are THEMES: Nostromo (#94) and Night City (#95); #96 adds Gates when its words fit,
+and with it what its own drawing code needs recorded (Gates' Ink.put). Night City draws through its own ink queue
+(night_city._Ink), so the check hooks it too: each text layer _Ink.layer makes is a run (the hold chip's two shifted
+copies, a refresh hit's and the transparent_bg backing are new layers, not runs); a value's numerals and its percent sign,
+which _draw_value draws as two runs UNIT_GAP apart, are one run, the figure; an outlined chip (_chip_out) is the ring
+between its two polygons (stroke_masks) and a filled chip (_chip_crit, _chip_hold) its polygon (fill_masks), checked as
+outlines and fills are; the hazard strips are the tiles _Ink.hazard pastes; the bars are _draw_cells' cells and
+_draw_slanted's bar; the pip is a fill; and the body is the polygon inside the frame's edge (_paint_frame).
 
-    python tests/frame_layout.py THEME LANGUAGE     the findings, as JSON (an empty list when the frames are clean)
+Night City's looks place its runs differently (night_city.Look and the Edgerun plate), so its jobs are per look
+(NIGHT_CITY_JOBS), and two of them draw a format tag of their own (TAGS: fr-CA's day clock and es-CO's ages).
+
+    python tests/frame_layout.py THEME LANGUAGE [VARIANT]    the findings, as JSON (an empty list when clean)
 """
 from __future__ import annotations
 
@@ -49,8 +58,21 @@ NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 INK = 64                        # the coverage (of 255) that counts as ink, as the probes for #94's plan count it
 MIN_GAP = 2.0                   # logical px of air between the ink of two runs on one line
 TOUCH = 1                       # buffer px round an outline's stroke that a run's ink must keep clear of
-THEMES: tuple[str, ...] = ("nostromo",)
+THEMES: tuple[str, ...] = ("nostromo", "night_city")
 LANGUAGES: tuple[str, ...] = ("en", "pseudo", "fr", "es", "tr")
+# A format tag drawn as a job of its own, as (language, format tag, clock): the tags whose figures the budgets' rows name
+# (fr-CA's 12-hour day clock in the hover line and the row's reset, es-CO's spaced day in the band's age).
+TAGS: dict[str, tuple[str, str, int]] = {"fr-CA": ("fr", "fr-CA", 12), "es-CO": ("es", "es-CO", 12)}
+# Night City's jobs, as (language or tag, variant): every layout (layout_of) in the pseudo-locale, where the words give
+# way the most: the three looks, and Edgerun with transparent_bg ("edgerun/clear": the floating widget and the strip,
+# the surfaces that take it), which drops the plate for a look of its own; English, French, Spanish and Turkish on a
+# boxed look (Blackwall) and a plain one (Relic); the two tags on Blackwall, whose boxes their figures fill. The
+# critic's cost cut (#95 critic 4): the other looks in those languages are held to these by the variant check.
+NIGHT_CITY_JOBS: tuple[tuple[str, str], ...] = (
+    ("pseudo", "blackwall"), ("pseudo", "relic"), ("pseudo", "edgerun"), ("pseudo", "edgerun/clear"),
+    *((language, look) for language in ("en", "fr", "es", "tr") for look in ("blackwall", "relic")),
+    ("fr-CA", "blackwall"), ("es-CO", "blackwall"))
+CLEAR = "/clear"                # a job's variant drawn with transparent_bg
 # What English already draws so, by design, and every language with it: (theme, surface, what, the run as a pattern),
 # each with the budgets' record of it. Nostromo's 5H value at 100 % (tight: "100%", Turkish "%100") meets the 5H bar's
 # last cells on a short taskbar's strip (budgets.KNOWN_ENGLISH_OVERRUNS, "nostromo.strip.value_5h"). A known overlap
@@ -86,6 +108,10 @@ class Frame:
     cells: list[tuple[int, int, int, int]] = field(default_factory=list)
     hazard: list[tuple[int, int, int, int]] = field(default_factory=list)
     body: Image.Image | None = None
+    # Shapes that are not rectangles (Night City's chips): (mask, x, y), the mask's 255 where the stroke or fill is, at
+    # buffer px (x, y).
+    stroke_masks: list[tuple[Image.Image, int, int]] = field(default_factory=list)
+    fill_masks: list[tuple[Image.Image, int, int]] = field(default_factory=list)
 
 
 @contextmanager
@@ -97,6 +123,7 @@ def recording() -> Iterator[list[Frame]]:
     frames: list[Frame] = []
     live: dict[int, tuple[Any, Frame]] = {}       # by id, holding the canvas so its id is not reused while recording
     texts: dict[int, tuple[Any, str]] = {}        # the same for the text layers
+    figures: dict[int, int] = {}                  # a Night City value's layers, by layer id: the figure they make up
     inside: list[str] = []
     real = {name: getattr(Canvas, name) for name in ("text_layer", "stamp", "fill_rect", "outline_rect",
                                                       "dotted_hline", "segment_layers", "hazard", "gradient_fill",
@@ -120,8 +147,17 @@ def recording() -> Iterator[list[Frame]]:
             ink = layer.mask.point(_INK_TABLE)
             box = ink.getbbox()
             if box is not None:
-                frame(self).runs.append(Run(text, ink, layer.x, layer.y, (layer.x + box[0], layer.y + box[1],
-                                                                         layer.x + box[2], layer.y + box[3])))
+                run = Run(text, ink, layer.x, layer.y, (layer.x + box[0], layer.y + box[1], layer.x + box[2],
+                                                        layer.y + box[3]))
+                target = frame(self)
+                figure = figures.get(id(layer))
+                joined = target.__dict__.setdefault("_figures", {})
+                if figure is not None and figure in joined:     # the figure's other run: one run, the two inks
+                    target.runs[target.runs.index(joined[figure])] = joined[figure] = _joined(joined[figure], run)
+                else:
+                    if figure is not None:
+                        joined[figure] = run
+                    target.runs.append(run)
         return real["stamp"](self, layer, color)
 
     def fill_rect(self: Any, x0: float, y0: float, x1: float, y1: float, color: Any) -> None:
@@ -174,19 +210,133 @@ def recording() -> Iterator[list[Frame]]:
     def finish(self: Any, *args: Any, **kwargs: Any) -> Any:
         done = live.pop(id(self), None)
         if done is not None:
+            done[1].__dict__.pop("_figures", None)
             frames.append(done[1])
         return real["finish"](self, *args, **kwargs)
 
     spies = {"text_layer": text_layer, "stamp": stamp, "fill_rect": fill_rect, "outline_rect": outline_rect,
              "dotted_hline": dotted_hline, "segment_layers": segment_layers, "hazard": hazard,
              "gradient_fill": gradient_fill, "fill_ring": fill_ring, "finish": finish}
+    night = _night_city_spies(frame, texts, figures)
     for name, spy in spies.items():
         setattr(Canvas, name, spy)
+    for (owner, name), (spy, _method) in night.items():
+        setattr(owner, name, spy)
     try:
         yield frames
     finally:
         for name, method in real.items():
             setattr(Canvas, name, method)
+        for (owner, name), (_spy, method) in night.items():
+            setattr(owner, name, method)
+
+
+def _joined(a: Run, b: Run) -> Run:
+    """Two runs' ink as one run (Night City's value: its numerals and its percent sign), its text in reading order."""
+    left, top = min(a.box[0], b.box[0]), min(a.box[1], b.box[1])
+    right, bottom = max(a.box[2], b.box[2]), max(a.box[3], b.box[3])
+    ink = Image.new("L", (right - left, bottom - top), 0)
+    for run in (a, b):
+        part = run.ink.crop((run.box[0] - run.x, run.box[1] - run.y, run.box[2] - run.x, run.box[3] - run.y))
+        at = (run.box[0] - left, run.box[1] - top, run.box[2] - left, run.box[3] - top)
+        ink.paste(ImageChops.lighter(ink.crop(at), part), at[:2])
+    text = "".join(run.text for run in sorted((a, b), key=lambda run: run.box[0]))
+    return Run(text, ink, left, top, (left, top, right, bottom))
+
+
+def _night_city_spies(frame: Callable[[Any], Frame], texts: dict[int, tuple[Any, str]],
+                      figures: dict[int, int]) -> dict[tuple[Any, str], tuple[Any, Any]]:
+    """The hooks Night City's own drawing needs (the module's docstring says what each records), as {(owner, name):
+    (spy, the real one)}."""
+    from usage_monitor.render import engine
+    from usage_monitor.render.skins import night_city as nc
+
+    Ink = nc._Ink
+    real = {name: getattr(Ink, name) for name in ("layer", "hazard", "polygon")}
+    real_nc = {name: getattr(nc, name) for name in ("_chip_out", "_chip_crit", "_chip_hold", "_draw_cells",
+                                                     "_draw_slanted", "_paint_frame", "_pip", "_draw_value")}
+    polygons: list[list[Any]] = []                # the polygons each chip being drawn queues, innermost last
+    figure: list[int | None] = [None]             # the value being drawn, if any
+    count = [0]
+
+    def layer(self: Any, text: str, *args: Any, **kwargs: Any) -> Any:
+        out = real["layer"](self, text, *args, **kwargs)
+        texts[id(out[0])] = (out[0], str(text))
+        if figure[0] is not None:
+            figures[id(out[0])] = figure[0]
+        return out
+
+    def hazard(self: Any, rect: Any, *args: Any, **kwargs: Any) -> None:
+        frame(self.cv).hazard.append(self.cv._rect_px(*rect))
+        return real["hazard"](self, rect, *args, **kwargs)
+
+    def polygon(self: Any, points: Any, color: Any) -> None:
+        if polygons:
+            polygons[-1].append(points)
+        return real["polygon"](self, points, color)
+
+    def shapes(draw: Callable[[], Any]) -> tuple[Any, list[Any]]:
+        polygons.append([])
+        try:
+            return draw(), polygons[-1]
+        finally:
+            polygons.pop()
+
+    def cropped(mask: Image.Image) -> tuple[Image.Image, int, int] | None:
+        box = mask.getbbox()
+        return None if box is None else (mask.crop(box), box[0], box[1])
+
+    def chip_out(ink: Any, *args: Any, **kwargs: Any) -> Any:
+        width, made = shapes(lambda: real_nc["_chip_out"](ink, *args, **kwargs))
+        ring = cropped(ImageChops.subtract(ink.cv._full_mask(made[0]), ink.cv._full_mask(made[1])))
+        if ring is not None:
+            frame(ink.cv).stroke_masks.append(ring)
+        return width
+
+    def filled(name: str) -> Callable[..., Any]:
+        def chip(ink: Any, *args: Any, **kwargs: Any) -> Any:
+            width, made = shapes(lambda: real_nc[name](ink, *args, **kwargs))
+            fill = cropped(ink.cv._full_mask(made[0]))
+            if fill is not None:
+                frame(ink.cv).fill_masks.append(fill)
+            return width
+        return chip
+
+    def draw_cells(ink: Any, x: float, y: float, step: float, width: float, height: float, cells: int,
+                   *args: Any, **kwargs: Any) -> Any:
+        frame(ink.cv).cells.extend(ink.cv._rect_px(x + step * i, y, x + step * i + width, y + height)
+                                   for i in range(cells))
+        return real_nc["_draw_cells"](ink, x, y, step, width, height, cells, *args, **kwargs)
+
+    def draw_slanted(ink: Any, x: float, y: float, width: float, height: float, *args: Any, **kwargs: Any) -> Any:
+        frame(ink.cv).cells.append(ink.cv._rect_px(x, y, x + width, y + height))
+        return real_nc["_draw_slanted"](ink, x, y, width, height, *args, **kwargs)
+
+    def paint_frame(cv: Any, pal: Any, width: float, height: float, chamfer: float, opts: Any) -> Any:
+        frame(cv).body = cv._full_mask(engine.chamfer_polygon(1, 1, width - 1, height - 1, chamfer - 1, chamfer - 1))
+        return real_nc["_paint_frame"](cv, pal, width, height, chamfer, opts)
+
+    def pip(ink: Any, x: float, y: float, *args: Any, **kwargs: Any) -> Any:
+        frame(ink.cv).fills.append(ink.cv._rect_px(x, y, x + nc.PIP, y + nc.PIP))
+        return real_nc["_pip"](ink, x, y, *args, **kwargs)
+
+    def draw_value(*args: Any, **kwargs: Any) -> Any:
+        count[0] += 1
+        figure[0] = count[0]
+        try:
+            return real_nc["_draw_value"](*args, **kwargs)
+        finally:
+            figure[0] = None
+
+    spies: dict[tuple[Any, str], tuple[Any, Any]] = {
+        (Ink, "layer"): (layer, real["layer"]), (Ink, "hazard"): (hazard, real["hazard"]),
+        (Ink, "polygon"): (polygon, real["polygon"])}
+    for name, spy in (("_chip_out", chip_out), ("_chip_crit", filled("_chip_crit")),
+                      ("_chip_hold", filled("_chip_hold")), ("_draw_cells", draw_cells),
+                      ("_draw_slanted", draw_slanted), ("_paint_frame", paint_frame), ("_pip", pip),
+                      ("_draw_value", draw_value)):
+        spies[nc, name] = (spy, real_nc[name])
+    return spies
 
 
 def drawn(draw: Callable[[], Any]) -> Frame:
@@ -216,6 +366,27 @@ def _shared(a: Run, b: Run) -> bool:
     one = a.ink.crop((x0 - a.x, y0 - a.y, x1 - a.x, y1 - a.y))
     two = b.ink.crop((x0 - b.x, y0 - b.y, x1 - b.x, y1 - b.y))
     return ImageChops.multiply(one, two).getbbox() is not None
+
+
+def _meets_mask(run: Run, mask: Image.Image, x: int, y: int, outside: bool = False) -> bool:
+    """Whether the run's ink has a pixel where ``mask`` (at buffer px x, y) is set; with ``outside``, where it is not
+    (beyond the mask's own box too)."""
+    ink = run.ink.crop((run.box[0] - run.x, run.box[1] - run.y, run.box[2] - run.x, run.box[3] - run.y))
+    part = mask.crop((run.box[0] - x, run.box[1] - y, run.box[2] - x, run.box[3] - y))
+    return ImageChops.multiply(ink, ImageChops.invert(part) if outside else part).getbbox() is not None
+
+
+def _grown(mask: Image.Image, by: int) -> Image.Image:
+    """``mask`` with ``by`` buffer px added on every side, the shape grown into them."""
+    from PIL import ImageFilter
+
+    out = Image.new("L", (mask.width + 2 * by, mask.height + 2 * by), 0)
+    out.paste(mask, (by, by))
+    return out.filter(ImageFilter.MaxFilter(2 * by + 1))
+
+
+def _mask_box(mask: Image.Image, x: int, y: int) -> tuple[int, int, int, int]:
+    return x, y, x + mask.width, y + mask.height
 
 
 def _outside(run: Run, body: Image.Image) -> bool:
@@ -258,14 +429,29 @@ def check(frame: Frame) -> list[tuple[str, str, str]]:
                     on.add(what)
                     break
         if "run on an outline" not in on:
+            for mask, x, y in frame.stroke_masks:
+                if _meets_mask(run, mask, x, y):
+                    found.append(("run on an outline", run.text, logical(_mask_box(mask, x, y))))
+                    on.add("run on an outline")
+                    break
+        if "run on an outline" not in on:
             for rect in frame.strokes:
                 if _meets(run, (rect[0] - TOUCH, rect[1] - TOUCH, rect[2] + TOUCH, rect[3] + TOUCH)):
                     found.append(("run touches an outline", run.text, logical(rect)))
+                    on.add("run touches an outline")
+                    break
+        if "run on an outline" not in on and "run touches an outline" not in on:
+            for mask, x, y in frame.stroke_masks:
+                if _meets_mask(run, _grown(mask, TOUCH), x - TOUCH, y - TOUCH):
+                    found.append(("run touches an outline", run.text, logical(_mask_box(mask, x, y))))
                     break
         for rect in frame.fills:
             if _meets(run, rect) and not (rect[0] <= run.box[0] and rect[1] <= run.box[1]
                                           and run.box[2] <= rect[2] and run.box[3] <= rect[3]):
                 found.append(("run across a fill", run.text, logical(rect)))
+        for mask, x, y in frame.fill_masks:
+            if _meets_mask(run, mask, x, y) and _meets_mask(run, mask, x, y, outside=True):
+                found.append(("run across a fill", run.text, logical(_mask_box(mask, x, y))))
         if frame.body is not None and _outside(run, frame.body):
             found.append(("run leaves the body", run.text, logical(run.box)))
     return found
@@ -273,10 +459,34 @@ def check(frame: Frame) -> list[tuple[str, str, str]]:
 
 # ── Every frame of a theme ────────────────────────────────────────────────────
 
-def surfaces(theme_id: str, model: Any, variant: Any = None) -> Iterator[tuple[str, Callable[[], Any]]]:
+def strip_draws(theme_id: str) -> list[tuple[str, int, float]]:
+    """(name, taskbar height in device px, display scale) for each strip the check draws: Nostromo's at every
+    budgets.STRIP_SCALES, a strip exactly as tall as itself; Night City's at each taskbar height the frame dump draws
+    at each display scale (budgets.SCALES), one per scale the skin settles on (night_city.render_taskbar shrinks the
+    strip to the bar less STRIP_MARGIN a side, and centres it in a taller one)."""
+    import budgets
+    from usage_monitor.render import dump
+
+    if theme_id != "night_city":
+        from usage_monitor.render.skins import nostromo
+
+        return [(f"strip@{scale:.4g}", round(nostromo.STRIP_H * scale), scale) for scale in budgets.STRIP_SCALES]
+    from usage_monitor.render.skins import night_city as nc
+
+    seen: dict[float, tuple[str, int, float]] = {}
+    for scale in budgets.SCALES:
+        for height in dump.TASKBAR_HEIGHTS_AT_1X:
+            px = round(height * scale)
+            settled = round(max(0.25, min(scale, (px - 2 * nc.STRIP_MARGIN) / nc.STRIP_H)), 4)
+            seen.setdefault(settled, (f"strip@{settled:.4g}", px, scale))
+    return sorted(seen.values(), key=lambda item: item[2] * 1000 + item[1])
+
+
+def surfaces(theme_id: str, model: Any, variant: Any = None, opts: Any = None) -> Iterator[tuple[str, Callable[[], Any]]]:
     """(name, draw) for each surface and scale the check draws ``model`` at: the floating widget and the hover card at
     every display scale Windows offers up to 200 % (budgets.SCALES, 1.75 too), and the strip at every scale a taskbar
-    draws it at (budgets.STRIP_SCALES)."""
+    draws it at (strip_draws). With ``opts`` (RenderOptions) only the surfaces that take them, the floating widget and
+    the strip."""
     import budgets
     from usage_monitor.render import dump
     from usage_monitor.render.skins import get_skin
@@ -284,21 +494,32 @@ def surfaces(theme_id: str, model: Any, variant: Any = None) -> Iterator[tuple[s
     theme = dump.load_theme_objects()[theme_id]
     skin, variant = get_skin(theme_id), variant or theme.variants[0]
     for scale in budgets.SCALES:
-        yield f"floating@{scale:g}", lambda s=scale: skin.render_floating(model, theme, variant, s, None)
-        yield f"tooltip@{scale:g}", lambda s=scale: skin.render_tooltip(model, theme, variant, s)
-    strip_h = getattr(sys.modules[type(skin).__module__], "STRIP_H", 34)
-    for scale in budgets.STRIP_SCALES:
-        yield f"strip@{scale:.4g}", lambda s=scale: skin.render_taskbar(model, theme, variant, round(strip_h * s), s,
-                                                                        None)
+        yield f"floating@{scale:g}", lambda s=scale: skin.render_floating(model, theme, variant, s, opts)
+        if opts is None:
+            yield f"tooltip@{scale:g}", lambda s=scale: skin.render_tooltip(model, theme, variant, s)
+    for name, height, scale in strip_draws(theme_id):
+        yield name, lambda h=height, s=scale: skin.render_taskbar(model, theme, variant, h, s, opts)
 
 
-def models(language: str) -> dict[str, Any]:
-    """Every state tests/skin_words.py records (the dump's in every show_scoped mode, the edge and guard states and
-    Nostromo's own), as view models in ``language``'s dev locale."""
-    import skin_words
+def locale_of(language: str) -> Any:
+    """The locale a job draws in: a dev instance's for a DEV_LANGUAGES id, else a format tag's of TAGS (a 12-hour
+    clock: the widest day clocks)."""
     from usage_monitor import i18n
 
-    return skin_words.models(skin_words._nostromo_states, i18n.dev_locale(language))
+    if language in TAGS:
+        base, tag, clock = TAGS[language]
+        return i18n.Locale(setting="system", language=base, system=i18n.DEFAULT, format=tag, clock=clock,
+                           offered=(i18n.DEFAULT,))
+    return i18n.dev_locale(language)
+
+
+def models(language: str, theme_id: str = "nostromo") -> dict[str, Any]:
+    """Every state tests/skin_words.py records for ``theme_id`` (the dump's in every show_scoped mode, the edge and
+    guard states and the theme's own), as view models in ``language``'s locale (locale_of)."""
+    import skin_words
+
+    states = skin_words._night_city_states if theme_id == "night_city" else skin_words._nostromo_states
+    return skin_words.models(states, locale_of(language))
 
 
 def _strip_bar(group: int) -> tuple[float, float]:
@@ -326,35 +547,81 @@ def known(theme_id: str, finding: list[str]) -> tuple[str, str, str, str] | None
     return None
 
 
-def findings(theme_id: str, language: str) -> list[list[str]]:
-    """Every finding in every frame of ``theme_id`` in ``language``: [state, surface, what, run, other], the KNOWN
-    ones too."""
+def findings(theme_id: str, language: str, variant_id: str | None = None) -> list[list[str]]:
+    """Every finding in every frame of ``theme_id`` in ``language`` (a variant's, the first when None; one ending in
+    CLEAR drawn with transparent_bg): [state, surface, what, run, other], the KNOWN ones too."""
+    from usage_monitor.render import dump
+    from usage_monitor.render.skins import RenderOptions
+
+    clear = bool(variant_id) and variant_id.endswith(CLEAR)
+    variant_id = variant_id[:-len(CLEAR)] if clear and variant_id else variant_id
+    variant = dump.load_theme_objects()[theme_id].variant(variant_id) if variant_id else None
+    opts = RenderOptions(transparent_bg=True) if clear else None
     found: list[list[str]] = []
-    for name, model in models(language).items():
-        for surface, draw in surfaces(theme_id, model):
+    for name, model in models(language, theme_id).items():
+        for surface, draw in surfaces(theme_id, model, variant, opts):
             for what, text, other in check(drawn(draw)):
                 found.append([name, surface, what, text, other])
     return found
 
 
-def runs_by_variant(theme_id: str, language: str) -> dict[str, list[list[Any]]]:
-    """For each state, each variant's runs at 1.0 on every surface (text, buffer x and y of the layer, its ink box),
-    keyed "<state>|<variant>", so a test can hold every variant to the first (they differ in colour only)."""
+def layout_of(theme_id: str, variant: Any, clear: bool = False) -> str:
+    """Which variants draw the same runs: Nostromo's all (they differ in colour only); Night City's by its look, its
+    bars and the plate: "boxed" Blackwall, "plate" the Edgerun plate, "plain" Relic and Mox (slanted bars), "cells"
+    Edgerun without its plate (transparent_bg turns it off: night_city._palette), whose segmented bars end 1 px past
+    the slanted one's and leave the strip's percent that much less room."""
+    if theme_id != "night_city":
+        return "all"
     from usage_monitor.render import dump
-    from usage_monitor.render.skins import get_skin
+    from usage_monitor.render.skins import night_city as nc
+
+    look = nc.look_for(variant)
+    if look.boxed:
+        return "boxed"
+    if nc._plate_tokens(dump.load_theme_objects()[theme_id], variant) and not clear:
+        return "plate"
+    return "cells" if look.segmented else "plain"
+
+
+def runs_by_variant(theme_id: str, language: str) -> dict[str, dict[str, list[list[Any]]]]:
+    """For each state, each variant's runs at 1.0 by surface (floating widget, hover card, strip: text, buffer x and y
+    of the layer, its ink box), keyed "<state>|<layout>|<variant>" (layout_of), so a test can hold every variant to the
+    first of its layout. Night City's are also drawn with transparent_bg (the floating widget and the strip, the
+    surfaces that take it), keyed "<state>|<layout>/clear|<variant>"."""
+    from usage_monitor.render import dump
+    from usage_monitor.render.skins import RenderOptions, get_skin
 
     theme = dump.load_theme_objects()[theme_id]
     skin = get_skin(theme_id)
-    out: dict[str, list[list[Any]]] = {}
-    for name, model in models(language).items():
+
+    def runs(draw: Callable[[], Any]) -> list[list[Any]]:
+        return [[run.text, run.x, run.y, list(run.box)] for run in drawn(draw).runs]
+
+    out: dict[str, dict[str, list[list[Any]]]] = {}
+    for name, model in models(language, theme_id).items():
         for variant in theme.variants:
-            with recording() as frames:
-                skin.render_floating(model, theme, variant, 1.0, None)
-                skin.render_tooltip(model, theme, variant, 1.0)
-                skin.render_taskbar(model, theme, variant, 48, 1.0, None)
-            out[f"{name}|{variant.id}"] = [[run.text, run.x, run.y, list(run.box)] for frame in frames
-                                           for run in frame.runs]
+            out[f"{name}|{layout_of(theme_id, variant)}|{variant.id}"] = {
+                "floating": runs(lambda: skin.render_floating(model, theme, variant, 1.0, None)),
+                "tooltip": runs(lambda: skin.render_tooltip(model, theme, variant, 1.0)),
+                "strip": runs(lambda: skin.render_taskbar(model, theme, variant, 48, 1.0, None))}
+            if theme_id == "night_city":
+                clear = RenderOptions(transparent_bg=True)
+                out[f"{name}|{layout_of(theme_id, variant, clear=True)}/clear|{variant.id}"] = {
+                    "floating": runs(lambda: skin.render_floating(model, theme, variant, 1.0, clear)),
+                    "strip": runs(lambda: skin.render_taskbar(model, theme, variant, 48, 1.0, clear))}
     return out
+
+
+def jobs() -> list[tuple[str, ...]]:
+    """What test_frame_layout.py runs, each in a fresh Python: ("findings", theme, language[, variant]) for Nostromo in
+    every language on its first variant and for Night City's NIGHT_CITY_JOBS, and ("variants", theme, "pseudo")."""
+    found: list[tuple[str, ...]] = []
+    for theme in THEMES:
+        if theme == "night_city":
+            found += [("findings", theme, language, variant) for language, variant in NIGHT_CITY_JOBS]
+        else:
+            found += [("findings", theme, language) for language in LANGUAGES]
+    return found + [("variants", theme, "pseudo") for theme in THEMES]
 
 
 def collect(theme_id: str, language: str, what: str = "findings") -> Any:
@@ -368,14 +635,16 @@ def collect(theme_id: str, language: str, what: str = "findings") -> Any:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) == 3 and argv[0] in ("findings", "variants") and argv[1] in THEMES and argv[2] in LANGUAGES:
+    languages = (*LANGUAGES, *TAGS)
+    if len(argv) in (3, 4) and argv[0] in ("findings", "variants") and argv[1] in THEMES and argv[2] in languages:
         sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
-        result = findings(argv[1], argv[2]) if argv[0] == "findings" else runs_by_variant(argv[1], argv[2])
+        result = (findings(argv[1], argv[2], *argv[3:]) if argv[0] == "findings"
+                  else runs_by_variant(argv[1], argv[2]))
         print(json.dumps(result, ensure_ascii=False))
         return 0
-    if len(argv) == 2 and argv[0] in THEMES and argv[1] in LANGUAGES:
+    if len(argv) in (2, 3) and argv[0] in THEMES and argv[1] in languages:
         sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
-        print(json.dumps(findings(argv[0], argv[1]), ensure_ascii=False, indent=1))
+        print(json.dumps(findings(argv[0], argv[1], *argv[2:]), ensure_ascii=False, indent=1))
         return 0
     print(__doc__)
     return 2
