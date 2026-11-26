@@ -614,9 +614,12 @@ html[data-g-swatches] .nm-variants .nm-btn[aria-pressed="true"]::before { box-sh
 .nm-update .nm-status:empty { display: none; }
 
 /* a running update on Settings (#58): the guard card's parts. The steps are the chips' own tones (done ok, now the accent with
-   its dot, next neutral, a stall warn, a failure alert); the bar takes the warn and alert fills, as a limit card's does. */
+   its dot, a stall warn, a failure alert); next is the neutral chip dimmed as a disabled control is (a button's text at its
+   opacity). The bar takes the warn and alert fills, as a limit card's does. The sizes line keeps its line when it is empty. */
 .nm-uprog { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
 .nm-uprog .nm-verdict { flex-wrap: wrap; }
+.nm-uprog .nm-chip[data-step="next"] { color: var(--text); opacity: .5; }
+.nm-uprog .nm-story:empty { min-height: 1lh; }
 .nm-uprog.is-warn { --g-fill: var(--warn); }
 .nm-uprog.is-crit { --g-fill: var(--alert); }
 

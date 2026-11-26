@@ -1847,6 +1847,10 @@ function fakeBlock() {
       parts.cells = part("cells", cellsSig ? unesc(cellsSig[1]) : null, { className: /class="(nm-cells[^"]*)"/.exec(value)[1] });
       if (/data-pending=""/.test(value)) { parts.cells.setAttribute("data-pending", ""); }
       parts.bar = part("bar", null);
+      for (const name of ["aria-valuenow", "aria-valuetext"]) {
+        const m = new RegExp('role="progressbar"[^>]*? ' + name + '="([^"]*)"').exec(value);
+        if (m) { parts.bar.setAttribute(name, unesc(m[1])); }
+      }
       parts.bar.querySelector = (sel) => (sel === ".nm-cells" ? parts.cells : null);
       parts.size = part("size", sig("size"));
       parts.line = part("line", sig("line"), { className: /<p class="(nm-status[^"]*)" role="status"/.exec(value)[1] });
@@ -1892,7 +1896,7 @@ async function updateProgress() {
     checking: runOf(a, R({ phase: "checking", done: 99, total: 99 })), starting: runOf(a, R({ phase: "starting", done: 99, total: 99 })),
     restarting: runOf(a, R({ phase: "restarting", done: 99, total: 99 })),
   };
-  const failed = (reason, failedIn, extra) => runOf(a, Object.assign(R(Object.assign({ phase: "failed", reason, failed_in: failedIn, done: 9, total: 99 }, extra || {})), { failOver: SUB }), SUB);
+  const failed = (reason, failedIn, extra) => runOf(a, Object.assign(R(Object.assign({ phase: "failed", reason, failed_in: failedIn, done: 9, total: 99 }, extra || {})), { failOver: SUB, failFor: OFFERED }), SUB);
   U.failedIn = {
     downloading: failed("cut_short", "downloading"), checking: failed("digest", "checking", { done: 99 }),
     starting: failed("helper", "starting", { done: 99 }), restarting: failed("error", "restarting", { done: 99 }), none: failed("error", null),
@@ -1916,6 +1920,13 @@ async function updateProgress() {
     idle: runOf(a, R({ phase: "idle", version: null, age_s: 0 })),
     none: runOf(a, Object.assign(R({ done: 9, total: 99 }), { none: true })),
   };
+  // 5b. a failure that names no version is the release's that was on offer when it was shown, not a newer one found later
+  {
+    const noVersion = Object.assign(R({ phase: "failed", reason: "rejected", version: null, failed_in: "downloading", done: 0, total: null }),
+      { failOver: SUB, failFor: OFFERED });
+    U.noVersion = { underItsOffer: runOf(a, noVersion, SUB), underANewerOne: runOf(a, noVersion, SUB, "2.5.0"),
+      named: runOf(a, Object.assign({}, noVersion, { status: record({ phase: "failed", reason: "network", failed_in: "downloading" }), failFor: "" }), SUB) };
+  }
   // 6. just after a click: a record with no run yet, or a failure older than the click, is the click's run not begun; a run
   // that is going is shown as it is, however old
   const clicked = (ago, extra, p) => runOf(a, Object.assign({ clickedAt: UPDATE_NOW - ago, failOver: SUB }, R(extra), p || {}), SUB);
@@ -1972,6 +1983,27 @@ async function updateProgress() {
     a.patchUpdateBlock(block.box, null);
     U.patches = { first, same, partMoved, nextStep, cellsHtml, hiddenAfter: block.box.hidden, emptyAfter: block.box.innerHTML === "" };
   }
+  // 11b. one block drawn once and patched for the rest of the run keeps what a screen reader and the theme read in step: the
+  // bar's figures, its pending mark, the hot bar and the line's error tone
+  {
+    const block = fakeBlock();
+    const parts = (p) => a.progressParts(a.progressView(Object.assign(a.updateProgressState(), p), UPDATE_NOW, OFFERED, SUB));
+    const read = () => {
+      const q = block.parts();
+      return { now: q.bar.getAttribute("aria-valuenow"), text: q.bar.getAttribute("aria-valuetext"), pending: q.cells.getAttribute("data-pending") !== null,
+        cells: q.cells.className, line: q.line.className };
+    };
+    a.patchUpdateBlock(block.box, parts(R({ done: 0, total: null })));
+    const connecting = read();
+    a.patchUpdateBlock(block.box, parts(R({ done: 4404020, total: 22020096 })));
+    const sized = read();
+    a.patchUpdateBlock(block.box, parts(Object.assign(R({ phase: "failed", reason: "cut_short", failed_in: "downloading", done: 4404020, total: 22020096 }),
+      { failOver: SUB, failFor: OFFERED })));
+    const failedRun = read();
+    a.patchUpdateBlock(block.box, parts(R({ done: 1048576, total: 22020096 })));
+    const newRun = read();
+    U.patched = { connecting, sized, failed: failedRun, newRun, draws: block.counts.box };
+  }
 
   // The page's real paths, against a recording monitor: Settings opened, the asks, the clicks.
   const main = element("main");
@@ -1995,6 +2027,7 @@ async function updateProgress() {
     if (/\/api\/update\//.test(key)) { calls.push(key); }
     const hit = typeof replies[key] === "function" ? replies[key]() : replies[key];
     if (hit === "lost") { return Promise.reject(new Error("link lost")); }
+    if (hit === "hang") { return new Promise(() => {}); }
     return answer(...(hit || [404, { error: "not in this test" }]))();
   };
   const offering = (version) => ({ state: { status: "live" }, settings: {}, model_names: {},
@@ -2020,6 +2053,13 @@ async function updateProgress() {
     size: Object.keys(block.parts()).length ? block.parts().size.getAttribute("data-sig") : null,
     steps: Object.keys(block.parts()).length ? [...block.parts().steps.getAttribute("data-sig").matchAll(/data-step="(\w+)"/g)].map((m) => m[1]) : null
   });
+  // the page's clock, for the checks that need age_s to grow with it (the vm's Date.now, put back after each)
+  const VMDate = vm.runInContext("Date", box);
+  const realNow = VMDate.now;
+  let clock = 0;
+  const useClock = (at) => { clock = at; VMDate.now = () => clock; };
+  const realClock = () => { VMDate.now = realNow; };
+  const tickClock = async (ms) => { clock += ms; a.updateTick(); await settle(); };
   // the quick asks that are due (any other timer the page set is dropped: nothing here waits on one)
   const fire = async () => { const due = timers.filter((t) => t.ms === a.UPDATE_POLL_MS); timers.length = 0; due.forEach((t) => t.fn()); await settle(); };
   const tickAfter = async (ms) => { S.progress.askedAt = Date.now() - ms; a.updateTick(); await settle(); };
@@ -2141,6 +2181,92 @@ async function updateProgress() {
     restarting: await losing(record({ phase: "restarting", done: 99, total: 99 })),
     idle: await losing(record({ phase: "idle", version: null })),
   };
+
+  // 16. question 4: a failure that a click ended does not come back with its run's next answer; a later run's failure shows
+  // (the tray started it, and it failed before an ask saw it going), and ends at a click in turn
+  const failure = (extra) => record(Object.assign({ phase: "failed", reason: "network", failed_in: "downloading" }, extra));
+  fresh();
+  useClock(UPDATE_NOW);
+  replies = {
+    [STATUS]: [200, failure({ age_s: 40 })],
+    "POST /api/update/check": [200, { ok: true, result: { available: true, version: OFFERED, checked: true } }],
+    "GET /api/state": [200, offering(OFFERED)],
+  };
+  await opens("#settings");
+  U.again = { shown: look() };
+  api.settingsClick(click("check-update"));
+  await settle();
+  U.again.checked = look();
+  replies[STATUS] = [200, failure({ age_s: 43 })];
+  await tickClock(3000);
+  U.again.sameRun = look();
+  replies[STATUS] = [200, failure({ reason: "http", http_status: 404, age_s: 0.8 })];
+  await tickClock(3000);
+  U.again.laterRun = look();
+  api.settingsClick(click("check-update"));
+  await settle();
+  replies[STATUS] = [200, failure({ reason: "http", http_status: 404, age_s: 3.8 })];
+  await tickClock(3000);
+  U.again.laterRunEnded = look();
+  realClock();
+
+  // 17. the same failure with no version, then a newer release on offer (the six-hourly check found it) and no click
+  fresh();
+  useClock(UPDATE_NOW);
+  replies = { [STATUS]: [200, failure({ reason: "rejected", version: null, done: 0, total: null, age_s: 9 })] };
+  await opens("#settings");
+  U.newerOffer = { shown: look() };
+  S.data = offering("2.5.0");
+  replies[STATUS] = [200, failure({ reason: "rejected", version: null, done: 0, total: null, age_s: 12 })];
+  await tickClock(3000);
+  U.newerOffer.after = look();
+  realClock();
+
+  // 18. the link back after it was lost: the run shows again, asked every half second; misses count only in a row
+  const back = await losing(record({ done: 4404020, total: 22020096 }));
+  replies[STATUS] = [200, record({ done: 5404020, total: 22020096, age_s: 30 })];
+  await tickAfter(9000);
+  U.linkBack = { lost: back.after, back: look() };
+  fresh();
+  replies = { [STATUS]: [200, record({ done: 4404020, total: 22020096 })] };
+  await opens("#settings");
+  for (let i = 0; i < 3; i++) {
+    replies[STATUS] = "lost";
+    await fire();
+    replies[STATUS] = [200, record({ done: 4404020 + i, total: 22020096 })];
+    await fire();
+  }
+  U.linkBack.spread = look();
+
+  // 19. Install update again over a shown failure: the block stays, as the new run's start, while the click is answered (the
+  // card neither drops to the one line nor grows back); the new run's failure shows at its first answer, even within a second
+  // of the last; any other answer shows in its place; an answer that never comes leaves the line after the grace
+  const STARTED = [200, { ok: true, result: { started: true, mode: "installer" } }];
+  const rerun = async (applied, then) => {
+    fresh();
+    useClock(UPDATE_NOW);
+    replies = { [STATUS]: [200, failure({ done: 0, total: null, age_s: 0.5 })], "POST /api/update/apply": applied };
+    await opens("#settings");
+    const shown = look();
+    clock += 300;
+    calls.length = 0;
+    api.settingsClick(click("install-update"));
+    const asking = look();                                          // the click's POST is on its way
+    replies[STATUS] = then;
+    clock += 100;
+    await settle();
+    return { shown, asking, answered: look() };
+  };
+  U.rerun = {
+    failedAgain: await rerun(STARTED, [200, failure({ reason: "cut_short", done: 4404020, total: 22020096, age_s: 0 })]),
+    started: await rerun(STARTED, "hang"),                          // the monitor started it; its record not asked yet
+    browser: await rerun([200, { ok: true, result: { started: false, mode: "browser" } }], "hang"),
+    linkLost: await rerun("lost", "hang"),
+    hung: await rerun("hang", "hang"),
+  };
+  await tickClock(a.UPDATE_CLICK_GRACE_MS + 500);
+  U.rerun.hung.afterGrace = look();
+  realClock();
 
   // 15. the banner and the line under the buttons are what they were, with a run and without
   fresh();

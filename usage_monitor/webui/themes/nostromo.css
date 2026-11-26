@@ -537,11 +537,15 @@ html[data-reduce-motion="1"] *, html[data-reduce-motion="1"] *::before, html[dat
 
 /* a running update on Settings (#58): the guard card's parts. The steps differ by fill and light: done a settled plate on the
    track's ghost, now the plain chip, next dimmed as a disabled control is; a stall is the bright solid chip, a failure the hot
-   one. The bar stays monochrome while it stalls (the chip says it) and is drawn hot once the update failed (.hot). */
+   one with the theme's error mark (as .nm-err has: where a variant's warn and alert are one colour, white, it is what tells a
+   failure from a stall). The bar stays monochrome while it stalls (the chip says it) and is drawn hot once the update failed
+   (.hot). The sizes line keeps its line when it has nothing to say, so the block does not jump. */
 .nm-uprog { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
 .nm-uprog .nm-verdict { flex-wrap: wrap; padding-bottom: 0; }
 .nm-uprog .nm-chip[data-step="done"] { background: var(--ghost); border-color: var(--edge); }
 .nm-uprog .nm-chip[data-step="next"] { color: var(--label); border-color: var(--edge); opacity: .45; }
+.nm-uprog .nm-chip.is-crit::before { content: "! "; }
+.nm-uprog .nm-story:empty { min-height: 1lh; }
 .nm-cells.hot i.part { background: linear-gradient(90deg, var(--hot) var(--f, 0%), var(--ghost) var(--f, 0%)); }
 
 /* the sign-in help: the dashed status line grown into a panel, for a missing or an expired sign-in. Its heading keeps the banner's

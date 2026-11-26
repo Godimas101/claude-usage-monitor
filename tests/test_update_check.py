@@ -1358,6 +1358,82 @@ def test_the_real_opener_refuses_a_redirect_to_plain_http_with_its_own_code(serv
     assert uc.failure_code(caught.value) == "redirect"     # not "GitHub answered HTTP 302"
 
 
+class _RedirectServer:
+    """127.0.0.1 only: /<status>/<to> answers that redirect status with a Location of the kind ``to`` names. "https" points
+    back at this same plain-http server over https, so a redirect that is followed ends in a TLS failure, never a fetch."""
+
+    def __init__(self) -> None:
+        port: list[int] = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # noqa: N802
+                parts = self.path.strip("/").split("/")
+                targets = {"file": "file:///C:/Windows/win.ini", "data": "data:text/plain,hi", "ftp": "ftp://127.0.0.1/x",
+                           "http": f"http://127.0.0.1:{port[0]}/x", "https": f"https://127.0.0.1:{port[0]}/x"}
+                if len(parts) == 2 and parts[0] in ("301", "302", "303", "307", "308") and parts[1] in targets:
+                    self.send_response(int(parts[0]))
+                    self.send_header("Location", targets[parts[1]])
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                else:
+                    self.send_error(404)
+
+            def log_message(self, *_args: object) -> None:
+                pass
+
+        self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        port.append(self.httpd.server_address[1])
+        self.url = f"http://127.0.0.1:{port[0]}"
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def close(self) -> None:
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+def test_every_refused_redirect_has_its_own_code_whatever_the_scheme(tmp_path: Path) -> None:
+    """urllib turns down file: and data: itself with a plain HTTPError; the monitor judges every redirect status before it
+    does, so each one that does not go to https is a refused redirect, never "GitHub answered HTTP 302" (critic 10 on #58)."""
+    srv = _RedirectServer()
+    try:
+        for status in ("301", "302", "303", "307", "308"):
+            for to in ("file", "data", "ftp", "http"):
+                with pytest.raises(urllib.error.HTTPError, match="non-https") as caught:
+                    uc._download(f"{srv.url}/{status}/{to}", str(tmp_path / "Setup.exe"), repo=REPO)
+                assert isinstance(caught.value, uc.UpdateRedirectRefused), (status, to)
+                assert uc.failure_code(caught.value) == "redirect" and caught.value.code == int(status), (status, to)
+        with pytest.raises(urllib.error.URLError) as followed:
+            uc._download(srv.url + "/302/https", str(tmp_path / "Setup.exe"), repo=REPO)
+        assert not isinstance(followed.value, urllib.error.HTTPError)   # followed to https: the TLS hello found no TLS there
+        assert uc.failure_code(followed.value) == "network"
+        assert list(tmp_path.iterdir()) == []
+    finally:
+        srv.close()
+
+
+def test_a_redirect_is_judged_by_the_address_it_resolves_to() -> None:
+    """A relative Location is judged where it points (on an https page, https: followed), a scheme-relative one too, and a
+    redirect with no Location is left to urllib, as before."""
+    handler = uc._HttpsOnlyRedirects()
+    opened: list[urllib.request.Request] = []
+    handler.parent = types.SimpleNamespace(open=lambda new, timeout=None: opened.append(new) or new)  # type: ignore[assignment]
+    req = urllib.request.Request("https://github.com/o/r/releases/download/v1/Setup.exe")
+    req.timeout = 5  # type: ignore[attr-defined]
+
+    def answer(location: str | None) -> object:
+        headers = http.client.HTTPMessage()
+        if location is not None:
+            headers["Location"] = location
+        return handler.http_error_302(req, io.BytesIO(), 302, "Found", headers)
+
+    assert answer("/o/r/assets/1").full_url == "https://github.com/o/r/assets/1"  # type: ignore[attr-defined]
+    with pytest.raises(uc.UpdateRedirectRefused):
+        answer("http://objects.example/x")
+    assert answer("//objects.example/x").full_url == "https://objects.example/x"  # type: ignore[attr-defined]
+    assert answer(None) is None
+    assert [r.full_url for r in opened] == ["https://github.com/o/r/assets/1", "https://objects.example/x"]
+
+
 # ── The helper script and how it is started ───────────────────────────────────
 
 def test_the_helper_script_is_a_constant_ascii_batch_file() -> None:

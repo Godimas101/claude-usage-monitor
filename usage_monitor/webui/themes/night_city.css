@@ -669,12 +669,13 @@ h1, h2, h3, p, figure, dl, dd { margin: 0; }
 
 /* a running update on Settings (#58): the guard card's parts. A step done is a plate in the bar's colour, filled as the cells
    are (an outline would match the accent tag where the bar is the accent, as in Edgerun); now is the plain accent tag; next is
-   dimmed as a disabled control is; a stall is the warn plate, a failure the danger plate. The bar takes the limit cards' warn
-   and hazard fills. */
+   drawn as a disabled control is (a button's ink on its frame, at its opacity); a stall is the warn plate, a failure the danger
+   plate. The bar takes the limit cards' warn and hazard fills. The sizes line keeps its line when it has nothing to say. */
 .nm-uprog { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
 .nm-uprog .nm-verdict { flex-wrap: wrap; row-gap: 6px; padding-bottom: 0; }
 .nm-uprog .nm-chip[data-step="done"] { --oc: var(--nc-bar); --of: var(--nc-bar); color: var(--nc-ink); }
-.nm-uprog .nm-chip[data-step="next"] { --oc: var(--nc-hair); color: var(--nc-ink-3); opacity: .45; }
+.nm-uprog .nm-chip[data-step="next"] { --oc: var(--nc-line-a); color: var(--nc-ink-2); opacity: .45; }
+.nm-uprog .nm-story:empty { min-height: 1lh; }
 .nm-uprog.is-warn .nm-cells i.on { background: var(--nc-warn); }
 .nm-uprog.is-warn .nm-cells i.part { background: linear-gradient(90deg, var(--nc-warn) var(--f, 0%), var(--nc-track) var(--f, 0%)); }
 .nm-uprog.is-crit .nm-cells i.on { background: var(--nc-hazard); }

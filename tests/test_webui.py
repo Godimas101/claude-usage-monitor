@@ -2522,6 +2522,87 @@ def test_a_failure_lasts_until_the_next_click_on_an_update_button(checks: dict[s
 
 
 @ui_only
+def test_a_failure_a_click_ended_stays_ended_and_a_later_runs_failure_shows(checks: dict[str, Any]) -> None:
+    """Question 4: the next answer of the run whose failure a click ended does not bring it back (its age_s has grown with
+    the clock: the same run); a run that began later, which the tray started and which failed before an ask saw it going,
+    shows its failure, over the line under the buttons as a first failure does, and a click ends that one in turn."""
+    again = update_run(checks)["again"]
+    assert again["shown"]["shown"] and unescape(again["shown"]["said"]) == UPDATE_FAILURE_TEXTS["network"]
+    for name in ("checked", "sameRun", "laterRunEnded"):
+        view = again[name]
+        assert not view["shown"] and view["line"] == "AN UPDATE IS AVAILABLE." and not view["lineHidden"], name
+    later = again["laterRun"]
+    assert later["shown"] and later["cls"] == "nm-uprog is-crit" and later["lineHidden"]
+    assert unescape(later["said"]) == UPDATE_FAILURE_TEXTS["http"].replace("{status}", "404")
+    assert len(again["laterRunEnded"]["calls"]) == 6                  # each step above was asked, none was skipped
+
+
+@ui_only
+def test_a_failure_with_no_version_belongs_to_the_release_it_was_shown_under(checks: dict[str, Any]) -> None:
+    """A link that was not this project's leaves a failure with no version: it is the release's that was on offer when it
+    showed, so a newer release found later (the six-hourly check, no click) is not drawn under it; its line shows instead."""
+    no_version = update_run(checks)["noVersion"]
+    assert no_version["underItsOffer"]["kind"] == "failed" and no_version["underANewerOne"] == NOTHING
+    assert no_version["named"]["kind"] == "failed"                    # a failure that names its version needs no such mark
+    newer = update_run(checks)["newerOffer"]
+    assert newer["shown"]["shown"] and unescape(newer["shown"]["said"]) == UPDATE_FAILURE_TEXTS["rejected"]
+    assert not newer["after"]["shown"] and newer["after"]["line"] == "Version 2.5.0 is available." and not newer["after"]["lineHidden"]
+
+
+@ui_only
+def test_the_patches_keep_the_bar_and_the_line_in_step(checks: dict[str, Any]) -> None:
+    """The block is drawn once at the start of a run and patched after: the bar's figure for a screen reader comes with the
+    size, the pending mark goes (the theme's placeholder would stay over a filling bar), the bar turns hot and the line takes
+    the error tone at a failure, and a new run clears both."""
+    patched = update_run(checks)["patched"]
+    assert patched["draws"] == 1
+    assert patched["connecting"] == {"now": None, "text": "Connecting to GitHub…", "pending": True, "cells": "nm-cells", "line": "nm-status"}
+    assert patched["sized"] == {"now": "20", "text": "4.2 of 21.0 MB", "pending": False, "cells": "nm-cells", "line": "nm-status"}
+    assert patched["failed"] == {"now": "20", "text": "4.2 of 21.0 MB", "pending": False, "cells": "nm-cells hot", "line": "nm-status is-err"}
+    assert patched["newRun"] == {"now": "4", "text": "1.0 of 21.0 MB", "pending": False, "cells": "nm-cells", "line": "nm-status"}
+
+
+@ui_only
+def test_the_link_back_shows_the_run_again_and_misses_count_only_in_a_row(checks: dict[str, Any]) -> None:
+    """After three asks with no answer the run reads as lost; the first answer after shows it again, asked every half second.
+    Asks that went unanswered one at a time, each followed by an answer, never add up to a lost link."""
+    back = update_run(checks)["linkBack"]
+    assert unescape(back["lost"]["said"]) == UPDATE_LOST
+    for name in ("back", "spread"):
+        view = back[name]
+        assert view["shown"] and view["cls"] == "nm-uprog" and view["said"] == "Downloading version 2.4.0.", name
+        assert view["steps"] == ["now", "next", "next"] and view["quick"] == 1 and view["busy"] == "true", name
+    assert back["back"]["size"] == "5.1 of 21.0 MB"
+
+
+@ui_only
+def test_install_update_over_a_failure_keeps_the_block_while_the_click_is_answered(checks: dict[str, Any]) -> None:
+    """Install update again over a failure that shows: the block becomes the new run's start at once and stays while the
+    monitor answers (the card neither drops to the one line nor grows back), Install busy and its INSTALLING… line hidden.
+    Started: the start until the record has the run, and a failure of the new run shows at its first answer, even a second
+    after the last one began. Any other answer shows in the block's place; an answer that never comes leaves the line once
+    the click's grace is over."""
+    rerun = update_run(checks)["rerun"]
+    for name, case in rerun.items():
+        assert case["shown"]["shown"] and unescape(case["shown"]["said"]) == UPDATE_FAILURE_TEXTS["network"], name
+        asking = case["asking"]
+        assert asking["calls"] == ["POST /api/update/apply"], name
+        assert asking["shown"] and asking["steps"] == ["now", "next", "next"] and asking["size"] == "Connecting to GitHub…", name
+        assert asking["said"] == "Downloading version 2.4.0." and asking["lineHidden"] and asking["busy"] == "true", name
+    again = rerun["failedAgain"]["answered"]
+    assert again["calls"] == ["POST /api/update/apply", "GET /api/update/status"]
+    assert again["shown"] and unescape(again["said"]) == UPDATE_FAILURE_TEXTS["cut_short"] and again["lineHidden"]
+    started = rerun["started"]["answered"]
+    assert started["shown"] and started["size"] == "Connecting to GitHub…" and started["lineHidden"] and started["busy"] == "true"
+    for name, line in (("browser", "OPENED THE RELEASE PAGE IN YOUR BROWSER."), ("linkLost", "UPDATE FAILED: THE DASHBOARD LOST ITS LINK")):
+        answered = rerun[name]["answered"]
+        assert not answered["shown"] and answered["line"] == line and not answered["lineHidden"] and answered["busy"] is None, name
+    assert rerun["hung"]["answered"]["shown"] and rerun["hung"]["answered"]["lineHidden"]
+    after = rerun["hung"]["afterGrace"]
+    assert not after["shown"] and after["line"] == "INSTALLING…" and not after["lineHidden"] and after["busy"] is None
+
+
+@ui_only
 def test_a_second_click_on_install_sends_nothing_while_a_run_goes(checks: dict[str, Any]) -> None:
     """Install update is aria-disabled while a run goes (it keeps the keyboard focus) and settingsClick sends nothing for it;
     the other buttons still work, and their answers show under the run."""
@@ -2530,8 +2611,9 @@ def test_a_second_click_on_install_sends_nothing_while_a_run_goes(checks: dict[s
     during = click["checkDuringRun"]
     assert during["calls"] == ["POST /api/update/check"]
     assert during["shown"] and during["line"] == "AN UPDATE IS AVAILABLE." and not during["lineHidden"]
-    assert re.search(r'action === "install-update"\) \{\s*if \(!updateRunBusy\(\)\) \{[^\n]*\n\s*installUpdate\(\);',
+    assert re.search(r'action === "install-update"\) \{\s*if \(!updateRunBusy\(\)\) \{[^\n]*\n\s*installUpdateFromSettings\(\);',
                      function_body(APP_CODE, "settingsClick"))
+    assert "\n    installUpdate();\n" in function_body(APP_CODE, "installUpdateFromSettings")
 
 
 @ui_only
@@ -2588,22 +2670,32 @@ def test_the_block_holds_no_figure_night_city_glitches(checks: dict[str, Any]) -
 @pytest.mark.parametrize("theme_id", THEME_IDS)
 def test_every_theme_draws_the_update_block_with_what_it_has(theme_id: str) -> None:
     """Each sheet lays the block out and lets its chips wrap (a long word in another language fits a narrow window), tells
-    the three steps apart (Gates by the chips' own tones, which gates.js reads from data-tone), and colours a stalled and a
-    failed bar its own way. No rule of the block moves anything."""
+    the three steps apart (Gates by the chips' own tones, which gates.js reads from data-tone), dims the next step as it dims
+    a disabled control (at that control's opacity; in Night City with a button's ink on a button's frame, dimmed once), keeps
+    the sizes line a line high when it is empty (a failure before the first byte would shrink the block), and colours a
+    stalled and a failed bar its own way. No rule of the block moves anything."""
     css = THEME_CSS[theme_id]
     assert re.search(r"\.nm-uprog \{ display: flex; flex-direction: column;", css)
     assert re.search(r"\.nm-uprog \.nm-verdict \{ flex-wrap: wrap;", css)
     rules = re.findall(r"([^{}\n]*\.nm-uprog[^{}]*)\{([^}]*)\}", css)
     assert rules and not any(re.search(r"\b(?:animation|transition)\b", body) for _, body in rules)
+    disabled = re.search(r'\.nm-btn\[aria-disabled="true"\][^{]*\{[^}]*opacity: (\.\d+);', css).group(1)
+    upcoming = re.search(r'\.nm-uprog \.nm-chip\[data-step="next"\] \{([^}]*)\}', css).group(1)
+    assert f"opacity: {disabled};" in upcoming                          # as a disabled control is
+    assert ".nm-uprog .nm-story:empty { min-height: 1lh; }" in css
     if theme_id == "gates":
         assert ".nm-uprog.is-warn { --g-fill: var(--warn); }" in css and ".nm-uprog.is-crit { --g-fill: var(--alert); }" in css
         assert re.search(r'\.nm-chip\[data-g-tone="acc"\] \{[^}]*color: var\(--text\)', css)
         assert re.search(r'\.nm-chip\[data-g-tone="neutral"\] \{[^}]*color: var\(--text-dim\)', css)
+        assert "color: var(--text);" in upcoming                         # a button's text, at a disabled button's opacity
     else:
         assert re.search(r'\.nm-uprog \.nm-chip\[data-step="done"\] \{[^}]+\}', css)
-        assert re.search(r'\.nm-uprog \.nm-chip\[data-step="next"\] \{[^}]*opacity: \.45;', css)    # as a disabled control is
+    if theme_id == "night_city":                                         # a button as a disabled one is drawn: dimmed once
+        assert upcoming.strip() == "--oc: var(--nc-line-a); color: var(--nc-ink-2); opacity: .45;"
+        assert re.search(r"\n\.nm-btn, [^{]*\{[^}]*color: var\(--nc-ink-2\);\s*--oc: var\(--nc-line-a\);", css)
     if theme_id == "nostromo":
         assert ".nm-cells.hot i.on { background: var(--hot); }" in css and ".nm-cells.hot i.part {" in css
+        assert '.nm-err::before { content: "! ";' in css and '.nm-uprog .nm-chip.is-crit::before { content: "! "; }' in css
     if theme_id == "night_city":
         for tone in ("is-warn", "is-crit"):
             assert f".nm-uprog.{tone} .nm-cells i.on" in css and f".nm-uprog.{tone} .nm-cells i.part" in css

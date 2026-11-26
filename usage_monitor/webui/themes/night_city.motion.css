@@ -123,6 +123,8 @@ html[data-theme="night_city"] :is(.nm-cells, .nm-ratio)[data-fx-pend="bar"]::aft
 /* a bar with no cells yet still shows its empty cells */
 html[data-theme="night_city"] .nm-cells[data-fx-pend="bar"]:empty { background: repeating-linear-gradient(90deg, var(--nc-track) 0 calc(5% - 2px), transparent calc(5% - 2px) 5%); }
 html[data-theme="night_city"] .nm-ratio[data-fx-pend="bar"]:empty { background: repeating-linear-gradient(90deg, var(--nc-track) 0 calc(16.67% - 3px), transparent calc(16.67% - 3px) 16.67%); }
+/* a stalled update of unknown size (#58): its placeholder bar holds still, as nothing arrives */
+html[data-theme="night_city"] .nm-uprog.is-warn .nm-cells[data-fx-pend="bar"]::after { animation: none; display: none; }
 html[data-theme="night_city"] .nm-chart-host[data-fx-pend="chart"] {
   min-height: 60px; overflow: hidden; background: repeating-linear-gradient(180deg, var(--nc-hair) 0 1px, transparent 1px 22px);
 }

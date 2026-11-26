@@ -36,10 +36,11 @@
  * Progress    A running update on Settings (#58): .nm-uprog#set-update-progress in the System card, hidden while there is none
  *             to show; .is-warn while the download stalls, .is-crit once the update failed or the dashboard lost the monitor.
  *             Made of the guard card's parts: .nm-verdict > three .nm-chip steps (Download, Check, Restart), each with
- *             data-step=done|now|next|stalled|failed and the tones of the guard's chips (done is-ok, now acc, next neutral,
- *             stalled solid is-warn, failed solid is-crit); div[role=progressbar] > .nm-cells (data-pending while the size is
- *             not known; .hot once it failed); .nm-story (the sizes, as written); .nm-status (what it is doing). A theme tells
- *             the three steps apart with what it has and adds no motion: an unknown size is the theme's own pending bar.
+ *             data-step=done|now|next|stalled|failed and the tones of the guard's chips (done is-ok, now acc, next neutral and
+ *             dimmed as the theme dims a disabled control, stalled solid is-warn, failed solid is-crit); div[role=progressbar] >
+ *             .nm-cells (data-pending while the size is not known; .hot once it failed); .nm-story (the sizes, as written; a line
+ *             high when it has none); .nm-status (what it is doing). A theme tells the three steps apart with what it has and adds
+ *             no motion: an unknown size is the theme's own pending bar, which holds still while the download stalls.
  * Help        .nm-msg.nm-help[role=region] is the status banner grown into a help panel, for the two statuses only the user can fix
  *             (no_credentials: the steps to sign in; stale: what to do about an expired sign-in). b (the heading) + p + ol (the steps;
  *             a li may hold a .nm-cmd[data-command] > code.nm-path + button.nm-btn[data-action=copy-command][data-command]; the stale
@@ -4612,7 +4613,7 @@
       });
     } else if (action === "install-update") {
       if (!updateRunBusy()) {                          // while a run goes the button is aria-disabled and a click sends nothing (#58)
-        installUpdate();
+        installUpdateFromSettings();
       }
     } else if (action === "skip-update") {
       skipUpdate();
@@ -4707,6 +4708,7 @@
   var UPDATE_IDLE_POLL_MS = 3000;          // while Settings is open with a release on offer (the guard card's cadence)
   var UPDATE_LOST_AFTER = 3;               // asks in a row with no answer before a running update counts as lost
   var UPDATE_CLICK_GRACE_MS = 3000;        // after Install update, how long its start shows before the record has the run
+  var UPDATE_RUN_APART_MS = 1000;          // two failures whose runs began further apart than this are two runs (age_s is to a tenth)
   // Owner question 1 on #58: how long the Check step stays the current one once the record has passed it. The SHA-256 is worked
   // out as the file arrives, so the check itself is one comparison; at 0 the Check chip shows done as soon as it has passed.
   var UPDATE_CHECK_HOLD_MS = 0;
@@ -4747,7 +4749,11 @@
       active: "",          // the record's phase after the last answer while it showed a run ("downloading" for the start), else ""
       checkAt: 0,          // when the record was first seen past the download (ms), for UPDATE_CHECK_HOLD_MS
       over: null,          // the S.update the block was drawn over: that line is the run's own, and stays hidden under it
-      failOver: null       // the S.update when the failure was first shown: a click gives S.update a new answer and ends it
+      failOver: null,      // the S.update when the failure was first shown: a click gives S.update a new answer and ends it
+      failStart: null,     // when that failure's run began (ms: the answer's time less its age_s), to tell a later run's from it
+      failFor: "",         // the release on offer when it was shown: a failure that names no version is that release's only
+      applying: null       // Install update clicked over a shown failure: { over, at }, the S.update its start shows over (true
+                           // until installUpdate has drawn its own) and when, while the monitor answers the click
     };
   }
 
@@ -4776,9 +4782,24 @@
 
   /* Owner question 4 on #58: how long a failure stays. Until the next click on an update button (Check for updates now, Install
    * update, Skip this version, or the banner's), each of which gives S.update a new answer that then shows in its place, or
-   * until a new run starts. */
-  function updateFailureLasts(p, update) {
-    return p.failOver !== null && p.failOver === update;
+   * until a new run starts; and only while its release is on offer (a failure that names no version, a link that was not this
+   * project's, is the release's that was on offer when it was shown). updateFailureNew says which failures are shown at all. */
+  function updateFailureLasts(p, update, offered) {
+    return p.failOver !== null && p.failOver === update && ((p.status !== null && p.status.version !== null) || p.failFor === offered);
+  }
+
+  /* Part of question 4: whether a failed record whose run began at start (the page's clock) is shown. Yes for the first one
+   * since a run was seen going or started here, and for one whose run began later than the shown one's (the tray started
+   * another); a failure that a click ended does not come back with the next answer of the same run. */
+  function updateFailureNew(p, start) {
+    return p.failOver === null || p.failStart === null || start - p.failStart > UPDATE_RUN_APART_MS;
+  }
+
+  /* A run was seen going, or was started here: the failure shown before it is over. */
+  function endUpdateFailure(p) {
+    p.failOver = null;
+    p.failStart = null;
+    p.failFor = "";
   }
 
   /* What Settings shows of the update, from what the page knows (p is S.progress), or null for nothing (today's line). kind is
@@ -4801,10 +4822,11 @@
       var held = (phase === "starting" || phase === "restarting") && waited > 0 && p.checkAt > 0 && now - p.checkAt < waited;
       return updateViewOf("run", held ? "checking" : phase, rec, offered);
     }
-    if (updateStale(p, rec, now)) {
+    var a = p.applying;
+    if ((a && (a.over === true || a.over === update) && now - a.at <= UPDATE_CLICK_GRACE_MS) || updateStale(p, rec, now)) {
       return updateViewOf("start", "downloading", null, offered);
     }
-    if (phase === "failed" && updateIsFor(rec, offered) && updateFailureLasts(p, update)) {
+    if (phase === "failed" && updateIsFor(rec, offered) && updateFailureLasts(p, update, offered)) {
       return updateViewOf("failed", rec.failed_in, rec, offered);
     }
     return null;
@@ -5094,17 +5116,20 @@
   }
 
   /* A record the monitor answered. A running one for the release on offer ends a failure shown before it; a failure is shown
-   * from the first answer that has it (not one older than a click that started a new run). */
+   * from the first answer that has it (not one older than a click that started a new run), once for its run (updateFailureNew). */
   function takeUpdateStatus(rec) {
     var p = S.progress;
     var now = Date.now();
     var mine = isRunPhase(rec.phase) && updateIsFor(rec, offeredVersion());
+    var start = now - (updateCount(rec.age_s) || 0) * 1000;
     p.status = rec;
     p.misses = 0;
     if (mine) {
-      p.failOver = null;
-    } else if (rec.phase === "failed" && p.failOver === null && !updateStale(p, rec, now)) {
+      endUpdateFailure(p);
+    } else if (rec.phase === "failed" && !updateStale(p, rec, now) && updateFailureNew(p, start)) {
       p.failOver = S.update;
+      p.failStart = start;
+      p.failFor = offeredVersion();
     }
     p.checkAt = mine && rec.phase !== "downloading" ? p.checkAt || now : 0;
     p.active = mine ? rec.phase : updateStale(p, rec, now) ? "downloading" : "";
@@ -5150,8 +5175,26 @@
     p.misses = 0;
     p.checkAt = 0;
     p.over = null;
-    p.failOver = null;
+    p.status = null;                                                 // what the monitor said before is the run before's
+    endUpdateFailure(p);
     askUpdateStatus();
+  }
+
+  /* Install update on Settings. Over a failure that shows, the block stays, as the new run's start, while the monitor answers
+   * the click, so the card does not drop to the one line and grow again: if it starts the update, watchUpdateRun takes over;
+   * any other answer replaces the S.update the start shows over, and shows in its place. With no failure shown it is
+   * installUpdate alone (a source run answers "browser", and the start's "Downloading version" would not be true). */
+  function installUpdateFromSettings() {
+    var p = S.progress;
+    var view = progressView(p, Date.now(), offeredVersion(), S.update);
+    if (view && view.kind === "failed") {
+      p.applying = { over: true, at: Date.now() };
+      p.over = null;                                                 // the INSTALLING… answer is then the block's own, hidden under it
+    }
+    installUpdate();
+    if (p.applying && p.applying.over === true) {
+      p.applying.over = S.update;
+    }
   }
 
   // ── Export ──────────────────────────────────────────────────────────────────────

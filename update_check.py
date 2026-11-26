@@ -40,7 +40,11 @@
 #
 # While an update runs, PROGRESS records how far it got (the phase, the bytes, why it
 # failed) for the dashboard: see "What the dashboard sees of an update" below. That
-# record is this copy's own (#58); the suite's other copies do not have it.
+# record is this copy's own (#58); the suite's other copies do not have it. #58 is not
+# only that section: it also added imports, _release_version, the redirect handler's
+# http_error_302 and its UpdateRedirectRefused, DOWNLOAD_TIMEOUT_S as two defaults, and
+# hooks in apply_update, _apply, _stage_update, _download and _spawn_installer. A copy
+# for the suite takes all of #58 or none of it.
 
 import errno
 import hashlib
@@ -126,7 +130,8 @@ class UpdateHelperFailed(UpdateError):
 
 
 class UpdateRedirectRefused(urllib.error.HTTPError):
-    """A redirect to a plain-http address, refused. Still an HTTPError, as it always was."""
+    """A redirect to an address that is not https (plain http, file:, data: ...), refused. Still an HTTPError, as it
+    always was."""
 
 
 STALL_S = 15                # no new data for this long while bytes are missing: the record says "stalled"
@@ -348,7 +353,27 @@ def _open_url(url):
 # --- HTTP --------------------------------------------------------------------
 
 class _HttpsOnlyRedirects(urllib.request.HTTPRedirectHandler):
-    """Follow redirects (GitHub sends downloads to a CDN host) but never to plain http."""
+    """Follow redirects (GitHub sends downloads to a CDN host) but never to an address that is not https.
+
+    http_error_302 (and 301, 303, 307, 308) judges where a redirect points, its Location resolved against the request's
+    address as urllib resolves it, before urllib does: urllib refuses some schemes itself (file:, data:) with a plain
+    HTTPError, which the record would call an HTTP failure. Every refused redirect is an UpdateRedirectRefused (#58).
+    redirect_request checks again."""
+
+    def http_error_302(self, req, fp, code, msg, headers):
+        if "location" in headers:
+            target = headers["location"]
+        elif "uri" in headers:
+            target = headers["uri"]
+        else:
+            return None
+        if urllib.parse.urlsplit(urllib.parse.urljoin(req.full_url, target)).scheme.lower() != "https":
+            raise UpdateRedirectRefused(req.full_url, code, "refused a redirect to a non-https address", headers, fp)
+        return super().http_error_302(req, fp, code, msg, headers)
+
+    http_error_301 = http_error_303 = http_error_307 = http_error_302
+    if hasattr(urllib.request.HTTPRedirectHandler, "http_error_308"):      # Python 3.11 and later follow 308
+        http_error_308 = http_error_302
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         if urllib.parse.urlsplit(newurl).scheme.lower() != "https":

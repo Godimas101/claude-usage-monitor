@@ -1160,7 +1160,7 @@ rebuilt by `server.update_status_view` from the known fields only:
 | `done`, `total` | bytes written so far, and the Content-Length (`null` when the server did not send one) |
 | `age_s`, `idle_s` | seconds since the run began and since its last change, new bytes or a new phase (0 with no run), to a tenth |
 | `stalled` | downloading, bytes still missing, and no new bytes for `update_check.STALL_S` (15) seconds (from the start of the run until the first arrive; the headers alone do not count); the socket timeout (`DOWNLOAD_TIMEOUT_S`, 60) then fails it |
-| `reason` | a failure's code (`update_check.REASONS`, from `failure_code`): `timeout`, `network` (the connection: a URLError that is no HTTP answer or timeout, a ConnectionError, TLS, a name lookup, a socket error naming the network), `http` (with `http_status`), `redirect` (a refused redirect to plain http), `too_large`, `cut_short`, `digest` (the file did not match), `rejected` (not this project's link), `helper`, `local` (any other OSError: a full disk, a file held by a scanner, the temp folder, the helper file) or `error` |
+| `reason` | a failure's code (`update_check.REASONS`, from `failure_code`): `timeout`, `network` (the connection: a URLError that is no HTTP answer or timeout, a ConnectionError, TLS, a name lookup, a socket error naming the network), `http` (with `http_status`), `redirect` (a refused redirect to any address that is not https: plain http, file:, data: and the rest), `too_large`, `cut_short`, `digest` (the file did not match), `rejected` (not this project's link), `helper`, `local` (any other OSError: a full disk, a file held by a scanner, the temp folder, the helper file) or `error` |
 | `failed_in` | the phase it failed in, so the page marks that step |
 | `http_status` | the HTTP status of an `http` or `redirect` failure, else `null` |
 | `limit_mb`, `timeout_s` | the size cap and the socket timeout, for the page's words |
@@ -1315,11 +1315,12 @@ default browser instead, and the exit code says so (below).
   keeps its one line after *Update now*; Settings shows the run (below; the banner's turn is #114).
 - **A running update on Settings (#58).** The System card has `#set-update-progress` (`.nm-uprog`) between its buttons and
   its line, filled from `GET /api/update/status` (the record, "Updates"): three step chips (Download, Check, Restart: done,
-  under way, still to come, stalled or failed, with the guard card's tones), the limit cards' 32-cell bar, the sizes
-  ("4.2 of 21.0 MB": 1 MB is 1,048,576 bytes, the total rounded and the done floored to a tenth, and written a tenth lower
-  where it would read the total's figure before the last byte) and a status line. An unknown size is a pending bar
-  (`data-pending`, so each theme draws its placeholder bar), "4.2 MB so far" under it, and before the first byte
-  "Connecting to GitHub…". The page asks every `UPDATE_POLL_MS` (500 ms) while a run shows, every `UPDATE_IDLE_POLL_MS`
+  under way, still to come, stalled or failed, with the guard card's tones; a step still to come is dimmed as the theme dims
+  a disabled control), the limit cards' 32-cell bar, the sizes ("4.2 of 21.0 MB": 1 MB is 1,048,576 bytes, the total rounded
+  and the done floored to a tenth, and written a tenth lower where it would read the total's figure before the last byte; a
+  line high when there is nothing to say, so a failure before the first byte does not shrink the block) and a status line.
+  An unknown size is a pending bar (`data-pending`, so each theme draws its placeholder bar, which holds still while the
+  download stalls), "4.2 MB so far" under it, and before the first byte "Connecting to GitHub…". The page asks every `UPDATE_POLL_MS` (500 ms) while a run shows, every `UPDATE_IDLE_POLL_MS`
   (3 s, from `tick()`) while Settings is open with a release on offer (the tray can start a run), never while the window is
   hidden, another page is open or nothing is on offer, and not again after a 404 or a 501 (an older monitor, the dev server
   without `--update-demo`). A run shows only for the release on offer (a failure whose link named no version too). For
@@ -1327,18 +1328,30 @@ default browser instead, and the exit code says so (below).
   failure older than the click) shows the run's start; a running record shows as it is. Three asks in a row with no answer
   (`UPDATE_LOST_AFTER`) read as a lost link while the update downloads or is checked, and as the monitor closing once it
   had begun to (`starting`, `restarting`; no version is named, since a helper that dies brings the old one back), after
-  which nothing more is asked; with no run, nothing changes (the header already says the link is lost). A failure shows
-  until the next click on an update button (owner question 4: `updateFailureLasts`; each click gives `S.update` a new
-  answer, which then shows) or a new run. While the block shows, the line under the buttons is hidden when it is the
-  run's own (an answer given after the run began shows under the block), and *Install update* is `aria-disabled` while a
-  run goes: `settingsClick` sends nothing for it. The Check step is shown done as soon as the record has passed it
+  which nothing more is asked; with no run, nothing changes (the header already says the link is lost); the first answer
+  after shows the run again. A failure shows until the next click on an update button (owner question 4:
+  `updateFailureLasts`; each click gives `S.update` a new answer, which then shows) or a new run, and only while its release
+  is on offer (one that names no version is the release's that was on offer when it showed). Which failures show at all is
+  `updateFailureNew`: the first one since a run was seen or started here, and one whose run began more than
+  `UPDATE_RUN_APART_MS` (1 s) after the shown one's (each record's start is the answer's time less its `age_s`), so a click
+  that ended a failure is not undone by the next answer of the same run, while a later run's failure (the tray started it)
+  shows. While the block shows, the line under the buttons is hidden when it is the run's own (an answer given after the run
+  began shows under the block), and *Install update* is `aria-disabled` while a run goes: `settingsClick` sends nothing for
+  it. Clicked over a failure that shows, *Install update* (`installUpdateFromSettings`) keeps the block, as the new run's
+  start, while the monitor answers (at most `UPDATE_CLICK_GRACE_MS`): the card does not drop to the one line and grow again;
+  any answer but `installer` shows in its place. The Check step is shown done as soon as the record has passed it
   (owner question 1: `UPDATE_CHECK_HOLD_MS` is 0). The block is drawn once and patched part by part (`data-sig` on the
   chips, the cells, with the part of the next cell, the sizes and the line), so an answer every half second rebuilds only
   what moved. It holds no `.nm-big`, `.nm-stat-v` or `.nm-cmp-n`, which Night City glitches on every change. Each failure
   code has its own words (`UPDATE_FAILED`, a table of functions, so a text is the catalog's when it is drawn).
   `installUpdate` has one line for it (`watchUpdateRun()`, after the installer text): #97, which moves the update rows'
-  English to the catalog after this, keeps it, the hooks in `syncUpdate` and `settingsClick`, and `settings.update.progress.*`.
-  The Starbase (#66, #67) and Overseer (#80) sheets will need `.nm-uprog` rules. `tests/browser/update_probe.js` (Playwright,
+  English to the catalog after this, keeps it, the hooks in `syncUpdate` and `settingsClick` (its `install-update` branch
+  calls `installUpdateFromSettings`, which calls `installUpdate`), and `settings.update.progress.*`.
+  The Starbase (#66, #67) and Overseer (#80) sheets will need `.nm-uprog` rules: the column and its wrapping chips, the
+  steps told apart by `[data-step]` with next at the theme's disabled opacity, `.nm-uprog .nm-story:empty { min-height:
+  1lh; }`, a stalled and a failed bar, a failed step that differs from a stalled one by more than its fill where the warn
+  and alert tones are close, and, if their placeholder bar moves, a rule in their motion sheet that holds it still under
+  `.nm-uprog.is-warn`. `tests/browser/update_probe.js` (Playwright,
   not part of pytest) checks it in a real browser in every look, with and without reduced motion, and shoots every state.
 - **Usage guard card (#27).** The Settings card's two blocks, the live status (`#guard-live`) and the one-click setup
   (`#guard-setup`), are filled by `syncGuard` from `/api/guard`, asked once at a time every `GUARD_POLL_MS` while Settings is
@@ -1460,7 +1473,8 @@ just redrawn and the pointer has not moved since: one-shot hover animations wait
 the hover look itself; `app.js` and the engine both set it and both clear it on the first pointer or wheel movement). On a
 slot: `data-pending` (read by the engine, written by `app.js`; a running update whose size is not known yet is a pending bar
 too, #58, so each theme draws its placeholder bar there and its arrival when the size comes, and nothing else of the update's
-block moves), `data-fx-pend="num | text | bar | rail | chart"` (written by the engine for the themes' CSS), `.fx-land` (a bar, rail or chart whose data just arrived plays its fill from its own start, with
+block moves; Gates' and Night City's motion sheets hold that placeholder still under `.nm-uprog.is-warn`, while the
+download stalls), `data-fx-pend="num | text | bar | rail | chart"` (written by the engine for the themes' CSS), `.fx-land` (a bar, rail or chart whose data just arrived plays its fill from its own start, with
 no page stagger), and `data-fx` / `data-fx-d` (a figure whose characters the script draws: the ghost text). The orders the CSS
 reads are custom properties the engine writes (`--fx-i` a card's order, clamped to 8 so a long page ends inside its budget,
 `--fx-k` a cell's order in its bar, `--fx-c`, `--fx-p`, `--fx-d`, `--fx-r` for chart columns, pips, dots and rows, `--fx-cn` a

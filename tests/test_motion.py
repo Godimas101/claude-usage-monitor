@@ -461,11 +461,20 @@ def test_the_pending_marks_the_engine_reads_are_the_apps() -> None:
 
 
 def test_the_update_block_adds_no_animation_or_transition() -> None:
-    """#58: the update's block on Settings moves only as each theme's existing pending bar and bar arrival do. No motion
-    sheet names it, no rule of a theme sheet that names it sets an animation or a transition, and the page's code for it
-    starts no animation of its own (it writes data-pending, which motion.js reads; never a motion mark)."""
+    """#58: the update's block on Settings moves only as each theme's existing pending bar and bar arrival do. A motion sheet
+    names it only to hold that pending bar still while the download stalls (Gates' sweep and Night City's scan would say
+    data is coming while the line says none is); no rule of a theme sheet that names it sets an animation or a transition,
+    and the page's code for it starts no animation of its own (it writes data-pending, which motion.js reads; never a motion
+    mark)."""
+    hold = re.compile(r'html\[data-theme="\w+"\] \.nm-uprog\.is-warn \.nm-cells\[data-fx-pend="bar"\]::after')
+    held = set()
     for name in MOTION_CSS:
-        assert "nm-uprog" not in read(name), name
+        for rule in css_rules(read(name)):
+            if "nm-uprog" in rule.header:
+                assert hold.fullmatch(rule.header), (name, rule.header)
+                assert " ".join(rule.body.split()) == "animation: none; display: none;", (name, rule.header)
+                held.add(name)
+    assert held == {"themes/gates.motion.css", "themes/night_city.motion.css"}    # Nostromo's pending bar is a still pattern
     for theme_id in THEME_IDS:
         named = [rule for rule in css_rules(read(f"themes/{theme_id}.css")) if "nm-uprog" in rule.header]
         assert named, theme_id
