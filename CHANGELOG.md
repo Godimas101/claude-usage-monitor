@@ -4,6 +4,7 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
+- After an HTTP 403 the dashboard's sign-in help says to send Claude Code a message ([#55](https://github.com/Godimas101/claude-usage-monitor/issues/55)) — closed 2026-11-26 by @Godimas101
 - Localization: the choices only Chris can make ([#86](https://github.com/Godimas101/claude-usage-monitor/issues/86)) — closed 2026-11-26 by @Godimas101
 - Dashboard: its choices are lost each time the monitor restarts ([#54](https://github.com/Godimas101/claude-usage-monitor/issues/54)) — closed 2026-11-26 by @Godimas101
 - Epic: v2.3, finish the open work (update safety, guard reach, hardening) ([#50](https://github.com/Godimas101/claude-usage-monitor/issues/50)) — closed 2026-11-13 by @Godimas101
