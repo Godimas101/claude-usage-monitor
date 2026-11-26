@@ -2252,14 +2252,15 @@ def nc_room(box_id: str, language: str, scale: float = 1.0, tag: str | None = No
     """A Night City line box's room in ``language``, worked out as its limit is (_nc_room, its line's tuple) beside the
     language's own widest texts: its words', and the figures of format tag ``tag`` (nc_tags), or, with no tag, of the
     tag that leaves the box least. fr-CA's 12-hour day clock is wider than English's reset, so the pace has less room
-    there. English's is the box's limit."""
+    there. English's is the box's limit. The brand, drawn as written, has no text of a language's own: its English
+    stands beside the header's words in every language (as g_room's title)."""
     if tag is None:
         return min(nc_room(box_id, language, scale, each) for each in nc_tags(language))
     figures = nc_tags(language)[tag]
 
     def widest(other: str) -> float:
         box = BOX[other]
-        found = figures[other] if other in figures else (widest_text(box, language, scale),)
+        found = figures[other] if other in figures else (texts(box, language) or box.english)
         return max(box.width(text, scale) for text in found)
 
     def floor(other: str) -> float:

@@ -1295,6 +1295,12 @@ def test_a_night_city_boxs_room_in_a_language_is_its_own_tags() -> None:
     assert "100 DÍAS OLD" in budgets.nc_tags("es")["es-CO/24"][age.id]
     assert budgets.allowed(age, "es", "100 DÍAS OLD", 1.0) == pytest.approx(age.limit)
     assert budgets.allowed(age, i18n.DEFAULT, "41 M OLD", 1.0) == budgets.budget(age, 1.0)
+    # The brand is drawn as written in every language, so the header's words have English's room beside it, never the
+    # whole line (a language with no brand text of its own once measured it as empty: 207 px for the LIVE tag).
+    for language in i18n.DEV_LANGUAGES:
+        for box_id in ("night_city.floating.live_tag", "night_city.floating.status_chip",
+                       "night_city.floating.hold_chip", "night_city.floating.hold_word"):
+            assert budgets.nc_room(box_id, language) == pytest.approx(budgets.BOX[box_id].limit), (language, box_id)
 
 
 def test_night_citys_guard_chip_has_the_room_its_header_leaves_beside_the_languages_words(
