@@ -738,6 +738,140 @@ def test_a_theme_that_does_not_exist_is_refused_and_leaves_nothing_open(tmp_path
         devserver.make_server("normal", 0, settings_dir=tmp_path / "dev", theme=spec)
 
 
+# ── The update demo (#58) ─────────────────────────────────────────────────────────
+
+class DemoClock:
+    """Monotonic seconds for the demo's record; its sleep moves them on and notes the record at that moment."""
+
+    def __init__(self) -> None:
+        self.now = 500.0
+        self.demo: devserver.UpdateDemo | None = None
+        self.seen: list[dict[str, Any]] = []
+
+    def __call__(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+        assert self.demo is not None
+        self.seen.append(self.demo.status())
+
+
+def at_once(mode: str) -> tuple[devserver.UpdateDemo, DemoClock]:
+    """A demo whose run happens inside the apply request, on a clock that the run's sleeps move."""
+    clock = DemoClock()
+    demo = devserver.UpdateDemo(mode, clock=clock, sleep=clock.sleep, spawn=lambda run: run())
+    clock.demo = demo
+    return demo, clock
+
+
+@pytest.fixture
+def no_real_update(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Every way into the real updater fails the test: the network, apply_update, the download, the helper, the exit."""
+    import update_check
+
+    reached: list[str] = []
+
+    def refuse(name: str) -> Callable[..., Any]:
+        def call(*_args: Any, **_kwargs: Any) -> Any:
+            reached.append(name)
+            raise AssertionError(f"the update demo reached update_check.{name}")
+        return call
+
+    for name in ("_urlopen", "apply_update", "_stage_update", "_download", "_launch", "_spawn_installer",
+                 "_exit_process", "_open_url", "check_async"):
+        monkeypatch.setattr(update_check, name, refuse(name))
+    return reached
+
+
+def phases(seen: list[dict[str, Any]], last: dict[str, Any]) -> list[str]:
+    order: list[str] = []
+    for record in [*seen, last]:
+        if record["phase"] not in order:
+            order.append(record["phase"])
+    return order
+
+
+@pytest.mark.parametrize(("mode", "order", "reason", "failed_in", "total"), [
+    ("ok", ["downloading", "starting", "restarting"], None, None, devserver.DEMO_BYTES),
+    ("unknown", ["downloading", "starting", "restarting"], None, None, None),
+    ("stall", ["downloading", "failed"], "timeout", "downloading", devserver.DEMO_BYTES),
+    ("fail", ["downloading", "failed"], "digest", "checking", devserver.DEMO_BYTES),
+])
+def test_the_update_demo_runs_every_phase_without_the_network(started: Callable[..., ApiServer],
+                                                              no_real_update: list[str], mode: str, order: list[str],
+                                                              reason: str | None, failed_in: str | None,
+                                                              total: int | None) -> None:
+    demo, clock = at_once(mode)
+    server = started(update_demo=demo)
+    block = get_json(server, "/api/state")["update"]
+    assert (block["available"], block["version"], block["can_self_update"], block["skipped"]) == (True, "9.9.9", True, False)
+    assert get_json(server, "/api/update/status")["phase"] == "idle"
+    assert post(server, "/api/update/apply") == (200, {"ok": True, "result": {"started": True, "mode": "installer"}})
+    last = get_json(server, "/api/update/status")
+    assert phases(clock.seen, last) == order and no_real_update == []
+    assert (last["version"], last["reason"], last["failed_in"], last["total"]) == ("9.9.9", reason, failed_in, total)
+    downloading = [record for record in clock.seen if record["phase"] == "downloading"]
+    assert [record["done"] for record in downloading] == sorted(record["done"] for record in downloading)  # it fills
+    assert downloading[0]["done"] == 0 and all(record["total"] == total for record in downloading[1:])
+    if mode == "stall":
+        assert last["done"] == int(-(-devserver.DEMO_BYTES // devserver.DEMO_BLOCK) * devserver.DEMO_STALL_AT) * devserver.DEMO_BLOCK
+        assert any(record["stalled"] for record in clock.seen)       # stalled from STALL_S before the timeout
+    else:
+        assert last["done"] == devserver.DEMO_BYTES and not any(record["stalled"] for record in clock.seen)
+    assert post(server, "/api/update/check") == (200, {"ok": True, "result": {"available": True, "version": "9.9.9",
+                                                                               "checked": True}})
+
+
+def test_a_failed_demo_run_can_be_started_again_and_a_restarting_one_cannot(started: Callable[..., ApiServer],
+                                                                            no_real_update: list[str]) -> None:
+    demo, clock = at_once("fail")
+    server = started(update_demo=demo)
+    post(server, "/api/update/apply")
+    first = len(clock.seen)
+    post(server, "/api/update/apply")
+    assert len(clock.seen) == 2 * first                              # a second run, from nothing
+    demo.mode = "ok"
+    post(server, "/api/update/apply")
+    after = len(clock.seen)
+    assert get_json(server, "/api/update/status")["phase"] == "restarting"
+    post(server, "/api/update/apply")                                # the monitor would be gone by now
+    assert len(clock.seen) == after and no_real_update == []
+
+
+def test_there_is_no_update_without_the_demo(started: Callable[..., ApiServer]) -> None:
+    server = started()
+    block = get_json(server, "/api/state")["update"]
+    assert (block["available"], block["info"]) == (False, None)
+    status, _headers, body = get(server, "/api/update/status")
+    assert status == 501 and b"not available" in body
+    assert post(server, "/api/update/apply") == (200, {"ok": True, "result": {"started": False,
+                                                                               "reason": "devserver never updates"}})
+
+
+def test_main_runs_the_update_demo_when_asked(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    built: list[Any] = []
+    real = devserver.make_server
+
+    def recorded(*args: Any, **kwargs: Any) -> Any:
+        built.append(kwargs.get("update_demo"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(devserver, "make_server", recorded)
+    assert devserver.main(["--port", "0", "--update-demo"], wait=interrupted) == 0
+    assert " update-demo=ok url=http://127.0.0.1:" in capsys.readouterr().out
+    assert devserver.main(["--port", "0", "--update-demo", "stall"], wait=interrupted) == 0
+    assert " update-demo=stall url=" in capsys.readouterr().out
+    assert devserver.main(["--port", "0"], wait=interrupted) == 0
+    assert "update-demo" not in capsys.readouterr().out
+    assert built == ["ok", "stall", None]
+    with pytest.raises(SystemExit) as caught:
+        devserver.main(["--update-demo", "sunny"])
+    assert caught.value.code == 2
+    with pytest.raises(ValueError, match="unknown update demo"):
+        devserver.UpdateDemo("sunny")
+
+
 # ── The command line ──────────────────────────────────────────────────────────────
 
 def interrupted() -> None:

@@ -12,6 +12,8 @@ ClaudeUsageMonitor (main process)
 │                           menus, timers, session-lock + settings-change notifications
 ├─ data thread              DataService (Phase 1) → MonitorState
 ├─ API threads              ThreadingHTTPServer on 127.0.0.1:<random>: webui + JSON API
+├─ self-update thread       only while an update runs (update_check.apply_update): download, check,
+│                           helper, then the exit; writes update_check.PROGRESS (see "Updates")
 └─ dashboard child process  "--dashboard": pywebview (WebView2) window on the local API URL
 ```
 
@@ -411,7 +413,8 @@ catalog key (`i18n._KEY`), which is what a build without its catalog files would
   `--smoke-test` always runs as a dev instance, whatever the environment says. The API server is
   a dev server when its `dev` flag is set **or** `USAGE_MONITOR_DEV_INSTANCE=1` is in the environment.
 - **Dev server.** `python -m usage_monitor.ui.devserver [--port N] [--scenario
-  normal|warning|critical|stale|refused|guard|no_login|limits_only] [--db PATH] [--theme ID[/VARIANT]] [--lang ID]` serves the real webui
+  normal|warning|critical|stale|refused|guard|no_login|limits_only] [--db PATH] [--theme ID[/VARIANT]] [--lang ID]
+  [--update-demo [MODE]]` serves the real webui
   and API from a fake `MonitorState`, with settings in `USAGE_MONITOR_APPDATA_DIR` (or a temporary folder). `stale` and `no_login`
   carry the data layer's own sign-in texts (`usage_api.EXPIRED_DETAIL`, `usage_api.NO_SIGN_IN_DETAIL`). `refused` is a sign-in
   the usage API turned down with HTTP 403 (`signin_refused` 403, #55): its help asks for `/login`, not for a message.
@@ -440,6 +443,15 @@ catalog key (`i18n._KEY`), which is what a build without its catalog files would
   in (a theme without a variant gets its default one). `make_server(..., clock=None)` takes a callable
   that returns the current time; the synthetic history, the fake state and the API's report clock all read
   it, so a test pins the date (the command line uses the time quantised to the minute).
+  `--update-demo [ok|stall|fail|unknown]` (#58; `ok` when no mode is named) offers a made-up release, 9.9.9, that
+  installs in place (the banner and Settings → System offer it). *Install update* runs a made-up update
+  (`devserver.UpdateDemo`): a timer fills a real `update_check.UpdateProgress` (21 MB in 64 KB blocks over about 12 s) and
+  `/api/update/status` answers it, so the route and the page read what they read in the app. It never calls
+  `apply_update`, opens no network connection, writes no file, starts no helper and never exits. `ok` ends in
+  `restarting` and stays there (a real monitor closes then: stop the dev server to see the page lose it); `stall` stops at
+  37 % and fails with `timeout` after 60 s, the real socket timeout; `fail` fails the SHA-256 check; `unknown` sends no
+  size. A failed run can be started again. Its clock, sleep and thread are injectable (`UpdateDemo(mode, clock=,
+  sleep=, spawn=)`), so a test runs it at once.
 
 ## Languages (#87)
 
@@ -981,6 +993,7 @@ Settings: `theme_id`, `theme_variant`, `theme_mode` (Gates: light / dark / syste
 | POST | `/api/refresh` | `DataService.refresh_now()` |
 | POST | `/api/dashboard/closed` | `{"pid": n}`: the dashboard process says its window is gone (`dashboard_closed_cb`, wired to `DashboardLauncher.window_closed`); `400` without a pid, `501` where nothing manages the dashboard |
 | POST | `/api/update/check` · `/api/update/apply` · `/api/update/skip` | updater (see "Updates") |
+| GET | `/api/update/status` | the record of a running update: phase, bytes, failure code (#58; see "Updates"); `501` without a source |
 | GET | `/api/guard` | the usage guard for the Settings card: `{guard, told, waiting, watching, setup}` (below) |
 | POST | `/api/guard/resume` | "Resume now": every running `--wait` ends at once, whatever the limits say |
 | POST | `/api/guard/setup` | `{"action": "install" \| "remove"}`: the one-click setup (below) |
@@ -1120,6 +1133,35 @@ after `check` and `skip`. `checked` is false when the monitor could not look: th
 bad answer: `update_check.check_async` hands the error to its `on_error`, which `UpdateTracker.check_now` collects) or did not
 answer in time. The page then says "Could not reach GitHub; try again later." and never "You are up to date", which only a
 lookup that ran and found nothing may say; a monitor that sends no `checked` is taken to have looked.
+
+**The update's record (#58).** One update runs per process (`update_check._update_lock`), so one record,
+`update_check.PROGRESS` (an `UpdateProgress`, thread-safe, on an injectable monotonic clock), says how it goes.
+`apply_update`'s worker starts it (`begin`) only once it holds the lock, so a second request, which the lock ignores,
+never resets the running one; its version is the asset's tag without the `v`, as the check reports it. `_download` reports
+the bytes after the headers and after every block it writes (`on_progress(done, announced)`, a callback that raises is
+logged and the download goes on); blocks are read with `read1`, so a slow line reports what has arrived, not only every
+64 KB. `_stage_update` moves it to `checking` when the file is in (the SHA-256 was worked out as it arrived, so this is
+one comparison) and to `starting` once it checked out, and `_apply` to `restarting` before the app's teardown. The record
+only watches: the size cap, the Content-Length test, the SHA-256 compare before the helper starts and the HTTPS-only
+redirects are `update_check.py`'s (its header). Calling `_download` or `_stage_update` directly writes nothing to it.
+`update_check.status()` returns `PROGRESS.snapshot()`, and `GET /api/update/status`
+(`ApiServer(update_status=update_check.status)`; `501` without one, `500` with no details when it raises) answers it,
+rebuilt by `server.update_status_view` from the known fields only:
+
+| Key | Meaning |
+|---|---|
+| `phase` | `idle` (no run since the monitor started), `downloading`, `checking`, `starting`, `restarting` or `failed` (`update_check.PHASES`); anything else answers the idle record |
+| `version` | the release being installed, a plain version or `null` |
+| `done`, `total` | bytes written so far, and the Content-Length (`null` when the server did not send one) |
+| `age_s`, `idle_s` | seconds since the run began and since its last change, new bytes or a new phase (0 with no run), to a tenth |
+| `stalled` | downloading, bytes still missing, and no new bytes for `update_check.STALL_S` (15) seconds (from the start of the run until the first arrive; the headers alone do not count); the socket timeout (`DOWNLOAD_TIMEOUT_S`, 60) then fails it |
+| `reason` | a failure's code (`update_check.REASONS`, from `failure_code`): `timeout`, `network` (the connection: a URLError that is no HTTP answer or timeout, a ConnectionError, TLS, a name lookup, a socket error naming the network), `http` (with `http_status`), `redirect` (a refused redirect to plain http), `too_large`, `cut_short`, `digest` (the file did not match), `rejected` (not this project's link), `helper`, `local` (any other OSError: a full disk, a file held by a scanner, the temp folder, the helper file) or `error` |
+| `failed_in` | the phase it failed in, so the page marks that step |
+| `http_status` | the HTTP status of an `http` or `redirect` failure, else `null` |
+| `limit_mb`, `timeout_s` | the size cap and the socket timeout, for the page's words |
+
+The record holds codes, never words: the page words them. A failed run stays recorded until the next run starts (or the
+monitor restarts). The record is this copy of `update_check.py`'s own; the other tools' copies do not have it.
 
 The monitor looks for a release at start and every six hours (`app.UPDATE_RECHECK_S`, one UI-host timer that is always armed
 and gated on `check_updates` when it fires; a check that fails is a debug line, nothing more, and the next one tries again). A
@@ -1262,8 +1304,9 @@ default browser instead, and the exit code says so (below).
   notes* opens the github.com page through `open_external` (shown only when there is one); *Skip this version* posts
   `/api/update/skip` and hides the banner at once, rolling back on failure. The status text is tied to the release it was
   about, so it never shows against a newer one. The line under the Settings buttons follows the same rule (`updateLine`), and a
-  check's words are tied there through `S.update.offered`, which keeps them out of the banner. The dev server fakes no update (its `info` callback returns nothing): to see
-  the banner, answer `/api/state` with an `update` block (a Playwright route does it).
+  check's words are tied there through `S.update.offered`, which keeps them out of the banner. Without `--update-demo` the dev
+  server fakes no update (its `info` callback returns nothing): to see the banner, answer `/api/state` with an `update` block
+  (a Playwright route does it), or start it with `--update-demo` (Dev isolation), which offers a made-up release.
 - **Usage guard card (#27).** The Settings card's two blocks, the live status (`#guard-live`) and the one-click setup
   (`#guard-setup`), are filled by `syncGuard` from `/api/guard`, asked once at a time every `GUARD_POLL_MS` while Settings is
   on screen; a block is rewritten only when its markup changed (`data-sig`), so a poll never drops the focus. The status is

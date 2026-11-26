@@ -1533,6 +1533,120 @@ def test_update_callback_failure_is_a_500_without_details(make_server: Any) -> N
     assert b"private" not in body
 
 
+# ── The update's status: GET /api/update/status (#58) ─────────────────────────────
+
+def running_record(**changes: Any) -> dict[str, Any]:
+    """update_check.UpdateProgress.snapshot() of a download at 20 %."""
+    record: dict[str, Any] = {"phase": "downloading", "version": "2.4.0", "done": 4404020, "total": 22020096,
+                              "age_s": 3.2, "idle_s": 0.1, "stalled": False, "reason": None, "failed_in": None,
+                              "http_status": None, "limit_mb": 512, "timeout_s": 60}
+    record.update(changes)
+    return record
+
+
+IDLE_STATUS = {"phase": "idle", "version": None, "done": 0, "total": None, "age_s": 0.0, "idle_s": 0.0,
+               "stalled": False, "reason": None, "failed_in": None, "http_status": None, "limit_mb": None,
+               "timeout_s": None}
+
+
+def test_update_status_answers_the_record(make_server: Any) -> None:
+    server, _ = make_server(update_status=lambda: running_record(token="secret C:/private"))
+    status, headers, body = request(server, "GET", "/api/update/status")
+    assert status == 200 and headers["content-type"].startswith("application/json")
+    assert headers["cache-control"] == "no-store"
+    assert json.loads(body) == running_record()                     # the known keys, nothing else
+    assert b"private" not in body
+
+
+def test_update_status_passes_the_updaters_own_record_as_it_is(make_server: Any) -> None:
+    import update_check
+
+    progress = update_check.UpdateProgress(clock=lambda: 50.0)
+    progress.begin("2.4.0")
+    progress.received(22020096, 22020096)
+    progress.phase("checking")
+    progress.fail(update_check.UpdateDigestMismatch("the downloaded installer does not match the release's SHA-256"))
+    server, _ = make_server(update_status=progress.snapshot)
+    answer = json.loads(request(server, "GET", "/api/update/status")[2])
+    assert answer == progress.snapshot()
+    assert (answer["phase"], answer["reason"], answer["failed_in"]) == ("failed", "digest", "checking")
+
+
+def test_update_status_needs_the_token_and_the_host(make_server: Any) -> None:
+    asked: list[int] = []
+    server, _ = make_server(update_status=lambda: (asked.append(1), running_record())[1])
+    assert request(server, "GET", "/api/update/status", token=False)[0] == 401
+    assert request(server, "GET", "/api/update/status", headers={TOKEN_HEADER: "wrong"})[0] == 401
+    assert request(server, "GET", "/api/update/status", host="evil.example:80")[0] == 403
+    assert asked == []                                                # refused before the record is read
+    assert request(server, "GET", "/api/update/status")[0] == 200 and asked == [1]
+
+
+def test_update_status_is_get_only_and_501_without_a_source(make_server: Any) -> None:
+    server, rec = make_server(update_status=running_record)
+    status, headers, _ = request(server, "POST", "/api/update/status")
+    assert status == 405 and headers["allow"] == "GET"
+    assert request(server, "GET", "/api/update/status")[0] == 200
+    status, headers, _ = request(server, "GET", "/api/update/check")  # the operations are still POST only
+    assert status == 405 and headers["allow"] == "POST"
+    assert rec.calls == []
+    bare, _ = make_server()
+    status, _, body = request(bare, "GET", "/api/update/status")
+    assert status == 501 and json.loads(body) == {"error": "update status is not available"}
+
+
+def test_update_status_while_idle(make_server: Any) -> None:
+    import update_check
+
+    server, _ = make_server(update_status=update_check.UpdateProgress().snapshot)
+    status, _, body = request(server, "GET", "/api/update/status")
+    assert status == 200
+    assert json.loads(body) == dict(IDLE_STATUS, limit_mb=512, timeout_s=60)
+
+
+@pytest.mark.parametrize(("record", "expected"), [
+    (running_record(version="<img src=x onerror=alert(1)>"), running_record(version=None)),
+    (running_record(version="v 2"), running_record(version=None)),
+    (running_record(phase="exploding"), IDLE_STATUS),
+    (running_record(phase=["downloading"]), IDLE_STATUS),
+    ("downloading", IDLE_STATUS),
+    (None, IDLE_STATUS),
+    (running_record(done=True, total=False, age_s=True, idle_s=float("nan")),
+     running_record(done=0, total=None, age_s=0.0, idle_s=0.0)),
+    (running_record(done=-1, total=2 ** 60, idle_s=-3, age_s=float("inf")),
+     running_record(done=0, total=None, idle_s=0.0, age_s=0.0)),
+    (running_record(done="4404020", total=22020096.0), running_record(done=0, total=None)),
+    (running_record(age_s=3.24999, idle_s=7), running_record(age_s=3.2, idle_s=7.0)),
+    (running_record(stalled="yes"), running_record(stalled=False)),
+    (running_record(stalled=1), running_record(stalled=False)),
+    (running_record(phase="failed", reason="rm -rf", failed_in="idle", http_status=999),
+     running_record(phase="failed")),
+    (running_record(phase="failed", reason="http", failed_in="downloading", http_status=True),
+     running_record(phase="failed", reason="http", failed_in="downloading")),
+    (running_record(phase="failed", reason="http", failed_in="downloading", http_status=404),
+     running_record(phase="failed", reason="http", failed_in="downloading", http_status=404)),
+    (running_record(limit_mb="512", timeout_s=-60), running_record(limit_mb=None, timeout_s=None)),
+])
+def test_update_status_lets_only_plain_versions_and_known_codes_out(make_server: Any, record: Any,
+                                                                    expected: dict[str, Any]) -> None:
+    server, _ = make_server(update_status=lambda: record)
+    status, _, body = request(server, "GET", "/api/update/status")
+    assert status == 200 and json.loads(body) == expected
+
+
+def test_a_status_source_that_fails_is_a_500_without_details(make_server: Any,
+                                                             caplog: pytest.LogCaptureFixture) -> None:
+    def boom() -> dict[str, Any]:
+        raise RuntimeError("secret path C:/private")
+
+    server, _ = make_server(update_status=boom)
+    with caplog.at_level(logging.ERROR):
+        status, _, body = request(server, "GET", "/api/update/status")
+    assert status == 500 and json.loads(body) == {"error": "update status failed"}
+    assert b"private" not in body
+    assert "update status failed" in caplog.text                      # logged, with its traceback, for the owner
+
+
 def test_bad_json_error_does_not_echo_the_body(make_server: Any) -> None:
     server, _ = make_server()
     status, _, body = request(server, "POST", "/api/settings", body=b'{"secret_token": "abc123"')

@@ -37,6 +37,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+import update_check
 from usage_monitor import paths
 from usage_monitor.agent import guard as agent_guard
 from usage_monitor.agent import sessions as agent_sessions
@@ -77,6 +78,7 @@ SUPPORTERS_RETRY_S = 300.0      # a failed fetch is retried after 5 min, not aft
 MAX_SUPPORTERS_BYTES = 512 * 1024
 THEME_ORDER = ("nostromo", "night_city", "gates")
 UPDATE_OPERATIONS = ("check", "apply", "skip")
+UPDATE_STATUS_PATH = "/api/update/status"    # GET: the record of a running update (#58); not one of the operations
 GUARD_SETUP_ACTIONS = ("install", "remove")
 SETUP_STATUS_TTL_S = 600.0      # the setup status starts `claude` twice, so /api/guard keeps it this long; a setup click
                                 # and a closed dashboard window clear it, so each window and each click look afresh
@@ -158,6 +160,47 @@ _RELEASE_URL = re.compile(r"https://github\.com/[0-9A-Za-z._~%+/-]{1,300}")
 def plain_version(value: Any) -> str | None:
     """``value`` when it is a plain version ("2.1.0", "3.0.0-rc.1") fit for a page, a menu or a toast, else None."""
     return value if isinstance(value, str) and _SAFE_VERSION.fullmatch(value) else None
+
+
+_JS_SAFE_INT = 2 ** 53 - 1
+
+
+def _whole(value: Any, default: int | None) -> int | None:
+    """A non-negative int the page can hold exactly, else ``default``."""
+    ok = isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= _JS_SAFE_INT
+    return value if ok else default
+
+
+def _seconds(value: Any) -> float:
+    """A finite non-negative number of seconds, to a tenth, else 0."""
+    ok = isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0
+    return round(float(value), 1) if ok else 0.0
+
+
+def update_status_view(record: Any) -> dict[str, Any]:
+    """GET /api/update/status: the updater's record (update_check.UpdateProgress.snapshot) rebuilt from the fields
+    the page knows. The version came off the network as a tag, so only a plain one passes; a phase, a failure code or
+    a step outside update_check's own lists, a number that is not one, and any other key are dropped. A record that
+    is not a mapping, or whose phase is unknown, is the idle one."""
+    found = record if isinstance(record, Mapping) else {}
+    phase = found.get("phase")
+    if phase not in update_check.PHASES:
+        found, phase = {}, "idle"
+    reason, failed_in, http_status = found.get("reason"), found.get("failed_in"), found.get("http_status")
+    return {
+        "phase": phase,
+        "version": plain_version(found.get("version")),
+        "done": _whole(found.get("done"), 0),
+        "total": _whole(found.get("total"), None),
+        "age_s": _seconds(found.get("age_s")),
+        "idle_s": _seconds(found.get("idle_s")),
+        "stalled": found.get("stalled") is True,
+        "reason": reason if reason in update_check.REASONS else None,
+        "failed_in": failed_in if failed_in in update_check.ACTIVE_PHASES else None,
+        "http_status": http_status if _whole(http_status, None) is not None and 100 <= http_status <= 599 else None,
+        "limit_mb": _whole(found.get("limit_mb"), None),
+        "timeout_s": _whole(found.get("timeout_s"), None),
+    }
 
 
 def _is_slug(value: Any) -> bool:
@@ -884,7 +927,8 @@ class ApiServer:
     is gone while the process itself is still exiting (the launcher then starts a new one at the next request to
     open it). ``update_cb`` maps ``info`` (the newest release the update check found, as a dict, or None), ``check``,
     ``apply`` and ``skip`` to callables. The last three answer POST /api/update/<name> (a missing one is a 501);
-    ``info`` feeds the ``update`` block of /api/state (see ``_update_view``).
+    ``info`` feeds the ``update`` block of /api/state (see ``_update_view``). ``update_status`` returns the record of a
+    running update (the app passes ``update_check.status``) for GET /api/update/status, a 501 without one.
 
     The usage guard (#27) reads and writes the session files in ``guard_dir`` (default: the app data folder; agent/
     sessions.py owns them) and sets up Claude Code through ``setup_cb``, a mapping of ``status``, ``install`` and
@@ -914,12 +958,14 @@ class ApiServer:
         guard_dir: Path | None = None,
         setup_cb: Mapping[str, Callable[[], Any]] | None = None,
         locale_provider: Callable[[], i18n.Locale] | None = None,
+        update_status: Callable[[], Mapping[str, Any]] | None = None,
     ) -> None:
         self._state_provider = state_provider
         self._settings = settings
         self._prefs_lock = threading.Lock()   # a saved dashboard choice is merged into the held ones, one save at a time
         self._refresh_cb = refresh_cb
         self._update_cb = dict(update_cb)
+        self._update_status = update_status
         self._on_settings_applied = on_settings_applied
         self._dashboard_closed_cb = dashboard_closed_cb
         self._version = str(version)
@@ -1072,6 +1118,10 @@ class ApiServer:
         if path == "/api/export":
             self._only(method, "GET")
             self._get_export(req, query)
+            return
+        if path == UPDATE_STATUS_PATH:          # before the operations, which are POST only
+            self._only(method, "GET")
+            self._get_update_status(req)
             return
         if path.startswith("/api/update/"):
             operation = path[len("/api/update/"):]
@@ -1275,6 +1325,18 @@ class ApiServer:
             "watching": agent_sessions.watching(folder),
             "setup": self._setup_status.soon(SETUP_STATUS_WAIT_S),
         })
+
+    def _get_update_status(self, req: _Handler) -> None:
+        """The record of a running update (#58) as ``update_status_view`` passes it: 501 without a source, 500 (logged,
+        no details) when the source fails. Never cached."""
+        if self._update_status is None:
+            raise _HttpError(501, "update status is not available")
+        try:
+            record = self._update_status()
+        except Exception:
+            log.exception("update status failed")
+            raise _HttpError(500, "update status failed") from None
+        self._send_json(req, 200, update_status_view(record))
 
     def _get_analytics(self, req: _Handler, name: str, query: str) -> None:
         """One statistics report as JSON (shapes: docs/ARCHITECTURE.md, "Phase 2 - stats")."""

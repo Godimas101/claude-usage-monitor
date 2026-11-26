@@ -37,18 +37,27 @@
 # CREATE_NO_WINDOW, not DETACHED_PROCESS: a detached cmd has no console, so every
 # console program it starts opens a visible Windows Terminal window, and a pipe
 # in the script hangs it.
+#
+# While an update runs, PROGRESS records how far it got (the phase, the bytes, why it
+# failed) for the dashboard: see "What the dashboard sees of an update" below. That
+# record is this copy's own (#58); the suite's other copies do not have it.
 
+import errno
 import hashlib
 import hmac
+import http.client
 import json
 import logging
 import os
 import re
 import shutil
+import socket
+import ssl
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -87,6 +96,158 @@ class UpdateRejected(UpdateError):
 
 class UpdateVerificationError(UpdateError):
     """The installer could not be verified: its SHA-256 differs from the release's, or the release has none."""
+
+
+# --- What the dashboard sees of an update (#58) ------------------------------
+#
+# One update runs per process (_update_lock), so one record, PROGRESS, says how it
+# goes: the phase, the bytes written so far and the size the server announced, and
+# for a failure its code and the phase it failed in. apply_update's worker writes
+# it (begin once it holds the lock, fail in its except), _download reports every
+# block it writes, _stage_update and _apply mark the phases. status() returns a
+# copy; the app's local API serves it as GET /api/update/status. The record holds
+# ids, never words: the page words them. Calling _download or _stage_update
+# directly writes nothing here. Nothing in it changes what the update runs or when.
+
+class UpdateTooLarge(UpdateError):
+    """The installer is over the size cap, as announced or as counted."""
+
+
+class UpdateCutShort(UpdateError):
+    """The download ended before the Content-Length the server announced."""
+
+
+class UpdateDigestMismatch(UpdateVerificationError):
+    """The downloaded installer's SHA-256 differs from the one the release lists."""
+
+
+class UpdateHelperFailed(UpdateError):
+    """The update helper could not be started, or stopped at once."""
+
+
+class UpdateRedirectRefused(urllib.error.HTTPError):
+    """A redirect to a plain-http address, refused. Still an HTTPError, as it always was."""
+
+
+STALL_S = 15                # no new data for this long while bytes are missing: the record says "stalled"
+DOWNLOAD_TIMEOUT_S = 60     # the socket timeout of an update's requests: a receive that waits this long fails
+PHASES = ("idle", "downloading", "checking", "starting", "restarting", "failed")
+ACTIVE_PHASES = ("downloading", "checking", "starting", "restarting")
+REASONS = ("timeout", "network", "http", "redirect", "too_large", "cut_short", "digest", "rejected", "helper", "local",
+           "error")
+# A socket error that names the network, raised as a plain OSError (not a ConnectionError) by a read of the body.
+_NETWORK_ERRNOS = frozenset(getattr(errno, name) for name in (
+    "ENETDOWN", "ENETUNREACH", "ENETRESET", "EHOSTDOWN", "EHOSTUNREACH", "ECONNABORTED", "ECONNRESET", "ECONNREFUSED")
+    if hasattr(errno, name))
+
+
+def failure_code(exc):
+    """The REASONS code of an update that failed with ``exc``.
+
+    network is the connection: a URLError that is neither an HTTP answer nor a timeout, a ConnectionError, a TLS
+    error, a failed name lookup, a socket error naming the network. Any other OSError is local (a full disk, a file
+    held by a scanner, a temp folder or helper file that cannot be written)."""
+    if isinstance(exc, UpdateTooLarge):
+        return "too_large"
+    if isinstance(exc, (UpdateCutShort, http.client.IncompleteRead)):
+        return "cut_short"
+    if isinstance(exc, UpdateDigestMismatch):
+        return "digest"
+    if isinstance(exc, UpdateRejected):
+        return "rejected"
+    if isinstance(exc, UpdateHelperFailed):
+        return "helper"
+    if isinstance(exc, UpdateRedirectRefused):
+        return "redirect"
+    if isinstance(exc, urllib.error.HTTPError):
+        return "http"
+    if isinstance(exc, TimeoutError) or (isinstance(exc, urllib.error.URLError)
+                                         and isinstance(exc.reason, TimeoutError)):
+        return "timeout"
+    if isinstance(exc, (urllib.error.URLError, ConnectionError, ssl.SSLError, socket.gaierror)):
+        return "network"
+    if isinstance(exc, OSError):
+        return "network" if exc.errno in _NETWORK_ERRNOS else "local"
+    return "error"
+
+
+def _count(value):
+    """A byte count: a non-negative int, else None."""
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
+
+class UpdateProgress:
+    """The record of this process's update. Thread-safe; no method raises. ``clock`` is monotonic seconds."""
+
+    def __init__(self, clock=None):
+        self._clock = clock or time.monotonic
+        self._lock = threading.Lock()
+        self._phase, self._version = "idle", None
+        self._done, self._total = 0, None
+        self._reason, self._failed_in, self._http_status = None, None, None
+        self._started = self._changed = None
+
+    def begin(self, version):
+        """A new run of the release ``version`` (None when unknown): downloading, nothing received, size unknown."""
+        with self._lock:
+            now = self._clock()
+            self._phase, self._version = "downloading", version if isinstance(version, str) else None
+            self._done, self._total = 0, None
+            self._reason, self._failed_in, self._http_status = None, None, None
+            self._started = self._changed = now
+
+    def received(self, done, total):
+        """``done`` bytes written of ``total`` (None: the server did not say). Ignored outside the download. Only new
+        bytes count as a change (the stall clock): the headers alone, with their total, do not."""
+        with self._lock:
+            done, total = _count(done) or 0, _count(total)
+            if self._phase == "downloading":
+                if done != self._done:
+                    self._changed = self._clock()
+                self._done, self._total = done, total
+
+    def phase(self, name):
+        """The run moved on to ``name``: checking, starting or restarting. Ignored when no run is going."""
+        with self._lock:
+            if name in ACTIVE_PHASES[1:] and self._phase in ACTIVE_PHASES:
+                self._phase = name
+                self._changed = self._clock()
+
+    def fail(self, exc):
+        """The run failed with ``exc``: its code (failure_code), its HTTP status if any, the phase it failed in."""
+        with self._lock:
+            self._failed_in = self._phase if self._phase in ACTIVE_PHASES else None
+            self._phase, self._reason = "failed", failure_code(exc)
+            code = getattr(exc, "code", None) if isinstance(exc, urllib.error.HTTPError) else None
+            self._http_status = code if isinstance(code, int) and 100 <= code <= 599 else None
+            self._changed = self._clock()
+
+    def snapshot(self):
+        """The record as a dict (what GET /api/update/status answers, once the server has checked each field).
+
+        age_s counts from the start of the run and idle_s from its last change, new bytes or a new phase (0 with no
+        run). stalled: downloading, bytes still missing (the size is unknown or not reached) and no new bytes for
+        STALL_S seconds, counted from the start of the run until the first ones arrive."""
+        with self._lock:
+            now = self._clock()
+            age = now - self._started if self._started is not None else 0.0
+            idle = now - self._changed if self._changed is not None else 0.0
+            missing = self._total is None or self._done < self._total
+            return {
+                "phase": self._phase, "version": self._version, "done": self._done, "total": self._total,
+                "age_s": round(max(0.0, age), 1), "idle_s": round(max(0.0, idle), 1),
+                "stalled": self._phase == "downloading" and missing and idle >= STALL_S,
+                "reason": self._reason, "failed_in": self._failed_in, "http_status": self._http_status,
+                "limit_mb": MAX_INSTALLER_BYTES // (1024 * 1024), "timeout_s": DOWNLOAD_TIMEOUT_S,
+            }
+
+
+PROGRESS = UpdateProgress()
+
+
+def status():
+    """The record of this process's update: PROGRESS.snapshot(), PROGRESS looked up at the call."""
+    return PROGRESS.snapshot()
 
 
 def _ver_tuple(s):
@@ -191,7 +352,7 @@ class _HttpsOnlyRedirects(urllib.request.HTTPRedirectHandler):
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         if urllib.parse.urlsplit(newurl).scheme.lower() != "https":
-            raise urllib.error.HTTPError(req.full_url, code, "refused a redirect to a non-https address", headers, fp)
+            raise UpdateRedirectRefused(req.full_url, code, "refused a redirect to a non-https address", headers, fp)
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
@@ -313,14 +474,20 @@ def apply_update(asset_url, *, on_error=None, on_before_exit=None, repo=None, di
     the asset (``digest`` "sha256:<hex>" when the caller already has it from the
     check, else it is looked up here). ``repo`` defaults to version.REPO. When the
     link, the digest or the file is not acceptable, nothing is run: the release
-    page opens in the browser and on_error receives an UpdateError."""
+    page opens in the browser and on_error receives an UpdateError.
+
+    PROGRESS records the run once this request holds the lock, so a second request, which is
+    ignored, never touches the record of the one that is running."""
     def worker():
         if not _update_lock.acquire(blocking=False):
             log.info("an update is already in progress; ignoring the second request")
             return
+        progress = PROGRESS
         try:
-            _apply(asset_url, repo=repo, digest=digest, on_before_exit=on_before_exit)
+            progress.begin(_release_version(asset_url, repo))
+            _apply(asset_url, repo=repo, digest=digest, on_before_exit=on_before_exit, progress=progress)
         except Exception as exc:
+            progress.fail(exc)
             log.warning("the update was not applied: %s", exc)
             if on_error:
                 try:
@@ -333,10 +500,18 @@ def apply_update(asset_url, *, on_error=None, on_before_exit=None, repo=None, di
     threading.Thread(target=worker, name="self-update", daemon=True).start()
 
 
-def _apply(asset_url, *, repo, digest, on_before_exit):
+def _release_version(asset_url, repo):
+    """The version ``asset_url`` installs, as _check reports it (the tag without its "v"); None for a link not ours."""
+    parts = _asset_parts(asset_url, repo or _default_repo())
+    return parts[0].lstrip("v") if parts else None
+
+
+def _apply(asset_url, *, repo, digest, on_before_exit, progress=None):
     staged = {}
-    proc = _stage_update(asset_url, repo=repo, digest=digest, staged=staged)
+    proc = _stage_update(asset_url, repo=repo, digest=digest, staged=staged, progress=progress)
     # The helper is running and waiting for us, so it is safe to go.
+    if progress is not None:
+        progress.phase("restarting")
     if on_before_exit:
         try:
             on_before_exit()
@@ -380,14 +555,16 @@ def _exit_process():
     os._exit(0)  # hard exit so the running .exe unlocks for overwrite
 
 
-def _stage_update(asset_url, *, repo=None, digest=None, timeout=60, staged=None):
+def _stage_update(asset_url, *, repo=None, digest=None, timeout=DOWNLOAD_TIMEOUT_S, staged=None, progress=None):
     """Check the link and the digest, download and verify the installer, start the helper.
 
     Returns the running helper process. Raises UpdateRejected (link), UpdateVerificationError
     (digest) or another UpdateError / OSError; the release page has been opened for the first
     two, and nothing is left on disk after any of them. ``staged``, when given, is a dict that
     receives "page" (the release page) and "installer" (the downloaded file, which sits in a
-    folder of its own) so the caller can recover if the helper dies before the app exits."""
+    folder of its own) so the caller can recover if the helper dies before the app exits.
+    ``progress``, when given, is an UpdateProgress that hears the bytes of the download and is
+    moved on to "checking" when the file is in and to "starting" once it checked out."""
     if not is_frozen():
         raise UpdateError("self-update runs only in the installed build")
     repo = repo or _default_repo()
@@ -408,14 +585,19 @@ def _stage_update(asset_url, *, repo=None, digest=None, timeout=60, staged=None)
     work = tempfile.mkdtemp(prefix=WORK_PREFIX, dir=tempfile.gettempdir())
     try:
         installer = os.path.join(work, name)
-        actual = _download(asset_url, installer, repo=repo, timeout=timeout)
+        actual = _download(asset_url, installer, repo=repo, timeout=timeout,
+                           on_progress=progress.received if progress is not None else None)
+        if progress is not None:
+            progress.phase("checking")
         if not hmac.compare_digest(actual, expected):
             log.warning("update refused: %s hashes to %s, the release lists %s", name, actual, expected)
             _open_url(page)
-            raise UpdateVerificationError("the downloaded installer does not match the release's SHA-256")
+            raise UpdateDigestMismatch("the downloaded installer does not match the release's SHA-256")
         log.info("update verified: %s sha256 %s", name, actual)
         if staged is not None:
             staged["installer"] = installer
+        if progress is not None:
+            progress.phase("starting")
         return _spawn_installer(installer)
     except BaseException:
         shutil.rmtree(work, ignore_errors=True)
@@ -441,34 +623,50 @@ def _lookup_digest(repo, tag, name, page, timeout):
     return found
 
 
-def _download(url, dst, *, repo=None, timeout=60, max_bytes=MAX_INSTALLER_BYTES):
+def _download(url, dst, *, repo=None, timeout=DOWNLOAD_TIMEOUT_S, max_bytes=MAX_INSTALLER_BYTES, on_progress=None):
     """Fetch ``url`` into ``dst`` and return the lowercase SHA-256 of what was written.
 
     Written to dst + '.part' and moved into place only when complete, so a cut-off download never
-    looks like an installer. Raises UpdateError for a body over ``max_bytes`` or shorter than the
-    Content-Length the server announced."""
+    looks like an installer. Raises UpdateError (UpdateTooLarge) for a body over ``max_bytes`` or
+    (UpdateCutShort) one shorter than the Content-Length the server announced.
+
+    ``on_progress(done, announced)``, when given, is called once the headers are in (done 0) and
+    after every block written; ``announced`` is the Content-Length or None. A callback that raises
+    is logged and the download goes on. Blocks are read as they arrive (read1, up to 64 KB), so a
+    slow line still reports every few KB."""
     req = urllib.request.Request(url, headers=_headers(repo or "unknown/update", "application/octet-stream"))
     part = dst + ".part"
     digest = hashlib.sha256()
     total = 0
+
+    def report(done):
+        if on_progress is not None:
+            try:
+                on_progress(done, announced)
+            except Exception:
+                log.debug("the download's progress callback failed", exc_info=True)
+
     try:
         with _urlopen(req, timeout) as resp:
             announced = resp.headers.get("Content-Length")
             announced = int(announced) if announced and announced.isdigit() else None
             if announced is not None and announced > max_bytes:
-                raise UpdateError("the installer is larger than %d MB" % (max_bytes // (1024 * 1024)))
+                raise UpdateTooLarge("the installer is larger than %d MB" % (max_bytes // (1024 * 1024)))
+            report(0)
+            read = getattr(resp, "read1", None) or resp.read     # a test's fake response may have read only
             with open(part, "wb") as out:
                 while True:
-                    chunk = resp.read(65536)
+                    chunk = read(65536)
                     if not chunk:
                         break
                     total += len(chunk)
                     if total > max_bytes:
-                        raise UpdateError("the installer is larger than %d MB" % (max_bytes // (1024 * 1024)))
+                        raise UpdateTooLarge("the installer is larger than %d MB" % (max_bytes // (1024 * 1024)))
                     digest.update(chunk)
                     out.write(chunk)
+                    report(total)
         if announced is not None and total != announced:
-            raise UpdateError("the download was cut short (%d of %d bytes)" % (total, announced))
+            raise UpdateCutShort("the download was cut short (%d of %d bytes)" % (total, announced))
         os.replace(part, dst)
     except BaseException:
         try:
@@ -590,9 +788,9 @@ def _spawn_installer(installer_path, exe=None, pid=None, install=True):
     try:
         proc = _launch(command, cwd, env)
     except OSError as exc:
-        raise UpdateError("could not start the update helper: %s" % exc) from exc
+        raise UpdateHelperFailed("could not start the update helper: %s" % exc) from exc
     try:
         code = proc.wait(timeout=HELPER_GRACE_S)
     except subprocess.TimeoutExpired:
         return proc  # still running: it is waiting for us to exit
-    raise UpdateError("the update helper stopped at once (exit code %s)" % code)
+    raise UpdateHelperFailed("the update helper stopped at once (exit code %s)" % code)

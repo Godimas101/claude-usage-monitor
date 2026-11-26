@@ -2398,6 +2398,11 @@ def test_the_server_is_given_the_real_callbacks(wired):
     assert kwargs["update_cb"]["info"]() is None
 
 
+def test_the_server_reads_the_updaters_status(wired):
+    """GET /api/update/status answers update_check's own record of a running update (#58), read at each request."""
+    assert wired.app.server.kwargs["update_status"] is app_mod.update_check.status
+
+
 def test_the_statistics_store_is_a_new_connection_on_the_usage_database(wired, isolated_env):
     """The server opens its own Store on the file the data service writes, and only when the first
     statistics request comes. (The fake service here writes nothing, so the test makes the file.)"""

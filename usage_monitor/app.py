@@ -722,6 +722,7 @@ class MonitorApp:
                 "apply": self._apply_update,
                 "skip": lambda: self.updates.skip(),
             },
+            update_status=update_check.status,
             dashboard_closed_cb=lambda pid: self.launcher is not None and self.launcher.window_closed(pid),
             version=version.APP_VERSION,
             dev=self.dev,

@@ -2,6 +2,7 @@
 
     python -m usage_monitor.ui.devserver --port 8765
         --scenario normal|warning|critical|stale|refused|guard|no_login|limits_only [--db PATH] [--theme ID[/VARIANT]]
+        [--lang ID] [--update-demo [ok|stall|fail|unknown]]
 
 Used for Playwright checks and design review. Settings go to USAGE_MONITOR_APPDATA_DIR (or a temporary
 folder), never to the owner's real app data, and the server is a dev one, so the "Start with
@@ -33,6 +34,14 @@ readings that lead up to the fake state's limits), so every page has data.
 
 ``--theme`` sets the theme the page starts in: nostromo, night_city/edgerun, gates/blue-light.
 It is stored in the dev settings like a choice made on the page.
+
+``--update-demo [ok|stall|fail|unknown]`` (#58) offers a made-up release, 9.9.9, that "installs in place" (the banner
+and Settings offer it). Install update runs a made-up update on a thread of its own: the record is update_check's
+UpdateProgress, filled by a timer (21 MB in 64 KB blocks over about 12 s), never by apply_update, and nothing is
+downloaded or run. ``ok`` ends in "restarting" and stays there (a real monitor would close now: stop the dev server to
+see what the page shows once it is gone); ``stall`` stops at 37 % and fails with a timeout after 60 s, as the real
+socket timeout would; ``fail`` fails the SHA-256 check; ``unknown`` is ``ok`` without a Content-Length. A failed run can
+be started again. Without the flag the dev server offers no update and has no update status (501).
 """
 from __future__ import annotations
 
@@ -52,6 +61,8 @@ from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+import update_check
+import version
 from usage_monitor import i18n, paths, themes
 from usage_monitor.agent import guard as agent_guard
 from usage_monitor.agent import sessions as agent_sessions
@@ -608,6 +619,89 @@ def dev_setup(folder: Path) -> dict[str, Callable[[], Any]]:
             "remove": lambda: agent_setup.remove(ctx)}
 
 
+# ── The update demo (#58) ─────────────────────────────────────────────────────────
+
+UPDATE_DEMOS = ("ok", "stall", "fail", "unknown")
+DEMO_VERSION = "9.9.9"
+DEMO_BYTES = 22_020_096             # 21.0 MB of 1,048,576 bytes
+DEMO_BLOCK = 65_536                 # the updater's largest read
+DEMO_DOWNLOAD_S = 12.0              # the whole download
+DEMO_CONNECT_S = 0.8                # connecting and the headers, before the first byte
+DEMO_STALL_AT = 0.37                # where ``stall`` stops
+
+
+class UpdateDemo:
+    """A made-up release and a made-up run of the self-update, for the Settings page's update block.
+
+    ``info``, ``check`` and ``apply`` stand in for the app's update callbacks and ``status`` for update_check.status.
+    The record is a real update_check.UpdateProgress, so the route and the page read what they read in the app; a timer
+    fills it. It never calls apply_update and opens nothing: no network, no file, no helper, no exit. ``clock`` (monotonic
+    seconds), ``sleep`` and ``spawn`` (which starts the run) are injectable, so a test runs it at once."""
+
+    def __init__(self, mode: str = "ok", *, clock: Callable[[], float] | None = None,
+                 sleep: Callable[[float], Any] | None = None, spawn: Callable[[Callable[[], None]], Any] | None = None):
+        if mode not in UPDATE_DEMOS:
+            raise ValueError(f"unknown update demo {mode!r} (one of {', '.join(UPDATE_DEMOS)})")
+        self.mode = mode
+        self.progress = update_check.UpdateProgress(clock=clock)
+        self._sleep = sleep or clock_time.sleep
+        self._spawn = spawn or (lambda run: threading.Thread(target=run, name="update-demo", daemon=True).start())
+        self._lock = threading.Lock()
+        self._busy = False
+
+    def info(self) -> dict[str, Any]:
+        """The release on offer, shaped as UpdateTracker.api_info gives it: it installs in place."""
+        return {"version": DEMO_VERSION, "tag": "v" + DEMO_VERSION, "url": f"https://github.com/{version.REPO}/releases",
+                "notes": "", "asset_url": None, "asset_name": None, "asset_digest": None, "asset_size": DEMO_BYTES,
+                "can_self_update": True}
+
+    def check(self) -> dict[str, Any]:
+        return {"available": True, "version": DEMO_VERSION, "checked": True}
+
+    def apply(self) -> dict[str, Any]:
+        """Start a run, unless one is going (as the updater's lock refuses a second request) or it is restarting."""
+        with self._lock:
+            start, self._busy = not self._busy, True
+        if start:
+            self._spawn(self._run)
+        return {"started": True, "mode": "installer"}
+
+    def status(self) -> dict[str, Any]:
+        return self.progress.snapshot()
+
+    def _run(self) -> None:
+        try:
+            self._steps()
+        except Exception:
+            log.exception("devserver: the update demo failed")
+        finally:
+            with self._lock:      # a monitor that is restarting is gone: no second run
+                self._busy = self.progress.snapshot()["phase"] == "restarting"
+
+    def _steps(self) -> None:
+        record = self.progress
+        record.begin(DEMO_VERSION)
+        self._sleep(DEMO_CONNECT_S)
+        total = None if self.mode == "unknown" else DEMO_BYTES
+        record.received(0, total)
+        blocks = -(-DEMO_BYTES // DEMO_BLOCK)
+        last = int(blocks * DEMO_STALL_AT) if self.mode == "stall" else blocks
+        for block in range(1, last + 1):
+            self._sleep(DEMO_DOWNLOAD_S / blocks)
+            record.received(min(DEMO_BYTES, block * DEMO_BLOCK), total)
+        if self.mode == "stall":
+            self._sleep(update_check.DOWNLOAD_TIMEOUT_S)     # nothing more arrives: stalled from STALL_S, then the timeout
+            record.fail(TimeoutError("timed out"))
+            return
+        record.phase("checking")
+        if self.mode == "fail":
+            record.fail(update_check.UpdateDigestMismatch("the downloaded installer does not match the release's SHA-256"))
+            return
+        record.phase("starting")
+        self._sleep(update_check.HELPER_GRACE_S)
+        record.phase("restarting")
+
+
 def theme_settings(spec: str) -> dict[str, str]:
     """The settings for ``--theme ID[/VARIANT]``. Without a variant the theme's default one is named, so
     the result does not depend on what an earlier run left in the dev settings. ValueError for an unknown theme."""
@@ -621,7 +715,8 @@ def theme_settings(spec: str) -> dict[str, str]:
 
 def make_server(scenario: str, port: int, settings_dir: Path | None = None, *, db: Path | str | None = None,
                 theme: str | None = None, lang: str | None = None, warm: bool = False,
-                clock: Callable[[], datetime] | None = None) -> tuple[ApiServer, Settings]:
+                clock: Callable[[], datetime] | None = None,
+                update_demo: UpdateDemo | str | None = None) -> tuple[ApiServer, Settings]:
     """A configured ApiServer for ``scenario``. Not started; the caller runs start()/stop().
 
     ``db`` is the usage database the statistics read (a copy; see the module docstring); without it a
@@ -631,15 +726,18 @@ def make_server(scenario: str, port: int, settings_dir: Path | None = None, *, d
     them all to one instant (the default is the real clock, rounded down to the minute for the fake state).
     ``lang`` shows a catalog language, offered or not, or the pseudo-locale, as a dev instance's USAGE_MONITOR_LANG
     does (#89); ValueError for anything else. Without it the process's own environment decides.
+    ``update_demo`` (a mode of UPDATE_DEMOS, or an UpdateDemo) offers the demo release and answers the update status
+    from its made-up run; without it there is no update and no update status.
     """
     if lang is not None and lang not in i18n.DEV_LANGUAGES:
         raise ValueError(f"no such language: {lang!r} (one of {', '.join(i18n.DEV_LANGUAGES)})")
+    demo = UpdateDemo(update_demo) if isinstance(update_demo, str) else update_demo
     folder = settings_dir or Path(os.environ.get("USAGE_MONITOR_APPDATA_DIR") or tempfile.mkdtemp(prefix="usage-monitor-dev-"))
     settings = Settings(folder / "devserver-settings.json", save_delay_s=0.2)
     now = clock or _quantised_now
     history = None if db is not None else SyntheticHistory(scenario, now=now)
 
-    def update_check() -> dict[str, Any]:
+    def check_updates() -> dict[str, Any]:
         return {"available": False, "version": None, "checked": True, "current": _app_version()}
 
     guard_folder = folder / "guard-dev"
@@ -672,11 +770,12 @@ def make_server(scenario: str, port: int, settings_dir: Path | None = None, *, d
         settings,
         refresh_cb=refresh,
         update_cb={
-            "check": update_check,
-            "apply": lambda: {"started": False, "reason": "devserver never updates"},
+            "check": check_updates if demo is None else demo.check,
+            "apply": (lambda: {"started": False, "reason": "devserver never updates"}) if demo is None else demo.apply,
             "skip": lambda: {"skipped": True},
-            "info": lambda: None,
+            "info": (lambda: None) if demo is None else demo.info,
         },
+        update_status=None if demo is None else demo.status,
         on_settings_applied=lambda applied: log.info("devserver: applied %s", sorted(applied)),
         version=_app_version(),
         dev=True,
@@ -714,16 +813,20 @@ def main(argv: list[str] | None = None, *, wait: Callable[[], Any] | None = None
                         help="theme to start in, e.g. night_city/edgerun or gates/blue-light")
     parser.add_argument("--lang", choices=i18n.DEV_LANGUAGES,
                         help="show this language, offered or not, or the pseudo-locale (#89)")
+    parser.add_argument("--update-demo", choices=UPDATE_DEMOS, nargs="?", const="ok", metavar="|".join(UPDATE_DEMOS),
+                        help="offer a made-up release whose Install update runs a made-up update (#58; default ok)")
     args = parser.parse_args(argv)
     if args.db is not None and not args.db.is_file():
         parser.error(f"--db: no such file: {args.db}")
     try:
-        server, settings = make_server(args.scenario, args.port, db=args.db, theme=args.theme, lang=args.lang, warm=True)
+        server, settings = make_server(args.scenario, args.port, db=args.db, theme=args.theme, lang=args.lang, warm=True,
+                                       update_demo=args.update_demo)
     except ValueError as exc:
         parser.error(f"--theme: {exc}")
     try:
         server.start()
-        print(f"devserver scenario={args.scenario}{' lang=' + args.lang if args.lang else ''} url={server.url} "
+        print(f"devserver scenario={args.scenario}{' lang=' + args.lang if args.lang else ''}"
+              f"{' update-demo=' + args.update_demo if args.update_demo else ''} url={server.url} "
               f"data={args.db if args.db is not None else 'synthetic'}", flush=True)
         (wait or threading.Event().wait)()
     except KeyboardInterrupt:

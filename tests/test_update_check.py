@@ -21,15 +21,19 @@ Nothing here touches the network: a fake opener stands in for it (one test uses 
 from __future__ import annotations
 
 import ast
+import errno
 import glob
 import hashlib
 import http.client
 import http.server
+import inspect
 import io
 import json
 import os
 import re
 import shutil
+import socket
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -940,6 +944,418 @@ def test_a_second_request_while_one_is_running_is_ignored(stage: Stage, run: Run
     assert run.done.wait(10)
     time.sleep(0.1)
     assert calls == [URL]
+
+
+# ── The record the dashboard reads (#58) ──────────────────────────────────────
+
+class FakeClock:
+    """Monotonic seconds that move only when a test moves them."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+@pytest.fixture
+def clock() -> FakeClock:
+    return FakeClock()
+
+
+@pytest.fixture
+def record(monkeypatch: pytest.MonkeyPatch, clock: FakeClock) -> uc.UpdateProgress:
+    """A fresh PROGRESS on the fake clock: what apply_update writes and status() reads in this test."""
+    fresh = uc.UpdateProgress(clock=clock)
+    monkeypatch.setattr(uc, "PROGRESS", fresh)
+    return fresh
+
+
+IDLE = {"phase": "idle", "version": None, "done": 0, "total": None, "age_s": 0.0, "idle_s": 0.0, "stalled": False,
+        "reason": None, "failed_in": None, "http_status": None, "limit_mb": 512, "timeout_s": 60}
+
+
+class Watched(uc.UpdateProgress):
+    """An UpdateProgress that notes each new phase in the Stage's events, beside "launch" and "before_exit"."""
+
+    def __init__(self, clock: FakeClock, events: list[str]) -> None:
+        super().__init__(clock=clock)
+        self.events = events
+
+    def _note(self) -> None:
+        mark = "phase:" + self.snapshot()["phase"]
+        if mark not in self.events:
+            self.events.append(mark)
+
+    def begin(self, version: Any) -> None:
+        super().begin(version)
+        self._note()
+
+    def received(self, done: Any, total: Any) -> None:
+        super().received(done, total)
+        self._note()
+
+    def phase(self, name: str) -> None:
+        super().phase(name)
+        self._note()
+
+    def fail(self, exc: BaseException) -> None:
+        super().fail(exc)
+        self._note()
+
+
+def test_a_monitor_that_never_updated_has_an_idle_record(record: uc.UpdateProgress) -> None:
+    assert uc.status() == IDLE
+    assert IDLE["limit_mb"] == uc.MAX_INSTALLER_BYTES // (1024 * 1024) and IDLE["timeout_s"] == uc.DOWNLOAD_TIMEOUT_S
+
+
+def test_a_download_reports_its_bytes_block_by_block(net: FakeNet, tmp_path: Path) -> None:
+    net.add_bytes(URL, PAYLOAD)                         # two blocks of the fake response's read(65536)
+    calls: list[tuple[int, int | None]] = []
+    assert uc._download(URL, str(tmp_path / SETUP), repo=REPO, on_progress=lambda done, total: calls.append((done, total))) == SHA
+    assert calls == [(0, len(PAYLOAD)), (65536, len(PAYLOAD)), (len(PAYLOAD), len(PAYLOAD))]
+
+
+def test_a_download_without_a_content_length_reports_no_total(net: FakeNet, tmp_path: Path) -> None:
+    net.add_bytes(URL, PAYLOAD, announce=None)
+    calls: list[tuple[int, int | None]] = []
+    uc._download(URL, str(tmp_path / SETUP), repo=REPO, on_progress=lambda done, total: calls.append((done, total)))
+    assert calls == [(0, None), (65536, None), (len(PAYLOAD), None)]
+
+
+def test_a_progress_callback_that_raises_does_not_stop_the_download(net: FakeNet, tmp_path: Path) -> None:
+    net.add_bytes(URL, PAYLOAD)
+
+    def boom(_done: int, _total: int | None) -> None:
+        raise RuntimeError("a broken page")
+
+    assert uc._download(URL, str(tmp_path / SETUP), repo=REPO, on_progress=boom) == SHA
+    assert (tmp_path / SETUP).read_bytes() == PAYLOAD
+
+
+def test_apply_update_records_each_phase_in_order(stage: Stage, run: Run, clock: FakeClock,
+                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    """Downloading, then checking once the file is in, starting once it checked out (before the helper is launched),
+    restarting once the helper runs (before the app's own teardown)."""
+    watched = Watched(clock, stage.events)
+    monkeypatch.setattr(uc, "PROGRESS", watched)
+    stage.serve()
+    run.start()
+    assert stage.events == ["phase:downloading", "phase:checking", "phase:starting", "launch", "phase:restarting",
+                            "before_exit", "exit"]
+    now = uc.status()
+    assert (now["phase"], now["done"], now["total"], now["reason"]) == ("restarting", len(PAYLOAD), len(PAYLOAD), None)
+
+
+def test_the_record_names_the_version_as_the_check_does(stage: Stage, run: Run, record: uc.UpdateProgress) -> None:
+    """The page shows a run only for the release on offer, whose version is the tag without its "v" (_check)."""
+    assert TAG == "v2.0.0"
+    stage.serve()
+    run.start()
+    assert uc.status()["version"] == "2.0.0"
+
+
+@pytest.mark.parametrize(("setup", "code", "failed_in", "http_status"), [
+    ("mismatch", "digest", "checking", None),
+    ("foreign_link", "rejected", "downloading", None),
+    ("no_digest", "error", "downloading", None),             # the release lists no SHA-256: nothing was downloaded
+    ("offline", "network", "downloading", None),
+    ("http_404", "http", "downloading", 404),
+    ("redirect_to_http", "redirect", "downloading", 302),
+    ("timeout", "timeout", "downloading", None),
+    ("connect_timeout", "timeout", "downloading", None),
+    ("reset", "network", "downloading", None),
+    ("tls", "network", "downloading", None),
+    ("name_lookup", "network", "downloading", None),
+    ("network_down", "network", "downloading", None),
+    ("cut_short", "cut_short", "downloading", None),
+    ("incomplete_read", "cut_short", "downloading", None),
+    ("too_large", "too_large", "downloading", None),
+    ("helper_missing", "helper", "starting", None),
+    ("helper_stops", "helper", "starting", None),
+    ("file_held", "local", "downloading", None),              # a scanner holds the file os.replace moves
+    ("temp_folder", "local", "downloading", None),
+    ("helper_file", "local", "starting", None),               # the disk fills as the helper is written
+    ("from_source", "error", "downloading", None),
+])
+def test_a_failed_update_records_its_code(stage: Stage, run: Run, record: uc.UpdateProgress,
+                                          monkeypatch: pytest.MonkeyPatch, setup: str, code: str,
+                                          failed_in: str, http_status: int | None) -> None:
+    stage.serve()
+    url = URL
+    errors = {
+        "offline": urllib.error.URLError("offline"),
+        "http_404": urllib.error.HTTPError(URL, 404, "Not Found", {}, None),   # type: ignore[arg-type]
+        "redirect_to_http": uc.UpdateRedirectRefused(URL, 302, "refused a redirect to a non-https address", {}, None),  # type: ignore[arg-type]
+        "timeout": TimeoutError("timed out"),
+        "connect_timeout": urllib.error.URLError(TimeoutError("timed out")),
+        "reset": ConnectionResetError(errno.ECONNRESET, "connection reset"),
+        "tls": ssl.SSLError(1, "bad record mac"),
+        "name_lookup": socket.gaierror(11001, "getaddrinfo failed"),
+        "network_down": OSError(errno.ENETDOWN, "the network is down"),
+        "incomplete_read": http.client.IncompleteRead(b"MZ", 1000),
+    }
+
+    def refuse(*_args: Any, **_kwargs: Any) -> Any:
+        raise {"file_held": PermissionError(errno.EACCES, "used by another process"),
+               "temp_folder": PermissionError(errno.EACCES, "access denied"),
+               "helper_file": OSError(errno.ENOSPC, "no space left on the device")}[setup]
+
+    if setup in errors:
+        stage.net.add_error(URL, errors[setup])
+    elif setup == "mismatch":
+        stage.serve(digest="sha256:" + "1" * 64)
+    elif setup == "foreign_link":
+        url = "https://evil.example/Setup.exe"
+    elif setup == "no_digest":
+        stage.serve(digest=None)
+    elif setup == "cut_short":
+        stage.serve(payload=PAYLOAD[:500], announce=len(PAYLOAD))
+    elif setup == "too_large":
+        stage.serve(announce=uc.MAX_INSTALLER_BYTES + 1)
+    elif setup == "helper_missing":
+        stage.launch_error = OSError("no cmd")
+    elif setup == "helper_stops":
+        stage.proc = FakeProc(exit_code=1)
+    elif setup == "file_held":
+        monkeypatch.setattr(os, "replace", refuse)
+    elif setup == "temp_folder":
+        monkeypatch.setattr(tempfile, "mkdtemp", refuse)
+    elif setup == "helper_file":
+        monkeypatch.setattr(uc, "_helper_script", refuse)
+    elif setup == "from_source":
+        monkeypatch.setattr(uc, "is_frozen", lambda: False)
+    run.start(url=url)
+    assert len(run.errors) == 1 and "exit" not in stage.events
+    now = uc.status()
+    assert (now["phase"], now["reason"], now["failed_in"], now["http_status"]) == ("failed", code, failed_in, http_status)
+    assert now["version"] == (None if setup == "foreign_link" else "2.0.0")
+    whole = ("mismatch", "helper_missing", "helper_stops", "file_held", "helper_file")
+    assert now["done"] == (len(PAYLOAD) if setup in whole else 500 if setup == "cut_short" else 0)
+
+
+def test_failure_codes_name_every_reason() -> None:
+    """Each code of REASONS is one failure_code gives, and nothing else is."""
+    samples = [uc.UpdateTooLarge("x"), uc.UpdateCutShort("x"), http.client.IncompleteRead(b""), uc.UpdateDigestMismatch("x"),
+               uc.UpdateRejected("x"), uc.UpdateHelperFailed("x"),
+               uc.UpdateRedirectRefused(URL, 301, "refused", {}, None),  # type: ignore[arg-type]
+               urllib.error.HTTPError(URL, 500, "x", {}, None), TimeoutError(), urllib.error.URLError("x"),  # type: ignore[arg-type]
+               OSError(errno.ENOSPC, "full"), uc.UpdateVerificationError("x"), ValueError("x")]
+    assert sorted({uc.failure_code(exc) for exc in samples}) == sorted(uc.REASONS)
+    assert uc.PHASES == ("idle", *uc.ACTIVE_PHASES, "failed")
+
+
+def test_the_record_says_failed_before_on_error_hears_of_it(stage: Stage, record: uc.UpdateProgress) -> None:
+    stage.serve(digest="sha256:" + "1" * 64)
+    heard: list[str] = []
+    done = threading.Event()
+
+    def on_error(_exc: BaseException) -> None:
+        heard.append(uc.status()["phase"])
+        done.set()
+
+    uc.apply_update(URL, repo=REPO, on_error=on_error)
+    assert done.wait(10)
+    assert wait_for(lambda: not uc._update_lock.locked(), 5)
+    assert heard == ["failed"]
+
+
+def test_a_second_request_leaves_the_running_record_alone(stage: Stage, run: Run, record: uc.UpdateProgress,
+                                                          clock: FakeClock, monkeypatch: pytest.MonkeyPatch) -> None:
+    entered, release = threading.Event(), threading.Event()
+
+    def slow(asset_url: str, **_kwargs: Any) -> FakeProc:
+        entered.set()
+        release.wait(10)
+        return FakeProc()
+
+    monkeypatch.setattr(uc, "_stage_update", slow)
+    uc.apply_update(URL, repo=REPO)
+    assert entered.wait(5)
+    clock.advance(5)
+    before = uc.status()
+    uc.apply_update(URL, repo=REPO)       # a second click on "Update": the lock refuses it
+    time.sleep(0.2)
+    after = uc.status()
+    release.set()
+    assert run.done.wait(10)
+    assert wait_for(lambda: not uc._update_lock.locked(), 5)
+    assert before == after
+    assert (before["phase"], before["age_s"], before["version"]) == ("downloading", 5.0, "2.0.0")
+
+
+def test_stalled_means_fifteen_seconds_without_a_block_while_bytes_are_missing(clock: FakeClock) -> None:
+    progress = uc.UpdateProgress(clock=clock)
+
+    def stalled_after(seconds: float) -> bool:
+        clock.advance(seconds)
+        return progress.snapshot()["stalled"]
+
+    progress.begin("2.0.0")
+    assert not stalled_after(14.9) and stalled_after(0.1)       # nothing since the start: connecting, no headers yet
+    progress.begin("2.0.0")
+    clock.advance(10)
+    progress.received(0, 1000)                                   # the headers, with the size: no bytes yet
+    assert not stalled_after(4.9) and stalled_after(0.1)         # still counted from the start of the run
+    progress.begin("2.0.0")
+    progress.received(0, 1000)
+    progress.received(500, 1000)
+    assert not stalled_after(14.9) and stalled_after(0.1)       # 15 s since the last block
+    progress.received(600, 1000)
+    assert not progress.snapshot()["stalled"]                   # a new block clears it
+    progress.begin("2.0.0")
+    progress.received(500, None)
+    assert stalled_after(15)                                     # the size is unknown: bytes may still be missing
+    progress.begin("2.0.0")
+    progress.received(1000, 1000)
+    assert not stalled_after(30)                                 # the whole file is in; it is only being closed
+    progress.begin("2.0.0")
+    progress.received(500, 1000)
+    progress.phase("checking")
+    assert not stalled_after(30)
+    progress.begin("2.0.0")
+    progress.received(500, 1000)
+    progress.fail(TimeoutError())
+    assert not stalled_after(30)
+    assert uc.STALL_S == 15
+
+
+def test_a_new_run_starts_from_nothing(clock: FakeClock) -> None:
+    progress = uc.UpdateProgress(clock=clock)
+    progress.begin("2.0.0")
+    progress.received(100, 1000)
+    clock.advance(2)
+    progress.fail(urllib.error.HTTPError(URL, 404, "Not Found", {}, None))  # type: ignore[arg-type]
+    clock.advance(3)
+    progress.begin("2.1.0")
+    assert progress.snapshot() == dict(IDLE, phase="downloading", version="2.1.0")
+
+
+def test_the_record_takes_only_what_belongs_to_a_run(clock: FakeClock) -> None:
+    progress = uc.UpdateProgress(clock=clock)
+    progress.received(10, 20)
+    progress.phase("checking")
+    progress.phase("restarting")
+    assert progress.snapshot() == IDLE                           # no run: nothing to move on
+    progress.begin("2.0.0")
+    progress.received("lots", True)                              # not counts: read as 0 of an unknown size
+    progress.phase("failed")                                     # only fail() fails a run
+    progress.phase("idle")
+    progress.received(30, 40)
+    progress.phase("checking")
+    progress.received(40, 40)                                    # a late block after the download: ignored
+    now = progress.snapshot()
+    assert (now["phase"], now["done"], now["total"]) == ("checking", 30, 40)
+
+
+def test_apply_update_keeps_its_signature() -> None:
+    """The app calls apply_update with digest, on_error and on_before_exit (test_app pins those); the record is
+    read through status(), so the signature does not change."""
+    params = inspect.signature(uc.apply_update).parameters
+    assert [(name, p.kind.name, p.default) for name, p in params.items()] == [
+        ("asset_url", "POSITIONAL_OR_KEYWORD", inspect.Parameter.empty), ("on_error", "KEYWORD_ONLY", None),
+        ("on_before_exit", "KEYWORD_ONLY", None), ("repo", "KEYWORD_ONLY", None), ("digest", "KEYWORD_ONLY", None)]
+
+
+def test_the_new_errors_are_update_errors_with_the_old_messages(stage: Stage, tmp_path: Path) -> None:
+    """Every `except UpdateError` and every match= of the tests above still holds: the codes come from subclasses."""
+    for subclass in (uc.UpdateTooLarge, uc.UpdateCutShort, uc.UpdateHelperFailed):
+        assert issubclass(subclass, uc.UpdateError) and not issubclass(subclass, uc.UpdateVerificationError)
+    assert issubclass(uc.UpdateDigestMismatch, uc.UpdateVerificationError)
+    assert issubclass(uc.UpdateRedirectRefused, urllib.error.HTTPError)
+    assert not issubclass(uc.UpdateRedirectRefused, uc.UpdateError)
+
+    stage.net.add_bytes(URL, PAYLOAD)
+    with pytest.raises(uc.UpdateTooLarge, match=r"^the installer is larger than 0 MB$"):
+        uc._download(URL, str(tmp_path / SETUP), repo=REPO, max_bytes=1000)
+    stage.net.add_bytes(URL, PAYLOAD[:1000], announce=len(PAYLOAD))
+    with pytest.raises(uc.UpdateCutShort, match=rf"^the download was cut short \(1000 of {len(PAYLOAD)} bytes\)$"):
+        uc._download(URL, str(tmp_path / SETUP), repo=REPO)
+    stage.serve(digest="sha256:" + "1" * 64)
+    with pytest.raises(uc.UpdateDigestMismatch, match=r"^the downloaded installer does not match the release's SHA-256$"):
+        uc._stage_update(URL, repo=REPO)
+    stage.serve()
+    stage.proc = FakeProc(exit_code=1)
+    with pytest.raises(uc.UpdateHelperFailed, match=r"^the update helper stopped at once \(exit code 1\)$"):
+        uc._stage_update(URL, repo=REPO)
+    stage.launch_error = OSError("blocked by policy")
+    with pytest.raises(uc.UpdateHelperFailed, match=r"^could not start the update helper: blocked by policy$"):
+        uc._stage_update(URL, repo=REPO)
+    handler = uc._HttpsOnlyRedirects()
+    with pytest.raises(uc.UpdateRedirectRefused) as refused:
+        handler.redirect_request(urllib.request.Request(URL), io.BytesIO(), 302, "Found", http.client.HTTPMessage(),
+                                 "http://evil.example/x")
+    assert refused.value.code == 302 and refused.value.msg == "refused a redirect to a non-https address"
+
+
+class _SlowServer:
+    """127.0.0.1 only: a body whose second piece is sent only once the client has reported the first (``go``), or
+    after 5 s, and one that stops after its first piece."""
+
+    FIRST = 1000
+    TOTAL = 70_000                     # more than one 64 KB read
+
+    def __init__(self) -> None:
+        self.release, self.go = threading.Event(), threading.Event()
+        release, go, first, total = self.release, self.go, self.FIRST, self.TOTAL
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # noqa: N802
+                self.send_response(200)
+                self.send_header("Content-Length", str(total))
+                self.end_headers()
+                self.wfile.write(b"a" * first)
+                self.wfile.flush()
+                if self.path == "/trickle":
+                    go.wait(5)
+                    self.wfile.write(b"b" * (total - first))
+                else:                  # /stall: nothing more until the test ends
+                    release.wait(10)
+
+            def log_message(self, *_args: object) -> None:
+                pass
+
+        self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.httpd.server_address[1]}"
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def close(self) -> None:
+        self.release.set()
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+def test_the_real_opener_reports_progress_and_a_stall_times_out(tmp_path: Path) -> None:
+    slow = _SlowServer()
+    try:
+        calls: list[tuple[int, int | None]] = []
+
+        def heard(done: int, total: int | None) -> None:
+            calls.append((done, total))
+            if done:
+                slow.go.set()                            # the rest of the body follows only now
+
+        uc._download(slow.url + "/trickle", str(tmp_path / "a.exe"), repo=REPO, on_progress=heard)
+        assert calls[0] == (0, slow.TOTAL) and calls[-1] == (slow.TOTAL, slow.TOTAL)
+        assert 0 < calls[1][0] <= slow.FIRST           # the first piece counts as soon as it is in, not at 64 KB
+        stalled: list[tuple[int, int | None]] = []
+        with pytest.raises(TimeoutError) as caught:
+            uc._download(slow.url + "/stall", str(tmp_path / "b.exe"), repo=REPO, timeout=0.5,
+                         on_progress=lambda done, total: stalled.append((done, total)))
+        assert uc.failure_code(caught.value) == "timeout"
+        assert stalled[-1][0] <= slow.FIRST and stalled[-1][1] == slow.TOTAL
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["a.exe"]     # no .part left of the stalled one
+    finally:
+        slow.close()
+
+
+def test_the_real_opener_refuses_a_redirect_to_plain_http_with_its_own_code(server: _Server, tmp_path: Path) -> None:
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        uc._download(server.url + "/redirect", str(tmp_path / "Setup.exe"), repo=REPO)
+    assert uc.failure_code(caught.value) == "redirect"     # not "GitHub answered HTTP 302"
 
 
 # ── The helper script and how it is started ───────────────────────────────────
