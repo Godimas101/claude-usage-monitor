@@ -102,6 +102,70 @@ def test_night_citys_record_is_whole() -> None:
     assert normal["clear"]["edgerun"]["floating@1"] == normal["looks"]["relic"]["floating@1"]  # no plate: plain
 
 
+# ── Gates' English stays what it was (#96 step 0) ─────────────────────────────
+
+def _gates_surfaces() -> set[str]:
+    from usage_monitor.render import dump
+
+    return {"floating@1", "floating@1.25", "tooltip@1", "tooltip@1.25", "tray/32",
+            *(f"strip/h{round(height * scale)}@{scale:g}" for scale in skin_words.SCALES
+              for height in dump.TASKBAR_HEIGHTS_AT_1X)}
+
+
+def test_gates_record_is_whole() -> None:
+    """Gates' section has every dump state, the edge and guard states and the states its own words hang on (Night
+    City's, the guard holding beside a missing sign-in, and the two guard holds whose resume English's footer cuts,
+    each at a clock of its own); every surface at both scales and the tray once, its number one entry per run (never
+    per glyph) with the keyline's mask and the ink's; and the words the frame dump never draws: the refused sign-in's
+    footer, the first reading awaited, no reset time yet, the guard armed with nothing to list, and English's own
+    cut."""
+    from usage_monitor.render import dump
+
+    gates = RECORDED["gates"]
+    assert {name.split("/")[0] for name in gates} >= set(dump.DUMP_STATE_NAMES)
+    assert set(RECORDED["night_city"]) <= set(gates)                 # Night City's states, every one
+    assert {"refused", "unknown_kind", "scoped_neither", "scoped_surface_only/guard_holding", "guard_over_a_limit_gone",
+            "no_reading/live", "pace/none", "pace/ahead_100", "guard_armed_no_caps", "age/stale/100d",
+            "guard_hold/no_credentials", "guard_hold/resume_mon_10am", "guard_hold/resume_wed_1259pm"} <= set(gates)
+    surfaces = _gates_surfaces()
+    numbers = 0
+    for words in gates.values():
+        assert set(words) == {"helpers", "runs"} and set(words["runs"]) == surfaces
+        tray = words["runs"]["tray/32"]                  # the number, or nothing beside a lamp's mark (offline, limited)
+        assert isinstance(tray, list) and len(tray) <= 1 and all(len(run[-1]) == 2 for run in tray), tray
+        numbers += len(tray)
+    assert numbers > 50
+    drawn = {run[0] for words in gates.values() for runs in words["runs"].values() if not isinstance(runs, str)
+             for run in runs}
+    assert {"Claude usage", "Session", "Weekly", "Fable weekly", "Weekly scoped", "5H", "7D", "50% share", "Cap 95%",
+            "Nearly out", "On pace", "Ahead of pace", "Under pace", "Ahead of pace by 100 pts",
+            "Under pace by 100 pts", "Resets 11:39 PM", "Guard armed", "Guard armed:", "Guard holding",
+            "Guard holding:", "Hmm, we lost touch.", " Send Claude Code a message.", "Sign-in refused.",
+            " Run /login in Claude Code.", "No sign-in found.", " Open the dashboard for help.", "Rate limited.",
+            " Showing the last reading.", "No connection. Retrying every minute.",
+            "Paused. Resume to keep usage live.", "Fetching your usage.", "Waiting for your first reading.",
+            "No reset time yet."} <= drawn
+    held = gates["guard_hold/no_credentials"]
+    assert {"No sign-in found.", " Open the dashboard for help."} <= _drawn(held, "floating@1")
+    for name in ("guard_hold/resume_mon_10am", "guard_hold/resume_wed_1259pm"):
+        cut = [text for text in _drawn(gates[name], "floating@1") if text.endswith("…")]
+        assert cut and cut[0].startswith(" · Resumes "), (name, cut)                 # English's own cut
+
+
+def test_the_gates_record_does_not_hang_on_the_glyph_cache() -> None:
+    """Gates draws each run through _run, whose cache hands back a mask it drew before, and Pillow draws a glyph only
+    when the cache misses: a record read from those draw calls would hang on what was drawn first. Gates' runs are read
+    where the skin places them (skin_words.gates_runs), so the record worked out in one process with the cache cleared
+    and again with it warm is the same."""
+    from usage_monitor.render.skins import gates
+
+    gates._run.cache_clear()
+    cold = skin_words.SKINS["gates"]()
+    warm = skin_words.SKINS["gates"]()
+    assert gates._run.cache_info().hits > 0
+    assert cold == warm
+
+
 # ── The keys hold today's English (#94 step 1) ────────────────────────────────
 
 # Nostromo's keys (widget.nostromo.<group>.<name>): the header's state words, the guard's chip, mark and line, the
@@ -298,6 +362,87 @@ def test_night_citys_english_records_are_the_catalogs() -> None:
                                    (nc.DEFAULT_STALE_REFUSED, "stale_refused", "refused"),
                                    (nc.DEFAULT_NO_LOGIN, "no_login", "no_login")):
         assert default == copy[copied] == text(f"band.{cause}"), cause
+
+
+# Gates' keys (widget.gates.<group>.<name>, #96), in sentence case but the 5H and 7D tags: the rows' names, the window
+# tags (the strip's labels too), the share, the cap badge, the reset, the paces (the footer's leads and the hover card's
+# readouts), the critical lead, the guard's line and its names, and the footer's sentences (a lead and its step, or
+# its one run).
+GATES_KEYS = (
+    "limit.session", "limit.weekly", "limit.scoped", "limit.scoped_unnamed", "window.session", "window.weekly",
+    "share.of", "cap.tag", "resets.at", "pace.on", "pace.ahead", "pace.behind", "pace.ahead_by", "pace.behind_by",
+    "state.critical",
+    *(f"guard.{part}" for part in ("armed", "armed_list", "holding", "holding_list", "limit", "cap", "resumes",
+                                   "time_left", "session", "weekly", "scoped", "scoped_unnamed")),
+    *(f"footer.{part}" for part in ("stale", "stale_step", "refused", "refused_step", "no_login", "no_login_step",
+                                    "rate_limited", "rate_limited_rest", "offline", "paused", "loading", "waiting",
+                                    "no_reset")),
+)
+
+
+def test_the_english_catalog_is_gates_english() -> None:
+    """Each widget.gates key of en.json, filled with the values English gives it, is the text Gates drew before #96
+    (the record above), so a retyped value fails. The fills: {name} Fable or claude_code, {percent} the percent,
+    {clock} the reset or resume time, {time_left} the time left in its brackets, {countdown} 2h 14m, {points} the
+    points, {product} Claude Code, {command} /login. A footer's rest follows its lead after a space, which the code
+    writes; the hover card's guard line glues its pieces (engine.glue)."""
+    from usage_monitor import i18n
+    from usage_monitor.render import engine
+
+    en = i18n.load_catalog("en")
+    assert {key for key in en.english() if key.startswith("widget.gates.")} == {
+        f"widget.gates.{key}" for key in GATES_KEYS}
+
+    def text(key: str, **values: str) -> str:
+        return str(en.text(f"widget.gates.{key}", values))
+
+    was = RECORDED["gates"]
+    helpers = {state: words["helpers"] for state, words in was.items()}
+    rows = {row["key"]: row for row in helpers["normal3/auto"]["rows"]}
+    assert (text("limit.session"), text("limit.weekly")) == (rows["session"]["name"], rows["weekly"]["name"])
+    assert text("limit.scoped", name="Fable") == rows["scoped:fable"]["name"] == "Fable weekly"
+    assert text("limit.scoped_unnamed") == helpers["scoped_neither"]["rows"][2]["name"]
+    assert (text("window.session"), text("window.weekly")) == (rows["session"]["tag"], rows["weekly"]["tag"])
+    labels = [run[0] for run in was["normal3/auto"]["runs"]["strip/h48@1"] if run[1] == 10]    # x: STRIP_K_X
+    assert labels == [text("window.session"), text("window.weekly")]
+    assert text("share.of", percent="50%") == rows["scoped:fable"]["tag"]
+    held = helpers["guard_hold_session/auto"]
+    assert text("cap.tag", percent="95%") in _drawn(was["guard_hold_session/auto"], "floating@1")
+    assert text("resets.at", clock="11:39 PM") in _drawn(was["normal3/auto"], "tooltip@1")
+    paces = {shape: helpers[f"pace/{shape}"]["rows"][0]["pace"] for shape in ("on", "ahead_100", "behind_100")}
+    assert paces == {"on": [text("pace.on"), "ok"], "ahead_100": [text("pace.ahead_by", points="100"), "warn"],
+                     "behind_100": [text("pace.behind_by", points="100"), "ok"]}
+    assert helpers["critical/auto"]["footer"][0] == [text("state.critical"), 600, "alert"]
+    leads = {tuple(words["footer"][0]) for words in helpers.values()}
+    assert {(text("pace.ahead"), 600, "warn"), (text("pace.behind"), 600, "ok"), (text("pace.on"), 600, "ok")} <= leads
+    assert helpers["normal3/auto"]["footer"][1][0] == " · " + text("resets.at", clock="11:39 PM")
+    assert helpers["guard_armed_no_caps"]["statement"] == [text("guard.armed"), ""]
+    caps = (("session", "95%"), ("weekly", "90%"))
+    assert helpers["guard_armed/auto"]["statement"] == [text("guard.armed_list"), ", ".join(
+        engine.glue(text("guard.limit", name=name, percent=cap)) for name, cap in caps)]
+    assert text("guard.holding") + ":" == text("guard.holding_list") == held["statement"][0]
+    time_left = text("guard.time_left", countdown="2h 14m")
+    assert held["statement"][1] == (engine.glue(text("guard.limit", name="session", percent="96%")) + " "
+                                    + engine.glue(text("guard.cap", percent="95%")) + ". "
+                                    + text("guard.resumes", clock=engine.glue("10:26 PM"),
+                                           time_left=engine.glue(time_left)) + ".")
+    assert held["hold"] == held["footer"] == [[text("guard.holding"), 600, "alert"], [
+        " · " + text("guard.resumes", clock="10:26 PM", time_left=time_left), 400, "text_3"]]
+    assert (text("guard.session"), text("guard.weekly")) == (held["names"]["session"],
+                                                             helpers["guard_hold_weekly/auto"]["names"]["weekly"])
+    named = {**helpers["scoped_model/guard_holding"]["names"], **helpers["scoped_surface_only/guard_holding"]["names"],
+             **helpers["scoped_neither/guard_holding"]["names"]}
+    assert {text("guard.scoped", name="Fable"), text("guard.scoped", name="claude_code"),
+            text("guard.scoped_unnamed")} <= set(named.values()), named
+    names = {"product": "Claude Code", "command": "/login"}
+    for state, lead, rest in (("stale/auto", "stale", "stale_step"), ("refused", "refused", "refused_step"),
+                              ("no_credentials/auto", "no_login", "no_login_step"),
+                              ("rate_limited/auto", "rate_limited", "rate_limited_rest")):
+        assert helpers[state]["footer"] == [[text(f"footer.{lead}"), 600, "warn"],
+                                            [" " + text(f"footer.{rest}", **names), 400, "text_3"]], state
+    for state, key in (("offline/auto", "offline"), ("paused/auto", "paused"), ("loading/auto", "loading"),
+                       ("no_reading/live", "waiting"), ("pace/none", "no_reset")):
+        assert helpers[state]["footer"] == [[text(f"footer.{key}"), 400, "text_3"]], state
 
 
 # ── The skin's words come from the catalog (#94 steps 2 and 3) ────────────────

@@ -1,10 +1,10 @@
 """Each skin's own English words, for tests/test_skin_words.py (#94 to #96).
 
 tests/fixtures/skin_words_english.json holds what a skin drew before its own words moved into the catalog, one section
-per skin: "nostromo" (#94), "night_city" (#95), and Gates' once #96 records it, before it edits. A section has the output
-of every helper of the skin that words a text, and every run of text each surface draws (the text, where it is set, its
-face, size, tracking and alignment, the pixel it lands on and its advance) at 1.0 and 1.25. The test holds the skin to it
-byte for byte. Reset times and resume clocks are local time, so the words are worked out in a fresh Python with the time
+per skin: "nostromo" (#94), "night_city" (#95) and "gates" (#96), each recorded before its skin was edited. A section has
+the output of every helper of the skin that words a text, and every run of text each surface draws (the text, where it
+is set, its face, size, tracking and alignment, the pixel it lands on and its advance) at 1.0 and 1.25. The test holds
+the skin to it byte for byte. Reset times and resume clocks are local time, so the words are worked out in a fresh Python with the time
 zone pinned to UTC (``collect``), as tests/widget_words.py does.
 
 The states: every dump state in every show_scoped mode; tests/widget_words.py's edge states (the refused sign-in, the
@@ -17,7 +17,10 @@ offline and rate-limited ones), the guard holding over a stale and an offline re
 (the band's hold chip), and the guard armed while paused and while loading (the header's status chip beside the GUARD
 chip). Night City's variants place their runs by look (night_city.Look), so its section has Blackwall's runs at 1.0 and
 1.25, Relic's and Edgerun's at 1.0 (Mox is Relic's look), and Blackwall's and Edgerun's floating widget and strip with
-transparent_bg at 1.0 (Edgerun drops its plate there).
+transparent_bg at 1.0 (Edgerun drops its plate there). For Gates: Night City's, a missing sign-in that keeps its reading
+while the guard holds, and the two guard holds whose resume English's footer cuts, each at a clock of its own. Gates
+queues its text and draws it on the finished frame through a glyph cache, so its runs are read where it places them
+(gates_runs); its variants place their runs alike, so its section has system-dark's.
 
     python tests/skin_words.py --print SKIN      a skin's words, from the code this Python imports, as JSON
     python tests/skin_words.py --record SKIN     write a skin's section, worked out in a fresh Python; refused when the
@@ -31,7 +34,7 @@ import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -120,10 +123,39 @@ def _night_city_states() -> dict[str, Any]:
     return states
 
 
+# The two guard holds whose resume English's footer cuts ("Guard holding · Resumes Mon 10:00 AM (in 20h 20m)" is 260.3 px
+# of 258, budgets.KNOWN_ENGLISH_OVERRUNS): the state's name, its clock and the resume time, in UTC.
+GATES_WIDE_RESUMES: tuple[tuple[str, datetime, datetime], ...] = (
+    ("guard_hold/resume_mon_10am", datetime(2026, 10, 25, 13, 40, tzinfo=timezone.utc),
+     datetime(2026, 10, 26, 10, 0, tzinfo=timezone.utc)),
+    ("guard_hold/resume_wed_1259pm", datetime(2026, 10, 20, 13, 0, tzinfo=timezone.utc),
+     datetime(2026, 10, 21, 12, 59, tzinfo=timezone.utc)),
+)
+
+
+def _gates_states() -> dict[str, Any]:
+    """The states Gates' own words hang on, beyond the dump's and widget_words': Night City's (each sign-in reason, each
+    age shape, each pace, the guard armed with no caps, holding over a stale and an offline reading, armed while paused
+    and while loading), a missing sign-in that keeps its reading while the guard holds (NO LOGIN beside the holding
+    capsule, the no-login footer), and the two guard holds whose resume English's footer cuts (GATES_WIDE_RESUMES), each
+    a (state, now) pair: the sample clock never gives them."""
+    from usage_monitor.data.models import ApiStatus
+    from usage_monitor.render import dump
+
+    states: dict[str, Any] = dict(_night_city_states())
+    states["guard_hold/no_credentials"] = replace(dump.sample_state("guard_hold_session"), status=ApiStatus.NO_CREDENTIALS)
+    for name, now, resume in GATES_WIDE_RESUMES:
+        state = dump.sample_state("guard_hold_session", now)
+        at = resume.isoformat().replace("+00:00", "Z")
+        states[name] = (replace(state, guard={**state.guard, "resume_at": at}), now)
+    return states
+
+
 def models(extra: Callable[[], dict[str, Any]], locale: Any = None) -> dict[str, Any]:
     """Every state the record covers, by name, as its view model in ``locale`` (English when None): the dump's in
     every show_scoped mode that gives it other rows than the modes before it, then widget_words' edge and guard states
-    and ``extra``'s, with every scoped row shown."""
+    and ``extra``'s, with every scoped row shown. A state given as a (state, now) pair is built at that clock, any other
+    at the dump's."""
     from usage_monitor.i18n import ENGLISH
     from usage_monitor.render import dump
     from usage_monitor.render.model import SHOW_SCOPED_MODES, build_model
@@ -138,8 +170,9 @@ def models(extra: Callable[[], dict[str, Any]], locale: Any = None) -> dict[str,
                 shown.append(model)
                 found[f"{name}/{mode}"] = model
     for group in (widget_words._edge_states(), widget_words._guard_states(), extra()):
-        for name, state in group.items():
-            found[name] = build_model(state, dump.SAMPLE_NOW, show_scoped="always", locale=locale)
+        for name, given in group.items():
+            state, now = given if isinstance(given, tuple) else (given, dump.SAMPLE_NOW)
+            found[name] = build_model(state, now, show_scoped="always", locale=locale)
     return found
 
 
@@ -196,6 +229,79 @@ def runs(skin: Any, model: Any, theme: Any, variant: Any, heights: tuple[int, ..
             take(f"tray/{TRAY_SIZE}", lambda: skin.render_tray_icon(model, theme, variant, TRAY_SIZE))
     finally:
         engine.Canvas.text_layer, ImageDraw.ImageDraw.text = real_layer, real_draw
+    return drawn
+
+
+def gates_runs(skin: Any, model: Any, theme: Any, variant: Any, heights: tuple[int, ...],
+               scales: tuple[float, ...] = SCALES, *, opts: Any = None) -> dict[str, list[list[Any]] | str]:
+    """runs() for Gates, which queues its text (Ink.put) and draws it on the finished frame at output size
+    (Ink._draw_text, through the cached _run and _blend): every run in drawing order as (text, x, baseline, face file
+    without its .ttf, size in output px, weight, optical size, align, coverage gamma, the fraction of a pixel it starts
+    at, the pixel x and y of its mask, advance); the tray number as one entry per run (text, face file, size, weight,
+    optical size, gamma, fraction, and the pixel each of its masks lands on: the keyline's, then the ink's). Each run is
+    read where Ink._draw_text and _tray_number place it, never from Pillow's draw calls, which _run makes only when its
+    cache misses. The surfaces, their names and ``opts`` as runs()."""
+    from usage_monitor.render.skins import gates
+
+    found: list[list[Any]] = []
+    calls: list[tuple[Any, ...]] = []
+    real_draw, real_tray, real_run, real_blend = gates.Ink._draw_text, gates._tray_number, gates._run, gates._blend
+
+    def run(face: Any, text: str, gamma: float, frac: float) -> Any:
+        calls.append(("run", face, text, gamma, frac))
+        return real_run(face, text, gamma, frac)
+
+    def blend(image: Any, mask: Any, x: int, y: int, color: Any) -> None:
+        calls.append(("blend", x, y))
+        real_blend(image, mask, x, y, color)
+
+    def heard(draw_it: Callable[[], Any]) -> tuple[list[tuple[Any, ...]], list[tuple[Any, ...]]]:
+        calls.clear()
+        gates._run, gates._blend = run, blend
+        try:
+            draw_it()
+        finally:
+            gates._run, gates._blend = real_run, real_blend
+        return [call for call in calls if call[0] == "run"], [call for call in calls if call[0] == "blend"]
+
+    def face_of(face: Any) -> list[Any]:
+        return [Path(str(face.path or "")).stem, face.size, face.wght, face.opsz]
+
+    def draw_text(self: Any, out: Any) -> None:
+        queued = list(self._texts)
+        made, placed = heard(lambda: real_draw(self, out))
+        assert len(made) == len(placed) == len(queued), (len(made), len(placed), len(queued))
+        for (_text, x, baseline, _face, _color, align), (_, face, text, gamma, frac), (_, px, py) in zip(
+                queued, made, placed):
+            found.append([str(text), round(x, 2), round(baseline, 2), *face_of(face), align, round(gamma, 6), frac,
+                          px, py, round(self.advance(text, face), 2)])
+
+    def tray(icon: Any, size: int, percent: Any, pal: Any, theme_: Any) -> None:
+        made, placed = heard(lambda: real_tray(icon, size, percent, pal, theme_))
+        for _, face, text, gamma, frac in made:
+            found.append([str(text), *face_of(face), round(gamma, 6), frac, [[px, py] for _, px, py in placed]])
+
+    def take(surface: str, draw_it: Callable[[], Any]) -> None:
+        found.clear()
+        draw_it()
+        same = next((name for name, earlier in drawn.items() if earlier == found), None)
+        drawn[surface] = same if same is not None else list(found)
+
+    drawn: dict[str, list[list[Any]] | str] = {}
+    gates.Ink._draw_text, gates._tray_number = draw_text, tray
+    try:
+        for scale in scales:
+            tag = f"{scale:g}"
+            take(f"floating@{tag}", lambda: skin.render_floating(model, theme, variant, scale, opts))
+            if opts is None:
+                take(f"tooltip@{tag}", lambda: skin.render_tooltip(model, theme, variant, scale))
+            for height in heights:
+                take(f"strip/h{round(height * scale)}@{tag}",
+                     lambda: skin.render_taskbar(model, theme, variant, round(height * scale), scale, opts))
+        if opts is None:
+            take(f"tray/{TRAY_SIZE}", lambda: skin.render_tray_icon(model, theme, variant, TRAY_SIZE))
+    finally:
+        gates.Ink._draw_text, gates._tray_number = real_draw, real_tray
     return drawn
 
 
@@ -286,8 +392,46 @@ def _night_city() -> dict[str, Any]:
     return found
 
 
-# The skins with a section, and what works their words out. #96 adds Gates' here, and records before it edits.
-SKINS: dict[str, Callable[[], dict[str, Any]]] = {"nostromo": _nostromo, "night_city": _night_city}
+def _gates_helpers(model: Any, theme: Any) -> dict[str, Any]:
+    """What each of Gates' wording helpers gives for ``model``: the pill's age; per row its name, tag, and the hover
+    card's pace with its colour role; the footer's runs and the guard's hold runs (text, weight, colour role); the
+    guard's countdown, the name it gives each limit it watches or holds on, its statement and the hover card's guard bar
+    at 1.0 and 1.25 (measured as render_tooltip measures it). The title, the cap badge, the hover card's reset and the
+    strip's tags have no helper of their own: they are in the runs."""
+    from usage_monitor.render.skins import gates
+
+    guard = model.guard
+    rows = [{"key": row.key, "name": gates._row_name(row), "tag": gates._tag(row, model.locale),
+             "pace": list(gates._pace_text(row))} for row in model.rows]
+    names = (None if guard is None else
+             {key: gates._guard_name(guard, key) for key in dict.fromkeys([*guard.caps, *guard.over_keys])})
+    countdown = (gates._countdown(guard.resume_seconds)
+                 if guard is not None and guard.resume_seconds is not None else None)
+    lines: dict[str, Any] = {}
+    for scale in SCALES:
+        lead, wrapped = gates._guard_bar_lines(gates._card_canvas(1, scale, theme), model)
+        lines[f"{scale:g}"] = {"lead": lead, "lines": wrapped}
+    statement = gates._guard_statement(model)
+    return {"age": gates._age_label(model), "footer": [list(run) for run in gates._footer_runs(model)],
+            "hold": [list(run) for run in gates._hold_runs(model)], "countdown": countdown, "names": names,
+            "statement": list(statement) if statement is not None else None, "guard_lines": lines, "rows": rows}
+
+
+def _gates() -> dict[str, Any]:
+    from usage_monitor.render import dump
+    from usage_monitor.render.skins import get_skin
+
+    theme = dump.load_theme_objects()["gates"]
+    skin, variant = get_skin("gates"), theme.variants[0]            # system-dark: the variants place their runs alike
+    found: dict[str, Any] = {}
+    for name, model in models(_gates_states).items():
+        found[name] = {"helpers": _gates_helpers(model, theme),
+                       "runs": gates_runs(skin, model, theme, variant, dump.TASKBAR_HEIGHTS_AT_1X)}
+    return found
+
+
+# The skins with a section, and what works their words out.
+SKINS: dict[str, Callable[[], dict[str, Any]]] = {"nostromo": _nostromo, "night_city": _night_city, "gates": _gates}
 
 
 # ── Running ───────────────────────────────────────────────────────────────────
