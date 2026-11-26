@@ -569,7 +569,8 @@ def test_the_alerts_write_their_percents_and_reset_times_in_the_locale(settings)
 
 
 def test_a_reset_announced_when_its_window_ends_writes_zero_and_the_name_in_the_locale(settings):
-    """The reset of a window that ran out is worded from the name kept since its last reading."""
+    """The reset of a window that ran out names the limit from what named it at its last reading (its kind, label,
+    model and surface), worded at the window's end."""
     ended = SESSION_AT + timedelta(minutes=2) - ALERT_NOW
     engine = AlertEngine(settings, tz=ALERT_TZ, locale_provider=lambda: loc("fr-FR"))
     for minutes, percent in ((0, 10.0), (1, 91.0), (ended.total_seconds() / 60, 91.0)):
@@ -582,17 +583,76 @@ def test_a_reset_announced_when_its_window_ends_writes_zero_and_the_name_in_the_
                                                                  ("Claude Instant weekly limit reset", zero)]
 
 
+def test_a_reset_at_a_windows_end_is_worded_in_the_locale_of_that_moment(settings):
+    """A language changed between a limit's last reading and the end of its window is the one its reset is told in
+    (#97): the name is worded then, not kept as the last reading worded it. English keeps its own case of the name
+    ("Claude instant weekly"); the pseudo-locale writes its own words around it."""
+    ended = SESSION_AT + timedelta(minutes=2) - ALERT_NOW
+    now_locale = [EN]
+    engine = AlertEngine(settings, tz=ALERT_TZ, locale_provider=lambda: now_locale[0])
+    for minutes, percent in ((0, 10.0), (1, 91.0), (ended.total_seconds() / 60, 91.0)):
+        if minutes > 1:
+            now_locale[0] = PSEUDO
+        limits = [limit("weekly_scoped", percent, SESSION_AT, label="X WEEKLY", scope_model="Claude Instant")]
+        found = engine.evaluate(dump._state(ALERT_NOW + timedelta(minutes=minutes), ApiStatus.LIVE, limits, 0))
+    title = i18n.fill(i18n.pseudo_text("{name} limit reset"),
+                      {"name": i18n.fill(i18n.pseudo_text("{name} weekly"), {"name": "Claude Instant"})})
+    assert [alert.title for alert in found] == [title] and "Claude Instant" in title
+    now_locale[0] = EN
+    found = alerts_in(settings, PSEUDO, [scoped("Claude Instant", percent=10.0)], [scoped("Claude Instant", percent=91.0)])
+    assert found[-1][0].title.startswith("[[Claude Instant ")                          # the threshold, in the pseudo-locale
+
+
+def test_the_pseudo_title_is_not_cased_again(settings):
+    """The pseudo-locale takes the catalog's words as they are written and puts a name in as written (#97): only the
+    name is cased, its first letter, where it starts the title. Nothing lowers the pseudo-locale's İ to an i with a
+    combining dot (U+0307), as English's own case of a name would, and the template's own capitals stay."""
+    pseudo = i18n.pseudo_text
+    cases = [(limit("session", 1.0, WEEK_AT), pseudo("Session")), (limit("weekly_all", 1.0, WEEK_AT), pseudo("Weekly")),
+             (scoped("claude instant"), i18n.fill(pseudo("{name} weekly"), {"name": "Claude instant"})),
+             (scoped(None, "claude_code"), i18n.fill(pseudo("{name} weekly"), {"name": "Claude_code"})),
+             (scoped(None, None), pseudo("Weekly scoped")), (scoped("", label=""), pseudo("Scoped")),
+             (scoped("istanbul", label=""), "Istanbul"),
+             (limit("design_weekly", 1.0, WEEK_AT, label="DESIGN WEEKLY"), "Design weekly")]
+    for item, expected in cases:
+        title = alerts._name(item, PSEUDO)
+        assert title == expected and "\u0307" not in title, (item.kind, item.scope_model, title)
+    found = alerts_in(settings, PSEUDO, [limit("session", 10.0, SESSION_AT)], [limit("session", 91.0, SESSION_AT)])[-1]
+    assert [alert.title for alert in found] == [i18n.fill(pseudo("{name} limit at {percent}"),
+                                                          {"name": pseudo("Session"), "percent": "90\u00a0%"})]
+    assert "\u0307" not in found[0].title + found[0].message
+
+
+def test_a_name_is_capitalised_only_where_it_starts_the_title(monkeypatch):
+    """Outside English a model's name goes in as written, its first letter in capitals by the locale's rule only where
+    it starts the alert's title (#96 Q4's rule for the alerts, #97): a French title that puts the name after its own
+    words keeps "claude_code" as written, and the template's words are never cased."""
+    english = i18n.load_catalog("en").english()
+    french = i18n.Catalog("fr", {"toast.alert.threshold": "Limite {name} à {percent}",
+                                   "toast.alert.reset": "{name} : limite REMISE",
+                                   "toast.alert.name.scoped": "{name} hebdo"}, english)
+    shipped = i18n.app_catalog
+    monkeypatch.setattr(i18n, "app_catalog", lambda language: french if language == "fr" else shipped(language))
+    fr = loc("fr-FR")
+    item = scoped(None, "claude_code")
+    assert alerts._title("toast.alert.threshold", item, fr, percent="80\u00a0%") == "Limite claude_code hebdo à 80\u00a0%"
+    assert alerts._title("toast.alert.reset", item, fr) == "Claude_code hebdo : limite REMISE"
+    assert alerts._title("toast.alert.reset", scoped("istanbul"), loc("tr-TR")) == "İstanbul weekly limit reset"
+
+
 @pytest.mark.parametrize("locale", LOCALES, ids=ids)
 def test_the_alerts_reset_time_is_the_widgets_for_every_hour(locale):
-    """The alerts and the view model write a reset time with the same formats, so the two never drift apart. Both read
-    this PC's zone here (the alerts with no zone given), so the moments are its wall times."""
+    """The alerts and the view model write a reset time with the same formats, so the two never drift apart; the
+    alert's words are the catalog's (#97). Both read this PC's zone here (the alerts with no zone given), so the moments
+    are its wall times."""
+    resets = i18n.app_catalog(locale.language)
     for hour in range(24):
         at = wall(SATURDAY_1612.replace(hour=hour, minute=0))
         earlier, same_day = at - timedelta(days=2), wall(SATURDAY_1612.replace(hour=0, minute=0))
         weekly = alerts._reset_text(limit("weekly_all", 40.0, at), None, locale)
         session = alerts._reset_text(limit("session", 40.0, at), None, locale)
-        assert weekly == f"Resets {view.format_resets(at, earlier, locale)}", hour
-        assert session == f"Resets {view.format_resets(at, same_day, locale)}", hour
+        assert weekly == resets.text("toast.alert.resets", {"time": view.format_resets(at, earlier, locale)}), hour
+        assert session == resets.text("toast.alert.resets", {"time": view.format_resets(at, same_day, locale)}), hour
     assert alerts._reset_text(limit("weekly_all", 40.0, WEEK_AT), ALERT_TZ, loc("fr-FR")) == "Resets sam. 16:00"
 
 
@@ -607,7 +667,7 @@ def test_french_credits_are_in_plain_dollars_with_no_code():
     assert alerts._credits_text(euros, es_mx) == "Used EUR\u00a05.96"
     assert alerts._credits_text(Spend(enabled=True, used=5.96, currency=None), loc("tr-TR")) == "Used 5,96"
     assert alerts._credits_text(spend, EN) == "Used 1,234.56 of 10,000.00 USD"
-    assert alerts._credits_text(spend, PSEUDO) == "Used 1\u202f234.56 of 10\u202f000.00 USD"
+    assert alerts._credits_text(spend, PSEUDO) == "[Üşéd 1\u202f234.56 öf 10\u202f000.00 USD ıİğş]"   # its own words (#97)
 
 
 def test_a_turkish_title_keeps_a_name_as_written_and_never_writes_a_combining_dot(settings):

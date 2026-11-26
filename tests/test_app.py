@@ -2829,34 +2829,61 @@ def update_note() -> Path:
     return app_mod.paths.app_data_dir() / app_mod.UPDATE_NOTE_FILE
 
 
+COUNTS = '{"tools": 1, "waits": 0}'           # what Setup writes (installer.iss WriteUpdateNote)
 NOTE = ("Setup closed the monitor's tool in a Claude Code session.\r\nIf that session shows an error, type /mcp there or "
-        "restart it.")
+        "restart it.")                          # what a Setup before 2.4 wrote
 SAID = "Setup closed the monitor's tool in a Claude Code session. If that session shows an error, type /mcp there or restart it."
 
 
 def test_the_note_of_a_silent_update_is_said_once_and_then_deleted(wired):
     """To replace the files, Setup ends the monitor's MCP tool in open Claude Code sessions and their waits on the usage
-    guard. After an update from the app nobody saw Setup, so the monitor says it once when it is back."""
+    guard. After an update from the app nobody saw Setup, so the monitor says it once when it is back, worded from the
+    counts Setup left (#97)."""
+    note = update_note()
+    note.write_text(COUNTS, encoding="ascii")
+    assert (app_mod.UPDATE_NOTE_TITLE, SAID) in publish(wired, usage_state(10))
+    assert not note.exists()
+    note.write_text('{"tools": 2, "waits": 0}', encoding="ascii")    # only an update writes one, and it starts the monitor
+    assert app_mod.UPDATE_NOTE_TITLE not in [title for title, _ in publish(wired, usage_state(11))]
+
+
+def test_an_older_setups_prose_note_is_still_said_once(wired):
+    """A Setup before 2.4 left its English sentences, not counts: a note that does not start with "{" is said as it is,
+    on one line, once."""
     note = update_note()
     note.write_text(NOTE, encoding="ascii")
     assert (app_mod.UPDATE_NOTE_TITLE, SAID) in publish(wired, usage_state(10))
     assert not note.exists()
-    note.write_text("Not looked for again: only an update writes one, and it starts the monitor again.", encoding="ascii")
     assert app_mod.UPDATE_NOTE_TITLE not in [title for title, _ in publish(wired, usage_state(11))]
 
 
-def test_an_empty_update_note_says_nothing_and_goes(wired):
+@pytest.mark.parametrize("text", ["  \r\n", '{"tools": 0, "waits": 0}', "{}"])
+def test_an_empty_update_note_says_nothing_and_goes(wired, text):
     note = update_note()
-    note.write_text("  \r\n", encoding="ascii")
+    note.write_text(text, encoding="ascii")
     assert app_mod.UPDATE_NOTE_TITLE not in [title for title, _ in publish(wired, usage_state(10))]
     assert not note.exists()
+
+
+@pytest.mark.parametrize("text", ['{"tools": 1', '{"tools": "1"}', '{"tools": true}', '{"waits": -1}',
+                                  '{"waits": 10000}', '{"tools": 1.0}', '{"tools": null}', "{private words}"])
+def test_a_broken_counts_note_says_nothing_and_goes(wired, caplog, text):
+    """A note that starts with "{" and is not the counts Setup writes (whole numbers from 0 to 9999) says nothing, is
+    deleted, and is logged once without its text."""
+    note = update_note()
+    note.write_text(text, encoding="ascii")
+    with caplog.at_level(logging.WARNING, logger="usage_monitor.app"):
+        assert app_mod.UPDATE_NOTE_TITLE not in [title for title, _ in publish(wired, usage_state(10))]
+    assert not note.exists()
+    said = [record.getMessage() for record in caplog.records if "update note" in record.getMessage()]
+    assert len(said) == 1 and text not in said[0] and "private" not in said[0]
 
 
 def test_an_update_note_waits_for_someone_to_see_it(wired, monkeypatch):
     """Held back like the update toast (a locked session, a fullscreen app, quiet hours), and kept when the shell has no
     icon to attach it to."""
     note = update_note()
-    note.write_text(NOTE, encoding="ascii")
+    note.write_text(COUNTS, encoding="ascii")
     notify = wired.tray.notify
     monkeypatch.setattr(wired.app, "_toast_held_back", lambda: True)
     assert publish(wired, usage_state(10)) == [] and note.exists()
@@ -3290,7 +3317,7 @@ def test_a_release_found_while_the_session_was_locked_is_announced_at_unlock(mon
 def test_an_update_note_held_back_while_locked_is_said_at_unlock(wired):
     """An update from the app often finishes with nobody at the PC: the note waits, and the unlock itself is the cue."""
     note = update_note()
-    note.write_text(NOTE, encoding="ascii")
+    note.write_text(COUNTS, encoding="ascii")
     wired.host.locked = True
     wired.host.emit("session", True)
     assert publish(wired, usage_state(10)) == [] and note.exists()
@@ -4135,6 +4162,32 @@ def test_the_widgets_the_tray_and_the_alerts_follow_the_apps_locale(monkeypatch,
     app._refresh()
     assert len(built) >= 2 and set(built) == {app.locale()}
     assert app._alerts is not None and app._alerts._locale_provider is app.locale
+
+
+def test_the_toasts_read_the_apps_locale_each_time(monkeypatch, settings):
+    """Every toast is worded in the app's language of the moment (#97): the release toast, the note after a silent
+    update and the alerts follow a language change at the next one, title and text."""
+    monkeypatch.setattr(i18n, "OFFERED", ("en", "fr"))
+    english = i18n.load_catalog("en").english()
+    french = i18n.Catalog("fr", {
+        "toast.update.title": "{app} v{version} est là", "toast.update.body": "Ouvrez le menu",
+        "toast.updated.title": "{app} mis à jour",
+        "toast.updated.tools": {"one": "Un outil ({product}, {command}).", "many": "{count} outils ({product}).",
+                                "other": "{count} outils ({product}, {command})."},
+        "toast.alert.threshold": "{name} : limite à {percent}", "toast.alert.resets": "Fin {time}"}, english)
+    shipped = i18n.app_catalog
+    monkeypatch.setattr(i18n, "app_catalog", lambda language: french if language == "fr" else shipped(language))
+    built = build_app(monkeypatch, settings, update_check_fn=FakeChecker(INFO))
+    assert built.tray.notices == [TOAST]                                       # English at start
+    settings.set("language", "fr")
+    assert built.app.locale().language == "fr"
+    built.app.updates._info = dict(INFO, version="2.2.0", tag="v2.2.0")
+    built.app._announce_update()
+    assert built.tray.notices[-1] == ("Claude Usage Monitor v2.2.0 est là", "Ouvrez le menu")
+    update_note().write_text('{"tools": 2, "waits": 0}', encoding="ascii")
+    assert ("Claude Usage Monitor mis à jour", "2 outils (Claude Code, /mcp).") in publish(built, usage_state(13))
+    (title, body), = publish(built, usage_state(85))
+    assert title == "Session : limite à 80\u00a0%" and body.startswith("Fin ")
 
 
 def test_a_regional_format_change_reads_the_formats_again(settings):

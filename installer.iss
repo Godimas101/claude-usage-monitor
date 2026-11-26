@@ -534,9 +534,9 @@ begin
   Log('Processes of the install folder are still running.');
 end;
 
-// What Setup ended of Claude Code's calls, for the person: on the last page of a run by hand, or as a note the monitor
-// shows once after a silent update (WriteUpdateNote). Empty when it ended neither kind: a hook cut short fails once,
-// and Claude Code's next one works.
+// What Setup ended of Claude Code's calls, for the person, on the last page of a run by hand. After a silent update the
+// monitor says the same, worded from the counts WriteUpdateNote leaves it (app.py, toast.updated.*). Empty when it
+// ended neither kind: a hook cut short fails once, and Claude Code's next one works.
 function EndedNote: String;
 begin
   Result := '';
@@ -774,14 +774,16 @@ begin
 end;
 
 // After a silent update (the app's own, which nobody watches), what Setup ended, for the monitor to say once when it
-// starts again (app.py, _announce_update_note). A run by hand says it on its last page instead.
+// starts again (app.py, _announce_update_note). A run by hand says it on its last page instead (EndedNote). The note
+// holds the two counts alone, in ASCII on one line ({"tools": 1, "waits": 0}): the monitor words them in its own
+// language, and SaveStringToFile writes the system's ANSI code page, which would garble a sentence in another (#97).
 procedure WriteUpdateNote;
 var
   Note, Text: String;
 begin
-  Text := EndedNote;
-  if Text = '' then
+  if (EndedTools <= 0) and (EndedWaits <= 0) then
     Exit;
+  Text := Format('{"tools": %d, "waits": %d}', [EndedTools, EndedWaits]);
   Note := ExpandConstant(UpdateNote);
   if ForceDirectories(ExtractFileDir(Note)) and SaveStringToFile(Note, Text, False) then
     Log('Left the monitor a note: ' + Text)

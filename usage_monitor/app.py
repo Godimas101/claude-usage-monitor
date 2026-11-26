@@ -23,6 +23,10 @@ own worker thread, and fails silent. A release it finds is announced with one tr
 stays on offer in the tray menu and as /api/state's ``update`` block, which the dashboard shows as a
 banner. See UpdateTracker and MonitorApp._announce_update.
 
+Every toast is worded from the catalog in the app's language, read when the toast is worded (#97): the alerts by the
+engine, the release toast and the note after a silent update here (update_toast_title, update_toast_body,
+update_note_title, update_note_text).
+
 Shutdown order: close the dashboard, stop the data service, stop the API server, remove the tray
 icon, destroy the windows, flush settings.
 
@@ -58,6 +62,7 @@ from usage_monitor.data.service import DataService
 from usage_monitor.data.store import Store
 from usage_monitor.log import get_logger, setup_logging
 from usage_monitor.render.model import (
+    PRODUCT,
     UNIT_DAYS,
     UNIT_HOURS,
     UNIT_MINUTES,
@@ -101,11 +106,18 @@ GITHUB_PREFIX = "https://github.com/"
 UPDATE_RECHECK_S = 6 * 60 * 60      # the monitor looks for a newer release again this often while it runs
 NOTIFIED_KEY = "notified_version"   # setting: the newest release the monitor has already put a toast up for
 GUARD_ON_KEY = "guard_enabled_at"   # setting: when the usage guard was last switched on (agent/guard.ON_KEY)
-# What the last update ended of Claude Code's calls to the monitor, written by Setup after a silent update (installer.iss,
-# WriteUpdateNote) and said once as a toast when the monitor is back (MonitorApp._announce_update_note).
+# What the last update ended of Claude Code's calls to the monitor: the counts Setup writes after a silent update
+# (installer.iss, WriteUpdateNote: {"tools": 1, "waits": 0}, ASCII), which the monitor words in its language and says
+# once as a toast when it is back (MonitorApp._announce_update_note, update_note_text). A Setup before 2.4 wrote its
+# English sentences instead, which are said as they are.
 UPDATE_NOTE_FILE = "update-note.txt"
+UPDATE_NOTE_MAX = 250                   # a balloon's text holds 255 characters; the worded note is cut here too
+UPDATE_NOTE_COUNT_MAX = 9999            # the most of either count a note may hold; past it the note is not read
+APP_NAME = "Claude Usage Monitor"       # the toasts' {app}: the monitor's name, as written in every language
+MCP_COMMAND = "/mcp"                    # the note's {command}: what reconnects Claude Code's tool (i18n.COMMANDS)
+# English's two fixed toast texts, as en.json words them (toast.updated.title, toast.update.body). The toasts read the
+# catalog; these stay for the tests that name them.
 UPDATE_NOTE_TITLE = "Claude Usage Monitor updated"
-UPDATE_NOTE_MAX = 250                   # a balloon's text holds 255 characters
 UPDATE_TOAST_BODY = "Open the tray menu or the dashboard to update"
 
 # Settings that change what the UI shows. Anything else (poll interval, dashboard bounds) is ignored here.
@@ -345,9 +357,76 @@ def open_url(url: str) -> None:
     threading.Thread(target=work, name="open-url", daemon=True).start()
 
 
-def update_toast_title(version_text: str) -> str:
-    """The toast for a newly found release: "Claude Usage Monitor v2.1.0 is available" (its body is UPDATE_TOAST_BODY)."""
-    return f"Claude Usage Monitor v{version_text} is available"
+def toast_locale(source: Callable[[], i18n.Locale]) -> i18n.Locale:
+    """The app's locale for a toast, read when the toast is worded, so a language change reaches the next one. English
+    when it cannot be read."""
+    try:
+        return source()
+    except Exception:
+        log.exception("the locale could not be read; the toast is English")
+        return i18n.ENGLISH
+
+
+def update_toast_title(version_text: str, locale: i18n.Locale = i18n.ENGLISH) -> str:
+    """The toast for a newly found release: "Claude Usage Monitor v2.1.0 is available" (toast.update.title), the
+    version as given (a plain one: UpdateTracker.announcement)."""
+    words = i18n.app_catalog(locale.language)
+    return str(words.text("toast.update.title", {"app": APP_NAME, "version": version_text}))
+
+
+def update_toast_body(locale: i18n.Locale = i18n.ENGLISH) -> str:
+    """The release toast's text: "Open the tray menu or the dashboard to update" (toast.update.body)."""
+    return str(i18n.app_catalog(locale.language).text("toast.update.body"))
+
+
+def update_note_title(locale: i18n.Locale = i18n.ENGLISH) -> str:
+    """The note toast's title: "Claude Usage Monitor updated" (toast.updated.title)."""
+    return str(i18n.app_catalog(locale.language).text("toast.updated.title", {"app": APP_NAME}))
+
+
+def update_note_counts(raw: str) -> tuple[int, int] | None:
+    """(tools, waits) of a note Setup wrote (installer.iss WriteUpdateNote: '{"tools": 1, "waits": 0}'), a count it
+    leaves out read as 0. None for anything else: not a JSON object, or a count that is not a whole number from 0 to
+    UPDATE_NOTE_COUNT_MAX (true and false are not counts)."""
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    counts = []
+    for key in ("tools", "waits"):
+        value = data.get(key, 0)
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= UPDATE_NOTE_COUNT_MAX:
+            return None
+        counts.append(value)
+    return counts[0], counts[1]
+
+
+def is_counts_note(raw: str) -> bool:
+    """Whether a note is Setup's counts (it starts with "{"), not an older Setup's sentences."""
+    return raw.lstrip().startswith("{")
+
+
+def update_note_words(tools: int, waits: int, locale: i18n.Locale = i18n.ENGLISH) -> str:
+    """The counts of Setup's note worded in ``locale``'s language, whole: toast.updated.tools, then toast.updated.waits,
+    a space between, as Setup's Finish page joins them (installer.iss EndedNote); "" for counts of 0. Claude Code and
+    /mcp go in as written; a count in the language's digits, with no group sign."""
+    words = i18n.app_catalog(locale.language)
+    names = {"product": PRODUCT, "command": MCP_COMMAND}
+    return " ".join(str(words.plural(f"toast.updated.{kind}", count,
+                                     {"count": formats.number(str(count), locale, group=False), **names}))
+                    for kind, count in (("tools", tools), ("waits", waits)) if count)
+
+
+def update_note_text(raw: str, locale: i18n.Locale = i18n.ENGLISH) -> str:
+    """What the note toast says for the text of Setup's note, on one line and cut at UPDATE_NOTE_MAX: the counts worded
+    in ``locale``'s language (update_note_words), or an older Setup's sentences as they are. "" when there is nothing to
+    say: an empty note, counts of 0, or a note that starts with "{" and is not one Setup writes (update_note_counts)."""
+    if is_counts_note(raw):
+        counts = update_note_counts(raw)
+        raw = update_note_words(*counts, locale) if counts is not None else ""
+    return " ".join(raw.split())[:UPDATE_NOTE_MAX]
 
 
 def in_quiet_hours(quiet: Any, now: datetime) -> bool:
@@ -958,7 +1037,8 @@ class MonitorApp:
         back and the release stays untold, so the next call tries again: a locked session or screensaver, a
         fullscreen app in front, the user's quiet hours. Clicking the toast opens the dashboard (the same click
         handler as the alert toasts). The usage-alert switches (alerts_enabled and the alert_on_* kinds) are about
-        limits and do not apply: only check_updates and the quiet hours do."""
+        limits and do not apply: only check_updates and the quiet hours do. Worded in the app's language of the
+        moment (toast_locale)."""
         tracker, tray = self.updates, self.tray
         if tracker is None or tray is None or self._torn_down:
             return
@@ -966,7 +1046,9 @@ class MonitorApp:
         if info is None or self._toast_held_back():
             return
         try:
-            shown = tray.notify(update_toast_title(info["version"]), UPDATE_TOAST_BODY)   # a plain version: see announcement()
+            locale = toast_locale(self.locale)
+            shown = tray.notify(update_toast_title(info["version"], locale),   # a plain version: see announcement()
+                                update_toast_body(locale))
         except Exception:  # a bug, not the shell's refusal: do not hit it again at every state
             log.exception("could not show the update notice")
             shown = True
@@ -978,21 +1060,28 @@ class MonitorApp:
 
         To replace the files, Setup ends the monitor's MCP tool in open Claude Code sessions and their waits on the usage
         guard. Run by hand, it says so on its last page. Run by the app's update, nobody sees Setup, so it leaves the
-        text in UPDATE_NOTE_FILE for this. Held back like the update toast while nobody would see it, and kept when the
-        shell has no icon to attach it to; only an update writes one, and an update starts the monitor again."""
+        counts in UPDATE_NOTE_FILE for this, and the monitor words them in its language of the moment
+        (update_note_text); an older Setup's sentences are said as they are. Held back like the update toast while
+        nobody would see it, and kept when the shell has no icon to attach it to; only an update writes one, and an
+        update starts the monitor again. A note that starts with "{" and is not Setup's counts says nothing and goes,
+        logged without its text."""
         if self._update_note_done or self.tray is None or self._torn_down:
             return
         note = paths.app_data_dir() / UPDATE_NOTE_FILE
         try:
-            text = " ".join(note.read_text(encoding="utf-8-sig", errors="replace").split())   # one line, as a balloon shows it
+            raw = note.read_text(encoding="utf-8-sig", errors="replace")
         except OSError:                 # none, which is the usual case, or one that cannot be read
             self._update_note_done = True
             return
+        locale = toast_locale(self.locale)
+        text = update_note_text(raw, locale)            # one line, as a balloon shows it
+        if not text and is_counts_note(raw) and update_note_counts(raw) is None:
+            log.warning("the update note is not one Setup writes (%d characters); it is deleted unsaid", len(raw))
         if text:
             if self._toast_held_back():
                 return
             try:
-                shown = self.tray.notify(UPDATE_NOTE_TITLE, text[:UPDATE_NOTE_MAX])
+                shown = self.tray.notify(update_note_title(locale), text)
             except Exception:  # a bug, not the shell's refusal: do not hit it again at every state
                 log.exception("could not show the update note")
                 shown = True
@@ -1881,11 +1970,18 @@ __all__ = [
     "analytics_store",
     "blink_cycle",
     "in_quiet_hours",
+    "is_counts_note",
     "menu_items",
     "mutex_name",
     "run_smoke_test",
     "service_pricing",
     "tick_delay_ms",
+    "toast_locale",
     "tray_tooltip",
+    "update_note_counts",
+    "update_note_text",
+    "update_note_title",
+    "update_note_words",
+    "update_toast_body",
     "update_toast_title",
 ]

@@ -21,18 +21,19 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone, tzinfo
 from typing import Any
 
-from usage_monitor import casing, formats
+from usage_monitor import casing, formats, i18n
 from usage_monitor.data.identity import scope_name
 from usage_monitor.data.models import ApiStatus, Limit, MonitorState, Spend
-from usage_monitor.i18n import DEFAULT, ENGLISH, PSEUDO, Locale
+from usage_monitor.i18n import DEFAULT, ENGLISH, Locale
 from usage_monitor.log import get_logger
 from usage_monitor.settings import DEFAULTS, Settings, parse_clock
 
 log = get_logger(__name__)
 
 _SAME_WINDOW = timedelta(seconds=60)  # resets_at jitter below this is the same window (as in analytics)
-_FALLBACK_NAMES = {"session": "Session", "weekly_all": "Weekly"}
-_KIND_WORDS = {"session": "session", "weekly_all": "weekly"}    # the same, for casing.cased (other languages)
+KEY = "toast.alert."                    # the alerts' words in the catalog (#97)
+# The kinds with a name of their own, by key; any other is named by its scope, its code or its model (_name).
+_FALLBACK_NAMES = {"session": KEY + "name.session", "weekly_all": KEY + "name.weekly"}
 
 
 @dataclass(slots=True)
@@ -52,8 +53,13 @@ class _Track:
     percent: float                               # last percent seen in that window
     high: float                                  # highest percent seen in that window
     done: set[int] = field(default_factory=set)  # thresholds already handled in that window
-    name: str = ""                               # display name, kept so a reset can be announced without a Limit in hand
     closed: bool = False                         # the window ended and its reset was dealt with; waits for the next one
+    # What names the limit (_name), kept from its last reading so a reset can be announced without a Limit in hand,
+    # worded then in the locale of that moment.
+    kind: str = ""
+    label: str = ""
+    scope_model: str | None = None
+    scope_surface: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,8 +76,9 @@ class AlertEngine:
     """Turns successive MonitorStates into the alerts that should be shown.
 
     ``locale_provider`` gives the app's locale (i18n.LocaleSource, #91); it is read on every evaluation, as the
-    settings are. Without one the alerts are English. The words stay English until #97; the numbers, the reset
-    times (as the widgets write them) and the case of the names follow the locale."""
+    settings are. Without one the alerts are English. The words come from the catalog in the locale's language
+    (toast.alert.*, #97); the numbers, the reset times (as the widgets write them) and the case of the names follow the
+    locale."""
 
     def __init__(self, settings: Settings, *, tz: tzinfo | None = None,
                  locale_provider: Callable[[], Locale] | None = None) -> None:
@@ -132,11 +139,10 @@ class AlertEngine:
                 return []  # still the window that ran out (or another that is over too): nothing to judge
             # First sight of this limit, or its first window since a reset that was announced when the old one ran
             # out: whatever level it is at now is baseline, not news.
-            self._tracks[lid] = _Track(_window_key(resets_at), resets_at, float(percent), float(percent),
-                                       {t for t in cfg.thresholds if t <= percent}, _name(limit, locale),
-                                       closed=ended)
+            self._tracks[lid] = _keep_name(_Track(_window_key(resets_at), resets_at, float(percent), float(percent),
+                                                  {t for t in cfg.thresholds if t <= percent}, closed=ended), limit)
             return []
-        track.name = _name(limit, locale)
+        _keep_name(track, limit)
         if ended:
             return []  # a window that is over has no thresholds left; _expire() announces its reset
 
@@ -148,7 +154,7 @@ class AlertEngine:
                     key=f"reset:{lid[0]}:{lid[1]}:{resets}",
                     kind="reset",
                     severity="info",
-                    title=f"{_name(limit, locale)} limit reset",
+                    title=_title(KEY + "reset", limit, locale),
                     message=_reset_text(limit, self._tz, locale),
                 ))
             track.key = resets
@@ -169,7 +175,7 @@ class AlertEngine:
                 key=f"threshold:{lid[0]}:{lid[1]}:{track.key}:{top}",
                 kind="threshold",
                 severity="critical" if top >= 100 else "warning",
-                title=f"{_name(limit, locale)} limit at {formats.percent(str(top), locale)}",
+                title=_title(KEY + "threshold", limit, locale, percent=formats.percent(str(top), locale)),
                 message=_reset_text(limit, self._tz, locale),
             ))
         return out
@@ -183,18 +189,22 @@ class AlertEngine:
         """
         out: list[Alert] = []
         moment = now.astimezone(timezone.utc)
+        words = _words(locale)
         for (kind, label), track in self._tracks.items():
             if track.closed or moment < track.resets_at + _SAME_WINDOW:
                 continue
             reached = track.percent
             track.closed, track.percent, track.high, track.done = True, 0.0, 0.0, set()
             if reached >= cfg.thresholds[0]:
+                # Named now, in this evaluation's locale, from what named it at its last reading (a language changed
+                # since then is the one the reset is told in). A limit with no name is "Usage".
+                named = bool(_name(track, locale))
                 out.append(Alert(
                     key=f"reset:{kind}:{label}:{track.key}",
                     kind="reset",
                     severity="info",
-                    title=f"{track.name or 'Usage'} limit reset",
-                    message=f"Usage is back to {formats.percent('0', locale)}.",
+                    title=_title(KEY + "reset", track, locale) if named else str(words.text(KEY + "reset_unnamed")),
+                    message=str(words.text(KEY + "back_to_zero", {"percent": formats.percent("0", locale)})),
                 ))
         return out
 
@@ -213,7 +223,7 @@ class AlertEngine:
             key=f"credits:{day.isoformat()}",
             kind="credits",
             severity="info",
-            title="Usage credits in use",
+            title=str(_words(locale).text(KEY + "credits.title")),
             message=_credits_text(spend, locale),
         )]
 
@@ -281,69 +291,111 @@ def _window_key(resets_at: datetime) -> str:
     return resets_at.astimezone(timezone.utc).replace(second=0, microsecond=0).isoformat()
 
 
-def _name(limit: Limit, locale: Locale) -> str:
-    """The limit's name for a title, sentence case: "Fable weekly", "Weekly scoped", "Session" (#90). It is worded from the
-    kind and the scope, not from the label. A limit with no label (none comes from the API) is named by its kind, else
-    by its model. English (and the pseudo-locale) cases the name with the words, as it always has ("Claude opus 5
-    weekly"). Another language puts the name in as written, with its first letter in capitals by the language's
-    rule where it starts the title (#91): "Claude Opus 5 weekly", and "İstanbul weekly" for "istanbul" in Turkish."""
-    if locale.language not in (DEFAULT, PSEUDO):
-        template, names = _title_words(limit)
-        return " ".join(casing.cased(template, "sentence", locale.language, **names).split())
+def _words(locale: Locale) -> i18n.Catalog:
+    """The catalog of ``locale``'s language (English behind it), read once per language and process."""
+    return i18n.app_catalog(locale.language)
+
+
+def _starts(template: str) -> bool:
+    """Whether what fills ``template``'s {name} starts it: no letter comes before the placeholder."""
+    return not any(ch.isalpha() for ch in template.split("{name}", 1)[0])
+
+
+def _title(key: str, limit: Limit | _Track, locale: Locale, **values: str) -> str:
+    """An alert's title, ``key``'s template with the limit's name put in (and ``values``): "Session limit at 80%". The
+    name is in sentence case where it starts the title (_name)."""
+    words = _words(locale)
+    name = _name(limit, locale, starts=_starts(words.text(key)))
+    return str(words.text(key, {"name": name, **values}))
+
+
+def _name(limit: Limit | _Track, locale: Locale, *, starts: bool = True) -> str:
+    """The limit's name for a title, from the catalog: "Fable weekly", "Weekly scoped", "Session" (#90, #97). It is
+    worded from the kind and the scope, not from the label. A limit with no label (none comes from the API) is named by
+    its kind, else by its model. English cases the name with the words, as it always has ("Claude opus 5 weekly"). Any
+    other language, the pseudo-locale too, takes the catalog's words as they are written and puts the name in as
+    written, its first letter in capitals by the locale's rule where it starts the title (``starts``): "Claude Opus 5
+    weekly", and "İstanbul weekly" for "istanbul" in Turkish. Only the name is cased, never the template's words."""
+    words = _words(locale)
+    if locale.language != DEFAULT:
+        return " ".join(_other_name(limit, words, locale.language, starts).split())
     if (limit.label or "").strip() and limit.kind:
-        text = _kind_words(limit)
+        text = _kind_words(limit, words)
     else:
-        text = _FALLBACK_NAMES.get(limit.kind) or (limit.scope_model or "Scoped")
+        key = _FALLBACK_NAMES.get(limit.kind)
+        text = words.text(key) if key else (limit.scope_model or words.text(KEY + "name.unlabelled"))
     text = " ".join(text.split())
     return text[:1].upper() + text[1:].lower()
 
 
-def _title_words(limit: Limit) -> tuple[str, dict[str, str]]:
-    """A title's words for a language other than English (English words until #97, in lower case for casing.cased)
-    and the name they hold: ("{name} weekly", {"name": "Fable"}). A kind the app has no words for is the API's name."""
-    if (limit.label or "").strip() and limit.kind:
-        if limit.kind in _KIND_WORDS:
-            return _KIND_WORDS[limit.kind], {}
-        if limit.kind == "weekly_scoped":
-            scope = scope_name(limit.scope_model, limit.scope_surface)
-            return ("{name} weekly", {"name": scope}) if scope else ("weekly scoped", {})
-        return "{name}", {"name": limit.kind.replace("_", " ")}
-    if limit.kind in _KIND_WORDS:
-        return _KIND_WORDS[limit.kind], {}
-    return ("{name}", {"name": limit.scope_model}) if limit.scope_model else ("scoped", {})
+def _other_name(limit: Limit | _Track, words: i18n.Catalog, language: str, starts: bool) -> str:
+    """_name in a language other than English: the catalog's words as written, a name in as written, its first letter in
+    capitals by ``language``'s rule where it starts the title. A kind no catalog has words for is named from its code
+    (identity text, as Gates names it, #93 D4)."""
+    if limit.kind in _FALLBACK_NAMES:
+        return words.text(_FALLBACK_NAMES[limit.kind])
+    labelled = bool((limit.label or "").strip()) and bool(limit.kind)
+    if labelled and limit.kind == "weekly_scoped":
+        scope = scope_name(limit.scope_model, limit.scope_surface)
+        if not scope:
+            return words.text(KEY + "name.scoped_unnamed")
+        template = words.text(KEY + "name.scoped")
+        first = starts and _starts(template)
+        return words.text(KEY + "name.scoped", {"name": _first_up(scope, language) if first else scope})
+    if labelled:
+        name = limit.kind.replace("_", " ")
+    elif limit.scope_model:
+        name = limit.scope_model
+    else:
+        return words.text(KEY + "name.unlabelled")
+    return _first_up(name, language) if starts else name
 
 
-def _kind_words(limit: Limit) -> str:
-    if limit.kind == "session":
-        return "Session"
-    if limit.kind == "weekly_all":
-        return "Weekly"
+def _first_up(name: str, language: str) -> str:
+    """``name`` as written, its first letter in capitals by ``language``'s rule (casing.cased)."""
+    return casing.cased("{name}", "sentence", language, name=name)
+
+
+def _kind_words(limit: Limit | _Track, words: i18n.Catalog) -> str:
+    """English's name for a labelled limit, before _name cases it: the catalog's words, the scope in capitals."""
+    if limit.kind in _FALLBACK_NAMES:
+        return words.text(_FALLBACK_NAMES[limit.kind])
     if limit.kind == "weekly_scoped":
         scope = scope_name(limit.scope_model, limit.scope_surface)
         # Upper case first, as the label always was, so a name that upper-cases to two letters titles the same as before.
-        return f"{scope.upper()} weekly" if scope else "Weekly scoped"
+        return words.text(KEY + "name.scoped", {"name": scope.upper()}) if scope else words.text(
+            KEY + "name.scoped_unnamed")
     return limit.kind.replace("_", " ").upper()
+
+
+def _keep_name(track: _Track, limit: Limit) -> _Track:
+    """Keep on ``track`` what names ``limit`` (_name reads these four), for a reset announced when its window ends."""
+    track.kind, track.label = limit.kind, limit.label
+    track.scope_model, track.scope_surface = limit.scope_model, limit.scope_surface
+    return track
 
 
 def _reset_text(limit: Limit, tz: tzinfo | None, locale: Locale) -> str:
     """"Resets 4:40 PM" for the session, "Resets Tue 4:00 PM" for the others: the reset time in ``locale``, as the
-    widgets write it (formats.clock and formats.day_clock)."""
+    widgets write it (formats.clock and formats.day_clock), in the catalog's words."""
     local = limit.resets_at.astimezone(tz)
-    if limit.kind == "session":
-        return f"Resets {formats.clock(local, locale)}"
-    return f"Resets {formats.day_clock(local, locale)}"
+    time = formats.clock(local, locale) if limit.kind == "session" else formats.day_clock(local, locale)
+    return str(_words(locale).text(KEY + "resets", {"time": time}))
 
 
 def _credits_text(spend: Spend, locale: Locale) -> str:
-    """"Used 1,234.56 of 10,000.00 USD" in English, as always. Another language writes each amount in its own way, US
+    """"Used 1,234.56 of 10,000.00 USD" in English (and the pseudo-locale's shapes), as always: the code after the
+    last amount, as part of how English writes the figure. Another language writes each amount in its own way, US
     dollars as the plain "$" and another currency by its code, and no code after them: "Used 1 234,56 $ of
-    10 000,00 $" in French (#91)."""
+    10 000,00 $" in French (#91). The words are the catalog's (#97)."""
+    of = _finite(spend.limit)
     if formats.english_shapes(locale):
-        text = f"Used {formats.number(f'{spend.used:.2f}', locale)}"
-        if _finite(spend.limit):
-            text += f" of {formats.number(f'{spend.limit:.2f}', locale)}"
-        return text + (f" {spend.currency}" if spend.currency else "")
-    text = f"Used {formats.money(spend.used, spend.currency, locale)}"
-    if _finite(spend.limit):
-        text += f" of {formats.money(spend.limit, spend.currency, locale)}"
-    return text
+        code = f" {spend.currency}" if spend.currency else ""
+        used = formats.number(f"{spend.used:.2f}", locale)
+        limit = formats.number(f"{spend.limit:.2f}", locale) + code if of else ""
+        used += "" if of else code
+    else:
+        used = formats.money(spend.used, spend.currency, locale)
+        limit = formats.money(spend.limit, spend.currency, locale) if of else ""
+    key = KEY + ("credits.used_of" if of else "credits.used")
+    return str(_words(locale).text(key, {"used": used, "limit": limit}))

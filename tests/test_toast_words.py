@@ -12,7 +12,10 @@ from typing import Any
 
 import pytest
 
+import english_left
 import toast_words
+from usage_monitor import app, i18n
+from usage_monitor.ui import dashboard
 
 
 @pytest.fixture(scope="module")
@@ -82,3 +85,45 @@ def test_the_recorder_words_the_note_as_endednote_does():
     pascal = ("function EndedNote: String;\nbegin\n  Result := '';\n  A := 'It''s one';\n  B := 'x %d';\n"
               "  C := ' ';\n  D := 'a wait';\n  E := 'ws %d';\nend;\n\nprocedure Other;\nbegin\n  F := 'not it';\nend;\n")
     assert toast_words.ended_note_forms(pascal) == ("It's one", "x %d", "a wait", "ws %d")
+
+
+# ── The note Setup leaves after a silent update (steps a4 to a6) ──────────────
+
+def test_every_count_pair_says_what_setup_said(recorded):
+    """Setup now leaves the counts (installer.iss WriteUpdateNote), and the app words them: for every count pair the
+    toast is the one today's app showed for the sentences Setup used to write (the record's), and the note goes."""
+    for tools in toast_words.NOTE_COUNTS:
+        for waits in toast_words.NOTE_COUNTS:
+            counts = json.dumps({"tools": tools, "waits": waits}).encode("ascii")
+            said = toast_words.note_toasts(i18n.ENGLISH, counts)
+            was = recorded[f"note/{tools}/{waits}"]
+            assert said == was, (tools, waits)
+    assert app.update_note_counts('{"waits": 3}') == (0, 3) and app.update_note_counts("{}") == (0, 0)
+    assert app.update_note_text('  {"tools": 1, "waits": 0}\r\n') == recorded["note/1/0"]["toasts"][0][1]
+
+
+def test_the_note_is_worded_in_the_apps_language():
+    """The counts are worded in the app's language of the moment, title and text: the pseudo-locale's own sentences,
+    Claude Code and /mcp as written, the counts in its digits; no English is left."""
+    pseudo = i18n.dev_locale(i18n.PSEUDO)
+    said = toast_words.note_toasts(pseudo, b'{"tools": 2, "waits": 1}')
+    words = i18n.app_catalog(i18n.PSEUDO)
+    names = {"product": "Claude Code", "command": "/mcp"}
+    text = (words.plural("toast.updated.tools", 2, {"count": "2", **names}) + " "
+            + words.plural("toast.updated.waits", 1, {"count": "1"}))
+    assert said == {"toasts": [[words.text("toast.updated.title", {"app": "Claude Usage Monitor"}), text]],
+                    "kept": False}
+    assert "Claude Code" in text and "/mcp" in text and text.startswith("[")
+    title, body = said["toasts"][0]
+    assert english_left.english([title, body], english_left.widget_names(), ["/mcp"]) == set()
+    assert english_left.english([body], english_left.widget_names()) == {english_left.entry(body)}  # /mcp is data
+
+
+def test_the_toasts_fixed_words_are_the_catalogs():
+    """The app's English records of its two fixed toast texts are en.json's, the monitor's name in them is the
+    dashboard window's, and the note's command is one the catalog check knows as a command."""
+    english = i18n.load_catalog("en")
+    assert app.UPDATE_TOAST_BODY == english.text("toast.update.body") == app.update_toast_body()
+    assert app.UPDATE_NOTE_TITLE == english.text("toast.updated.title", {"app": app.APP_NAME}) == app.update_note_title()
+    assert app.APP_NAME == dashboard.WINDOW_TITLE and app.MCP_COMMAND in i18n.COMMANDS
+    assert app.update_toast_title("2.1.0") == "Claude Usage Monitor v2.1.0 is available"

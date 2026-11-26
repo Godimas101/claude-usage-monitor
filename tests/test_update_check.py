@@ -2072,6 +2072,45 @@ def test_the_iss_is_ascii() -> None:
     ISS.encode("ascii")
 
 
+NOTE_FORMAT = "'{\"tools\": %d, \"waits\": %d}'"     # WriteUpdateNote's Format string, as the script writes it
+
+
+def test_setup_writes_the_note_as_counts() -> None:
+    """After a silent update Setup leaves the monitor the counts of what it ended, not its sentences (#97): one ASCII
+    line the app words in its own language, since SaveStringToFile writes the system's ANSI code page. It leaves none
+    when it ended nothing, and the app reads what it writes."""
+    from usage_monitor import app
+
+    routine = iss_routine("WriteUpdateNote")
+    assert f"Text := Format({NOTE_FORMAT}, [EndedTools, EndedWaits]);" in routine
+    assert "EndedNote" not in routine and "SaveStringToFile(Note, Text, False)" in routine
+    assert re.search(r"if \(EndedTools <= 0\) and \(EndedWaits <= 0\) then\s+Exit;", routine)
+    assert routine.index("Exit;") < routine.index("Text := Format(")
+    NOTE_FORMAT.encode("ascii")
+    written = NOTE_FORMAT.strip("'") % (3, 2)
+    assert written == '{"tools": 3, "waits": 2}' and "\n" not in written
+    assert app.update_note_counts(written) == (3, 2) and app.is_counts_note(written)
+    assert app.update_note_counts(NOTE_FORMAT.strip("'") % (9999, 0)) == (9999, 0)
+    assert "WriteUpdateNote;" in iss_routine("DeinitializeSetup")
+
+
+def test_the_finish_page_and_the_toast_say_the_same_english() -> None:
+    """Setup's Finish page words what it ended itself (EndedNote); after a silent update the app words the counts
+    (en.json's toast.updated.*). Both say the same English: EndedNote's four sentence forms, its doubled quotes read as
+    one and its %d as {count}, are en.json's forms with Claude Code and /mcp put in. When #103 moves them into
+    [CustomMessages], this reads its en. messages (their %1 as {count}), each paired with its form."""
+    from usage_monitor import app, i18n
+
+    literals = [text.replace("''", "'") for text in re.findall(r"'((?:[^']|'')*)'", iss_routine("EndedNote"))]
+    forms = [text.replace("%d", "{count}") for text in literals if len(text) > 1]
+    english = json.loads((ROOT / "usage_monitor" / "webui" / "i18n" / "en.json").read_text(encoding="utf-8"))
+    names = {"product": "Claude Code", "command": "/mcp"}
+    ours = [i18n.fill(english[f"toast.updated.{kind}"][form], names) for kind in ("tools", "waits")
+            for form in ("one", "other")]
+    assert forms == ours
+    assert (app.PRODUCT, app.MCP_COMMAND) == (names["product"], names["command"])
+
+
 # ── installer.iss, compiled (USAGE_MONITOR_UI_TESTS=1) and run in a sandbox (USAGE_MONITOR_INSTALLER_E2E=1 as well) ────────────────
 #
 # The text checks above cannot see whether the [Code] section compiles, or what a silent upgrade does to the
@@ -3244,9 +3283,7 @@ def test_a_sandboxed_update_ends_a_reader_that_starts_as_the_exe_moves_and_says_
         assert (tmp_path / "straggler-holding").exists(), "the straggler never held the bundle"
         assert re.search(r"Ending process \d+ of the install folder, started with --mcp\.", log)
         assert box.moved_aside() == [] and box.display_version() == "2.0.0"
-        assert sandbox_note().read_text(encoding="ascii") == (
-            "Setup closed the monitor's tool in a Claude Code session. If that session shows an error, type /mcp there or "
-            "restart it.")
+        assert sandbox_note().read_text(encoding="ascii") == '{"tools": 1, "waits": 0}'    # the counts (#97)
     finally:
         box.cleanup()
     assert real_install_state() == before
