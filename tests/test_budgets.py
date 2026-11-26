@@ -21,6 +21,7 @@ import pytest
 import budgets
 from usage_monitor import cldr, formats, i18n
 from usage_monitor.render import dump, engine
+from usage_monitor.render.skins import RenderOptions
 from usage_monitor.render.skins import night_city as nc
 from usage_monitor.render.skins import nostromo as nos
 from usage_monitor.ui import tray
@@ -41,38 +42,39 @@ LIMITS: dict[str, float] = {
     "nostromo.tooltip.resets": 252, "nostromo.tooltip.pace": 120.6, "nostromo.tooltip.pace_short": 120.6,
     "nostromo.tooltip.guard_lead": 252, "nostromo.tooltip.guard_lines": 252, "nostromo.strip.window_tag": 20.0,
     "nostromo.strip.value_5h": 24.0, "nostromo.strip.value_5h_chip": 20.0, "nostromo.strip.value_7d": 32.0,
-    "nostromo.strip.value_7d_chip": 28.0, "nostromo.tray.readout": 20.0, "night_city.floating.brand": 132.236,
-    "night_city.floating.live_tag": 110.417, "night_city.floating.status_chip": 106.417,
-    "night_city.floating.guard_chip": 39.056, "night_city.floating.hold_chip": 101.417,
-    "night_city.floating.band_text": 154.556, "night_city.floating.band_text_no_age": 220,
-    "night_city.floating.band_age": 62.359, "night_city.floating.band_hold_text": 168.921,
-    "night_city.floating.band_hold_chip": 175.866, "night_city.floating.row_name": 137.372,
+    "nostromo.strip.value_7d_chip": 28.0, "nostromo.tray.readout": 20.0, "night_city.floating.brand": 179.746,
+    "night_city.floating.live_tag": 102.417, "night_city.floating.status_chip": 98.417,
+    "night_city.floating.guard_chip": 39.056, "night_city.floating.hold_chip": 93.417,
+    "night_city.floating.hold_word": 93.417, "night_city.floating.band_text": 220.0,
+    "night_city.floating.band_text_no_age": 220, "night_city.floating.band_age": 62.359,
+    "night_city.floating.band_hold_text": 168.921, "night_city.floating.band_hold_chip": 175.866,
+    "night_city.floating.band_hold_word": 175.866, "night_city.floating.row_name": 137.372,
     "night_city.floating.row_chip": 153.065, "night_city.floating.row_tag": 91.192,
     "night_city.floating.row_reset": 128.331, "night_city.floating.row_value": 143.921,
     "night_city.tooltip.row_name": 129.271, "night_city.tooltip.row_chip": 144.965,
     "night_city.tooltip.row_tag": 83.092, "night_city.tooltip.row_value": 143.921,
-    "night_city.tooltip.info_reset": 129.245, "night_city.tooltip.info_pace": 117.433,
-    "night_city.tooltip.guard_lead": 236, "night_city.tooltip.guard_lines": 236, "night_city.strip.window_label": 18,
-    "night_city.strip.percent": 21, "night_city.strip.status_live": 40, "night_city.strip.status_word": 45,
-    "night_city.strip.hold_chip": 36, "gates.floating.title": 84.54, "gates.floating.status_word": 76.184,
-    "gates.floating.status_pill": 76.184, "gates.tooltip.title": 105.54, "gates.tooltip.status_word": 97.184,
-    "gates.tooltip.status_pill": 97.184, "gates.floating.row_label": 212.84, "gates.floating.row_tag": 139.496,
-    "gates.floating.row_value": 232.82, "gates.floating.cap_badge": 55.036, "gates.tooltip.row_label": 204.05,
-    "gates.tooltip.row_tag": 130.706, "gates.tooltip.row_value": 232.82, "gates.tooltip.cap_badge": 46.246,
-    "gates.tooltip.resets": 130.565, "gates.tooltip.pace": 153.962, "gates.tooltip.guard_lead": 220,
-    "gates.tooltip.guard_text": 220, "gates.floating.footer_lead": 258, "gates.floating.footer_rest": 258,
-    "gates.strip.window_tag": 24, "gates.strip.value": 38, "gates.tray.number": 17.013,
-    "dashboard.nostromo.cost_tile": 6, "dashboard.night_city.cost_tile": 6, "dashboard.gates.cost_tile": 6,
-    "dashboard.nostromo.cost_hero": 6, "dashboard.night_city.cost_hero": 6, "dashboard.gates.cost_hero": 6,
-    "app.tray.tooltip": 127, "app.toast.alert_threshold.title": 63, "app.toast.alert_resets.body": 255,
-    "app.toast.alert_reset.title": 63, "app.toast.alert_reset_ended.body": 255, "app.toast.alert_credits.title": 63,
-    "app.toast.alert_credits.body": 255, "app.toast.update.title": 63, "app.toast.update.body": 255,
-    "app.toast.update_note.title": 63, "app.toast.update_note.body": 250, "nostromo.floating.header_line": 240.0,
-    "nostromo.floating.row_name_line": 202.0, "nostromo.tooltip.row_name_line": 199.0,
-    "nostromo.tooltip.info_line": 252, "night_city.floating.header_line": 223, "night_city.floating.band_line": 220,
-    "night_city.floating.band_hold_line": 220, "night_city.tooltip.info_line": 236, "gates.floating.header_line": 216,
-    "gates.tooltip.header_line": 237, "gates.floating.row_line": 258, "gates.floating.footer": 258,
-    "gates.tooltip.info_line": 258,
+    "night_city.tooltip.info_reset": 228.0, "night_city.tooltip.info_pace": 109.433,
+    "night_city.tooltip.info_pace_short": 109.433, "night_city.tooltip.guard_lead": 236,
+    "night_city.tooltip.guard_lines": 236, "night_city.strip.window_label": 16.0, "night_city.strip.percent": 21,
+    "night_city.strip.status_live": 36, "night_city.strip.status_word": 45, "night_city.strip.hold_chip": 36,
+    "gates.floating.title": 84.54, "gates.floating.status_word": 76.184, "gates.floating.status_pill": 76.184,
+    "gates.tooltip.title": 105.54, "gates.tooltip.status_word": 97.184, "gates.tooltip.status_pill": 97.184,
+    "gates.floating.row_label": 212.84, "gates.floating.row_tag": 139.496, "gates.floating.row_value": 232.82,
+    "gates.floating.cap_badge": 55.036, "gates.tooltip.row_label": 204.05, "gates.tooltip.row_tag": 130.706,
+    "gates.tooltip.row_value": 232.82, "gates.tooltip.cap_badge": 46.246, "gates.tooltip.resets": 130.565,
+    "gates.tooltip.pace": 153.962, "gates.tooltip.guard_lead": 220, "gates.tooltip.guard_text": 220,
+    "gates.floating.footer_lead": 258, "gates.floating.footer_rest": 258, "gates.strip.window_tag": 24,
+    "gates.strip.value": 38, "gates.tray.number": 17.013, "dashboard.nostromo.cost_tile": 6,
+    "dashboard.night_city.cost_tile": 6, "dashboard.gates.cost_tile": 6, "dashboard.nostromo.cost_hero": 6,
+    "dashboard.night_city.cost_hero": 6, "dashboard.gates.cost_hero": 6, "app.tray.tooltip": 127,
+    "app.toast.alert_threshold.title": 63, "app.toast.alert_resets.body": 255, "app.toast.alert_reset.title": 63,
+    "app.toast.alert_reset_ended.body": 255, "app.toast.alert_credits.title": 63, "app.toast.alert_credits.body": 255,
+    "app.toast.update.title": 63, "app.toast.update.body": 255, "app.toast.update_note.title": 63,
+    "app.toast.update_note.body": 250, "nostromo.floating.header_line": 240.0, "nostromo.floating.row_name_line": 202.0,
+    "nostromo.tooltip.row_name_line": 199.0, "nostromo.tooltip.info_line": 252, "night_city.floating.header_line": 223,
+    "night_city.floating.band_line": 220, "night_city.floating.band_hold_line": 220,
+    "night_city.tooltip.info_line": 236, "gates.floating.header_line": 216, "gates.tooltip.header_line": 237,
+    "gates.floating.row_line": 258, "gates.floating.footer": 258, "gates.tooltip.info_line": 258,
 }
 
 # Where a box's runs are drawn. The hover cards draw the floating widget's header, band, message and footer with the
@@ -81,11 +83,15 @@ STANDS_ON: dict[str, tuple[str, ...]] = {"floating": ("floating", "tooltip"), "t
                                           "strip": ("strip",), "tray": ("tray",)}
 
 # The boxes the frame dump never draws: [G], since every sample state leaves room for [GUARD]; and the pace's short
-# form, which English never needs (#94).
-NOT_DRAWN_WHOLE = frozenset({"nostromo.floating.armed_guard_short", "nostromo.tooltip.pace_short"})
+# form, which English never needs (#94). Night City's (#95, critic 3): HOLD alone in the header and in the band (the
+# dump's guard holds all have a resume time, and none holds over a stale reading), and the pace's short form, which
+# English never needs either.
+NOT_DRAWN_WHOLE = frozenset({"nostromo.floating.armed_guard_short", "nostromo.tooltip.pace_short",
+                             "night_city.floating.hold_word", "night_city.floating.band_hold_word",
+                             "night_city.tooltip.info_pace_short"})
 
 # What still runs past before French or Spanish is offered (#107), each with the ticket that settles it: #91 the
-# dashboard's money figures, #95 Night City's boxes, #96 Gates' (#94 settled Nostromo's). The dollar is the plain "$"
+# dashboard's money figures, #96 Gates' boxes (#94 settled Nostromo's, #95 Night City's). The dollar is the plain "$"
 # (Chris's decision on #91), and the boxes sized for English's figures (the strips' values, the cap badge on Gates'
 # hover card, the dashboard's cost tiles and big cost figure) draw their percents and dollars without the space beside
 # the sign (Box.tight, Chris's decision on #91): Turkish's "%100" fits, and so do the cents and whole dollars of every
@@ -102,11 +108,8 @@ _COMPACT = {language: {(box, budgets.tight(figure)) for box in _MONEY for figure
             for language in ("fr", "es", "tr")}
 _FR_DAYS = ("LUN.", "MAR.", "MER.", "JEU.", "VEN.", "SAM.", "DIM.")
 FOR_91: dict[str, set[tuple[str, str]]] = {
-    "fr": {(box, f"RST {day} 12 H 59\u202fP.M.") for day in _FR_DAYS                                  # #95: fr-CA's and
-           for box in ("night_city.floating.row_reset", "night_city.tooltip.info_reset")}           # fr-MA's day clocks
-    | _COMPACT["fr"],                                                     # #91: the compact tiles (above)
+    "fr": _COMPACT["fr"],                                                 # #91: the compact tiles (above)
     "es": _COMPACT["es"]                                                  # #91: the compact tiles (above)
-    | {("night_city.floating.band_age", "100 DÍAS OLD")}                                            # #95: es-CO's unit
     | {(box, "RATE LIMITED · 100 días") for box in ("gates.floating.status_pill", "gates.tooltip.status_pill")},  # #96
     "tr": _COMPACT["tr"],                                                 # #91: the compact tiles (above)
 }
@@ -121,8 +124,24 @@ FOR_91: dict[str, set[tuple[str, str]]] = {
 # box's widest texts, so a row is the worst a tag can draw, at every age of that shape ("59MIN" stands for "41MIN").
 _LEFT_OUT = "left out beside the tag's own HOLD 23H 59MIN"
 _ES_CO = "es-CO's narrow unit, spaced: beside its own HOLD 23 H 59 MIN no age fits (8.4 px)"
+# Night City's (#95): its rooms in a language are its own tags' too (budgets.nc_room), so a reset or an age a tag writes
+# wider than English's is reported where its line gives way. Each row names the tags that write it and says whether a
+# draft's word could settle it (critic 14 of #95's plan); the budgets measure the pace's points with both signs.
+_FR_CA_ROW = ("fr-CA's 12-hour day clock (129.4 px), 1.1 px past the room beside SESSION: the floating row leaves its "
+              "reset out (a weekday is shown only for a session that resets on another day) and the hover card shows "
+              "it whole; a draft's shorter RST or SESSION (#104) could settle it")
+_FR_CA_PACE = ("beside fr-CA's 12-hour day clock in the hover line's reset (RST LUN. 12 H 59 P.M., 129.4 px) the pace has "
+               "78.6 px: it takes its short form, its signed points; English's UNDER PACE, which French shows until "
+               "#104, needs 80.3 px at -18 and 86.8 at -100, so a draft's shorter pace word could settle it")
+_ES_PACE = ("beside a 12-hour day clock with its spaced p. m. (RST MIÉ, 12:59 P. M., 123.2 px: es-ES's and most Latin "
+            "American tags' on a 12-hour clock) the pace has 84.8 px: it takes its short form, its signed points; "
+            "English's UNDER PACE -100, which Spanish shows until #105, needs 86.8 px, so a draft's shorter pace word "
+            "could settle it")
 ACCEPTED_CUTS: dict[str, dict[tuple[str, str], str]] = {
     "fr": {
+        **{("night_city.floating.row_reset", f"RST {day} 12 H 59{chr(0x202F)}P.M."): _FR_CA_ROW for day in _FR_DAYS},
+        ("night_city.tooltip.info_pace", "UNDER PACE -100"): _FR_CA_PACE,
+        ("night_city.tooltip.info_pace", "UNDER PACE +100"): _FR_CA_PACE,
         ("nostromo.floating.age", "59MIN"): f"the narrow minute of every French tag but fr-CA (59M): {_LEFT_OUT}",
         ("nostromo.floating.age", "100J"): f"every French tag's narrow day: {_LEFT_OUT} (every tag's but fr-CA's)",
     },
@@ -141,6 +160,13 @@ ACCEPTED_CUTS: dict[str, dict[tuple[str, str], str]] = {
         # English's widest word, which Spanish shows until #105, has 78.8 px. NO LOGIN, the state that words it, has no
         # age, so no frame draws this pair: the budgets pair every box's widest.
         ("nostromo.floating.state_word", "AUTH REQUIRED"): "beside es-CO's and es-419's widest ages, cut first (Q2)",
+        ("night_city.floating.band_age", "100 DÍAS OLD"): (
+            "es-CO's narrow day, spaced and in full (73.9 px against the band's 62.4 beside the widest cause): the band "
+            "leaves the age out and keeps the cause whole (BAND_GIVE_WAY; before #95 it cut the cause and dropped the age "
+            "too); the day is CLDR's, and only an age word (OLD) two characters shorter, a draft's (#105), could settle "
+            "it"),
+        ("night_city.tooltip.info_pace", "UNDER PACE -100"): _ES_PACE,
+        ("night_city.tooltip.info_pace", "UNDER PACE +100"): _ES_PACE,
     },
 }
 
@@ -156,12 +182,12 @@ TOOLTIPS: dict[str, int] = {
                      # ... [ğüárd höldıñğ, réşüméş 10:00 AM (ıñ 1m) ıİğşéñıİğşéñ] (dev)
 }
 
-# Boxes that draw a status word that is the skin's own, not the view model's (Night City's, #95), so they carry no
-# status key: the header's live tag (_live_tag(..., "LIVE")) and the strip's status words (STRIP_WORDS).
+# Boxes that draw a status word that is the skin's own, not the view model's, so they carry the skin's key, not the
+# status word's (Night City's, #95): the header's LIVE tag and the strip's status words (night_city.STATE_KEYS).
 OWN_STATUS_WORDS: dict[str, str] = {
-    "night_city.floating.live_tag": "Night City's own LIVE tag (night_city._live_tag), #95",
-    "night_city.strip.status_live": "Night City's own LIVE on the strip, #95",
-    "night_city.strip.status_word": "Night City's STRIP_WORDS, #95",
+    "night_city.floating.live_tag": "Night City's own LIVE tag (widget.night_city.state.live), #95",
+    "night_city.strip.status_live": "Night City's own LIVE on the strip (widget.night_city.state.live), #95",
+    "night_city.strip.status_word": "Night City's own strip words (widget.night_city.state.*), #95",
 }
 
 # Nostromo's boxes that draw its own words (#94): every box of its floating widget, hover card and strip but the
@@ -179,6 +205,22 @@ NOSTROMO_WORDED = frozenset({
 NOSTROMO_FIGURES = frozenset({"nostromo.floating.age", "nostromo.floating.row_value", "nostromo.tooltip.row_value",
                               "nostromo.strip.value_5h", "nostromo.strip.value_5h_chip", "nostromo.strip.value_7d",
                               "nostromo.strip.value_7d_chip", "nostromo.tray.readout"})
+# Night City's boxes that draw its own words (#95): every box of its floating widget, hover card and strip but the
+# figures' and the brand's. The guard's statement composes its texts instead.
+NIGHT_CITY_WORDED = frozenset({
+    *(f"night_city.floating.{part}" for part in ("live_tag", "status_chip", "guard_chip", "hold_chip", "hold_word",
+                                                 "band_text", "band_text_no_age", "band_age", "band_hold_text",
+                                                 "band_hold_chip", "band_hold_word", "row_name", "row_chip", "row_tag",
+                                                 "row_reset")),
+    *(f"night_city.tooltip.{part}" for part in ("row_name", "row_chip", "row_tag", "info_reset", "info_pace",
+                                                "guard_lead")),
+    *(f"night_city.strip.{part}" for part in ("window_label", "status_live", "status_word", "hold_chip")),
+})
+# Night City's boxes of figures alone (the values, the strip's percent, the pace's points), and its brand mark, drawn
+# as written in every language (#86): measured in the pseudo-locale as it draws them (Box.words False).
+NIGHT_CITY_FIGURES = frozenset({"night_city.floating.row_value", "night_city.tooltip.row_value",
+                                "night_city.strip.percent", "night_city.tooltip.info_pace_short"})
+NIGHT_CITY_AS_WRITTEN = frozenset({"night_city.floating.brand"})
 
 
 # ── As the skins draw ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -347,12 +389,12 @@ def test_no_offered_language_is_past_a_budget() -> None:
 def test_what_91_has_to_settle_is_all_that_runs_past() -> None:
     """French's and Spanish's longest figures run past only where FOR_91 says, or where ACCEPTED_CUTS accepts a
     format's cut; #91 and the skins' tickets strike each FOR_91 row as they settle it. An accepted cut is a box that
-    gives way (never a fault), and no FOR_91 row is Nostromo's: #94 settled them."""
+    gives way (never a fault), and no FOR_91 row is Nostromo's or Night City's: #94 and #95 settled them."""
     for language in sorted(set(FOR_91) | set(ACCEPTED_CUTS)):
         expected = FOR_91.get(language, set()) | set(ACCEPTED_CUTS.get(language, {}))
         assert {(r.box.id, r.text) for r in budgets.over(language)} == expected, language
     assert not any(budgets.BOX[box].enforced for cuts in ACCEPTED_CUTS.values() for box, _text in cuts)
-    assert not any(box.startswith("nostromo.") for rows in FOR_91.values() for box, _text in rows)
+    assert not any(box.startswith(("nostromo.", "night_city.")) for rows in FOR_91.values() for box, _text in rows)
 
 
 def test_the_boxes_sized_for_englishs_figures_take_their_percents_and_dollars_tight() -> None:
@@ -380,13 +422,23 @@ def test_the_boxes_sized_for_englishs_figures_take_their_percents_and_dollars_ti
 
 
 def test_a_box_that_shrinks_its_text_is_measured_at_the_size_it_shrinks_to(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Night City's strip status shrinks a long word to fit, down to 9 px (_fit_type): "CONNEXION" is too wide at the
-    status size but fits shrunk; a word too wide even at 9 px is still a fault."""
+    """Night City's strip words shrink a long word to fit, down to 9 px (_fit_type), and only then cut it (#95): the
+    LIVE tag's, the status word's and the HOLD chip's are measured at the size the skin's _fit_type draws them at, so a
+    word too wide at its own size fits shrunk; a word too wide even at 9 px is reported as a cut, its width the 9 px
+    one."""
+    ink = budgets._nc_ink()
+    for box_id, spec, word in (("night_city.strip.status_live", "STATUS", "DIRECT"),
+                               ("night_city.strip.status_word", "STATUS", "CONNEXION"),
+                               ("night_city.strip.hold_chip", "CHIP", "ESPERA")):
+        box = budgets.BOX[box_id]
+        assert box.fit == "ellipsis" and not box.enforced, box_id
+        drawn = nc._fit_type(ink, word, getattr(nc, spec), box.limit, nc.STRIP_FLOOR)
+        assert budgets.W_nc(word, spec) > box.limit >= box.width(word) == pytest.approx(ink.width(word, drawn)), box_id
     box = budgets.BOX["night_city.strip.status_word"]
-    assert box.fit == "shrink" and box.enforced
-    assert budgets.W_nc("CONNEXION", "STATUS") > box.limit >= box.width("CONNEXION")
     monkeypatch.setattr(budgets, "texts", lambda _box, _language: ["CONNEXION", "DÉCONNEXION RÉSEAU"])
-    assert [(r.box.id, r.text) for r in budgets.over("xx", [box])] == [(box.id, "DÉCONNEXION RÉSEAU")]
+    [hit] = budgets.over("xx", [box])
+    floor = nc.STATUS._replace(size=nc.STRIP_FLOOR, tracking=0.3)
+    assert (hit.text, hit.width) == ("DÉCONNEXION RÉSEAU", pytest.approx(budgets._nc_ink().width(hit.text, floor)))
 
 
 def test_a_character_limit_stays_the_budget_where_english_runs_past() -> None:
@@ -633,10 +685,11 @@ def test_a_boxs_keys_are_the_words_it_draws() -> None:
     assert wrong == [] and missing == []
     keyed = {box.id for box in budgets.BOXES if box.keys and box.compose is None}
     assert keyed == {"gates.floating.status_word", "gates.tooltip.status_word", "gates.floating.status_pill",
-                     "gates.tooltip.status_pill", "night_city.floating.status_chip", "night_city.floating.band_text",
-                     "night_city.floating.band_hold_text", *NOSTROMO_WORDED}
+                     "gates.tooltip.status_pill", *NOSTROMO_WORDED, *NIGHT_CITY_WORDED}
     for box_id in OWN_STATUS_WORDS:
-        assert not budgets.BOX[box_id].keys and set(budgets.BOX[box_id].english) & set(status), box_id
+        box = budgets.BOX[box_id]
+        assert box.keys and all(key.startswith("widget.night_city.state.") for key in box.keys), box_id
+        assert set(box.english) & set(status), box_id
     raw = json.loads((i18n.CATALOG_DIR / "en.json").read_text(encoding="utf-8"))
     assert set(budgets.BOX["app.tray.tooltip"].keys) == {key for key in raw if key.startswith("tray.tip.")}
 
@@ -736,7 +789,8 @@ def test_nostromo_passes_its_budgets_in_the_pseudo_locale() -> None:
     nostromo = {box.id for box in budgets.BOXES if box.id.startswith("nostromo.")}
     assert {box.id for box in budgets.BOXES if box.id in nostromo and box.keys and box.compose is None} == \
         NOSTROMO_WORDED
-    assert {box.id for box in budgets.BOXES if not box.words} == NOSTROMO_FIGURES
+    assert {box.id for box in budgets.BOXES if not box.words} == (NOSTROMO_FIGURES | NIGHT_CITY_FIGURES
+                                                                   | NIGHT_CITY_AS_WRITTEN)
     assert nostromo == NOSTROMO_WORDED | NOSTROMO_FIGURES | {"nostromo.tooltip.guard_lines"}
 
 
@@ -788,10 +842,11 @@ def test_a_figure_box_is_measured_with_the_pseudo_locales_figures() -> None:
 
 
 def test_a_worded_boxs_english_is_its_keys_filled() -> None:
-    """Each English text of a box of Nostromo's keys is one of its keys' English filled (each placeholder standing for
-    any text), or the box's data: a figure alone or a name alone; and each key's English, filled, is one of them."""
+    """Each English text of a box of Nostromo's or Night City's keys is one of its keys' English filled (each
+    placeholder standing for any text), or the box's data: a figure alone or a name alone; and each key's English,
+    filled, is one of them."""
     english = i18n.load_catalog(i18n.DEFAULT)
-    for box_id in sorted(NOSTROMO_WORDED):
+    for box_id in sorted(NOSTROMO_WORDED | NIGHT_CITY_WORDED):
         box = budgets.BOX[box_id]
         patterns = [budgets.key_pattern(str(english.lookup(key).value)) for key in box.keys]
         data = [text for text in box.english if not any(pattern.fullmatch(text) for pattern in patterns)]
@@ -800,12 +855,15 @@ def test_a_worded_boxs_english_is_its_keys_filled() -> None:
         assert all(any(pattern.fullmatch(text) for text in box.english) for pattern in patterns), box_id
 
 
-def test_the_guard_line_box_composes_the_statements_the_skin_words(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The guard line's texts are nostromo._guard_statement's, as _guard_lines breaks them (the lead glued), in every
-    language and every locale of it, worded through exactly the keys the box lists."""
+@pytest.mark.parametrize("skin", ["nostromo", "night_city"])
+def test_the_guard_line_box_composes_the_statements_the_skin_words(skin: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The guard line's texts are the skin's _guard_statement's, as its _guard_lines breaks them (Nostromo's lead glued
+    on; Night City's rest alone, its lead a run of its own), in every language and every locale of it, worded through
+    exactly the keys the box lists."""
+    module = nc if skin == "night_city" else nos
     read: set[str] = set()
     inside = [0]
-    real_text, real_statement = i18n.Catalog.text, nos._guard_statement
+    real_text, real_statement = i18n.Catalog.text, module._guard_statement
 
     def text(self: Any, key: str, *args: Any, **kwargs: Any) -> Any:
         if inside[0]:
@@ -820,12 +878,18 @@ def test_the_guard_line_box_composes_the_statements_the_skin_words(monkeypatch: 
             inside[0] -= 1
 
     monkeypatch.setattr(i18n.Catalog, "text", text)
-    monkeypatch.setattr(nos, "_guard_statement", statement)
-    box = budgets.BOX["nostromo.tooltip.guard_lines"]
+    monkeypatch.setattr(module, "_guard_statement", statement)
+    box = budgets.BOX[f"{skin}.tooltip.guard_lines"]
     assert box.compose is not None
+    leads = {str(i18n.app_catalog(i18n.DEFAULT).text(key)) for key in box.keys if ".guard.armed" in key
+             or ".guard.holding" in key}
     for language in i18n.DEV_LANGUAGES:
         composed = box.compose(language)
-        assert composed and all(engine.NO_BREAK in statement.split(" ")[0] for statement in composed), language
+        assert composed, language
+        if skin == "nostromo":
+            assert all(engine.NO_BREAK in statement.split(" ")[0] for statement in composed), language
+        else:
+            assert not any(statement.startswith(tuple(leads)) for statement in composed), language
     assert read == set(box.keys), sorted(read ^ set(box.keys))
     glued = engine.glue("(IN 6D 23H).")
     assert any(glued in statement for statement in box.compose(i18n.DEFAULT))
@@ -980,6 +1044,171 @@ def test_a_languages_header_rooms_are_its_own_tags() -> None:
     assert budgets.allowed(age, "es", "59S", 1.0) == pytest.approx(22.8)           # es-ES's, never beside es-CO's chip
     assert budgets.allowed(word, "es", "THROTTLED", 1.0) == pytest.approx(budgets.header_room(word.id, "es", 1.0))
     assert budgets.allowed(age, i18n.DEFAULT, "12 S", 1.0) == budgets.budget(age, 1.0)
+
+
+# ── Night City's words and fits (#95) ─────────────────────────────────────────────────────────────────────────────
+
+def test_night_city_passes_its_budgets_in_the_pseudo_locale() -> None:
+    """In the pseudo-locale (about 40 % longer, bracketed, accented) no Night City box or line that has no fallback or
+    only shrinks runs past its budget: its words come from its keys and fit, shrink or give way as the skin makes them.
+    What gives way is reported as a cut. Every Night City box is worded by keys, holds figures alone, is the brand drawn
+    as written, or composes."""
+    rows = budgets.over(i18n.PSEUDO)
+    assert [(r.box.id, r.text) for r in rows if r.box.id.startswith("night_city.") and r.box.enforced] == []
+    cut = {r.box.id for r in rows if r.box.id.startswith("night_city.")}
+    assert {"night_city.floating.band_age", "night_city.tooltip.info_pace", "night_city.strip.status_word",
+            "night_city.strip.window_label"} <= cut
+    city = {box.id for box in budgets.BOXES if box.id.startswith("night_city.")}
+    assert {box.id for box in budgets.BOXES if box.id in city and box.keys and box.compose is None} == NIGHT_CITY_WORDED
+    assert city == NIGHT_CITY_WORDED | NIGHT_CITY_FIGURES | NIGHT_CITY_AS_WRITTEN | {"night_city.tooltip.guard_lines"}
+    assert budgets.texts(budgets.BOX["night_city.floating.brand"], i18n.PSEUDO) == [nc.BRAND_MARK]
+    # Its keys made pseudo and filled (the reset's with WED 12:59 PM in it), not its English made pseudo whole.
+    resets = budgets.texts(budgets.BOX["night_city.tooltip.info_reset"], i18n.PSEUDO)
+    template = str(i18n.app_catalog(i18n.PSEUDO).lookup("widget.night_city.resets.at").value)
+    assert i18n.fill(template, {"clock": "WED 12:59 PM"}) in resets
+    assert i18n.pseudo_text("RST WED 12:59 PM") not in resets
+
+
+def _nc_catalog(monkeypatch: pytest.MonkeyPatch, words: dict[str, str]) -> None:
+    english = i18n.load_catalog("en").english()
+    catalog = i18n.Catalog("en", {}, {**english, **words})
+    monkeypatch.setattr(i18n, "app_catalog", lambda language: catalog)
+
+
+def _nc_line(line_id: str) -> Any:
+    return next(item for item in budgets.LINES if item.id == line_id)
+
+
+@pytest.mark.parametrize("language", ["fr", "es", i18n.PSEUDO])
+def test_the_budgets_give_way_as_night_city_does(language: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Critic 18 of #94's plan, for Night City: for the language's worst header (the LIVE tag, the status chip and the
+    hold chip on its right), its worst band (the guard holding and not) and its worst hover line, the skin's plans
+    (_header_plan, _band_plan, _info_plan) give up the same boxes in the same order as the budgets' Line.gives_way, and
+    both fit after; and what the band and the hover line keep is the same (the age or none, the hold chip or HOLD alone,
+    the pace whole, its points or none). Night City's widths are the same at every scale, so this is at 1.0."""
+    import dataclasses
+
+    theme = dump.load_theme_objects()["night_city"]
+    blackwall = theme.variants[0]
+    ink = nc._Ink(nc._canvas(nc.FLOAT_W, 126, 1.0, theme), nc.Palette.for_variant(theme, blackwall), RenderOptions())
+    look = nc.look_for(blackwall)
+    widest = {box_id: budgets.widest_text(budgets.BOX[box_id], language, 1.0) for box_id in budgets.NC_HOME}
+    taken = []
+    header = _nc_line("night_city.floating.header_line")
+    for right, kind in (("live_tag", "live"), ("status_chip", "chip"), ("hold_chip", "hold")):
+        right_id = f"night_city.floating.{right}"
+        steps, width, _after = header.give_way([("night_city.floating.brand", nc.BRAND_MARK),
+                                                (right_id, widest[right_id])], 1.0,
+                                               {"night_city.floating.hold_word": widest["night_city.floating.hold_word"]})
+        monkeypatch.setattr(nc, "_hold_word", lambda _model, kind=kind, text=widest[right_id]:
+                            text if kind == "hold" else None)
+        _nc_catalog(monkeypatch, {"widget.night_city.state.live": widest[right_id],
+                                  "widget.night_city.guard.hold": widest["night_city.floating.hold_word"]})
+        model = dump.sample_model("guard_hold_session" if kind == "hold" else "normal3" if kind == "live" else "paused")
+        if kind == "chip":
+            model = dataclasses.replace(model, status_text=widest[right_id])
+        plan = nc._header_plan(ink, look, model)
+        mapped = tuple("night_city.floating.hold_chip" if step == "countdown" else
+                       "night_city.floating.hold_word" if "countdown" in plan.gave_way else right_id
+                       for step in plan.gave_way)
+        assert mapped == steps and width <= header.limit, (right, plan, steps)
+        taken.append(steps)
+    monkeypatch.undo()
+    # A cut ends with the skin's own three dots (Q3, kept on #95), the budgets' floors too; Nostromo's with its "…".
+    assert nc._cut(ink, "W" * 20, nc.CHIP, 40.0).endswith(budgets.cut_mark(header.id))
+    assert budgets.cut_mark("nostromo.floating.age") == nos.ELLIPSIS != budgets.cut_mark(header.id)
+    for holding in (False, True):
+        line = _nc_line("night_city.floating.band_hold_line" if holding else "night_city.floating.band_line")
+        cause_id = "night_city.floating.band_hold_text" if holding else "night_city.floating.band_text"
+        runs = [(cause_id, widest[cause_id]), ("night_city.floating.band_age", widest["night_city.floating.band_age"])]
+        if holding:
+            runs.append(("night_city.floating.band_hold_chip", widest["night_city.floating.band_hold_chip"]))
+        steps, width, after = line.give_way(runs, 1.0, {
+            "night_city.floating.band_hold_word": widest["night_city.floating.band_hold_word"]})
+        plan = nc._band_plan(ink, dump.sample_model("stale3"), widest[cause_id], widest["night_city.floating.band_age"],
+                             widest["night_city.floating.band_hold_chip"] if holding else None,
+                             widest["night_city.floating.band_hold_word"])
+        names = {"countdown": "night_city.floating.band_hold_chip", "age": "night_city.floating.band_age",
+                 "cause": cause_id}
+        assert tuple(names[step] for step in plan.gave_way) == steps and width <= line.limit, (holding, plan, steps)
+        kept = {box: text or None for box, text in after}
+        chip = kept.get("night_city.floating.band_hold_chip", kept.get("night_city.floating.band_hold_word"))
+        assert (kept["night_city.floating.band_age"], chip) == (plan.age, plan.chip), (holding, plan, after)
+        taken.append(steps)
+    info = _nc_line("night_city.tooltip.info_line")
+    reset, pace, short = (widest[f"night_city.tooltip.{part}"] for part in ("info_reset", "info_pace", "info_pace_short"))
+    steps, width, after = info.give_way([("night_city.tooltip.info_reset", reset), ("night_city.tooltip.info_pace", pace)],
+                                        1.0, {"night_city.tooltip.info_pace_short": short})
+    monkeypatch.setattr(nc, "_reset_text", lambda _row, _tooltip, *, locale: reset)
+    monkeypatch.setattr(nc, "_pace_text", lambda _row, *, locale: (pace, "behind"))
+    monkeypatch.setattr(nc, "_pace_short", lambda _row: short)
+    model = dump.sample_model("normal3")
+    plan = nc._info_plan(ink, look, model, model.rows[0])
+    names = {"pace": "night_city.tooltip.info_pace", "pace_short": "night_city.tooltip.info_pace_short"}
+    assert tuple(names[step] for step in plan.gave_way) == steps and width <= info.limit, (plan, steps)
+    assert [text or None for _box, text in after] == [plan.reset, plan.pace], (plan, after)
+    taken.append(steps)
+    assert any(taken)                                       # each language's worst lines give way somewhere
+
+
+@pytest.mark.parametrize("order", list(itertools.permutations(nc.HEADER_GIVE_WAY)))
+def test_the_budgets_take_the_header_order_from_night_citys_tuple(order: tuple[str, ...],
+                                                                   monkeypatch: pytest.MonkeyPatch) -> None:
+    """Q2 lives in night_city.HEADER_GIVE_WAY alone (and the band's and the hover line's orders in theirs): every Night
+    City line's give-way is its tuple's steps as boxes (budgets.nc_gives_way); in any order of Q2's, so is the header's,
+    and each right-hand box's room (budgets._nc_room, which LIMITS pins for the order shipped) is where the skin's
+    _header_plan stops keeping it whole: the longest text of the box's shape it keeps fits the room, and one letter more
+    does not."""
+    import dataclasses
+
+    for line_id, plan in budgets.NC_PLANS.items():
+        assert _nc_line(line_id).gives_way == budgets.nc_gives_way(plan), line_id
+    monkeypatch.setattr(nc, "HEADER_GIVE_WAY", order)
+    assert budgets.nc_gives_way(budgets.NC_HEADER) == tuple(item for step in order
+                                                            for item in budgets.NC_HEADER.step(step))
+    theme = dump.load_theme_objects()["night_city"]
+    blackwall = theme.variants[0]
+    ink = nc._Ink(nc._canvas(nc.FLOAT_W, 126, 1.0, theme), nc.Palette.for_variant(theme, blackwall), RenderOptions())
+    look = nc.look_for(blackwall)
+    real_hold = nc._hold_word
+    for box_id, kind, text_of in (("night_city.floating.live_tag", "live", lambda n: "W" * n),
+                                  ("night_city.floating.status_chip", "chip", lambda n: "W" * n),
+                                  ("night_city.floating.hold_chip", "hold", lambda n: "HOLD " + "9" * n)):
+        box = budgets.BOX[box_id]
+        room = budgets._nc_room(budgets.NC_HEADER, box_id, budgets._nc_widest, budgets._nc_floor)
+
+        def whole(n: int, kind: str = kind, text_of: Any = text_of) -> bool:
+            text = text_of(n)
+            monkeypatch.setattr(nc, "_hold_word", (lambda _model: text) if kind == "hold" else real_hold)
+            _nc_catalog(monkeypatch, {"widget.night_city.state.live": text})
+            model = dump.sample_model({"live": "normal3", "chip": "paused", "hold": "guard_hold_session"}[kind])
+            if kind == "chip":
+                model = dataclasses.replace(model, status_text=text)
+            return nc._header_plan(ink, look, model).gave_way == ()
+
+        low, high = 1, 80                                   # whole(low) holds, whole(high) not
+        while high - low > 1:
+            middle = (low + high) // 2
+            low, high = (middle, high) if whole(middle) else (low, middle)
+        assert box.width(text_of(low)) <= room + 0.01 < box.width(text_of(low + 1)), (box_id, order, low, room)
+
+
+def test_a_night_city_boxs_room_in_a_language_is_its_own_tags() -> None:
+    """In a language, Night City's line boxes have the rooms their limits are worked out by, beside the language's own
+    widest texts and each format tag's own figures (budgets.nc_room; critic 1 and 2 of #95's plan): English's are its
+    limits; the hover line's pace has less room beside fr-CA's 12-hour day clock (RST LUN. 12 H 59 P.M.) than beside
+    English's reset; the band's age keeps its room beside the widest cause (a word) in every tag, so es-CO's 100 DÍAS OLD
+    is held to it; and a figure is held to the rooms of the tags that write it, a word to the least of any tag's."""
+    for box_id in budgets.NC_HOME:
+        assert budgets.nc_room(box_id, i18n.DEFAULT) == pytest.approx(budgets.BOX[box_id].limit), box_id
+    pace, age = budgets.BOX["night_city.tooltip.info_pace"], budgets.BOX["night_city.floating.band_age"]
+    canada = budgets.nc_room(pace.id, "fr", 1.0, "fr-CA/12")
+    assert canada < pace.limit - 20 and budgets.allowed(pace, "fr", "ON PACE", 1.0) == pytest.approx(
+        budgets.nc_room(pace.id, "fr", 1.0))
+    assert "RST LUN. 12 H 59" + chr(0x202F) + "P.M." in budgets.nc_tags("fr")["fr-CA/12"]["night_city.tooltip.info_reset"]
+    assert "100 DÍAS OLD" in budgets.nc_tags("es")["es-CO/24"][age.id]
+    assert budgets.allowed(age, "es", "100 DÍAS OLD", 1.0) == pytest.approx(age.limit)
+    assert budgets.allowed(age, i18n.DEFAULT, "41 M OLD", 1.0) == budgets.budget(age, 1.0)
 
 
 # ── The report ────────────────────────────────────────────────────────────────────────────────────────────────────

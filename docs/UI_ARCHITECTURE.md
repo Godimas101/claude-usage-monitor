@@ -256,7 +256,7 @@ draws its small percent sign on the side `formats.percent_parts` gives (before t
 sized for English's figures (Nostromo's strip values, Night City's strip percent, the cap badge on Gates' hover card)
 take the percent without its space ("100%"; Turkish "%100", Chris's decision on #91); Gates' floating badge has the
 room and keeps the language's space. The tray icons' numbers stay digits. Nostromo's own words, units and case calls
-come from the catalog and `casing` since #94 (see "Languages", "Skin words"); Night City's and Gates' are #95's and
+come from the catalog and `casing` since #94, Night City's since #95 (see "Languages", "Skin words"); Gates' are
 #96's.
 
 **Lamp kinds.** A status with no room for words (the strip, the tray icon) is drawn by `WidgetModel.lamp`
@@ -331,21 +331,22 @@ Sign-in copy. `WidgetModel.stale_reason` says why the user must act (`expired`, 
 since #93). Each skin picks its copy by the reason,
 as its approved mockup words it, and never reads the neutral text. Nostromo: the dashed auth box reads
 "AUTH LINK LOST." / "USE CLAUDE CODE TO RESTORE." (`AUTH_KEYS`, by reason: `widget.nostromo.auth.*`). Night City: the hazard band reads "RELINK // USE CLAUDE CODE"
-(`theme.extras.copy.stale_auth`). Gates: the footer reads "Hmm, we lost touch. Send Claude Code a message."
+(`widget.night_city.band.expired`; the theme file's `extras.copy` keeps the mockup's English and is no longer read, #95).
+Gates: the footer reads "Hmm, we lost touch. Send Claude Code a message."
 Each says to use Claude Code, not to open it: Claude Code renews the sign-in only when it sends a request, so
 an open but idle Claude Code lets it run out (#52).
 
 A sign-in Claude turned down with HTTP 403 (`MonitorState.signin_refused`, #55) is not renewed by a message: only a
 new sign-in fixes it. Its reason is `refused`, and its neutral wording `STALE_MESSAGE_REFUSED` ("LOGIN REFUSED - RUN /login IN CLAUDE CODE").
 Nostromo: "AUTH REFUSED." / "RUN /login IN CLAUDE CODE." Night City: "RELINK // RUN /login"
-(`theme.extras.copy.stale_refused`). Gates: "Sign-in refused. Run /login in Claude Code." The dashboard's sign-in
+(`widget.night_city.band.refused`). Gates: "Sign-in refused. Run /login in Claude Code." The dashboard's sign-in
 help asks for `/login` too. A 401 keeps the expired wording: Claude Code's next request renews the sign-in, or asks
 for a new one.
 
 No sign-in at all is a different case (#28): the person may never have used Claude Code (claude.ai and the
 Claude apps share its limits), so the widgets send them to the dashboard, which has the steps, rather than to
 Claude Code. The neutral text is "NO LOGIN FOUND - OPEN THE DASHBOARD" (Nostromo's auth box has the same words, as
-its two lines), Night City's band "NO LOGIN // OPEN DASHBOARD" (`theme.extras.copy.no_login`), and Gates' footer
+its two lines), Night City's band "NO LOGIN // OPEN DASHBOARD" (`widget.night_city.band.no_login`), and Gates' footer
 "No sign-in found. Open the dashboard for help." The dashboard's link status reads "NO LOGIN" too (Gates: "Not signed in"),
 and its status banner becomes the sign-in help (see "webui").
 
@@ -490,7 +491,7 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   month, a day period or the zone (the agent modes' English `Mon 09:00` in `agent/status.py` is the one listed
   exception). The widgets, the tray tooltip and the alerts write their numbers, percents, clocks and weekdays this
   way. The view model's, the tray tooltip's and the tray menu's words come from the catalog since #93, Nostromo's own
-  words since #94; Night City's and Gates' stay English until #95 and #96, the toasts' until #97. The alerts read the app's locale on each evaluation
+  words since #94, Night City's since #95; Gates' stay English until #96, the toasts' until #97. The alerts read the app's locale on each evaluation
   (`AlertEngine(settings, locale_provider=)`, English without one or when it fails); English alerts keep their trailing
   `USD`, other languages write each amount with the plain `$` (US dollars) or the currency's code. The dashboard has its
   own: `webui/formats.js` (`window.MonitorFormats`: `make(locale)`, and `active()` from the `monitor-locale` meta),
@@ -548,7 +549,8 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   for byte. Ids (limit kinds, keys, the guard's identity strings, tags, currency codes) keep the plain calls:
   `tests/test_casing_sites.py` lists every bare call allowed in the files the widgets', the tray's and the alerts' words
   come from (render/model.py, app.py, data/alerts.py, data/identity.py, data/usage_api.py, formats.py) and Nostromo's
-  skin, whose own calls moved to `casing` in #94 with no bare call left; Night City and Gates join it in #95 and #96. `tests/test_locale_surfaces.py` draws every
+  and Night City's skins, whose own calls moved to `casing` in #94 and #95 with no bare call left; Gates' joins them in
+  #96. `tests/test_locale_surfaces.py` draws every
   theme, state and surface in Turkish and finds no U+0307. On the page, `formats.js`'s `upper` and `lower` follow the
   same rule (for a language or a tag; the page's language when none is given): `app.js` cases a name in capitals by the
   page's language (`FMT.upper(name)`: a model, a plan, a surface), English words by English's (`FMT.upper(text, "en")`,
@@ -638,9 +640,10 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
 - **Skin words (#94).** A skin's own words are catalog keys named surface first, as the other keys are:
   `widget.<theme id>.<group>.<name>`. Nostromo's are `widget.nostromo.state.*` (the header's word), `.guard.*` (the
   hold chip, the armed mark, the hover card's guard line), `.auth.*.line1`/`.line2` (the sign-in box), `.limit.*`,
-  `.window.*`, `.share.of`, `.cap.tag`, `.resets.at`/`.unknown` and `.pace.*`; Night City's (#95) and Gates' (#96) take
-  `widget.night_city.*` and `widget.gates.*` with the same groups, and `tests/test_widget_words.py`'s key set leaves
-  `widget.<theme id>.*` out. A value is in the theme's case (Nostromo's capitals) and nothing cases it again. A name goes
+  `.window.*`, `.share.of`, `.cap.tag`, `.resets.at`/`.unknown` and `.pace.*`; Night City's (#95) take
+  `widget.night_city.*` with these groups but `.auth` and `.resets.unknown`, and two of their own, `.band` and `.age`
+  (below); Gates' (#96) `widget.gates.*`; `tests/test_widget_words.py`'s key set leaves `widget.<theme id>.*` out. A
+  value is in the theme's case (Nostromo's capitals) and nothing cases it again. A name goes
   in in the theme's case (`casing.upper(name, language)` for Nostromo: `HAİKU WEEKLY` in Turkish), the sign-in command
   as typed, and Claude Code's name, a percent, a clock, a countdown and the pace's signed points as placeholders; ages
   and countdowns are formats (`format_age_short`, `format_countdown`). The code keeps the `, ` between the guard line's
@@ -679,6 +682,44 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
     the least that keeps their ink off it, so the pill then meets the rule and a cap tag its tick.
   - `tests/test_skin_nostromo_fit.py` reads each decision; `tests/test_budgets.py` holds the budgets' give-way to the
     skin's; the frame check (`tests/frame_layout.py`, below) holds every frame clear.
+- **Skin words (#95).** Night City's words are `widget.night_city.<group>.<name>`, 38 keys: `.state.*` (the strip's
+  status tag, the header's LIVE, the rows' WARN and CRIT chips), `.band.*` (the stale band's four causes together, for a
+  translator), `.guard.*`, `.limit.*`, `.window.*` (the strip's 5H and 7D), `.share.of`, `.cap.tag` (`CAP {number}`, a
+  number without its sign), `.resets.at`, `.pace.*` and `.age.old` (`{age} OLD`). The brand mark `CLAUDE//USAGE` is
+  drawn as written (#86). The rules are Nostromo's: values in capitals, a name in the language's capitals (`HAİKU` in
+  Turkish), the command as typed, ages and countdowns as formats; the code keeps the guard line's
+  `, `, the space before a cap, its closing periods, a scoped row's name alone, the pace's short form (its signed
+  points, a figure) and the cut mark: Night City cuts with its three dots `...`, not `…` (Q3, an owner default: an
+  English cut never changes). The guard line's lead is a run of its own, never wrapped, so it keeps its colon whatever
+  space a language puts before it. The theme file's `extras.copy` is the mockup's record and is no longer read.
+  `STRIP_WORDS` and the `DEFAULT_*` causes stay as English records for the older tests, held to `en.json`. Where a
+  language's words are longer than English's, Night City's frames give way by pure helpers the tests read
+  (`tests/test_skin_night_city_fit.py`); English never meets any of them:
+  - The header (`_header_plan`): the right-hand side keeps `GUARD_GAP` (8 px) off the brand, which never gives way. In
+    `HEADER_GIVE_WAY`'s order, an owner default (Q2) Chris may overturn: the hold chip drops its countdown (`HOLD`
+    alone), the order Night City's band already took; then the right-hand word (the LIVE tag's, the status chip's or
+    the hold chip's) is cut with the dots, one letter at least. Nostromo's default on #94 drops the countdown last. The
+    armed guard's GUARD chip is drawn only in the room left, as before.
+  - The stale band (`_band_plan`, `BAND_GIVE_WAY`, one tuple for both paths): the hold chip drops its countdown, the age
+    is left out, and last the cause is cut. Before #95 the band without the guard cut its cause beside an age that did
+    not fit and then dropped the age too (es-CO's `100 DÍAS OLD`).
+  - The hover card's line (`_info_plan`, `INFO_GIVE_WAY`): the reset never gives way; the pace keeps `VALUE_GAP` off
+    it, takes its signed points (`-18`, in its chip and colour, or plain on a stale card), then is left out; a pace with
+    no points (ON PACE, PACE --) is left out at once.
+  - The strip: its window labels (`_strip_label`) shrink from 11 px to 9 px (`STRIP_LABEL_SIZES`, the tracking 0.12 em),
+    keeping `STRIP_LABEL_AIR` (2 px) off the bar, then are left out (two characters fit); its LIVE, status words and
+    HOLD shrink to `STRIP_FLOOR` (9 px, `_fit_type`) and only then are cut.
+  - Marks (Q1, an owner default Chris may overturn, as Nostromo's): a box Night City outlines round a word grows round
+    marks whose ink would touch its stroke, decided by the word's characters per face (`_mark_growth`), the least growth
+    that keeps the ink off at every scale and card height. A capital with a mark above (and in Share Tech Mono one of
+    `$()/[\]^{|}`) grows the outlined chip (the header's status and GUARD chips, a row's WARN, the pace chip) and
+    Blackwall's LIVE and strip tags 1 px up, Blackwall's reset box 2 px up (`MARK_GROWTH_UP`), and the stale band as
+    far as its words ask, its top hazard strip, outline and hold chip with it, the chip's word on the band's baseline.
+    A cedilla or a comma below (Ç Ş Ș), or a Rajdhani glyph that drops below the line (`DESCENDERS`: `();Q[]gjpqy{}`),
+    grows Blackwall's LIVE and strip tags 2 px down; the outlined chip grows 1 px down round a comma below alone. The
+    filled chips and the Edgerun plate's tags never grow. English never moves. The one conflict, recorded in
+    `GROWN_MEETS`: a row's WARN chip grown round a comma below meets its row's rail with no air (never overlapping);
+    every other grown box keeps air round its neighbours.
 - **Test tools (#89).** The pseudo-locale (`i18n.PSEUDO`, `pseudo`) is `en.json` made longer (about 40%), accented
   (`İ ı ğ ş é ñ` among the look-alikes) and bracketed (`i18n.pseudo_text`), so English left over, a missing glyph
   and a cut end all show. A dev instance shows it with `USAGE_MONITOR_LANG=pseudo`, and the dev server with
@@ -708,18 +749,27 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   minute. Clock and countdown are paired freely, so a figure can come out longer than the longest real tooltip, never
   shorter.
   Since #94 a key with a placeholder is filled as the skin fills it (`Box.fills`: each placeholder takes the language's
-  longest figures, the signed points, a name, Claude Code's name or the command), or its box composes its whole texts
-  (Nostromo's guard line composes through the skin's own `_guard_statement`). A box of a skin whose own words are keys
-  (`budgets.WORDED`: Nostromo) is measured in the pseudo-locale by those keys made pseudo and filled, not by its English
-  made pseudo, and a box of figures alone (`Box.words=False`) by the figures as the pseudo-locale writes them. A line
+  longest figures, the signed points, an age, a cap's number, a name, Claude Code's name or the command), or its box
+  composes its whole texts (each skin's guard line composes through the skin's own `_guard_statement`). A box of a skin
+  whose own words are keys (`budgets.WORDED`: Nostromo and Night City) is measured in the pseudo-locale by those keys
+  made pseudo and filled, not by its English made pseudo, and a box of figures alone, or Night City's brand mark
+  (`Box.words=False`), by the text as the pseudo-locale draws it. A line
   gives way as its skin does (`Line.gives_way`: a box cut to its first letter and the ellipsis, left out, or replaced by
   another box) and is reported only if it is still over after its last step; Nostromo's sign-in lines and strip tags
   are measured at the step they shrink to (`nostromo_fit`). Nostromo's header boxes take their rooms from Q2's order
   (`_header_room`), and in a language its own rooms (`header_room`): beside its own widest texts and each format tag's
-  own age and hold chip, so a text past them is reported as the cut the header makes. `ACCEPTED_CUTS` in
-  `test_budgets.py` holds, apart from `FOR_91`, the cuts a CLDR format causes, which no draft can settle: the ages the
-  header leaves out beside a tag's own hold chip (every French tag's but fr-CA's, every Spanish tag's, and in es-CO
-  every age) and the state word Spanish's widest ages leave less room.
+  own age and hold chip, so a text past them is reported as the cut the header makes. Night City's header, band and
+  hover line take their give-way and their boxes' rooms from the skin's tuples the same way (`NC_PLANS`, `_nc_room`; a
+  box that gives way by becoming another, the hold chip HOLD alone and the pace its points, has that box's room), and
+  in a language its own (`nc_room`, beside each format tag's own ages, hold chips and resets, `nc_tags`). Its strip
+  labels are measured at the size they shrink to (`night_city_label`), and the pace's points, which have no key, as
+  English writes them in every language. `ACCEPTED_CUTS` in `test_budgets.py` holds,
+  apart from `FOR_91`, the cuts a CLDR format causes: the ages Nostromo's header leaves out beside a tag's own hold chip
+  (every French tag's but fr-CA's, every Spanish tag's, and in es-CO every age) and the state word Spanish's widest ages
+  leave less room; and Night City's (#95), each with its tags and whether a draft's word could settle it: fr-CA's
+  12-hour day clock, which the floating row leaves out and beside which the hover line's pace takes its short form;
+  the 12-hour day clock of es-ES and most Latin American tags, beside which the pace takes it too; and es-CO's spaced
+  day, which the band leaves out beside its widest cause.
   `python tests/budgets.py --tooltips` prints each language's
   longest tooltip, which `test_budgets.py` pins as `TOOLTIPS` (en 113, fr 120, es 121, tr 114, pseudo 127 units today;
   the pseudo-locale's is a same-day resume that keeps its countdown at the shell's limit).
@@ -742,10 +792,17 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   (#93 to #101) shrinks by recording again (`python tests/english_left.py --record`, which adds new English only with
   `--allow-new`).
   The frame check (`tests/frame_layout.py`, held by `tests/test_frame_layout.py`; no window, so not gated, #94) draws
-  every state `tests/skin_words.py` records for the skins in `frame_layout.THEMES` (Nostromo; #95 and #96 add
-  theirs) in English, the pseudo-locale and the French, Spanish and Turkish dev locales: the floating widget and the
-  hover card at every display scale up to 200 % (1.75 too) and the strip at every scale a taskbar draws it at, first
-  variant (every variant's runs are the first's, checked at 1.0 in the pseudo-locale). It fails a run whose ink
+  every state `tests/skin_words.py` records for the skins in `frame_layout.THEMES` (Nostromo and, since #95, Night
+  City; #96 adds Gates') in English, the pseudo-locale and the French, Spanish and Turkish dev locales: the floating
+  widget and the hover card at every display scale up to 200 % (1.75 too) and the strip at every scale a taskbar draws
+  it at. Nostromo draws its first variant (every variant's runs are the first's, checked at 1.0 in the pseudo-locale).
+  Night City's looks place their runs differently, so its jobs are per look (`NIGHT_CITY_JOBS`): each layout in the
+  pseudo-locale (Blackwall, Relic, Edgerun, and Edgerun with `transparent_bg`, which drops its plate there; Mox is
+  Relic's layout), English, French, Spanish and Turkish on Blackwall and Relic, and fr-CA's and es-CO's formats on a
+  12-hour clock on Blackwall (`TAGS`); the variant check holds every variant to the first of its layout (`layout_of`),
+  with and without `transparent_bg`. The check hooks Night City's own drawing:
+  its ink queue's text layers, a value's numerals and sign as one run, its chips' polygon outlines and fills, its
+  hazard tiles, bars, pip and body. Each job is a process of its own, all side by side. It fails a run whose ink
   (coverage 64 of 255 and up) shares a pixel with another run or comes within 2 px of one on its line, meets an
   outline (or touches its stroke with no buffer px of air), a rule, a bar or the hazard band, crosses a fill's edge,
   or leaves the frame's body, its chamfered corners included. `KNOWN` lists what English draws so by design (the

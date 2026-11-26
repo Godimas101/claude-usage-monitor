@@ -29,19 +29,24 @@ view model's status word carry its key, and the tray tooltip is a composing box 
 worst-case tooltips the code words in the language, after the drop rule, not its English made pseudo
 (tests/widget_words.tooltip_sweep: two limits at 100 % in each status, in every format tag and clock, as a dev
 instance, with the guard holding at a resume clock, the same day's and another day's, and a countdown of every length
-they take). Since #94 a skin's own words are keys too (WORDED: Nostromo; #95 and #96 add theirs). A key with a
-placeholder is filled (``Box.fills``: each placeholder and the FILLS kind it takes, as the skin fills it: the language's
-longest figures, cased as the skin draws them, the signed points, a name, the product, the command), or its box composes
-its whole texts; a box of WORDED keys measures them in the pseudo-locale filled with the pseudo-locale's own figures,
-not its English made pseudo, and a box of figures alone (``Box.words`` False) measures them as the pseudo-locale writes
-them ("13 %" with its U+00A0, "12 S"), never bracketed. Nostromo's guard statement composes through the skin's own
-_guard_statement. The toasts' keys come from #97. Counts (the pace points) get no figure: a whole number under 1000 is
-written alike in all four languages.
+they take). Since #94 a skin's own words are keys too (WORDED: Nostromo, and Night City since #95; #96 adds Gates'). A
+key with a placeholder is filled (``Box.fills``: each placeholder and the FILLS kind it takes, as the skin fills it: the
+language's longest figures, cased as the skin draws them, the signed points, an age, a cap's number, a name, the
+product, the command), or its box composes its whole texts; a box of WORDED keys measures them in the pseudo-locale
+filled with the pseudo-locale's own figures, not its English made pseudo, and a box of figures alone, or of a brand
+mark drawn as written (``Box.words`` False), measures them as the pseudo-locale writes them ("13 %" with its U+00A0,
+"12 S", "CLAUDE//USAGE"), never bracketed. Each skin's guard statement composes through the skin's own _guard_statement.
+The toasts' keys come from #97. Counts (the pace points) get no figure: a whole number under 1000 is written alike in
+all four languages, so a box of the points alone (Night City's pace's short form) takes its English in every language.
 
 A line gives way as its skin does (``Line.gives_way``): while it is over, each step's box leaves its slot in turn (cut
-to its floor, one letter and the ellipsis; left out; or replaced by another box's text), and the line is reported only
-if it is still over after the last step. A box that shrinks is measured at the size it shrinks to: Night City's fit
-function, and Nostromo's steps (``nostromo_fit``: the sign-in lines' MESSAGE_STEPS, the strip tags' STRIP_TAG_SIZES).
+to its floor, one letter and the skin's cut mark; left out; or replaced by another box's text), and the line is
+reported only if it is still over after the last step. The lines a skin fits by a tuple take their give-way and their
+boxes' rooms from it (Nostromo's header, HEADER_STEPS; Night City's header, band and hover line, NC_PLANS), and a box's
+room in a language is the language's own, beside each format tag's own figures (header_room, nc_room). A box that
+shrinks is measured at the size it shrinks to: Night City's fit function and its strip labels' STRIP_LABEL_SIZES
+(``night_city_label``), and Nostromo's steps (``nostromo_fit``: the sign-in lines' MESSAGE_STEPS, the strip tags'
+STRIP_TAG_SIZES).
 
     python tests/budgets.py [--lang ID]     what a language's text would not fit (default: pseudo)
     python tests/budgets.py --limits        every box's and line's limit, as test_budgets.py pins them
@@ -59,6 +64,7 @@ import sys
 import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -134,14 +140,16 @@ PAGE_MONEY: dict[str, tuple[str, ...]] = {"fr": ("99,9\u00a0k\u00a0$",), "es": (
 _KINDS = ("percent", "clock", "money", "duration", "age", "count")
 _ON_A_DAY = re.compile(r"\b(?:WED|Wed) \{\}")
 CAPITALS = ("nostromo", "night_city")         # the skins that draw their figures in capitals
-WORDED = ("nostromo",)                        # the skins whose own words are catalog keys (#94; #95 and #96 add theirs)
+WORDED = ("nostromo", "night_city")          # the skins whose own words are catalog keys (#94, #95; #96 adds Gates')
 _FITS = ("none", "shrink", "ellipsis", "clip", "drop", "wrap")
 # What a placeholder of a box's key is filled with (Box.fills): a figure the language's FIGURES give (English and the
 # pseudo-locale: the widest shapes the code writes for them, ENGLISH_FILLS, the pseudo-locale's percent with its
-# U+00A0), the signed points, or a fixed sample: a name, Claude Code's name, the sign-in command.
-FILLS = ("percent", "clock", "duration", "count", "name", "product", "command")
+# U+00A0), the signed points, a cap's number (a whole one or a tenth, in the language's decimal), or a fixed sample: a
+# name, Claude Code's name, the sign-in command.
+FILLS = ("percent", "clock", "duration", "age", "count", "number", "name", "product", "command")
 ENGLISH_FILLS: dict[str, tuple[str, ...]] = {"percent": ("100%",), "clock": ("12:59 PM", "WED 12:59 PM"),
-                                             "duration": ("23H 59M", "6D 23H")}
+                                             "duration": ("23H 59M", "6D 23H"), "age": ("59 S", "59 M", "47 H", "100 D"),
+                                             "number": ("100", "99.5")}
 _POINTS = ("+100", "-100")                    # the widest pace counts, signed
 _NAME = "Fable"                               # a scoped limit's name, as the budgets' English has it (FABLE WEEKLY)
 
@@ -173,7 +181,8 @@ class Measure:
     """How a skin measures a run of text in a box, and at which scales. ``how`` names the skin's way; ``args`` its
     settings: nostromo (font, size, tracking, canvas), nostromo_fit (font, steps of (size, tracking), room, canvas: the
     width at the first step that fits the room, else at the last), night_city (spec), night_city_fit (spec, room,
-    floor), night_city_value (), gates (role, size, weight), nostromo_tray (), gates_tray (), chars ()."""
+    floor), night_city_label (room: the strip label's STRIP_LABEL_SIZES, the width at the first size that fits, else at
+    the last), night_city_value (), gates (role, size, weight), nostromo_tray (), gates_tray (), chars ()."""
 
     how: str
     args: tuple[Any, ...] = ()
@@ -212,6 +221,11 @@ def _width(m: Measure, text: str, scale: float) -> float:
         spec, room, floor = m.args
         ink = _nc_ink()
         return ink.width(text, nc._fit_type(ink, text, getattr(nc, spec), room, floor))
+    if m.how == "night_city_label":
+        # night_city._strip_label: the first of STRIP_LABEL_SIZES at which the label fits its room.
+        ink, size = _nc_ink(), nc.STRIP_LABEL_SIZES[-1]
+        spec = nc._strip_label(ink, text, m.args[0])
+        return ink.width(text, spec or nc.STATUS._replace(size=size, tracking=nc.STATUS.tracking * size / nc.STATUS.size))
     if m.how == "night_city_value":
         # _draw_value: the figure in VALUE, the percent sign in UNIT, UNIT_GAP between them.
         ink = _nc_ink()
@@ -351,13 +365,18 @@ class Line:
             if at is None:
                 continue
             if then == "cut":
-                runs[at] = (box_id, runs[at][1][0] + nos.ELLIPSIS)
+                runs[at] = (box_id, runs[at][1][0] + cut_mark(box_id))
             elif then == "drop":
                 runs[at] = (box_id, "")
             else:
                 runs[at] = (then, instead[then])
             taken.append(box_id)
         return tuple(taken), width(), runs
+
+
+def cut_mark(box_id: str) -> str:
+    """What a box's skin ends a cut with: Night City its three dots (Q3, an owner default on #95), the others "…"."""
+    return "..." if box_id.startswith("night_city.") else nos.ELLIPSIS
 
 
 SEMI, REG, VT = nos.FONT_SEMI, nos.FONT_REG, nos.FONT_VT
@@ -390,10 +409,11 @@ _NOS_GUARD_KEYS = _nos_keys("guard.armed", "guard.armed_list", "guard.holding", 
 _GUARD_COUNTDOWNS = (30, 23 * 3600 + 59 * 60, 6 * 86400 + 23 * 3600)    # under a minute, and FIGURES' widest two
 
 
-def _guard_statements(language: str) -> list[str]:
-    """The hover card's guard statements Nostromo words in ``language`` (nostromo._guard_statement), each as
-    _guard_lines breaks it (the lead glued, a space, the rest): armed over a session, a weekly, a named and an unnamed
-    scoped cap at 100 %, and holding over the four with a resume time and a countdown, in every locale of the language
+def _guard_statements(language: str, skin: str = "nostromo") -> list[str]:
+    """The hover card's guard statements ``skin`` words in ``language`` (its _guard_statement), each as its _guard_lines
+    breaks it: Nostromo's the lead glued, a space, the rest; Night City's the rest alone (its lead is a run of its own,
+    never wrapped: the guard_lead box). Armed over a session, a weekly, a named and an unnamed scoped cap at 100 %, and
+    holding over the four with a resume time and a countdown, in every locale of the language
     (widget_words.sweep_locales), at each length of resume clock the tooltip sweep tries (sweep_clocks) and at
     _GUARD_COUNTDOWNS."""
     from dataclasses import replace
@@ -414,21 +434,46 @@ def _guard_statements(language: str) -> list[str]:
                             kinds=kinds, scope_names=names, resume_clock=clock, resume_seconds=seconds)
                   for clock in sweep_clocks(locale) for seconds in _GUARD_COUNTDOWNS]
         for mark in marks:
-            statement = nos._guard_statement(replace(model, guard=mark))
+            statement = (nc if skin == "night_city" else nos)._guard_statement(replace(model, guard=mark))
             assert statement is not None
             lead, rest = statement
-            found.append(engine.glue(lead) + (f" {rest}" if rest else ""))
+            if skin == "night_city":
+                found += [rest] if rest else []
+            else:
+                found.append(engine.glue(lead) + (f" {rest}" if rest else ""))
     return list(dict.fromkeys(found))
 
-_NC_HEAD = nc.LEFT + nc.PIP + nc.BRAND_GAP                         # where the brand starts
-_NC_BRAND = W_nc("CLAUDE//USAGE", "BRAND")
-_NC_NAME_FLOOR = max(W_nc(c + "...", "NAME") for c in string.ascii_uppercase + string.digits)
-_NC_CAUSE_FLOOR = max(W_nc(c + "...", "BAND_TYPE") for c in string.ascii_uppercase + string.digits)
+
+def _nc_guard_statements(language: str) -> list[str]:
+    return _guard_statements(language, "night_city")
+
+_NC_HEAD = nc.LEFT + nc.PIP + nc.BRAND_GAP                         # where the brand starts, after the pip
+_NC_BRAND = W_nc(nc.BRAND_MARK, "BRAND")
+_NC_FLOOR_CHARS = string.ascii_uppercase + string.digits
+_NC_NAME_FLOOR = max(W_nc(c + "...", "NAME") for c in _NC_FLOOR_CHARS)
+_NC_CAUSE_FLOOR = max(W_nc(c + "...", "BAND_TYPE") for c in _NC_FLOOR_CHARS)
 _NC_CAP_CHIP = W_nc("CAP 100", "CHIP") + 17
 _NC_VALUE_100 = W_nc("100", "VALUE") + nc.UNIT_GAP + W_nc("%", "UNIT")
 _NC_VALUE_EXACT = W_nc("99.9", "VALUE") + nc.UNIT_GAP + W_nc("%", "UNIT")
 _NC_PCT_ROOM = nc.STRIP_PCT_RIGHT - (nc.STRIP_BAR_X + nc.STRIP_CELL_STEP * (nc.STRIP_CELLS - 1) + nc.STRIP_CELL_W) - 2
-_NC_STATUS_ROOM = (nc.STRIP_TAG[2] - nc.STRIP_TAG[0]) - 8
+_NC_STATUS_ROOM = (nc.STRIP_TAG[2] - nc.STRIP_TAG[0]) - 8            # a status word, in the tag less 4 px a side
+_NC_LIVE_ROOM = nc.STRIP_TAG[2] - 4 - nc.STRIP_WORD_X                # LIVE, after the dot, to 4 px inside the tag
+_NC_HOLD_ROOM = (nc.STRIP_TAG[2] - nc.STRIP_TAG[0]) - 17             # the HOLD chip's word, in the tag
+_NC_LABEL_ROOM = nc.STRIP_BAR_X - nc.STRIP_LABEL_X - nc.STRIP_LABEL_AIR   # a window label, to its bar's air
+_NC_GAP = nc.GUARD_GAP
+
+
+def _nc_keys(*names: str) -> tuple[str, ...]:
+    return tuple(f"widget.night_city.{name}" for name in names)
+
+
+_NC_NAMES = _nc_keys("limit.session", "limit.weekly", "limit.scoped", "limit.scoped_unnamed")
+_NC_ROW_NAMES = _nc_keys("limit.session", "limit.weekly", "limit.scoped_unnamed")     # a scoped row: its name alone
+_NC_ROW_CHIPS = _nc_keys("state.critical", "state.warning", "guard.hold", "cap.tag")
+_NC_LEADS = _nc_keys("guard.armed", "guard.armed_list", "guard.holding", "guard.holding_list")
+# What night_city._guard_statement reads: the leads, a limit and its cap, the resume sentence, and the limits' names.
+_NC_GUARD_KEYS = _NC_LEADS + _nc_keys("guard.limit", "guard.cap", "guard.resumes", "guard.time_left") + _NC_NAMES
+_NC_CAUSE_KEYS = _nc_keys("band.offline", "band.expired", "band.refused")       # the causes a band shows an age by
 
 _G_TITLE = W_g("Claude usage", "body", 12, 600)
 _G_WORD_WIDEST = max(W_g(w, "body", 10, 600) for w in ("LIVE", "STALE", "OFFLINE", "RATE LIMITED", "NO LOGIN", "PAUSED",
@@ -458,6 +503,172 @@ _TOOL_1 = ("Setup closed the monitor's tool in a Claude Code session. If that se
 _TOOL_N = "Setup closed the monitor's tool in 12 Claude Code sessions. If one shows an error, type /mcp there or restart it."
 _WAIT_1 = "A session waiting on the usage guard was let go early."
 _WAIT_N = "12 sessions waiting on the usage guard were let go early."
+
+
+# ── Night City's lines, by its tuples (night_city.HEADER_GIVE_WAY: Q2, an owner default on #95; BAND_GIVE_WAY;
+# INFO_GIVE_WAY) ──
+# Each line's slots, what the skin adds beside each box's text there (a box's padding, the gap before it), and what each
+# step of the tuple does to its boxes: cut (to one letter and the dots), drop, or become another box. A line's give-way
+# and each of its boxes' rooms are worked out from the tuple (nc_gives_way, _nc_room), so an answer to Q2 changes the
+# header's tuple alone (LIMITS and the _budget notes are then printed again).
+_NCF, _NCT = "night_city.floating.", "night_city.tooltip."
+_NC_BRAND_BOX, _NC_LIVE, _NC_CHIP = _NCF + "brand", _NCF + "live_tag", _NCF + "status_chip"
+_NC_HOLD, _NC_HOLD_ALONE = _NCF + "hold_chip", _NCF + "hold_word"
+_NC_CAUSE, _NC_AGE = _NCF + "band_text", _NCF + "band_age"
+_NC_HOLD_CAUSE, _NC_BAND_CHIP, _NC_BAND_HOLD = _NCF + "band_hold_text", _NCF + "band_hold_chip", _NCF + "band_hold_word"
+_NC_RESET, _NC_PACE, _NC_PACE_SHORT = _NCT + "info_reset", _NCT + "info_pace", _NCT + "info_pace_short"
+
+
+@dataclass(frozen=True)
+class NcPlan:
+    """A Night City line the skin fits by one of its tuples (``order``, its name in night_city): the line's room, its
+    slots, what the skin adds beside each box's text, and what each step does to its boxes."""
+    room: float
+    slots: tuple[tuple[str, ...], ...]
+    added: tuple[tuple[str, float], ...]
+    steps: tuple[tuple[str, tuple[tuple[str, str], ...]], ...]
+    order: str
+
+    def tuple(self) -> tuple[str, ...]:
+        return tuple(getattr(nc, self.order))
+
+    def add(self, box_id: str) -> float:
+        return dict(self.added).get(box_id, 0.0)
+
+    def step(self, name: str) -> tuple[tuple[str, str], ...]:
+        return dict(self.steps).get(name, ())
+
+
+NC_HEADER = NcPlan(
+    nc.RIGHT - _NC_HEAD, ((_NC_BRAND_BOX,), (_NC_LIVE, _NC_CHIP, _NC_HOLD, _NC_HOLD_ALONE)),
+    ((_NC_BRAND_BOX, _NC_GAP), (_NC_LIVE, 8), (_NC_CHIP, 12), (_NC_HOLD, 17), (_NC_HOLD_ALONE, 17)),
+    (("countdown", ((_NC_HOLD, _NC_HOLD_ALONE),)),
+     ("word", ((_NC_LIVE, "cut"), (_NC_CHIP, "cut"), (_NC_HOLD_ALONE, "cut"), (_NC_HOLD, "cut")))),
+    "HEADER_GIVE_WAY")
+NC_BAND = NcPlan(
+    nc.BAND_AGE_RIGHT - nc.BAND_TEXT_X, ((_NC_CAUSE,), (_NC_AGE,)), ((_NC_AGE, 10),),
+    (("age", ((_NC_AGE, "drop"),)), ("cause", ((_NC_CAUSE, "cut"),))), "BAND_GIVE_WAY")
+NC_BAND_HOLD = NcPlan(
+    nc.BAND_AGE_RIGHT - nc.BAND_TEXT_X, ((_NC_HOLD_CAUSE,), (_NC_AGE,), (_NC_BAND_CHIP, _NC_BAND_HOLD)),
+    ((_NC_AGE, 10), (_NC_BAND_CHIP, 17 + _NC_GAP), (_NC_BAND_HOLD, 17 + _NC_GAP)),
+    (("countdown", ((_NC_BAND_CHIP, _NC_BAND_HOLD),)), ("age", ((_NC_AGE, "drop"),)),
+     ("cause", ((_NC_HOLD_CAUSE, "cut"),))), "BAND_GIVE_WAY")
+NC_INFO = NcPlan(
+    nc.CONTENT_W, ((_NC_RESET,), (_NC_PACE, _NC_PACE_SHORT)),
+    ((_NC_RESET, 8), (_NC_PACE, nc.VALUE_GAP + 12), (_NC_PACE_SHORT, nc.VALUE_GAP + 12)),
+    (("pace", ((_NC_PACE, _NC_PACE_SHORT),)), ("pace_short", ((_NC_PACE_SHORT, "drop"),))), "INFO_GIVE_WAY")
+NC_PLANS: dict[str, NcPlan] = {_NCF + "header_line": NC_HEADER, _NCF + "band_line": NC_BAND,
+                               _NCF + "band_hold_line": NC_BAND_HOLD, _NCT + "info_line": NC_INFO}
+# Each of their boxes' own line (the age stands in both band lines; its room is the band's without the guard).
+NC_HOME: dict[str, NcPlan] = {box: plan for plan in (NC_BAND_HOLD, NC_INFO, NC_BAND, NC_HEADER)
+                              for slot in plan.slots for box in slot}
+# English's texts in each, and the style it is drawn in, for the rooms LIMITS pins.
+_NC_HOLDS = tuple(text for text in _COUNTDOWNS if text != "HOLD")
+_NC_AGES = ("41 M OLD", "59 S OLD", "47 H OLD", "2 D OLD", "100 D OLD", "2 M OLD", "6 M OLD")
+_NC_PACES = ("PACE --", "ON PACE", "AHEAD +41", "AHEAD +100", "UNDER PACE -18", "UNDER PACE -100")
+_NC_SHORT_PACES = ("+41", "+100", "-18", "-100")
+_NC_SPEC: dict[str, str] = {_NC_BRAND_BOX: "BRAND", _NC_LIVE: "STATUS", _NC_CHIP: "CHIP", _NC_HOLD: "CHIP",
+                            _NC_HOLD_ALONE: "CHIP", _NC_CAUSE: "BAND_TYPE", _NC_AGE: "RESET",
+                            _NC_HOLD_CAUSE: "BAND_TYPE", _NC_BAND_CHIP: "CHIP", _NC_BAND_HOLD: "CHIP",
+                            _NC_RESET: "RESET", _NC_PACE: "CHIP", _NC_PACE_SHORT: "CHIP"}
+_NC_ENGLISH: dict[str, tuple[str, ...]] = {
+    _NC_BRAND_BOX: (nc.BRAND_MARK,), _NC_LIVE: ("LIVE",), _NC_CHIP: ("PAUSED", "LOADING"), _NC_HOLD: _NC_HOLDS,
+    _NC_HOLD_ALONE: ("HOLD",), _NC_CAUSE: _NC_CAUSES, _NC_AGE: _NC_AGES, _NC_HOLD_CAUSE: _NC_CAUSES,
+    _NC_BAND_CHIP: _NC_HOLDS, _NC_BAND_HOLD: ("HOLD",), _NC_RESET: _NC_RESETS, _NC_PACE: _NC_PACES,
+    _NC_PACE_SHORT: _NC_SHORT_PACES}
+_NC_NAMES_OF = {_NC_BRAND_BOX: "the brand", _NC_LIVE: "the LIVE tag", _NC_CHIP: "the status chip",
+                _NC_HOLD: "the hold chip", _NC_HOLD_ALONE: "HOLD", _NC_CAUSE: "the cause", _NC_AGE: "the age",
+                _NC_HOLD_CAUSE: "the cause", _NC_BAND_CHIP: "the hold chip", _NC_BAND_HOLD: "HOLD",
+                _NC_RESET: "the reset", _NC_PACE: "the pace", _NC_PACE_SHORT: "its points"}
+
+
+def nc_gives_way(plan: NcPlan) -> tuple[tuple[str, str], ...]:
+    """A Night City line's give-way (Line.gives_way): each step of its tuple, in the tuple's order, as its boxes."""
+    return tuple(item for step in plan.tuple() for item in plan.step(step))
+
+
+def nc_rank(plan: NcPlan, box_id: str) -> int:
+    """Where a box first gives way in its line's order: its first step's place in the tuple; a box no step takes (the
+    brand, the reset, HOLD alone in the band) after them all."""
+    return next((index for index, step in enumerate(plan.tuple()) if any(box == box_id for box, _ in plan.step(step))),
+                len(plan.tuple()))
+
+
+def _nc_as_left(plan: NcPlan, other: str, upto: int, widest: Callable[[str], float],
+                floor: Callable[[str], float]) -> float:
+    """What ``other`` takes on its line once the first ``upto`` steps of the tuple are taken: left out, cut to its
+    floor, become another box (its widest), or its own widest; with what the skin adds beside it."""
+    box, cut = other, False
+    for step in plan.tuple()[:upto]:
+        for source, then in plan.step(step):
+            if source != box or cut:
+                continue
+            if then == "drop":
+                return 0.0
+            if then == "cut":
+                cut = True
+            else:
+                box = then
+    return (floor(box) if cut else widest(box)) + plan.add(box)
+
+
+def _nc_room(plan: NcPlan, box_id: str, widest: Callable[[str], float], floor: Callable[[str], float]) -> float:
+    """A box's room on its line: the line's, less what the skin adds beside the box's text and, in each other slot, the
+    most any box there takes once every step before the box's own is taken (_nc_as_left). A box whose first step makes
+    it another box (the hold chip HOLD alone, the pace its points) has that box's room: it gives way only by becoming
+    it, and is never cut (beside the band's widest cause no countdown shows in any language, English's neither)."""
+    upto = nc_rank(plan, box_id)
+    if upto < len(plan.tuple()):
+        then = next(then for source, then in plan.step(plan.tuple()[upto]) if source == box_id)
+        if then not in ("cut", "drop"):
+            return _nc_room(plan, then, widest, floor)
+    room = plan.room - plan.add(box_id)
+    for slot in plan.slots:
+        if box_id not in slot:
+            room -= max(_nc_as_left(plan, other, upto, widest, floor) for other in slot)
+    return room
+
+
+def _nc_widest(box_id: str) -> float:
+    return max(W_nc(text, _NC_SPEC[box_id]) for text in _NC_ENGLISH[box_id])
+
+
+def _nc_floor(box_id: str) -> float:
+    return max(W_nc(c + "...", _NC_SPEC[box_id]) for c in _NC_FLOOR_CHARS)
+
+
+def _nc_limit(box_id: str) -> float:
+    return _nc_room(NC_HOME[box_id], box_id, _nc_widest, _nc_floor)
+
+
+def _nc_why(box_id: str) -> str:
+    """How a box's room follows from its line's tuple, in words."""
+    plan = NC_HOME[box_id]
+    upto = nc_rank(plan, box_id)
+    if upto < len(plan.tuple()):
+        then = next(then for source, then in plan.step(plan.tuple()[upto]) if source == box_id)
+        if then not in ("cut", "drop"):
+            return (f"{_NC_NAMES_OF[box_id]} gives way only by becoming {_NC_NAMES_OF[then]} "
+                    f"(night_city.{plan.order}), so it has that room: {_nc_why(then)}")
+    parts = []
+    for slot in plan.slots:
+        if box_id in slot:
+            continue
+        for other in slot:
+            state, box = "whole, its widest", other
+            for step in plan.tuple()[:upto]:
+                for source, then in plan.step(step):
+                    if source == box and state.startswith("whole"):
+                        state = ({"drop": "left out", "cut": "cut to one letter"}.get(then)
+                                 or f"as {_NC_NAMES_OF[then]}")
+                        box = then if then not in ("cut", "drop") else box
+            parts.append(f"{_NC_NAMES_OF[other]} {state}")
+    return (f"the line's {plan.room:g} px less what the skin adds beside it, beside the others as night_city."
+            f"{plan.order} leaves them while it holds, the widest of each slot: {'; '.join(parts)}")
+
+
+def _nc_plan_box(id_: str, fit: str, **kwargs: Any) -> Box:
+    return _nc(id_, _NC_SPEC[id_], _nc_limit(id_), _nc_why(id_), fit, english=_NC_ENGLISH[id_], **kwargs)
 
 
 # ── Nostromo's header line, by Q2's order (nostromo.HEADER_GIVE_WAY, an owner default on #94) ──
@@ -560,9 +771,10 @@ def _nos(id_: str, font: str, size: float, tracking: float, limit: float, why: s
 
 def _nc(id_: str, spec: str, limit: float, why: str, fit: str = "none", *, english: tuple[str, ...],
         kinds: tuple[str, ...] = (), templates: tuple[str, ...] = ("{}",), measure: Measure | None = None,
-        tight: bool = False, keys: tuple[str, ...] = ()) -> Box:
+        tight: bool = False, keys: tuple[str, ...] = (), fills: tuple[tuple[str, str], ...] = (), words: bool = True,
+        note: str = "") -> Box:
     return Box(id_, measure or Measure("night_city", (spec,)), limit, why, fit, english, kinds, templates, keys,
-               tight=tight)
+               tight=tight, fills=fills, words=words, note=note)
 
 
 def _g(id_: str, role: str, size: float, weight: int, limit: float, why: str, fit: str = "none", *,
@@ -719,101 +931,115 @@ BOXES: tuple[Box, ...] = (
         "the ring's hole on a 32 px icon, in device px (_tray_geometry)", "none", ("--", "0", "13", "100"),
         words=False),
 
-    # ── Night City: the header (_draw_header) ──
-    _nc("night_city.floating.brand", "BRAND", nc.RIGHT - _NC_HEAD - (W_nc("HOLD 20H 48M", "CHIP") + 17),
-        "from the pip to the widest hold chip", english=("CLAUDE//USAGE",)),
-    _nc("night_city.floating.live_tag", "STATUS", nc.RIGHT - (_NC_HEAD + _NC_BRAND) - 8,
-        "right of the brand, its box 8 px wider than the word", english=("LIVE",)),
-    _nc("night_city.floating.status_chip", "CHIP", nc.RIGHT - (_NC_HEAD + _NC_BRAND) - 12,
-        "right of the brand, the chip 12 px wider than the word", english=("PAUSED", "LOADING"),
-        keys=_status_keys("PAUSED", "LOADING")),
+    # ── Night City: the header (night_city._header_plan): its rooms follow Q2's order (night_city.HEADER_GIVE_WAY,
+    # _nc_room); the brand is a mark, drawn as written, and never gives way ──
+    _nc_plan_box(_NC_BRAND_BOX, "none", words=False),
+    _nc_plan_box(_NC_LIVE, "ellipsis", keys=_nc_keys("state.live")),
+    _nc_plan_box(_NC_CHIP, "ellipsis", keys=_status_keys("PAUSED", "LOADING")),
     _nc("night_city.floating.guard_chip", "CHIP",
         nc.RIGHT - (W_nc("PAUSED", "CHIP") + 12) - 2 * nc.GUARD_GAP - (_NC_HEAD + _NC_BRAND) - 12,
-        "between the brand and a status chip, left out where it does not fit", "drop", english=("GUARD",)),
-    _nc("night_city.floating.hold_chip", "CHIP", nc.RIGHT - (_NC_HEAD + _NC_BRAND) - 17,
-        "right of the brand, the chip 17 px wider than its text", kinds=("duration",), templates=("HOLD {}",),
-        english=_COUNTDOWNS),
-    # ── Night City: the band (_draw_band, _draw_band_hold) ──
-    _nc("night_city.floating.band_text", "BAND_TYPE", nc.BAND_AGE_RIGHT - 10 - nc.BAND_TEXT_X - W_nc("100 D OLD", "RESET"),
-        "the cause, left of the widest age", "ellipsis", english=_NC_CAUSES, keys=_status_keys("RATE LIMITED")),
-    _nc("night_city.floating.band_text_no_age", "BAND_TYPE", nc.BAND_AGE_RIGHT - nc.BAND_TEXT_X,
-        "the whole band", "ellipsis", english=("NO LOGIN // OPEN DASHBOARD",)),
-    _nc("night_city.floating.band_age", "RESET",
-        nc.BAND_AGE_RIGHT - 10 - nc.BAND_TEXT_X - W_nc("RELINK // USE CLAUDE CODE", "BAND_TYPE"),
-        "right of the widest whole cause; left out when the cause is cut", "drop", kinds=("age",),
-        templates=("{} OLD",),
-        english=("41 M OLD", "59 S OLD", "47 H OLD", "2 D OLD", "100 D OLD", "2 M OLD", "6 M OLD")),
-    _nc("night_city.floating.band_hold_text", "BAND_TYPE",
-        nc.BAND_AGE_RIGHT - nc.GUARD_GAP - nc.BAND_TEXT_X - (W_nc("HOLD", "CHIP") + 17),
-        "the cause beside the shortest hold chip (the countdown and the age give way first)", "ellipsis",
-        english=_NC_CAUSES, keys=_status_keys("RATE LIMITED")),
-    _nc("night_city.floating.band_hold_chip", "CHIP", nc.BAND_AGE_RIGHT - nc.GUARD_GAP - nc.BAND_TEXT_X - 17 - _NC_CAUSE_FLOOR,
-        "right-anchored at BAND_AGE_RIGHT, never cut; it may only leave the cause its shortest cut", kinds=("duration",),
-        templates=("HOLD {}",), english=_COUNTDOWNS),
+        "between the brand and a status chip, GUARD_GAP off each, left out where it does not fit (_header_plan)", "drop",
+        english=("GUARD",), keys=_nc_keys("guard.mark")),
+    _nc_plan_box(_NC_HOLD, "drop", kinds=("duration",), templates=("HOLD {}",), keys=_nc_keys("guard.hold_for"),
+                 fills=(("countdown", "duration"),)),
+    _nc_plan_box(_NC_HOLD_ALONE, "ellipsis", keys=_nc_keys("guard.hold")),
+    # ── Night City: the band (night_city._band_plan, one order for both paths: BAND_GIVE_WAY) ──
+    _nc_plan_box(_NC_CAUSE, "ellipsis", keys=(*_NC_CAUSE_KEYS, *_status_keys("RATE LIMITED")),
+                 fills=(("product", "product"), ("command", "command"))),
+    _nc("night_city.floating.band_text_no_age", "BAND_TYPE", NC_BAND.room,
+        "the whole band: a missing sign-in has no age, and the guard does not hold without a reading", "ellipsis",
+        english=("NO LOGIN // OPEN DASHBOARD",), keys=_nc_keys("band.no_login")),
+    _nc_plan_box(_NC_AGE, "drop", kinds=("age",), templates=("{} OLD",), keys=_nc_keys("age.old"),
+                 fills=(("age", "age"),)),
+    _nc_plan_box(_NC_HOLD_CAUSE, "ellipsis", keys=(*_NC_CAUSE_KEYS, *_status_keys("RATE LIMITED")),
+                 fills=(("product", "product"), ("command", "command"))),
+    _nc_plan_box(_NC_BAND_CHIP, "drop", kinds=("duration",), templates=("HOLD {}",), keys=_nc_keys("guard.hold_for"),
+                 fills=(("countdown", "duration"),)),
+    _nc_plan_box(_NC_BAND_HOLD, "none", keys=_nc_keys("guard.hold")),
     # ── Night City: the rows (_layout_row, _draw_value) ──
     _nc("night_city.floating.row_name", "NAME",
         (nc.RIGHT - _NC_VALUE_100 - nc.MIN_GAP) - nc.LEFT - 6 - _NC_CAP_CHIP,
         "left of the widest chip and value; the reset and the tag give way first", "ellipsis",
-        english=("SESSION", "WEEKLY", "FABLE", "WEEKLY SCOPED")),
+        english=("SESSION", "WEEKLY", "FABLE", "WEEKLY SCOPED"), keys=_NC_ROW_NAMES),
     _nc("night_city.floating.row_chip", "CHIP",
         (nc.RIGHT - _NC_VALUE_100 - nc.MIN_GAP) - nc.LEFT - 6 - 17 - _NC_NAME_FLOOR,
         "beside the name's shortest cut, the chip 17 px wider than its text, never cut",
-        english=("CRIT", "WARN", "HOLD", "CAP 90", "CAP 95", "CAP 100")),
+        english=("CRIT", "WARN", "HOLD", "CAP 90", "CAP 95", "CAP 100"), keys=_NC_ROW_CHIPS,
+        fills=(("number", "number"),)),
     _nc("night_city.floating.row_tag", "TAG",
         (nc.RIGHT - _NC_VALUE_100 - nc.MIN_GAP) - nc.LEFT - W_nc("FABLE", "NAME") - 12 - _NC_CAP_CHIP,
         "beside FABLE and the widest chip, left out where it does not fit", "drop", kinds=("percent",),
-        templates=("{} SHARE",), english=("50% SHARE", "100% SHARE")),
+        templates=("{} SHARE",), english=("50% SHARE", "100% SHARE"), keys=_nc_keys("share.of"),
+        fills=(("percent", "percent"),)),
     _nc("night_city.floating.row_reset", "RESET",
         (nc.RIGHT - _NC_VALUE_100 - nc.VALUE_GAP) - nc.MIN_GAP - nc.LEFT - W_nc("SESSION", "NAME") - 8,
         "between SESSION and the value, left out whole where it does not fit", "drop", kinds=("clock",),
-        templates=("RST {}", "RST WED {}"), english=_NC_RESETS),
+        templates=("RST {}", "RST WED {}"), english=_NC_RESETS, keys=_nc_keys("resets.at"), fills=(("clock", "clock"),)),
     _nc("night_city.floating.row_value", "VALUE",
         nc.RIGHT - nc.MIN_GAP - (nc.LEFT + _NC_NAME_FLOOR + 6 + _NC_CAP_CHIP),
         "right-aligned; the name yields to its shortest cut beside the widest chip", kinds=("percent",),
-        measure=Measure("night_city_value"), english=("100%", "13%", "2%", "78%", "93%", "--")),
-    # ── Night City: the hover card ──
+        measure=Measure("night_city_value"), english=("100%", "13%", "2%", "78%", "93%", "--"), words=False),
+    # ── Night City: the hover card (_draw_row, _info_plan: INFO_GIVE_WAY, _guard_lines) ──
     _nc("night_city.tooltip.row_name", "NAME",
         (nc.RIGHT - _NC_VALUE_EXACT - nc.MIN_GAP) - nc.LEFT - 6 - _NC_CAP_CHIP,
         "left of the exact value and the widest chip; the tag gives way first", "ellipsis",
-        english=("SESSION", "WEEKLY", "FABLE", "WEEKLY SCOPED")),
+        english=("SESSION", "WEEKLY", "FABLE", "WEEKLY SCOPED"), keys=_NC_ROW_NAMES),
     _nc("night_city.tooltip.row_chip", "CHIP",
         (nc.RIGHT - _NC_VALUE_EXACT - nc.MIN_GAP) - nc.LEFT - 6 - 17 - _NC_NAME_FLOOR,
-        "beside the name's shortest cut, never cut", english=("CRIT", "WARN", "HOLD", "CAP 90", "CAP 95", "CAP 100")),
+        "beside the name's shortest cut, never cut", english=("CRIT", "WARN", "HOLD", "CAP 90", "CAP 95", "CAP 100"),
+        keys=_NC_ROW_CHIPS, fills=(("number", "number"),)),
     _nc("night_city.tooltip.row_tag", "TAG",
         (nc.RIGHT - _NC_VALUE_EXACT - nc.MIN_GAP) - nc.LEFT - W_nc("FABLE", "NAME") - 12 - _NC_CAP_CHIP,
         "beside FABLE and the widest chip, left out where it does not fit", "drop", kinds=("percent",), templates=("{} SHARE",),
-        english=("50% SHARE", "100% SHARE")),
+        english=("50% SHARE", "100% SHARE"), keys=_nc_keys("share.of"), fills=(("percent", "percent"),)),
     _nc("night_city.tooltip.row_value", "VALUE",
         nc.RIGHT - nc.MIN_GAP - (nc.LEFT + _NC_NAME_FLOOR + 6 + _NC_CAP_CHIP),
         "right-aligned; the name yields", kinds=("percent",), measure=Measure("night_city_value"),
-        english=("99.9%", "13.5%", "100%", "13%", "2%", "--")),
-    _nc("night_city.tooltip.info_reset", "RESET", nc.CONTENT_W - (W_nc("UNDER PACE -100", "CHIP") + 12) - 8,
-        "left of the widest pace chip", kinds=("clock",), templates=("RST {}", "RST WED {}"), english=_NC_RESETS),
-    _nc("night_city.tooltip.info_pace", "CHIP", nc.CONTENT_W - W_nc("RST WED 12:59 PM", "RESET") - 8 - 12,
-        "right of the widest reset, as a chip", kinds=("count",),
-        english=("PACE --", "ON PACE", "AHEAD +41", "AHEAD +100", "UNDER PACE -18", "UNDER PACE -100")),
-    _nc("night_city.tooltip.guard_lead", "CHIP", nc.CONTENT_W, "the card's content width",
-        english=("GUARD // HOLDING:", "GUARD // ARMED:", "GUARD // HOLDING", "GUARD // ARMED")),
-    _nc("night_city.tooltip.guard_lines", "RESET", nc.CONTENT_W,
-        "each line the card breaks the statement into, after the lead on the first; it wraps and the card grows", "wrap",
-        kinds=("percent", "clock", "duration"),
-        english=("SESSION 95%,", "WEEKLY 90%", "SESSION 96%", "(CAP 95%). RESUMES 10:26 PM", "(IN 2H 14M).",
-                 "WEEKLY 91% (CAP 90%).", "RESUMES FRI 11:12 PM (IN 2D 3H).")),
-    # ── Night City: the strip (_draw_strip_row, _draw_strip_status) ──
-    _nc("night_city.strip.window_label", "STATUS", nc.STRIP_BAR_X - nc.STRIP_LABEL_X, "from the label to the bar",
-        english=("5H", "7D")),
+        english=("99.9%", "13.5%", "100%", "13%", "2%", "--"), words=False),
+    _nc_plan_box(_NC_RESET, "none", kinds=("clock",), templates=("RST {}", "RST WED {}"), keys=_nc_keys("resets.at"),
+                 fills=(("clock", "clock"),)),
+    _nc_plan_box(_NC_PACE, "drop", kinds=("count",), keys=_nc_keys("pace.none", "pace.on", "pace.ahead", "pace.behind"),
+                 fills=(("points", "count"),)),
+    _nc_plan_box(_NC_PACE_SHORT, "drop", kinds=("count",), words=False),
+    _nc("night_city.tooltip.guard_lead", "CHIP", nc.CONTENT_W, "the card's content width: the lead is a run of its own, "
+        "never wrapped (_guard_lines)", english=("GUARD // HOLDING:", "GUARD // ARMED:", "GUARD // HOLDING",
+                                                 "GUARD // ARMED"), keys=_NC_LEADS),
+    Box("night_city.tooltip.guard_lines", Measure("night_city", ("RESET",)), nc.CONTENT_W,
+        "each line the card breaks the statement's rest into (night_city._guard_statement, as _guard_lines wraps it), "
+        "after the lead on the first; it wraps and the card grows", "wrap",
+        ("SESSION 95%,", "WEEKLY 90%", "SESSION 96%", "(CAP 95%). RESUMES 10:26 PM", "(IN 2H 14M).",
+         "WEEKLY 91% (CAP 90%).", "RESUMES FRI 11:12 PM (IN 2D 3H)."), kinds=("percent", "clock", "duration"),
+        keys=_NC_GUARD_KEYS, compose=_nc_guard_statements),
+    # ── Night City: the strip (_draw_strip_row, _strip_label, _draw_strip_status) ──
+    _nc("night_city.strip.window_label", "STATUS", _NC_LABEL_ROOM,
+        "from the label to its bar less STRIP_LABEL_AIR, at the size it shrinks to (night_city.STRIP_LABEL_SIZES: "
+        "11 px down to 9 px), left out where 9 px does not fit", "drop",
+        measure=Measure("night_city_label", (_NC_LABEL_ROOM,)), english=("5H", "7D"),
+        keys=_nc_keys("window.session", "window.weekly"),
+        note=f"{_NC_LABEL_ROOM:g} px at 11 px (night_city.strip.window_label, drop): a longer label shrinks to 9 px, then "
+             "is left out; two characters fit"),
     _nc("night_city.strip.percent", "STRIP_PCT", _NC_PCT_ROOM,
         "from the segmented bar's end (the slanted look has one px more); shrunk to fit, down to 8 px", "shrink",
         kinds=("percent",), measure=Measure("night_city_fit", ("STRIP_PCT", _NC_PCT_ROOM, 8.0)),
-        english=("100%", "13%", "2%", "--"), tight=True),
-    _nc("night_city.strip.status_live", "STATUS", nc.STRIP_TAG[2] - nc.STRIP_WORD_X, "the status tag's room",
-        english=("LIVE",)),
+        english=("100%", "13%", "2%", "--"), tight=True, words=False),
+    _nc("night_city.strip.status_live", "STATUS", _NC_LIVE_ROOM,
+        "after the dot to 4 px inside the tag, at the size it shrinks to (_fit_type, down to STRIP_FLOOR), cut there",
+        "ellipsis", measure=Measure("night_city_fit", ("STATUS", _NC_LIVE_ROOM, nc.STRIP_FLOOR)), english=("LIVE",),
+        keys=_nc_keys("state.live"),
+        note=f"{_NC_LIVE_ROOM:g} px at 11 px (night_city.strip.status_live, ellipsis): a longer word shrinks to 9 px, "
+             "then is cut"),
     _nc("night_city.strip.status_word", "STATUS", _NC_STATUS_ROOM,
-        "the status tag less its 8 px; shrunk to fit, down to 9 px", "shrink",
-        measure=Measure("night_city_fit", ("STATUS", _NC_STATUS_ROOM, 9.0)),
-        english=("STALE", "OFFLINE", "PAUSED", "LOADING", "LIMITED", "NO LOGIN")),
-    _nc("night_city.strip.hold_chip", "CHIP", (nc.STRIP_TAG[2] - nc.STRIP_TAG[0]) - 17, "the status tag as a chip",
-        english=("HOLD",)),
+        "the status tag less its 8 px, at the size it shrinks to (_fit_type, down to STRIP_FLOOR), cut there",
+        "ellipsis", measure=Measure("night_city_fit", ("STATUS", _NC_STATUS_ROOM, nc.STRIP_FLOOR)),
+        english=("STALE", "OFFLINE", "PAUSED", "LOADING", "LIMITED", "NO LOGIN"),
+        keys=_nc_keys("state.stale", "state.offline", "state.paused", "state.loading", "state.rate_limited",
+                      "state.no_credentials"),
+        note=f"{_NC_STATUS_ROOM:g} px at 11 px (night_city.strip.status_word, ellipsis): a longer word shrinks to 9 px, "
+             "then is cut"),
+    _nc("night_city.strip.hold_chip", "CHIP", _NC_HOLD_ROOM,
+        "the status tag as a chip, its word at the size it shrinks to (_fit_type, down to STRIP_FLOOR), cut there",
+        "ellipsis", measure=Measure("night_city_fit", ("CHIP", _NC_HOLD_ROOM, nc.STRIP_FLOOR)), english=("HOLD",),
+        keys=_nc_keys("guard.hold")),
 
     # ── Gates: the header (_header) ──
     _g("gates.floating.title", "body", 12, 600,
@@ -993,26 +1219,25 @@ LINES: tuple[Line, ...] = (
          (("RESETS 11:39 PM", "BEHIND -18 PTS"), ("RESETS SAT 8:12 PM", "BEHIND -55 PTS"), ("RESETS FRI 11:12 PM", "AHEAD +21 PTS"),
           ("RESETS SAT 8:12 PM", "ON PACE"), ("RESETS --", "PACE --"), ("RESETS WED 12:59 PM", "BEHIND -100 PTS")),
          (("nostromo.tooltip.pace", "nostromo.tooltip.pace_short"), ("nostromo.tooltip.pace_short", "drop"))),
-    Line("night_city.floating.header_line", nc.RIGHT - _NC_HEAD, "the brand from the pip, a tag or chip right-aligned at "
-         "RIGHT", "none",
-         (("night_city.floating.brand",),
-          ("night_city.floating.live_tag", "night_city.floating.status_chip", "night_city.floating.hold_chip")),
-         (("night_city.floating.live_tag", 8), ("night_city.floating.status_chip", 12), ("night_city.floating.hold_chip", 17)),
-         (("CLAUDE//USAGE", "LIVE"), ("CLAUDE//USAGE", "PAUSED"), ("CLAUDE//USAGE", "LOADING"),
-          ("CLAUDE//USAGE", "HOLD 20H 48M"))),
-    Line("night_city.floating.band_line", nc.BAND_AGE_RIGHT - nc.BAND_TEXT_X, "the cause and its age (the age is left "
-         "out when the cause is cut)", "ellipsis",
-         (("night_city.floating.band_text",), ("night_city.floating.band_age",)), (("night_city.floating.band_age", 10),),
-         (("RELINK // USE CLAUDE CODE", "100 D OLD"), ("NO SIGNAL // NET DOWN", "41 M OLD"), ("RATE LIMITED", "6 M OLD"))),
-    Line("night_city.floating.band_hold_line", nc.BAND_AGE_RIGHT - nc.BAND_TEXT_X, "the cause and the hold chip (the "
-         "countdown, then the age, give way first)", "ellipsis",
-         (("night_city.floating.band_hold_text",), ("night_city.floating.band_hold_chip",)),
-         (("night_city.floating.band_hold_chip", 17 + nc.GUARD_GAP),),
-         (("RELINK // USE CLAUDE CODE", "HOLD"), ("RATE LIMITED", "HOLD 2H 14M"))),
-    Line("night_city.tooltip.info_line", nc.CONTENT_W, "the reset (boxed: 8 px more) and the pace chip (12 px more) on "
-         "one line", "none", (("night_city.tooltip.info_reset",), ("night_city.tooltip.info_pace",)),
-         (("night_city.tooltip.info_reset", 8), ("night_city.tooltip.info_pace", 12)),
-         (("RST 11:39 PM", "ON PACE"), ("RST WED 12:59 PM", "UNDER PACE -100"), ("RST 12:59 PM", "PACE --"))),
+    Line("night_city.floating.header_line", NC_HEADER.room, "the brand from the pip, GUARD_GAP before the tag or chip "
+         "right-aligned at RIGHT; while over, it gives way in Q2's order (night_city.HEADER_GIVE_WAY)", "none",
+         NC_HEADER.slots, NC_HEADER.added,
+         ((nc.BRAND_MARK, "LIVE"), (nc.BRAND_MARK, "PAUSED"), (nc.BRAND_MARK, "LOADING"),
+          (nc.BRAND_MARK, "HOLD 20H 48M")), nc_gives_way(NC_HEADER)),
+    Line("night_city.floating.band_line", NC_BAND.room, "the cause and its age, 10 px apart; while over, the age is "
+         "left out, then the cause is cut (night_city.BAND_GIVE_WAY)", "ellipsis", NC_BAND.slots, NC_BAND.added,
+         (("RELINK // USE CLAUDE CODE", "100 D OLD"), ("NO SIGNAL // NET DOWN", "41 M OLD"), ("RATE LIMITED", "6 M OLD")),
+         nc_gives_way(NC_BAND)),
+    Line("night_city.floating.band_hold_line", NC_BAND_HOLD.room, "the cause, its age and the hold chip; while over, "
+         "the chip drops its countdown, the age is left out, then the cause is cut (night_city.BAND_GIVE_WAY)",
+         "ellipsis", NC_BAND_HOLD.slots, NC_BAND_HOLD.added,
+         (("RELINK // USE CLAUDE CODE", "", "HOLD"), ("RATE LIMITED", "41 M OLD", "HOLD 2H 14M")),
+         nc_gives_way(NC_BAND_HOLD)),
+    Line("night_city.tooltip.info_line", NC_INFO.room, "the reset (boxed: 8 px more) from LEFT and the pace (a chip: 12 "
+         "px more) right-aligned at RIGHT, VALUE_GAP apart; while over, the pace takes its short form, then is left out "
+         "(night_city.INFO_GIVE_WAY)", "none", NC_INFO.slots, NC_INFO.added,
+         (("RST 11:39 PM", "ON PACE"), ("RST WED 12:59 PM", "UNDER PACE -100"), ("RST 12:59 PM", "PACE --")),
+         nc_gives_way(NC_INFO)),
     Line("gates.floating.header_line", g.PILL_RIGHT - g.TITLE_X, "the title, the guard's capsule and the pill, to "
          "PILL_RIGHT", "none", (("gates.floating.title",), ("gates.floating.status_word",)),
          (("gates.floating.title", g.TITLE_GAP), ("gates.floating.status_word", _G_PILL_CHROME + _G_GUARD)),
@@ -1098,8 +1323,8 @@ def tight(figure: str) -> str:
 
 def _drawn_as(box: Box, figure: str, language: str) -> str:
     """A figure as the box's skin draws it: in capitals by the language's rule in Nostromo and Night City (casing, as
-    Nostromo's own case calls are since #94 and Night City's will be with #95), and glued in a box that wraps (the
-    guard's statement glues a time, a cap or a countdown: engine.glue), so it is measured whole."""
+    their own case calls are since #94 and #95), and glued in a box that wraps (the guard's statement glues a time, a
+    cap or a countdown: engine.glue), so it is measured whole."""
     if box.id.split(".")[0] in CAPITALS:
         figure = casing.upper(figure, language)
     return engine.glue(figure) if box.fit == "wrap" else figure
@@ -1122,6 +1347,12 @@ def fill_values(box: Box, kind: str, language: str) -> tuple[str, ...]:
     the sign); the signed points; the name, Claude Code's name in the language's capitals, the command as typed."""
     if kind == "count":
         return _POINTS
+    if kind == "number":
+        if language in (i18n.DEFAULT, i18n.PSEUDO):
+            return ENGLISH_FILLS["number"]
+        base = i18n.Locale(setting="system", language=language, system=i18n.DEFAULT,
+                           format=i18n.BASE_FORMATS[language], clock=24, offered=(i18n.DEFAULT,))
+        return tuple(dict.fromkeys(formats.number(value, base, group=False) for value in ENGLISH_FILLS["number"]))
     if kind == "name":
         return (casing.upper(_NAME, language),)
     if kind == "product":
@@ -1177,13 +1408,14 @@ def texts(box: Box, language: str) -> list[str]:
     (Box.fills). A composing box takes its whole texts as the code words them in the language (English's listed ones
     too). In the pseudo-locale a box of figures alone (Box.words False) takes its English as the pseudo-locale writes
     the figures, and a box of a WORDED skin's keys takes those keys made pseudo and filled, and what of its English is
-    no key's (a name, a figure alone) as the pseudo-locale draws it."""
+    no key's (a name, a figure alone) as the pseudo-locale draws it. A box of the signed points alone (Night City's
+    pace's short form, which has no key) takes its English in every language: each writes them alike."""
     found: list[str] = []
     if box.compose is not None:
         found += [*(box.english if language == i18n.DEFAULT else ()), *box.compose(language)]
         return list(dict.fromkeys(found))
     worded = bool(box.keys) and box.id.split(".")[0] in WORDED
-    if language == i18n.DEFAULT:
+    if language == i18n.DEFAULT or (not box.words and set(box.kinds) == {"count"}):
         found += box.english
     elif language == i18n.PSEUDO and not box.words:
         found += [_pseudo_figures(text, box) for text in box.english]
@@ -1295,12 +1527,74 @@ def header_room(box_id: str, language: str, scale: float, tag: str | None = None
     return _header_room(box_id, widest, floor)
 
 
+# Night City's boxes whose texts are a format tag's own figures, beside one another or a word on their lines (nc_tags).
+_NC_TAG_FIGURES = (_NC_AGE, _NC_HOLD, _NC_BAND_CHIP, _NC_RESET)
+_NC_AT = (datetime(2026, 7, 13, 16, 12), datetime(2026, 7, 13, 12, 59))     # a Monday: FIGURES' two times
+
+
+@lru_cache(maxsize=None)
+def nc_tags(language: str) -> dict[str, dict[str, tuple[str, ...]]]:
+    """Each format tag's own figures in Night City's lines, as the skin words them: {tag/clock: {box id: texts}} for
+    the band's age (format_age_short in the age key), the hold chips (format_countdown in theirs) and the hover line's
+    reset (the locale's clock and day clock at FIGURES' times, in capitals, in the reset key). A tag's figures stand
+    beside its own (fr-CA's day clock beside fr-CA's pace room, never fr-FR's). English and the pseudo-locale have one,
+    "", whose figures are their boxes' own."""
+    from datetime import timedelta
+
+    from widget_words import sweep_locales
+
+    if language in (i18n.DEFAULT, i18n.PSEUDO):
+        return {"": {}}
+    words = i18n.app_catalog(language)
+    found: dict[str, dict[str, tuple[str, ...]]] = {}
+    for locale in sweep_locales(language):
+        holds = tuple(dict.fromkeys(str(words.text("widget.night_city.guard.hold_for",
+                                                   {"countdown": format_countdown(seconds, locale)}))
+                                    for seconds in _HEADER_COUNTDOWNS))
+        clocks = {formats.clock(at, locale) for at in _NC_AT} | {formats.day_clock(at + timedelta(days=day), locale)
+                                                                  for at in _NC_AT for day in range(7)}
+        found[f"{locale.format}/{locale.clock}"] = {
+            _NC_AGE: tuple(dict.fromkeys(str(words.text("widget.night_city.age.old",
+                                                         {"age": format_age_short(seconds, locale)}))
+                                         for seconds in _HEADER_AGES)),
+            _NC_HOLD: holds, _NC_BAND_CHIP: holds,
+            _NC_RESET: tuple(sorted(str(words.text("widget.night_city.resets.at",
+                                                   {"clock": casing.upper(clock, language)})) for clock in clocks))}
+    return found
+
+
+def nc_room(box_id: str, language: str, scale: float = 1.0, tag: str | None = None) -> float:
+    """A Night City line box's room in ``language``, worked out as its limit is (_nc_room, its line's tuple) beside the
+    language's own widest texts: its words', and the figures of format tag ``tag`` (nc_tags), or, with no tag, of the
+    tag that leaves the box least. fr-CA's 12-hour day clock is wider than English's reset, so the pace has less room
+    there. English's is the box's limit."""
+    if tag is None:
+        return min(nc_room(box_id, language, scale, each) for each in nc_tags(language))
+    figures = nc_tags(language)[tag]
+
+    def widest(other: str) -> float:
+        box = BOX[other]
+        found = figures[other] if other in figures else (widest_text(box, language, scale),)
+        return max(box.width(text, scale) for text in found)
+
+    def floor(other: str) -> float:
+        return max(BOX[other].width(c + cut_mark(other), scale) for c in _NC_FLOOR_CHARS)
+
+    return _nc_room(NC_HOME[box_id], box_id, widest, floor)
+
+
 def allowed(box: Box, language: str, text: str, scale: float) -> float:
-    """The room ``text`` of ``language`` has in ``box`` at ``scale``: the box's budget, and in Nostromo's header no more
-    than its room in the language (header_room) in the tags that write it (a figure) or in any tag (a word), so what
-    the header leaves out beside the language's own wider texts is reported too."""
+    """The room ``text`` of ``language`` has in ``box`` at ``scale``: the box's budget, and in Nostromo's header and
+    Night City's lines no more than its room in the language (header_room, nc_room) in the tags that write it (a figure)
+    or in any tag (a word), so what a line leaves out beside the language's own wider texts is reported too."""
     room = budget(box, scale)
-    if language == i18n.DEFAULT or box.id not in HEADER_ADDED:
+    if language == i18n.DEFAULT:
+        return room
+    if box.id in NC_HOME:
+        tags = nc_tags(language)
+        writing = [tag for tag, figures in tags.items() if text in figures.get(box.id, ())]
+        return min(room, *(nc_room(box.id, language, scale, tag) for tag in (writing or tags)))
+    if box.id not in HEADER_ADDED:
         return room
     tags = header_tags(language)
     writing = [tag for tag, figures in tags.items() if text in figures.get(box.id, ())] if box.id in _TAG_FIGURES \
