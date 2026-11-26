@@ -1,9 +1,10 @@
-"""No frame overlaps (#94, #95; tests/frame_layout.py): every run of text a checked skin draws keeps off every other run
-and every box, rule, bar and edge of its frame, in English, the pseudo-locale and the French, Spanish and Turkish dev
-locales (Night City also in fr-CA's and es-CO's formats), at every display scale and every scale a taskbar draws the
-strip at. The skins whose frames are checked are frame_layout.THEMES (#96 adds Gates'); Night City's jobs are per look
-(frame_layout.NIGHT_CITY_JOBS). No window opens: the frames are drawn in memory, in a fresh Python with the time zone
-pinned, one per job, all started together (frame_layout.jobs)."""
+"""No frame overlaps (#94 to #96; tests/frame_layout.py): every run of text a checked skin draws keeps off every other
+run and every box, rule, bar and edge of its frame, in English, the pseudo-locale and the French, Spanish and Turkish
+dev locales (Night City and Gates also in fr-CA's and es-CO's formats), at every display scale and every scale a taskbar
+draws the strip at. The skins whose frames are checked are frame_layout.THEMES (Nostromo, Night City, Gates); Night
+City's jobs are per look (frame_layout.NIGHT_CITY_JOBS), Gates' on its first variant (frame_layout.GATES_JOBS). No
+window opens: the frames are drawn in memory, in a fresh Python with the time zone pinned, one per job, all started
+together (frame_layout.jobs)."""
 from __future__ import annotations
 
 import json
@@ -15,7 +16,7 @@ from typing import Any
 
 import pytest
 
-from PIL import Image
+from PIL import Image, ImageChops
 
 import budgets
 import frame_layout
@@ -48,10 +49,12 @@ def found() -> dict[tuple[str, str, str], Any]:
 @pytest.mark.parametrize(("theme", "language", "variant"), CASES)
 def test_no_frame_overlaps(found: dict[tuple[str, ...], Any], theme: str, language: str, variant: str) -> None:
     """Every state tests/skin_words.py records for the theme, on the floating widget and the hover card at every
-    display scale and on the strip at every taskbar scale, in the job's variant (the first when none): no finding but
-    the known ones (frame_layout.KNOWN)."""
+    display scale and on the strip at every taskbar scale, in the job's variant (the first when none), and Gates' strip
+    tags in a test catalog's words (frame_layout.GATES_WORDED): no finding but the known ones (frame_layout.KNOWN,
+    KNOWN_TOUCHES)."""
     findings = found[("findings", theme, language, variant) if variant else ("findings", theme, language)]
-    left = [finding for finding in findings if frame_layout.known(theme, finding) is None]
+    left = [finding for finding in findings if frame_layout.known(theme, finding) is None
+            and frame_layout.known_touch(theme, finding) is None]
     assert left == [], json.dumps(left[:20], ensure_ascii=False)
 
 
@@ -64,6 +67,16 @@ def test_the_known_overlaps_are_englishs_and_on_the_budgets_record(found: dict[t
         assert any(box_id == box for box_id, _text in budgets.KNOWN_ENGLISH_OVERRUNS), entry
 
 
+def test_the_known_touches_are_found_and_never_in_english(found: dict[tuple[str, ...], Any]) -> None:
+    """Each known touch (frame_layout.KNOWN_TOUCHES: what a language's words draw so by design, never English) is still
+    found, in the pseudo-locale, so the list only shrinks; and no English frame of its theme has a touch at all."""
+    for entry in frame_layout.KNOWN_TOUCHES:
+        theme = entry[0]
+        assert any(frame_layout.known_touch(theme, finding) == entry for finding in found["findings", theme, "pseudo"]), \
+            entry
+        assert not any(finding[2].startswith("run touches") for finding in found["findings", theme, "en"]), entry
+
+
 @pytest.mark.parametrize("theme", frame_layout.THEMES)
 def test_every_variant_draws_the_first_variants_runs(found: dict[tuple[str, ...], Any], theme: str) -> None:
     """Variants that share a layout (frame_layout.layout_of) differ in colour only, so the check draws one of each: in
@@ -72,7 +85,9 @@ def test_every_variant_draws_the_first_variants_runs(found: dict[tuple[str, ...]
     the Edgerun plate, Relic and Mox plain), and with transparent_bg (floating widget and strip) each draws the runs it
     draws without it, but Edgerun, which drops its plate there for a layout of its own (segmented bars, no box). This
     runs in the pseudo-locale alone, so each layout it leaves apart is drawn by a findings job in every language and
-    tag the check draws (the others are held to those by this result)."""
+    tag the check draws (the others are held to those by this result). Gates' variants share one layout, and
+    transparent_bg moves none of its runs either; its runs' ink is recorded at the most any variant draws
+    (test_gates_ink_is_recorded_at_the_most_any_variant_draws), so its first variant's jobs hold every variant."""
     runs = found["variants", theme, VARIANTS_IN]
     first: dict[str, Any] = {}
     members: dict[str, set[str]] = {}
@@ -83,6 +98,17 @@ def test_every_variant_draws_the_first_variants_runs(found: dict[tuple[str, ...]
         if first.setdefault(group, drawn) != drawn:
             differ.append(key)
     assert len(first) > 50 and len(runs) > len(first) and differ == []
+    if theme == "gates":
+        theme_object = dump.load_theme_objects()[theme]
+        assert members == {"all": {variant.id for variant in theme_object.variants},
+                           "all/clear": {variant.id for variant in theme_object.variants}}
+        for key, drawn in runs.items():             # transparent_bg moves no run
+            state, layout, variant = key.split("|")
+            if layout == "all/clear":
+                opaque = runs[f"{state}|all|{variant}"]
+                assert drawn == {surface: opaque[surface] for surface in drawn}, key
+        assert set(frame_layout.GATES_JOBS) == {*frame_layout.LANGUAGES, *frame_layout.TAGS}
+        return
     if theme != "night_city":
         assert set(members) == {"all"}
         return
@@ -143,6 +169,55 @@ def test_the_check_sees_night_citys_runs() -> None:
             for kind in seen:
                 seen[kind] += len(getattr(frame, kind))
     assert all(seen.values()), seen
+
+
+def test_the_check_sees_gates_runs() -> None:
+    """Gates queues its text and draws it on the finished frame through its glyph cache, so the recorder hooks
+    Ink._draw_text: every run tests/skin_words.py sees the skin draw (skin_words.gates_runs, in this process, so the
+    clocks are this time zone's) is a run of the frame, each state's floating widget, hover card and strip at 1.0 and
+    on a 30 px plate, the record's wide resumes among them; the frame records the fills, the rules, the bars and the
+    body; and the test catalog's strip tags (frame_layout.GATES_WORDED) are drawn, shrunk to fit and raised round their
+    mark below."""
+    from usage_monitor.render.skins import gates, get_skin
+
+    theme = dump.load_theme_objects()["gates"]
+    skin, variant = get_skin("gates"), theme.variants[0]
+    models = frame_layout.models("en", "gates")
+    seen = {"fills": 0, "rules": 0, "cells": 0}
+    for name in ("normal3/auto", "warning/auto", "critical/auto", "stale3/auto", "paused/auto", "guard_hold_session/auto",
+                 "guard_armed/auto", "rate_limited3/auto", "refused", "guard_hold/resume_mon_10am",
+                 "guard_hold/no_credentials", "scoped_model/guard_holding"):
+        model = models[name]
+        seen_runs = skin_words.gates_runs(skin, model, theme, variant, (48, 30), (1.0,))
+        for surface, draw in (("floating@1", lambda: skin.render_floating(model, theme, variant, 1.0, None)),
+                              ("tooltip@1", lambda: skin.render_tooltip(model, theme, variant, 1.0)),
+                              ("strip/h48@1", lambda: skin.render_taskbar(model, theme, variant, 48, 1.0, None)),
+                              ("strip/h30@1", lambda: skin.render_taskbar(model, theme, variant, 30, 1.0, None))):
+            frame = frame_layout.drawn(draw)
+            record = seen_runs[surface]
+            while isinstance(record, str):                       # a surface that drew what an earlier one did
+                record = seen_runs[record]
+            assert [run.text for run in frame.runs] == [run[0] for run in record], (name, surface)
+            assert frame.body is not None and frame.bar_touch == frame_layout.TOUCH, (name, surface)
+            for kind in seen:
+                seen[kind] += len(getattr(frame, kind))
+    assert all(seen.values()), seen
+    ink = gates.Ink(gates.STRIP_W, gates.STRIP_H, 1.0, gates._fonts(theme))
+    states = list(frame_layout.gates_worded("en"))
+    assert sorted(name for name, _model, _worded in states) == ["strip_tags/mark_below", "strip_tags/shrunk"]
+    for name, model, worded in states:
+        for height in (48, 36):                     # plates of 40 and 30 px, drawn at 1.0
+            plain = frame_layout.drawn(lambda: skin.render_taskbar(model, theme, variant, height, 1.0, None))
+            with frame_layout.worded(worded):
+                frame = frame_layout.drawn(lambda: skin.render_taskbar(model, theme, variant, height, 1.0, None))
+            for key, text in worded.items():
+                was = next(run for run in plain.runs if run.text == ("5H" if key.endswith(".session") else "7D"))
+                now = next(run for run in frame.runs if run.text == text)
+                if name == "strip_tags/shrunk":         # drawn smaller, in its room
+                    assert ink.advance(text, ink.face(ink.fonts.body, gates.SIZE_STRIP_K, 600)) > gates.STRIP_TAG_ROOM
+                    assert now.box[2] <= gates.STRIP_RAIL_X0 - gates.STRIP_TAG_AIR + 1, (name, now.box)
+                else:                                   # 2 px higher than 7D on the short plate, in place on the tall
+                    assert was.y - now.y == (gates.STRIP_TAG_RAISE if height == 36 else 0), (name, height)
 
 
 # ── The check itself ──────────────────────────────────────────────────────────
@@ -260,3 +335,87 @@ def test_a_shapes_outline_and_fill_are_checked_as_a_boxs() -> None:
     assert found(fill=Image.new("L", (30, 20), 255)) == []                 # wholly inside the fill
     assert found(fill=Image.new("L", (30, 14), 255)) == ["run across a fill"]
     assert found(fill=Image.new("L", (30, 20), 255), at=(50, 10)) == []    # a fill elsewhere
+
+
+@pytest.mark.parametrize("scale", budgets.SCALES)
+def test_the_check_finds_each_kind_of_overlap_in_a_gates_frame(scale: float) -> None:
+    """Gates' frames are recorded through its own hooks, in output px (frame_layout._gates_spies): on a Gates card
+    each check fails its own case and passes the case beside it, at every display scale: a fill round the run, a run
+    across a fill, on a rule, on a bar, touching a bar with no air (Frame.bar_touch) and one px off it, run on run, and
+    a run past the card's content box."""
+    from usage_monitor.render.skins import gates
+
+    theme = dump.load_theme_objects()["gates"]
+    pal = gates.Palette.for_variant(theme, theme.variants[0])
+    white = (255, 255, 255, 255)
+
+    def frame(draw: Any) -> frame_layout.Frame:
+        def make() -> None:
+            ink = gates._card_canvas(60, scale, theme)
+            gates._paint_card(ink, pal, False)
+            draw(ink, ink.face(ink.fonts.body, 11, 600))
+            ink.finish()
+        return frame_layout.drawn(make)
+
+    def kinds(draw: Any) -> set[str]:
+        return {what for what, _text, _other in frame_layout.check(frame(draw))}
+
+    def ab(ink: Any, face: Any, x: float = 40.0) -> None:
+        ink.put("AB", x, 30.0, face, white)
+
+    probe = frame(ab)
+    [run] = probe.runs
+    left, top, right, bottom = (run.box[0] / probe.kx, run.box[1] / probe.ky, run.box[2] / probe.kx,
+                                run.box[3] / probe.ky)
+    middle = (top + bottom) / 2
+    assert kinds(ab) == set()
+    assert kinds(lambda ink, face: (ink.rrect(left - 4, top - 4, right + 4, bottom + 4, 2, white), ab(ink, face))) \
+        == set()
+    assert kinds(lambda ink, face: (ink.rrect(left - 4, top - 4, (left + right) / 2, bottom + 4, 2, white),
+                                    ab(ink, face))) == {"run across a fill"}
+    assert kinds(lambda ink, face: (ink.rect(left - 4, middle, right + 4, middle + 1, white), ab(ink, face))) == {
+        "run on a rule"}
+    assert kinds(lambda ink, face: (ink.rrect(left - 4, middle - 2, right + 4, middle + 2, 2, white), ab(ink, face))) \
+        == {"run on a bar"}
+    assert kinds(lambda ink, face: (ink.rrect(left - 4, bottom, right + 4, bottom + gates.BAR_H, 2, white),
+                                    ab(ink, face))) == {"run touches a bar"}
+    off = bottom + 1 / probe.ky                                         # one output px of air
+    assert kinds(lambda ink, face: (ink.rrect(left - 4, off, right + 4, off + gates.BAR_H, 2, white), ab(ink, face))) \
+        == set()
+    assert kinds(lambda ink, face: (ab(ink, face), ab(ink, face, 41.0))) == {"run on run"}
+    assert kinds(lambda ink, face: ab(ink, face, gates.LEFT - 4.0)) == {"run leaves the body"}
+
+
+def test_gates_ink_is_recorded_at_the_most_any_variant_draws() -> None:
+    """The containment rule the Gates jobs stand on (#96's critic 7): a run's ink is coverage at INK and up after the
+    text colour's gamma (gates._text_gamma), which is GAMMA_LIGHT_MIN or more for every colour of every variant, and a
+    higher gamma only takes ink away; so the recorder, which takes each run's mask at GAMMA_LIGHT_MIN, holds every
+    variant's ink. Each light and dark variant's frame records the same ink, and it holds the ink each draws."""
+    from dataclasses import fields
+
+    from usage_monitor.render.skins import gates, get_skin
+
+    theme = dump.load_theme_objects()["gates"]
+    for variant in theme.variants:
+        pal = gates.Palette.for_variant(theme, variant)
+        for item in fields(pal):
+            color = getattr(pal, item.name)
+            if isinstance(color, tuple):
+                assert gates._text_gamma(color) >= gates.GAMMA_LIGHT_MIN, (variant.id, item.name)
+    for low, high in ((gates.GAMMA_LIGHT_MIN, 0.6), (0.6, gates.GAMMA_DARK_INK), (gates.GAMMA_LIGHT_MIN, 1.0)):
+        assert all(a >= b for a, b in zip(gates._coverage_table(low), gates._coverage_table(high))), (low, high)
+    skin, model = get_skin("gates"), dump.sample_model("guard_hold_session")
+    seen = {}
+    for variant_id in ("system-dark", "system-light", "green-dark", "rose-light"):
+        variant = theme.variant(variant_id)
+        frame = frame_layout.drawn(lambda: skin.render_floating(model, theme, variant, 1.25, None))
+        pal = gates.Palette.for_variant(theme, variant)
+        seen[variant_id] = [(run.text, run.x, run.y, run.ink.tobytes()) for run in frame.runs]
+        for run in frame.runs:
+            if run.text == gates.TITLE:                  # its own ink, at its colour's gamma, lies in the recorded
+                face = gates.Ink(gates.CARD_W, 10, 1.25, gates._fonts(theme)).face(
+                    gates._fonts(theme).body, gates.SIZE_TITLE, 600)
+                own = gates._run(face, run.text, gates._text_gamma(pal.text_bright), 0.0)[0].point(
+                    [255 if v >= frame_layout.INK else 0 for v in range(256)])
+                assert own.size == run.ink.size and ImageChops.subtract(own, run.ink).getbbox() is None, variant_id
+    assert len({tuple(found) for found in map(tuple, seen.values())}) == 1, sorted(seen)

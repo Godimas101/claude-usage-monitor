@@ -369,12 +369,12 @@ def test_night_citys_english_records_are_the_catalogs() -> None:
 
 # Gates' keys (widget.gates.<group>.<name>, #96), in sentence case but the 5H and 7D tags: the rows' names, the window
 # tags (the strip's labels too), the share, the cap badge, the reset, the paces (the footer's leads and the hover card's
-# readouts), the critical lead, the guard's line and its names, and the footer's sentences (a lead and its step, or
-# its one run).
+# readouts, and their short form for a tight line), the critical lead, the guard's line and its names, and the
+# footer's sentences (a lead and its step, or its one run).
 GATES_KEYS = (
     "limit.session", "limit.weekly", "limit.scoped", "limit.scoped_unnamed", "window.session", "window.weekly",
     "share.of", "cap.tag", "resets.at", "pace.on", "pace.ahead", "pace.behind", "pace.ahead_by", "pace.behind_by",
-    "state.critical",
+    "pace.points", "state.critical",
     *(f"guard.{part}" for part in ("armed", "armed_list", "holding", "holding_list", "limit", "cap", "resumes",
                                    "time_left", "session", "weekly", "scoped", "scoped_unnamed")),
     *(f"footer.{part}" for part in ("stale", "stale_step", "refused", "refused_step", "no_login", "no_login_step",
@@ -388,7 +388,8 @@ def test_the_english_catalog_is_gates_english() -> None:
     (the record above), so a retyped value fails. The fills: {name} Fable or claude_code, {percent} the percent,
     {clock} the reset or resume time, {time_left} the time left in its brackets, {countdown} 2h 14m, {points} the
     points, {product} Claude Code, {command} /login. A footer's rest follows its lead after a space, which the code
-    writes; the hover card's guard line glues its pieces (engine.glue)."""
+    writes; the hover card's guard line glues its pieces (engine.glue). pace.points, the hover pace's short form for a
+    tight line (#96's fits), which English never draws, is the end of pace.ahead_by's and pace.behind_by's."""
     from usage_monitor import i18n
     from usage_monitor.render import engine
 
@@ -415,6 +416,7 @@ def test_the_english_catalog_is_gates_english() -> None:
     paces = {shape: helpers[f"pace/{shape}"]["rows"][0]["pace"] for shape in ("on", "ahead_100", "behind_100")}
     assert paces == {"on": [text("pace.on"), "ok"], "ahead_100": [text("pace.ahead_by", points="100"), "warn"],
                      "behind_100": [text("pace.behind_by", points="100"), "ok"]}
+    assert paces["ahead_100"][0].endswith(" " + text("pace.points", points="100")) and         paces["behind_100"][0].endswith(" " + text("pace.points", points="100"))
     assert helpers["critical/auto"]["footer"][0] == [text("state.critical"), 600, "alert"]
     leads = {tuple(words["footer"][0]) for words in helpers.values()}
     assert {(text("pace.ahead"), 600, "warn"), (text("pace.behind"), 600, "ok"), (text("pace.on"), 600, "ok")} <= leads
@@ -819,12 +821,19 @@ def _gates_draw(models: dict[str, Any], scales: tuple[float, ...] = (1.0,)) -> d
             for name, model in models.items()}
 
 
+# The widget.gates keys English never draws in a recorded state: the hover pace's short form, for a line too tight for
+# the whole pace (#96's fits), whose marked piece ("Pts") is also pace.ahead_by's and pace.behind_by's unmarked tail.
+# The skin still reads it (it words the short form before it knows the line is tight), so the read check holds it.
+GATES_NOT_DRAWN_IN_ENGLISH = ("widget.gates.pace.points",)
+
+
 def _gates_pieces(english: dict[str, str]) -> dict[str, str]:
     """Each widget.gates text's pieces between its placeholders, English's to the marked one's, where the mark is,
-    without the spaces round them (the guard bar may break its line there)."""
+    without the spaces round them (the guard bar may break its line there); a key English never draws
+    (GATES_NOT_DRAWN_IN_ENGLISH) has no piece in a run to mark."""
     found: dict[str, str] = {}
     for key, value in english.items():
-        if key.startswith("widget.gates."):
+        if key.startswith("widget.gates.") and key not in GATES_NOT_DRAWN_IN_ENGLISH:
             for was, now in zip(_PLACEHOLDERS.split(value)[::2], _PLACEHOLDERS.split(_swapped(value))[::2]):
                 was, now = was.strip(), now.strip()
                 if was != now:

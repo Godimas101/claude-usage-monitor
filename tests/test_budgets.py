@@ -22,6 +22,7 @@ import budgets
 from usage_monitor import cldr, formats, i18n
 from usage_monitor.render import dump, engine
 from usage_monitor.render.skins import RenderOptions
+from usage_monitor.render.skins import gates as g
 from usage_monitor.render.skins import night_city as nc
 from usage_monitor.render.skins import nostromo as nos
 from usage_monitor.ui import tray
@@ -57,24 +58,36 @@ LIMITS: dict[str, float] = {
     "night_city.tooltip.info_pace_short": 109.433, "night_city.tooltip.guard_lead": 236,
     "night_city.tooltip.guard_lines": 236, "night_city.strip.window_label": 16.0, "night_city.strip.percent": 21,
     "night_city.strip.status_live": 36, "night_city.strip.status_word": 45, "night_city.strip.hold_chip": 36,
-    "gates.floating.title": 84.54, "gates.floating.status_word": 76.184, "gates.floating.status_pill": 76.184,
-    "gates.tooltip.title": 105.54, "gates.tooltip.status_word": 97.184, "gates.tooltip.status_pill": 97.184,
-    "gates.floating.row_label": 212.84, "gates.floating.row_tag": 139.496, "gates.floating.row_value": 232.82,
-    "gates.floating.cap_badge": 55.036, "gates.tooltip.row_label": 204.05, "gates.tooltip.row_tag": 130.706,
-    "gates.tooltip.row_value": 232.82, "gates.tooltip.cap_badge": 46.246, "gates.tooltip.resets": 130.565,
-    "gates.tooltip.pace": 153.962, "gates.tooltip.guard_lead": 220, "gates.tooltip.guard_text": 220,
-    "gates.floating.footer_lead": 258, "gates.floating.footer_rest": 258, "gates.strip.window_tag": 24,
-    "gates.strip.value": 38, "gates.tray.number": 17.013, "dashboard.nostromo.cost_tile": 6,
-    "dashboard.night_city.cost_tile": 6, "dashboard.gates.cost_tile": 6, "dashboard.nostromo.cost_hero": 6,
-    "dashboard.night_city.cost_hero": 6, "dashboard.gates.cost_hero": 6, "app.tray.tooltip": 127,
-    "app.toast.alert_threshold.title": 63, "app.toast.alert_resets.body": 255, "app.toast.alert_reset.title": 63,
-    "app.toast.alert_reset_ended.body": 255, "app.toast.alert_credits.title": 63, "app.toast.alert_credits.body": 255,
-    "app.toast.update.title": 63, "app.toast.update.body": 255, "app.toast.update_note.title": 63,
-    "app.toast.update_note.body": 250, "nostromo.floating.header_line": 240.0, "nostromo.floating.row_name_line": 202.0,
+    "gates.floating.title": 132.836, "gates.floating.status_word": 76.184, "gates.floating.status_word_shrunk": 76.184,
+    "gates.floating.loading_word": 106.184, "gates.floating.loading_word_shrunk": 106.184,
+    "gates.floating.status_pill": 76.184, "gates.tooltip.title": 153.836, "gates.tooltip.status_word": 97.184,
+    "gates.tooltip.status_word_shrunk": 97.184, "gates.tooltip.loading_word": 127.184,
+    "gates.tooltip.loading_word_shrunk": 127.184, "gates.tooltip.status_pill": 97.184,
+    "gates.floating.row_label": 212.84, "gates.floating.row_tag": 100.124, "gates.floating.row_value": 228.02,
+    "gates.floating.cap_badge": 52.972, "gates.tooltip.row_label": 204.05, "gates.tooltip.row_tag": 91.334,
+    "gates.tooltip.row_value": 228.02, "gates.tooltip.cap_badge": 46.246, "gates.tooltip.resets": 258.0,
+    "gates.tooltip.pace": 145.962, "gates.tooltip.pace_short": 145.962, "gates.tooltip.guard_lead": 220,
+    "gates.tooltip.guard_text": 220, "gates.floating.stale_lead": 109.258, "gates.floating.stale_step": 155.194,
+    "gates.floating.stale_step_alone": 258.0, "gates.floating.refused_lead": 124.867,
+    "gates.floating.refused_step": 179.328, "gates.floating.refused_step_alone": 258.0,
+    "gates.floating.no_login_lead": 111.546, "gates.floating.no_login_step": 170.077,
+    "gates.floating.no_login_step_alone": 258.0, "gates.floating.rate_limited_lead": 236.66,
+    "gates.floating.rate_limited_rest": 195.102, "gates.floating.pace_lead": 231.27,
+    "gates.floating.pace_reset": 186.214, "gates.floating.hold_lead": 231.27, "gates.floating.hold_rest": 186.038,
+    "gates.floating.footer_line": 258, "gates.strip.window_tag": 22.0, "gates.strip.value": 38,
+    "gates.tray.number": 17.013, "dashboard.nostromo.cost_tile": 6, "dashboard.night_city.cost_tile": 6,
+    "dashboard.gates.cost_tile": 6, "dashboard.nostromo.cost_hero": 6, "dashboard.night_city.cost_hero": 6,
+    "dashboard.gates.cost_hero": 6, "app.tray.tooltip": 127, "app.toast.alert_threshold.title": 63,
+    "app.toast.alert_resets.body": 255, "app.toast.alert_reset.title": 63, "app.toast.alert_reset_ended.body": 255,
+    "app.toast.alert_credits.title": 63, "app.toast.alert_credits.body": 255, "app.toast.update.title": 63,
+    "app.toast.update.body": 255, "app.toast.update_note.title": 63, "app.toast.update_note.body": 250,
+    "nostromo.floating.header_line": 240.0, "nostromo.floating.row_name_line": 202.0,
     "nostromo.tooltip.row_name_line": 199.0, "nostromo.tooltip.info_line": 252, "night_city.floating.header_line": 223,
     "night_city.floating.band_line": 220, "night_city.floating.band_hold_line": 220,
     "night_city.tooltip.info_line": 236, "gates.floating.header_line": 216, "gates.tooltip.header_line": 237,
-    "gates.floating.row_line": 258, "gates.floating.footer": 258, "gates.tooltip.info_line": 258,
+    "gates.floating.row_line": 258, "gates.tooltip.row_line": 258, "gates.tooltip.info_line": 258,
+    "gates.floating.stale_footer": 258, "gates.floating.refused_footer": 258, "gates.floating.no_login_footer": 258,
+    "gates.floating.rate_limited_footer": 258, "gates.floating.pace_footer": 258, "gates.floating.hold_footer": 258,
 }
 
 # Where a box's runs are drawn. The hover cards draw the floating widget's header, band, message and footer with the
@@ -85,18 +98,23 @@ STANDS_ON: dict[str, tuple[str, ...]] = {"floating": ("floating", "tooltip"), "t
 # The boxes the frame dump never draws: [G], since every sample state leaves room for [GUARD]; and the pace's short
 # form, which English never needs (#94). Night City's (#95, critic 3): HOLD alone in the header and in the band (the
 # dump's guard holds all have a resume time, and none holds over a stale reading), and the pace's short form, which
-# English never needs either.
+# English never needs either. Gates' (#96, critic 12, from this test's failure): the pace's points, and each sign-in
+# step alone, which English never needs (its leads and steps fit together); and the refused footer's lead and step:
+# the dump has no refused sign-in.
 NOT_DRAWN_WHOLE = frozenset({"nostromo.floating.armed_guard_short", "nostromo.tooltip.pace_short",
                              "night_city.floating.hold_word", "night_city.floating.band_hold_word",
-                             "night_city.tooltip.info_pace_short"})
+                             "night_city.tooltip.info_pace_short", "gates.tooltip.pace_short",
+                             "gates.floating.stale_step_alone", "gates.floating.no_login_step_alone",
+                             "gates.floating.refused_step_alone", "gates.floating.refused_lead",
+                             "gates.floating.refused_step"})
 
 # What still runs past before French or Spanish is offered (#107), each with the ticket that settles it: #91 the
-# dashboard's money figures, #96 Gates' boxes (#94 settled Nostromo's, #95 Night City's). The dollar is the plain "$"
-# (Chris's decision on #91), and the boxes sized for English's figures (the strips' values, the cap badge on Gates'
-# hover card, the dashboard's cost tiles and big cost figure) draw their percents and dollars without the space beside
-# the sign (Box.tight, Chris's decision on #91): Turkish's "%100" fits, and so do the cents and whole dollars of every
-# language. Gates' floating badge has room for "Cap 100 %" and keeps the space. Recompute with budgets.over() after a
-# change, never by hand.
+# dashboard's money figures (#94, #95 and #96 settled the skins' boxes). The dollar is the plain "$" (Chris's decision
+# on #91), and the boxes sized for English's figures (the strips' values, the cap badge on Gates' hover card, the
+# dashboard's cost tiles and big cost figure) draw their percents and dollars without the space beside the sign
+# (Box.tight, Chris's decision on #91): Turkish's "%100" fits, and so do the cents and whole dollars of every language.
+# Gates' floating badge keeps the space; beside a row's own spaced share and value (critic 5 of #96) French's and
+# Spanish's badge is left out there (ACCEPTED_CUTS). Recompute with budgets.over() after a change, never by hand.
 _MONEY = tuple(f"dashboard.{skin}.cost_{part}" for part in ("tile", "hero")
                for skin in ("nostromo", "night_city", "gates"))
 TIGHT_BOXES = frozenset({"nostromo.strip.value_5h", "nostromo.strip.value_5h_chip", "nostromo.strip.value_7d",
@@ -109,8 +127,7 @@ _COMPACT = {language: {(box, budgets.tight(figure)) for box in _MONEY for figure
 _FR_DAYS = ("LUN.", "MAR.", "MER.", "JEU.", "VEN.", "SAM.", "DIM.")
 FOR_91: dict[str, set[tuple[str, str]]] = {
     "fr": _COMPACT["fr"],                                                 # #91: the compact tiles (above)
-    "es": _COMPACT["es"]                                                  # #91: the compact tiles (above)
-    | {(box, "RATE LIMITED · 100 días") for box in ("gates.floating.status_pill", "gates.tooltip.status_pill")},  # #96
+    "es": _COMPACT["es"],                                                 # #91: the compact tiles (above)
     "tr": _COMPACT["tr"],                                                 # #91: the compact tiles (above)
 }
 # What the budgets report and nothing will settle, kept apart from FOR_91 (critic 7 of #94's plan): a cut that comes
@@ -137,8 +154,35 @@ _ES_PACE = ("beside a 12-hour day clock with its spaced p. m. (RST MIÉ, 12:59 P
             "American tags' on a 12-hour clock) the pace has 84.8 px: it takes its short form, its signed points; "
             "English's UNDER PACE -100, which Spanish shows until #105, needs 86.8 px, so a draft's shorter pace word "
             "could settle it")
+# Gates' (#96): its rooms in a language are its own tags' too (budgets.g_room, g_pill_room, g_badge_room). Each row
+# names the tags that write it and says whether a draft's word could settle it (critic 15 of #96's plan).
+_HOLD = ("the guard footer's rest after Guard holding, beside a 12-hour day clock, is cut at its end (186 px), as "
+         "English's own widest is (KNOWN_ENGLISH_OVERRUNS); the hover card's guard bar shows it whole; 24-hour tags fit; "
+         "a draft's shorter Guard holding or Resumes")
+_FR_HOLD = f"{_HOLD}, which French shows in English until #104, could settle it"
+_ES_HOLD = f"{_HOLD}, which Spanish shows in English until #105, could settle it"
+_BADGE = ("{tags}: the share's, the value's and the badge's spaced percent (CLDR's) beside a scoped model's row at a "
+          "100 % share leave the {surface} badge {room} px where English's has {limit:g}: it is left out (drawn only "
+          "where it fits; the value's alert colour and the footer carry the hold); a draft's shorter share or weekly, "
+          "which {language} shows in English until {ticket}, could settle it")
+_FR_BADGE = {surface: _BADGE.format(tags="every French tag but fr-CH", surface=surface, room=room, limit=limit,
+                                    language="French", ticket="#104")
+             for surface, room, limit in (("floating", 37.7, 52.972), ("hover card's", 31.0, 46.246))}
+_ES_BADGE = {surface: _BADGE.format(tags="es-ES's (es-EA's, es-GQ's, es-IC's and es-PH's too)", surface=surface,
+                                    room=room, limit=limit, language="Spanish", ticket="#105")
+             for surface, room, limit in (("floating", 37.7, 52.972), ("hover card's", 31.0, 46.246))}
+_ES_PILL = ("es-CO's narrow day, spaced and in full ( · 100 días): beside English's RATE LIMITED, which Spanish shows "
+            "until #105, the pill leaves its age out without the guard (108.7 px against 106.2) and beside the armed "
+            "shield on the hover card (against 107.2), where English keeps its widest age; a draft's shorter status word "
+            "could settle it")
 ACCEPTED_CUTS: dict[str, dict[tuple[str, str], str]] = {
     "fr": {
+        ("gates.floating.cap_badge", "Cap 100\u00a0%"): _FR_BADGE["floating"],
+        ("gates.tooltip.cap_badge", "Cap 100%"): _FR_BADGE["hover card's"],
+        ("gates.floating.hold_rest", " · Resumes sam. 12 h 59\u202fp.m. (in 23h 59m)"): f"fr-CA's (201.5 px): {_FR_HOLD}",
+        ("gates.floating.hold_rest", " · Resumes sam. 12:59\u202fPM (in 23h 59min)"): (
+            f"fr-FR's and most French tags' on a 12-hour clock (195.9 px): {_FR_HOLD}"),
+        ("gates.floating.hold_rest", " · Resumes sam. 12:59\u202fp.m. (in 23h 59min)"): f"fr-MA's (200.6 px): {_FR_HOLD}",
         **{("night_city.floating.row_reset", f"RST {day} 12 H 59{chr(0x202F)}P.M."): _FR_CA_ROW for day in _FR_DAYS},
         ("night_city.tooltip.info_pace", "UNDER PACE -100"): _FR_CA_PACE,
         ("night_city.tooltip.info_pace", "UNDER PACE +100"): _FR_CA_PACE,
@@ -146,6 +190,18 @@ ACCEPTED_CUTS: dict[str, dict[tuple[str, str], str]] = {
         ("nostromo.floating.age", "100J"): f"every French tag's narrow day: {_LEFT_OUT} (every tag's but fr-CA's)",
     },
     "es": {
+        ("gates.floating.status_pill", "RATE LIMITED · 100 días"): _ES_PILL,
+        ("gates.tooltip.status_pill", "RATE LIMITED · 100 días"): _ES_PILL,
+        ("gates.floating.cap_badge", "Cap 100\u00a0%"): _ES_BADGE["floating"],
+        ("gates.tooltip.cap_badge", "Cap 100%"): _ES_BADGE["hover card's"],
+        ("gates.floating.hold_rest", " · Resumes dom 12:59\u202fp.m. (in 23h 59min)"): (
+            f"es-MX's and es-US's on a 12-hour clock (200.8 px): {_ES_HOLD}"),
+        ("gates.floating.hold_rest", " · Resumes dom, 12:59\u202fp.m. (in 23h 59min)"): (
+            f"es-419's (es-BR's, es-BZ's and es-CU's too) on a 12-hour clock (203.2 px): {_ES_HOLD}"),
+        ("gates.floating.hold_rest", " · Resumes dom, 12:59\u202fp.\u202fm. (in 23 h 59 min)"): (
+            f"es-CO's on a 12-hour clock (212.2 px): {_ES_HOLD}"),
+        ("gates.floating.hold_rest", " · Resumes dom, 12:59\u202fp.\u202fm. (in 23h 59min)"): (
+            f"es-ES's and most Latin American tags' on a 12-hour clock (206.2 px): {_ES_HOLD}"),
         ("nostromo.floating.age", "59MIN"): f"the narrow minute of every Spanish tag but es-CO: {_LEFT_OUT}",
         ("nostromo.floating.age", "100D"): f"es-ES's narrow day (es-MX's, es-US's, es-EA's, es-GQ's, es-IC's and "
                                            f"es-PH's too): {_LEFT_OUT}",
@@ -221,6 +277,29 @@ NIGHT_CITY_WORDED = frozenset({
 NIGHT_CITY_FIGURES = frozenset({"night_city.floating.row_value", "night_city.tooltip.row_value",
                                 "night_city.strip.percent", "night_city.tooltip.info_pace_short"})
 NIGHT_CITY_AS_WRITTEN = frozenset({"night_city.floating.brand"})
+# Gates' boxes that draw its own words (#96): every box of its floating widget, hover card and strip but the figures',
+# the titles' and the composing boxes' (the pill, the footers' rests and steps after a lead, the guard bar's lines).
+GATES_WORDED = frozenset({
+    *(f"gates.{surface}.{part}" for surface in ("floating", "tooltip")
+      for part in ("status_word", "status_word_shrunk", "loading_word", "loading_word_shrunk", "row_label", "row_tag",
+                   "cap_badge")),
+    *(f"gates.floating.{part}" for part in ("stale_lead", "stale_step_alone", "refused_lead", "refused_step_alone",
+                                            "no_login_lead", "no_login_step_alone", "rate_limited_lead", "pace_lead",
+                                            "hold_lead", "footer_line")),
+    *(f"gates.tooltip.{part}" for part in ("resets", "pace", "pace_short", "guard_lead")),
+    "gates.strip.window_tag",
+})
+# Gates' boxes of figures alone, and its title, the brand mark drawn as written in every language (#86): measured in
+# the pseudo-locale as it draws them (Box.words False).
+GATES_FIGURES = frozenset({"gates.floating.row_value", "gates.tooltip.row_value", "gates.strip.value",
+                           "gates.tray.number"})
+GATES_AS_WRITTEN = frozenset({"gates.floating.title", "gates.tooltip.title"})
+# Gates' boxes that compose their texts as the skin words them in each language: the pill (the status word and its
+# age), each footer's rest or step after its lead, and the guard bar's lines.
+GATES_COMPOSED = frozenset({"gates.floating.status_pill", "gates.tooltip.status_pill", "gates.floating.stale_step",
+                            "gates.floating.refused_step", "gates.floating.no_login_step",
+                            "gates.floating.rate_limited_rest", "gates.floating.pace_reset", "gates.floating.hold_rest",
+                            "gates.tooltip.guard_text"})
 
 
 # ── As the skins draw ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -389,12 +468,14 @@ def test_no_offered_language_is_past_a_budget() -> None:
 def test_what_91_has_to_settle_is_all_that_runs_past() -> None:
     """French's and Spanish's longest figures run past only where FOR_91 says, or where ACCEPTED_CUTS accepts a
     format's cut; #91 and the skins' tickets strike each FOR_91 row as they settle it. An accepted cut is a box that
-    gives way (never a fault), and no FOR_91 row is Nostromo's or Night City's: #94 and #95 settled them."""
+    gives way (never a fault), and no FOR_91 row is a skin's: #94, #95 and #96 settled Nostromo's, Night City's and
+    Gates'."""
     for language in sorted(set(FOR_91) | set(ACCEPTED_CUTS)):
         expected = FOR_91.get(language, set()) | set(ACCEPTED_CUTS.get(language, {}))
         assert {(r.box.id, r.text) for r in budgets.over(language)} == expected, language
     assert not any(budgets.BOX[box].enforced for cuts in ACCEPTED_CUTS.values() for box, _text in cuts)
-    assert not any(box.startswith(("nostromo.", "night_city.")) for rows in FOR_91.values() for box, _text in rows)
+    assert not any(box.startswith(("nostromo.", "night_city.", "gates.")) for rows in FOR_91.values()
+                   for box, _text in rows)
 
 
 def test_the_boxes_sized_for_englishs_figures_take_their_percents_and_dollars_tight() -> None:
@@ -478,19 +559,20 @@ def _grown(box: budgets.Box, text: str) -> str:
 
 
 def test_a_line_is_measured_with_each_slots_widest_text(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A reset and a pace that each fit their own box can still not fit Gates' hover-card line together, so a line
-    takes each slot's widest text in the language, as the language would draw them side by side. (Nostromo's line
-    gives way instead: test_a_line_gives_way_before_it_is_reported.)"""
-    line = next(item for item in budgets.LINES if item.id == "gates.tooltip.info_line")
-    resets, pace = budgets.BOX["gates.tooltip.resets"], budgets.BOX["gates.tooltip.pace"]
+    """A row's name and qualifier that each fit their own box can still not fit Nostromo's row line together, so a line
+    takes each slot's widest text in the language, as the language would draw them side by side. (A line that gives
+    way does so first: test_a_line_gives_way_before_it_is_reported. Gates' and Night City's boxes have their rooms in a
+    language from their line, beside its other slots' widest: budgets.g_room, nc_room.)"""
+    line = next(item for item in budgets.LINES if item.id == "nostromo.floating.row_name_line")
+    name, qualifier = budgets.BOX["nostromo.floating.row_name"], budgets.BOX["nostromo.floating.row_qualifier"]
     assert not line.gives_way
-    reset_text, pace_text = _grown(resets, "Resets Wed 12:59 PM"), _grown(pace, "Ahead of pace by 444 pts")
-    made = {resets.id: [reset_text, "Resets 11:39 PM"], pace.id: [pace_text, "On pace"]}
+    name_text, qualifier_text = _grown(name, "WEEKLY SCOPED"), _grown(qualifier, "OF 100% SHARE")
+    made = {name.id: [name_text, "SESSION"], qualifier.id: [qualifier_text, "5H"]}
     monkeypatch.setattr(budgets, "texts", lambda box, _language: made.get(box.id, []))
-    assert budgets.over("xx", [resets, pace]) == []
+    assert budgets.over("xx", [name, qualifier]) == []
     [hit] = budgets.over("xx", [line])
-    assert hit.text == f"{reset_text} | {pace_text}" and hit.budget == line.limit
-    assert hit.width == pytest.approx(resets.width(reset_text, hit.scale) + pace.width(pace_text, hit.scale))
+    assert hit.text == f"{name_text} | {qualifier_text}" and hit.budget == line.limit
+    assert hit.width == pytest.approx(name.width(name_text, hit.scale) + 6 + qualifier.width(qualifier_text, hit.scale))
 
 
 def test_a_wrapping_box_is_measured_by_its_longest_run_without_a_space() -> None:
@@ -527,8 +609,9 @@ def test_each_languages_longest_figures_are_set_in_the_boxs_text() -> None:
     assert budgets.texts(budgets.BOX["night_city.floating.band_age"], "tr") == ["59SN OLD", "59D OLD", "47S OLD",
                                                                                 "100G OLD"]
     assert "RATE LIMITED · 100 días" in budgets.texts(budgets.BOX["gates.floating.status_pill"], "es")
-    guard = budgets.texts(budgets.BOX["gates.tooltip.guard_text"], "fr")
-    assert {"16\u00a0h\u00a012", "12\u00a0h\u00a059\u202fp.m.", "23h\u00a059min"} <= set(guard)
+    guard = budgets.texts(budgets.BOX["gates.tooltip.guard_text"], "fr")       # whole statements, the figures glued
+    assert all(any(piece in text for text in guard) for piece in ("dim.\u00a010\u00a0h\u00a000\u202fa.m.",
+                                                               "(in\u00a023h\u00a059min).")), guard[:3]
     assert budgets.texts(budgets.BOX["nostromo.floating.cap_tag"], "tr") == ["CAP %100"]
     assert budgets.texts(budgets.BOX["nostromo.floating.message"], "fr") == list(                 # no figure; its keys
         budgets.BOX["nostromo.floating.message"].english)                         # are English's until #104 drafts them
@@ -613,13 +696,15 @@ def test_no_value_of_a_listed_shape_is_wider_than_its_budget() -> None:
     """A box lists one value of each shape, and the run check above reads digits as zeros. Where a face's digits differ
     in width (Night City's chips, tags and status, Gates' body face), the shape with the face's widest digit in every
     place still fits the box's budget, so no value the skin can draw there is wider than the English it is worked out
-    from."""
+    from. A text English already runs past in a box that cuts it is cut there whatever its digits."""
     wider = []
     for box in budgets.BOXES:
         if box.unit == "chars":
             continue
         digit = max("0123456789", key=box.measure.width)
         for text in box.english:
+            if (box.id, text) in budgets.KNOWN_ENGLISH_OVERRUNS and not box.enforced:
+                continue                    # already cut there (Gates' guard footer's rest): a wider value is cut too
             variant = re.sub(r"\d", digit, text)
             if any(box.width(variant, scale) > budgets.budget(box, scale) + 0.01 for scale in box.scales):
                 wider.append((box.id, text, variant))
@@ -664,8 +749,8 @@ def _english(key: str) -> Any:
 
 
 def test_a_boxs_keys_are_the_words_it_draws() -> None:
-    """A box's key, filled, is one of the texts it draws, or the word before " · " (Gates' pill, its age after it);
-    test_a_worded_boxs_english_is_its_keys_filled holds the other way round. And a box
+    """A box's key, filled, is one of the texts it draws; test_a_worded_boxs_english_is_its_keys_filled holds the
+    other way round (a composing box, Gates' pill among them, words its texts as the skin does). And a box
     whose text is the view model's status word carries that word's key, but for OWN_STATUS_WORDS, the skins' own words.
     The tooltip, a composing box, carries every tray.tip key and reads no other (the next test)."""
     from usage_monitor.render.model import STATUS_KEYS
@@ -675,7 +760,7 @@ def test_a_boxs_keys_are_the_words_it_draws() -> None:
     for box in budgets.BOXES:
         if box.compose is not None:
             continue
-        leads = {text.split(" · ")[0] for text in box.english}
+        leads = set(box.english)
         for key in box.keys:
             if not any(budgets.key_pattern(_english(key)).fullmatch(lead) for lead in leads):
                 wrong.append((box.id, key))
@@ -684,8 +769,7 @@ def test_a_boxs_keys_are_the_words_it_draws() -> None:
                 missing.append((box.id, lead))
     assert wrong == [] and missing == []
     keyed = {box.id for box in budgets.BOXES if box.keys and box.compose is None}
-    assert keyed == {"gates.floating.status_word", "gates.tooltip.status_word", "gates.floating.status_pill",
-                     "gates.tooltip.status_pill", *NOSTROMO_WORDED, *NIGHT_CITY_WORDED}
+    assert keyed == {*GATES_WORDED, *NOSTROMO_WORDED, *NIGHT_CITY_WORDED}
     for box_id in OWN_STATUS_WORDS:
         box = budgets.BOX[box_id]
         assert box.keys and all(key.startswith("widget.night_city.state.") for key in box.keys), box_id
@@ -741,10 +825,11 @@ def test_every_key_with_a_placeholder_is_filled_or_composed() -> None:
 
 
 def test_a_key_in_several_boxes_has_one_note_naming_them_all() -> None:
-    """A status word sits in up to seven boxes; its one budget note names every one, by id, with its room and fit."""
+    """A status word sits in up to nine boxes; its one budget note names every one, by id, with its room and fit (or
+    the box's own note)."""
     note = budgets.notes()["_budget.widget.status.rate_limited"]
     boxes = sorted(box.id for box in budgets.BOXES if "widget.status.rate_limited" in box.keys)
-    assert len(boxes) == 7 and [piece.split("(")[1].split(",")[0] for piece in note.split("; ")] == boxes
+    assert len(boxes) == 9 and [piece.split("(")[1].split(",")[0] for piece in note.split("; ")] == boxes
     pill = budgets.BOX["nostromo.floating.status_pill"]
     assert f"{pill.limit:g} px ({pill.id}, ellipsis)" in note.split("; ")
     tip = budgets.notes()["_budget.tray.tip.lead"]
@@ -790,7 +875,8 @@ def test_nostromo_passes_its_budgets_in_the_pseudo_locale() -> None:
     assert {box.id for box in budgets.BOXES if box.id in nostromo and box.keys and box.compose is None} == \
         NOSTROMO_WORDED
     assert {box.id for box in budgets.BOXES if not box.words} == (NOSTROMO_FIGURES | NIGHT_CITY_FIGURES
-                                                                   | NIGHT_CITY_AS_WRITTEN)
+                                                                   | NIGHT_CITY_AS_WRITTEN | GATES_FIGURES
+                                                                   | GATES_AS_WRITTEN)
     assert nostromo == NOSTROMO_WORDED | NOSTROMO_FIGURES | {"nostromo.tooltip.guard_lines"}
 
 
@@ -842,11 +928,11 @@ def test_a_figure_box_is_measured_with_the_pseudo_locales_figures() -> None:
 
 
 def test_a_worded_boxs_english_is_its_keys_filled() -> None:
-    """Each English text of a box of Nostromo's or Night City's keys is one of its keys' English filled (each
+    """Each English text of a box of Nostromo's, Night City's or Gates' keys is one of its keys' English filled (each
     placeholder standing for any text), or the box's data: a figure alone or a name alone; and each key's English,
     filled, is one of them."""
     english = i18n.load_catalog(i18n.DEFAULT)
-    for box_id in sorted(NOSTROMO_WORDED | NIGHT_CITY_WORDED):
+    for box_id in sorted(NOSTROMO_WORDED | NIGHT_CITY_WORDED | GATES_WORDED):
         box = budgets.BOX[box_id]
         patterns = [budgets.key_pattern(str(english.lookup(key).value)) for key in box.keys]
         data = [text for text in box.english if not any(pattern.fullmatch(text) for pattern in patterns)]
@@ -855,12 +941,12 @@ def test_a_worded_boxs_english_is_its_keys_filled() -> None:
         assert all(any(pattern.fullmatch(text) for text in box.english) for pattern in patterns), box_id
 
 
-@pytest.mark.parametrize("skin", ["nostromo", "night_city"])
+@pytest.mark.parametrize("skin", ["nostromo", "night_city", "gates"])
 def test_the_guard_line_box_composes_the_statements_the_skin_words(skin: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The guard line's texts are the skin's _guard_statement's, as its _guard_lines breaks them (Nostromo's lead glued
-    on; Night City's rest alone, its lead a run of its own), in every language and every locale of it, worded through
-    exactly the keys the box lists."""
-    module = nc if skin == "night_city" else nos
+    """The guard line's texts are the skin's _guard_statement's, as its _guard_lines (Gates' _guard_bar_lines) breaks
+    them (Nostromo's lead glued on; Night City's and Gates' rest alone, the lead a run of its own), in every language
+    and every locale of it, worded through exactly the keys the box lists."""
+    module = {"nostromo": nos, "night_city": nc, "gates": g}[skin]
     read: set[str] = set()
     inside = [0]
     real_text, real_statement = i18n.Catalog.text, module._guard_statement
@@ -879,7 +965,7 @@ def test_the_guard_line_box_composes_the_statements_the_skin_words(skin: str, mo
 
     monkeypatch.setattr(i18n.Catalog, "text", text)
     monkeypatch.setattr(module, "_guard_statement", statement)
-    box = budgets.BOX[f"{skin}.tooltip.guard_lines"]
+    box = budgets.BOX[f"{skin}.tooltip.guard_text" if skin == "gates" else f"{skin}.tooltip.guard_lines"]
     assert box.compose is not None
     leads = {str(i18n.app_catalog(i18n.DEFAULT).text(key)) for key in box.keys if ".guard.armed" in key
              or ".guard.holding" in key}
@@ -891,7 +977,7 @@ def test_the_guard_line_box_composes_the_statements_the_skin_words(skin: str, mo
         else:
             assert not any(statement.startswith(tuple(leads)) for statement in composed), language
     assert read == set(box.keys), sorted(read ^ set(box.keys))
-    glued = engine.glue("(IN 6D 23H).")
+    glued = engine.glue("(in 6d 23h)." if skin == "gates" else "(IN 6D 23H).")
     assert any(glued in statement for statement in box.compose(i18n.DEFAULT))
 
 
@@ -1264,6 +1350,250 @@ def test_night_citys_guard_chip_has_the_room_its_header_leaves_beside_the_langua
         _nc_catalog(monkeypatch, words)
     assert rooms["PAUSED", "blackwall"] < 0 and min(rooms[pair] for pair in pairs) == pytest.approx(
         budgets.nc_guard_room("fr"))
+
+
+# ── Gates (#96) ───────────────────────────────────────────────────────────────────────────────────────────────────
+
+def _g_line(line_id: str) -> Any:
+    return next(item for item in budgets.LINES if item.id == line_id)
+
+
+def _g_ink() -> Any:
+    return g.Ink(g.CARD_W, g.CARD_H, 1.0, g._fonts(dump.load_theme_objects()["gates"]))
+
+
+def _g_catalog(monkeypatch: pytest.MonkeyPatch, words: dict[str, str]) -> None:
+    english = i18n.load_catalog("en").english()
+    catalog = i18n.Catalog("en", {}, {**english, **words})
+    monkeypatch.setattr(i18n, "app_catalog", lambda language: catalog)
+
+
+def test_gates_passes_its_budgets_in_the_pseudo_locale() -> None:
+    """In the pseudo-locale (about 40 % longer, bracketed, accented) no Gates box or line that has no fallback or only
+    shrinks runs past its budget (before #96 its title, header, status word, hover line, strip and tray did): its words
+    come from its keys and fit, shrink or give way as the skin makes them, and its title is the brand mark, drawn as
+    written. What gives way is reported as a cut: the pill's age, the status word, the pace, a sign-in footer's lead,
+    a strip tag. The pill word and the strip tag are measured at the size they shrink to. Every Gates box is worded by
+    keys, holds figures alone, is the title, or composes."""
+    rows = budgets.over(i18n.PSEUDO)
+    assert [(r.box.id, r.text) for r in rows if r.box.id.startswith("gates.") and r.box.enforced] == []
+    cut = {r.box.id for r in rows if r.box.id.startswith("gates.")}
+    assert {"gates.floating.status_pill", "gates.floating.status_word_shrunk", "gates.tooltip.pace",
+            "gates.floating.stale_lead", "gates.strip.window_tag"} <= cut
+    assert not cut & {line.id for line in budgets.LINES if line.gives_way}      # each gives way and then fits
+    gates = {box.id for box in budgets.BOXES if box.id.startswith("gates.")}
+    assert {box.id for box in budgets.BOXES if box.id in gates and box.keys and box.compose is None} == GATES_WORDED
+    assert {box.id for box in budgets.BOXES if box.id in gates and box.compose is not None} == GATES_COMPOSED
+    assert gates == GATES_WORDED | GATES_FIGURES | GATES_AS_WRITTEN | GATES_COMPOSED
+    for box_id in GATES_AS_WRITTEN:
+        assert budgets.texts(budgets.BOX[box_id], i18n.PSEUDO) == [g.TITLE], box_id
+    tag, word = budgets.BOX["gates.strip.window_tag"], budgets.BOX["gates.floating.status_word_shrunk"]
+    assert budgets.W_g("WWI", "body", g.SIZE_STRIP_K, 600) > tag.limit >= tag.width("WWI")
+    assert budgets.W_g("RATE LIMITED W", "body", g.SIZE_PILL, 600) > word.limit >= word.width("RATE LIMITED W")
+
+
+@pytest.mark.parametrize("language", ["fr", "es", i18n.PSEUDO])
+def test_the_budgets_give_way_as_gates_does(language: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Critic 18 of #94's plan, for Gates (#96): for the language's worst header on each surface (its widest status
+    word beside the guard's holding capsule), its worst hover line and its worst sign-in footers, the skin's plans
+    (_header_plan, _info_plan, _footer_plan) give up the same boxes in the same order as the budgets' Line.gives_way,
+    and both fit after; what the hover line keeps is the same, and the footer keeps its lead exactly where the budgets
+    do. English's words, which French and Spanish show until #104 and #105, take no step. Gates' widths are the same at
+    every scale, so this is at 1.0."""
+    import dataclasses
+
+    ink = _g_ink()
+    widest = {box_id: budgets.widest_text(budgets.BOX[box_id], language, 1.0) for box_id in budgets.G_HOME}
+    taken = []
+    for surface, more in (("floating", True), ("tooltip", False)):
+        p = f"gates.{surface}."
+        line, word = _g_line(p + "header_line"), widest[p + "status_word"]
+        steps, width, _after = line.give_way([(p + "title", g.TITLE), (p + "status_word", word)], 1.0,
+                                             {p + "status_word_shrunk": widest[p + "status_word_shrunk"]})
+        model = dataclasses.replace(dump.sample_model("guard_hold_session"), status_text=word)
+        plan = g._header_plan(ink, model, more=more)
+        names = {"shrink": p + "status_word",
+                 "word": p + ("status_word_shrunk" if "shrink" in plan.gave_way else "status_word")}
+        assert tuple(names[step] for step in plan.gave_way if step != "age") == steps, (surface, plan, steps)
+        assert width <= line.limit + 0.01, (surface, plan, width)
+        taken.append(steps)
+    line = _g_line("gates.tooltip.info_line")
+    reset, pace, short = (widest[f"gates.tooltip.{part}"] for part in ("resets", "pace", "pace_short"))
+    steps, width, after = line.give_way([("gates.tooltip.resets", reset), ("gates.tooltip.pace", pace)], 1.0,
+                                        {"gates.tooltip.pace_short": short})
+    _g_catalog(monkeypatch, {"widget.gates.resets.at": reset})
+    monkeypatch.setattr(g, "_pace_text", lambda _row, *, locale: (pace, "ok"))
+    monkeypatch.setattr(g, "_pace_short", lambda _row, *, locale: short)
+    model = dump.sample_model("normal3")
+    plan = g._info_plan(ink, model, model.rows[0])
+    names = {"pace": "gates.tooltip.pace", "pace_short": "gates.tooltip.pace_short"}
+    assert tuple(names[step] for step in plan.gave_way) == steps and width <= line.limit + 0.01, (plan, steps)
+    assert [text or None for _box, text in after] == [plan.reset, plan.pace], (plan, after)
+    taken.append(steps)
+    for kind, status in budgets.G_STEP_KINDS.items():
+        lead_id, step_id, alone_id = (f"gates.floating.{kind}_{part}" for part in ("lead", "step", "step_alone"))
+        line = _g_line(f"gates.floating.{kind}_footer")
+        steps, width, after = line.give_way([(lead_id, widest[lead_id]), (step_id, widest[step_id])], 1.0,
+                                            {alone_id: widest[alone_id]})
+        monkeypatch.setattr(g, "_footer_runs", lambda _model, kind=kind: [(widest[f"gates.floating.{kind}_lead"], 600,
+                                                                           "warn"),
+                                                                          (widest[f"gates.floating.{kind}_step"], 400,
+                                                                           "text_3")])
+        plan = g._footer_plan(ink, dataclasses.replace(dump.sample_model("stale"), status=status))
+        names = {"lead": lead_id, "step": alone_id if "lead" in plan.gave_way else step_id}
+        assert tuple(names[step] for step in plan.gave_way) == steps and width <= line.limit + 0.01, (kind, plan)
+        assert (after[0][1] == "") == ("lead" in plan.gave_way) and len(plan.runs) == 2 - (after[0][1] == ""), kind
+        taken.append(steps)
+    assert any(taken) == (language == i18n.PSEUDO), taken
+
+
+@pytest.mark.parametrize("order", list(itertools.permutations(g.HEADER_GIVE_WAY)))
+def test_the_budgets_take_the_header_order_from_gates_tuple(order: tuple[str, ...],
+                                                             monkeypatch: pytest.MonkeyPatch) -> None:
+    """Q2 lives in gates.HEADER_GIVE_WAY alone (the hover line's and the sign-in footers' orders in theirs): every
+    Gates plan line's give-way is its tuple's steps as boxes (budgets.nc_gives_way); in any order of Q2's, so is the
+    header's; and the status word's room on each surface (budgets._nc_room, which LIMITS pins) is where the skin's
+    _header_plan stops keeping the word whole at 10 px beside the guard's holding capsule: the longest word of its
+    shape it keeps whole fits the room, and one letter more does not."""
+    import dataclasses
+
+    for line_id, plan in budgets.G_PLANS.items():
+        assert _g_line(line_id).gives_way == budgets.nc_gives_way(plan), line_id
+    monkeypatch.setattr(g, "HEADER_GIVE_WAY", order)
+    for plan in (budgets.G_HEADER_F, budgets.G_HEADER_T):
+        assert budgets.nc_gives_way(plan) == tuple(item for step in order for item in plan.step(step))
+    ink = _g_ink()
+    for surface, more, plan in (("floating", True, budgets.G_HEADER_F), ("tooltip", False, budgets.G_HEADER_T)):
+        box = budgets.BOX[f"gates.{surface}.status_word"]
+        room = budgets._nc_room(plan, box.id, budgets._g_widest, budgets._g_floor, becoming=False)
+        assert room == pytest.approx(box.limit), surface
+
+        def whole(n: int, more: bool = more) -> bool:
+            model = dataclasses.replace(dump.sample_model("guard_hold_session"), status_text="W" * n,
+                                        age_seconds=None)
+            return g._header_plan(ink, model, more=more).gave_way == ()
+
+        low, high = 1, 40                                   # whole(low) holds, whole(high) not
+        while high - low > 1:
+            middle = (low + high) // 2
+            low, high = (middle, high) if whole(middle) else (low, middle)
+        assert box.width("W" * low) <= room + 0.01 < box.width("W" * (low + 1)), (surface, order, low, room)
+
+
+def test_a_gates_box_room_in_a_language_is_its_own_tags() -> None:
+    """In a language, Gates' line boxes have the rooms their limits are worked out by, beside the language's own
+    widest texts and each format tag's own figures (budgets.g_room; #95's lesson): English's are its limits; the hover
+    line's pace has less room beside fr-CA's 12-hour day clock than beside English's reset; the guard footer's rest is
+    the widest each tag's clocks and countdowns make (one per tag), held to that tag's room; a word is held to the
+    least of any tag's; and a row's tag has the room the language's own widest label and value leave (critic 5)."""
+    for box_id in budgets.G_HOME:
+        assert budgets.g_room(box_id, i18n.DEFAULT) == pytest.approx(budgets.BOX[box_id].limit), box_id
+    pace, rest = budgets.BOX["gates.tooltip.pace"], budgets.BOX["gates.floating.hold_rest"]
+    canada = budgets.g_tags("fr")["fr-CA/12"]
+    assert "Resets sam. 12 h 59\u202fp.m." in canada["gates.tooltip.resets"]
+    assert budgets.g_room(pace.id, "fr", 1.0, "fr-CA/12") == pytest.approx(
+        g.TRACK_W - g.INFO_GAP - budgets.W_gs("Resets sam. 12 h 59\u202fp.m.", "gates.tooltip.resets"))
+    assert budgets.g_room(pace.id, "fr", 1.0, "fr-CA/12") < pace.limit - 10
+    assert budgets.allowed(pace, "fr", "On pace", 1.0) == pytest.approx(budgets.g_room(pace.id, "fr", 1.0))
+    assert canada[rest.id] == (" · Resumes sam. 12 h 59\u202fp.m. (in 23h 59m)",)
+    assert all(len(figures[rest.id]) == 1 for figures in budgets.g_tags("es").values())
+    assert budgets.allowed(rest, "fr", canada[rest.id][0], 1.0) == pytest.approx(
+        budgets.g_room(rest.id, "fr", 1.0, "fr-CA/12"))
+    tag = budgets.BOX["gates.floating.row_tag"]
+    value = max(budgets.W_gs(text, "gates.floating.row_value") for text in budgets.texts(
+        budgets.BOX["gates.floating.row_value"], "fr"))
+    assert budgets.g_room(tag.id, "fr") == pytest.approx(
+        g.TRACK_W - 10 - value - 6 - budgets.W_gs("Claude Code weekly", "gates.floating.row_label"))
+    assert budgets.g_room(tag.id, "fr") < tag.limit
+
+
+def test_gates_pill_age_room_is_its_headers_beside_the_languages_words(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#95's lesson (a word budgeted beside another only where the skin draws them together), for Gates' pill (Q2's
+    first step, the age): its room in a language is beside the language's own status word, for each status the least
+    of the headers (the guard's mark beside it, each surface) English shows its widest age in (budgets.g_pill_pairs):
+    RATE LIMITED's without the holding capsule, never beside it, where English leaves its age out (LOADING has no
+    reading, so no mark); English's widest pill fits there; each such room is the one the skin's _header_plan keeps the
+    age in, a word a letter wider leaving it out; and a status word the language makes wider is held to it."""
+    import dataclasses
+
+    ink = _g_ink()
+    guards = {"none": "normal3", "armed": "guard_armed", "holding": "guard_hold_session"}
+    for surface, more in (("floating", True), ("tooltip", False)):
+        pairs, rooms = budgets.g_pill_pairs(surface), budgets._g_pill_rooms(surface)
+        assert ("RATE LIMITED", "none") in pairs and ("RATE LIMITED", "holding") not in pairs, surface
+        assert ("LOADING", "none") in pairs and not any(status == "LOADING" and mark != "none" for status, mark in rooms)
+        box = budgets.BOX[f"gates.{surface}.status_pill"]
+        for status, mark in pairs:
+            room = rooms[status, mark]
+            assert max(box.width(word + age) for word in (status,) for age in budgets._G_AGES) <= room + 0.01
+
+            def kept(n: int, mark: str = mark) -> bool:
+                model = dataclasses.replace(dump.sample_model(guards[mark]), status_text="W" * n, age_seconds=12)
+                return g._header_plan(ink, model, more=more).age is not None
+
+            low = max(n for n in range(1, 30) if kept(n))
+            assert box.width("W" * low + " · 12 s") <= room + 0.01 < box.width("W" * (low + 1) + " · 12 s"), (
+                surface, status, mark, low, room)
+    rate_limited = min(budgets._g_pill_rooms("floating")[pair] for pair in budgets.g_pill_pairs("floating")
+                       if pair[0] == "RATE LIMITED")
+    pill = budgets.BOX["gates.floating.status_pill"]
+    assert budgets.g_pill_room("floating", "es", "RATE LIMITED · 100 días") == pytest.approx(rate_limited)
+    assert budgets.allowed(pill, "es", "RATE LIMITED · 100 días", 1.0) == pytest.approx(rate_limited)
+    assert rate_limited > budgets.budget(pill)              # its own room, more than English's widest pill takes
+    budgets._g_pills.cache_clear()
+    try:
+        _g_catalog(monkeypatch, {"widget.status.stale": "STALE WWW"})
+        pills = budgets._g_pills("fr", "floating")
+        assert any(text.startswith("STALE WWW · ") for text in pills) and not any(text.startswith("STALE · ")
+                                                                                     for text in pills)
+    finally:
+        monkeypatch.undo()
+        budgets._g_pills.cache_clear()
+
+
+def test_gates_cap_badge_room_is_its_rows_beside_the_languages_words(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Critic 5: the cap badge, drawn last where it fits after its row's label and tag, has in a language the least
+    room the rows English shows its widest badge in leave it, beside the language's own label, tag and value
+    (budgets.g_badge_room; English's widest badge with its digits at the face's widest, as the budgets hold a shape):
+    English's is the box's limit, and English leaves the badge out beside a scoped row named for nothing or for its
+    surface at a 100 % share (a long scoped name keeps its room); French's spaced share and
+    value leave less; and each row's room is the one the skin's _row hands _cap_badge, in English, in French and in
+    the pseudo-locale, where a row too tight for its tag leaves it out."""
+    import dataclasses
+
+    from widget_words import sweep_locales
+
+    for surface in ("floating", "tooltip"):
+        box = budgets.BOX[f"gates.{surface}.cap_badge"]
+        rows = budgets.g_badge_rows(surface)
+        assert budgets.g_badge_room(surface, i18n.DEFAULT) == pytest.approx(box.limit), surface
+        named = {(str(g._row_name(row)), row.share_pct) for row in rows}
+        assert ("Fable weekly", 100.0) in named and ("Weekly scoped", 100.0) not in named, surface
+        assert ("Claude_code weekly", 100.0) not in named and ("Claude code weekly", None) in named, surface
+        assert ("Weekly scoped", None) in named and ("Haiku weekly", None) in named, surface
+        assert budgets.g_badge_room(surface, "fr") < box.limit - 10 and budgets.g_badge_room(surface, "tr") == \
+            pytest.approx(box.limit)
+    seen: list[tuple[str, float]] = []
+    monkeypatch.setattr(g, "_cap_badge", lambda _ink, _pal, _model, row, name_end, limit, _top, *, tight:
+                        seen.append((row.key, limit - (name_end + g.BADGE_GAP) - 2 * g.BADGE_PAD)))
+    theme = dump.load_theme_objects()["gates"]
+    skin = dump.get_skin("gates")
+    french = next(locale for locale in sweep_locales("fr") if locale.format == "fr-FR")
+    for locale in (i18n.ENGLISH, french, i18n.dev_locale(i18n.PSEUDO)):     # the pseudo-locale's tags give way
+        for row in budgets._g_badge_rows():
+            for surface, percents in (("floating", (100.0,)), ("tooltip", (99.9, 100.0))):
+                rooms = []
+                for percent in percents:
+                    model = dataclasses.replace(dump.sample_model("normal3", locale=locale),
+                                                rows=(dataclasses.replace(row, percent=percent),))
+                    seen.clear()
+                    if surface == "floating":
+                        skin.render_floating(model, theme, theme.variants[0], 1.0, None)
+                    else:
+                        skin.render_tooltip(model, theme, theme.variants[0], 1.0)
+                    rooms += [room for key, room in seen if key == row.key]
+                assert min(rooms) == pytest.approx(budgets._g_badge_room_in(surface, row, locale)), (
+                    surface, row.key, locale.format)
 
 
 # ── The report ────────────────────────────────────────────────────────────────────────────────────────────────────

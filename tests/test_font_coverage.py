@@ -43,8 +43,9 @@ NOT_A_CHARACTER = "\U0010fffd"                            # mapped by no font: w
 
 ASCII = "".join(chr(code) for code in range(0x20, 0x7F))
 SKIN_TEXT = "·…"                                # the skins' own: Gates' middle dot, the ellipsis
-# The letters each language needs, until its catalog holds them (#93 to #96). French and Spanish as plan-92 1.8
-# lists them, Turkish as its alphabet has them beyond ASCII. Capitals are added by the language's rule.
+# The letters each language needs, until its catalog holds them (the drafts, #104 to #106: the widgets' words are
+# keys since #93 to #96). French and Spanish as plan-92 1.8 lists them, Turkish as its alphabet has them beyond ASCII.
+# Capitals are added by the language's rule.
 FLOOR: dict[str, str] = {
     "fr": "àâæçéèêëîïôœùûüÿ«»",
     "es": "áéíñóúü¿¡",

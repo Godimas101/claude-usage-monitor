@@ -35,6 +35,7 @@ from __future__ import annotations
 import functools
 import math
 import os
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -216,6 +217,58 @@ PACE_KEYS: dict[str, tuple[str, str]] = {"ahead": (KEY + "pace.ahead_by", "warn"
 AGE_UNITS: dict[str, str] = {UNIT_SECONDS: "s", UNIT_MINUTES: "min", UNIT_HOURS: "h", UNIT_DAYS: "d"}
 COUNTDOWN_UNITS: dict[str, str] = {UNIT_MINUTES: "m", UNIT_HOURS: "h", UNIT_DAYS: "d"}
 UNDER_A_MINUTE = "<1m"
+
+# ── Fits (#96): what gives way where a language's words are longer than English's ──
+# English never meets a step it did not take before #96 (the header's age), so its frames are as they were
+# (tests/test_skin_gates_fit.py).
+
+# Q2, an owner default on #96 that Chris may overturn: what the header's pill gives up, in this order, while it does not
+# fit TITLE_GAP after the title and the usage guard's mark. The age is left out (as before #96), then the status word
+# shrinks (PILL_SIZES, 10 px down to 9), then it is cut with "…", one letter at least. The title (#86's brand mark), the
+# guard's shield (armed) or capsule (holding) and the menu dots never give way: the lamp's shape still tells the status
+# when its word is cut. _header_plan takes the steps in this tuple's order, whatever it is, and tests/budgets.py derives
+# the header line's give-way and its boxes' rooms from it: an answer changes this tuple alone (then test_budgets.py's
+# LIMITS and the _budget notes are printed again).
+HEADER_GIVE_WAY = ("age", "shrink", "word")
+PILL_SIZES = (SIZE_PILL, 9.5, 9.0)      # the pill's text as it shrinks: SIZE_PILL first, the floor last
+# The hover card's reset-and-pace line: the pace shortens to its signed points ("+21 pts", widget.gates.pace.points, in
+# its own colour), then is left out; On pace has no short form and goes at once. The reset never gives way: it is what
+# people look for there. The two keep INFO_GAP apart at least. _info_plan follows this tuple.
+INFO_GIVE_WAY = ("pace", "pace_short")
+INFO_GAP = 8.0
+# Q3, an owner default on #96: the footers whose rest is the step the user needs (STEP_FOOTERS: the sign-in ran out or
+# was refused, or there is none). While the lead and the step do not fit TRACK_W together, the lead is left out and the
+# step is drawn whole from LEFT, without the space that follows a lead; only a step too long alone is then cut. The
+# other footers keep their cut (the rest is cut to the room the lead leaves): their lead is the news, and English's
+# widest guard footer is cut so. _footer_plan follows this tuple; an answer changes it alone.
+FOOTER_GIVE_WAY = ("lead", "step")
+STEP_FOOTERS = frozenset({ApiStatus.STALE, ApiStatus.NO_CREDENTIALS})
+# The strip's window tags shrink from 11 px to 9 px, then are left out: the bars' order still tells the two windows
+# apart (_strip_tag). A tag's advance keeps STRIP_TAG_AIR off the rail (English's 5H takes 14.2 px of the 22 left).
+STRIP_TAG_SIZES = (SIZE_STRIP_K, 10.5, 10.0, 9.5, 9.0)
+STRIP_TAG_AIR = 2.0
+STRIP_TAG_ROOM = STRIP_RAIL_X0 - STRIP_K_X - STRIP_TAG_AIR
+FIT_SLACK = 1e-6                        # float error in a sum of advances: a line exactly as wide as its room fits
+
+# Q1, an owner default on #96 that Chris may overturn (as Nostromo's on #94 and Night City's on #95): Gates outlines no
+# box round a word, and its filled pill and cap badge keep every mark inside them at every scale, so no box grows. The
+# one clip is on a short taskbar: on a plate under 34 px the strip's second row's line box runs past the plate, and a
+# tag that reaches below the line there (a mark below, _BELOW: combining class 202 or 220, as Nostromo's rule: a
+# cedilla, an ogonek, a comma or a dot below, Ç Ş Ș Ą Ạ; or one of DESCENDERS, the glyphs of the tag's face that leave
+# that plate at 9 to 11 px, held to the face by a test) would lose up to 2 px of ink. Such a tag rises STRIP_TAG_RAISE,
+# decided by its letters (_strip_tag_raise). English's 5H and 7D never move, and the first row, which has room under it,
+# never does. Where a tag meets the tag above it, STRIP_TAG_MEETS says so (tests/test_skin_gates_fit.py holds every
+# other pair to keep air).
+STRIP_TAG_RAISE = 2.0
+_BELOW = (202, 220)
+DESCENDERS = frozenset("()[]_gjpqy{|}¡¿")
+STRIP_TAG_MEETS = (
+    "on a plate under 34 px, a raised second tag that has a capital with a mark above (É, as well as the mark below "
+    "or descender that raises it) meets the first tag's ink at the same place where that tag reaches the foot of its "
+    "line (Q, or a capital with a mark below), by up to 3 px",
+    "on a plate under 34 px, a second tag with a capital with a mark above meets a first tag with a capital with a "
+    "mark below at the same place by up to 1 px with no raise, as before #96: the rows are 14 px apart there",
+)
 
 
 # ── Typefaces ─────────────────────────────────────────────────────────────────
@@ -1207,7 +1260,8 @@ def _pill_colors(pal: Palette, model: WidgetModel) -> tuple[Color, Color]:
 
 
 def _header(ink: Ink, pal: Palette, model: WidgetModel, *, more: bool) -> None:
-    """Fluent glyph and title on the left; the status pill (lamp, word, age) on the right."""
+    """Fluent glyph and title on the left; the status pill (lamp, word, age) on the right, as _header_plan fits it
+    (HEADER_GIVE_WAY)."""
     fonts = ink.fonts
     if fonts.icons is not None:
         icon = ink.face(Typeface(((400, fonts.icons),), False), SIZE_ICON, 400)
@@ -1216,17 +1270,15 @@ def _header(ink: Ink, pal: Palette, model: WidgetModel, *, more: bool) -> None:
     else:
         _timer_glyph(ink, pal.accent, ICON_X + ICON_W / 2, HEAD_MID)
     title = ink.face(fonts.body, SIZE_TITLE, 600)
-    title_w = ink.put(TITLE, TITLE_X, ink.baseline(HEAD_TOP, HEAD_H, title), title, pal.text_bright)
+    ink.put(TITLE, TITLE_X, ink.baseline(HEAD_TOP, HEAD_H, title), title, pal.text_bright)
 
-    pill = ink.face(fonts.body, SIZE_PILL, 600)
+    plan = _header_plan(ink, model, more=more)
+    pill = ink.face(fonts.body, plan.size, 600)
     right = PILL_RIGHT if more else RIGHT
-    age = _age_label(model)
-    text = f"{model.status_text} · {age}" if age else model.status_text
+    text = plan.text
     chrome = PILL_PAD_LEFT + LAMP_SIZE + PILL_GAP + PILL_PAD_RIGHT
     guard_room = _guard_mark_width(model)
     guard_room = guard_room + GUARD_PILL_GAP if guard_room else 0.0     # the usage guard's mark sits left of the pill
-    if right - (chrome + ink.advance(text, pill)) < TITLE_X + title_w + TITLE_GAP + guard_room:
-        text = model.status_text                     # a long word leaves the age out before it collides
     width = chrome + ink.advance(text, pill)
     left = right - width
     ink_color, tint = _pill_colors(pal, model)
@@ -1249,13 +1301,194 @@ def _fit(ink: Ink, text: str, face: Face, limit: float) -> str:
     return text.rstrip() + "…"
 
 
+# ── Fits: the decisions, as pure helpers the tests read (#96) ─────────────────
+
+def _cut(ink: Ink, text: str, face: Face, limit: float) -> str:
+    """``text`` whole when it fits ``limit``, else cut with "…" (_fit), keeping one letter at least: a one-letter text
+    is its own floor."""
+    cut = _fit(ink, text, face, limit + FIT_SLACK)
+    return text if cut != text and ink.advance(cut, face) >= ink.advance(text, face) else cut
+
+
+@dataclass(frozen=True, slots=True)
+class HeaderPlan:
+    """What the header's pill draws (_header_plan): its word as drawn (whole or cut), the size its text is drawn at, the
+    age after the word (None when the model has none or it gave way), and the HEADER_GIVE_WAY steps taken, in order
+    (none while the pill fits; English takes the age's alone, as before #96)."""
+    word: str
+    size: float
+    age: str | None
+    gave_way: tuple[str, ...] = ()
+
+    @property
+    def text(self) -> str:
+        """The pill's text: "RATE LIMITED · 6 min", or the word alone."""
+        return f"{self.word} · {self.age}" if self.age else self.word
+
+
+def _header_plan(ink: Ink, model: WidgetModel, *, more: bool) -> HeaderPlan:
+    """The pill's text as it fits between TITLE_GAP after the title (and the guard's mark with its gap) and its right
+    edge (PILL_RIGHT before the menu dots on the floating widget, RIGHT on the hover card), measured on ``ink``: the
+    view model's status word and the model's age. While it does not fit, the HEADER_GIVE_WAY steps are taken in order
+    until it does: "age" leaves the age out, "shrink" draws the text at the first of PILL_SIZES where it fits (the
+    floor when none does), "word" cuts the word to the room left beside the age, if it is still there."""
+    title_w = ink.advance(TITLE, ink.face(ink.fonts.body, SIZE_TITLE, 600))
+    right = PILL_RIGHT if more else RIGHT
+    chrome = PILL_PAD_LEFT + LAMP_SIZE + PILL_GAP + PILL_PAD_RIGHT
+    guard_room = _guard_mark_width(model)
+    guard_room = guard_room + GUARD_PILL_GAP if guard_room else 0.0     # the usage guard's mark sits left of the pill
+    least = TITLE_X + title_w + TITLE_GAP + guard_room                  # where the pill may start
+    word, age = model.status_text, _age_label(model)
+    state = {"age": age is not None, "size": PILL_SIZES[0], "cut": False}
+
+    def face(size: float) -> Face:
+        return ink.face(ink.fonts.body, size, 600)
+
+    def drawn(size: float) -> str:
+        """The word as the steps taken so far leave it, at ``size``: cut to the room left beside the age once the word's
+        step is taken."""
+        if not state["cut"]:
+            return word
+        rest = ink.advance(" · " + age, face(size)) if state["age"] and age else 0.0
+        return _cut(ink, word, face(size), right - chrome - least - rest)
+
+    def fits(size: float) -> bool:
+        text = drawn(size)
+        text = f"{text} · {age}" if state["age"] and age else text
+        return right - (chrome + ink.advance(text, face(size))) >= least - FIT_SLACK
+
+    taken: list[str] = []
+    if not fits(state["size"]):
+        can = {"age": age is not None, "shrink": True, "word": True}     # a step a pill cannot take is skipped
+        for step in HEADER_GIVE_WAY:
+            if not can[step]:
+                continue
+            taken.append(step)
+            if step == "age":
+                state["age"] = False
+            elif step == "shrink":
+                state["size"] = next((size for size in PILL_SIZES if fits(size)), PILL_SIZES[-1])
+            else:
+                state["cut"] = True
+            if fits(state["size"]):
+                break
+    return HeaderPlan(drawn(state["size"]), state["size"], age if state["age"] else None, tuple(taken))
+
+
+@dataclass(frozen=True, slots=True)
+class InfoPlan:
+    """What the hover card's reset-and-pace line draws (_info_plan): the reset (None when the row has none), the pace as
+    drawn (whole, its short form, or None: on a dimmed card, with no pace, or given way), the pace's colour role, and
+    the INFO_GIVE_WAY steps taken."""
+    reset: str | None
+    pace: str | None
+    role: str
+    gave_way: tuple[str, ...] = ()
+
+
+def _pace_short(row: Row, *, locale: Locale = ENGLISH) -> str | None:
+    """The pace's short form for a tight hover line: its signed points ("+21 pts", "-18 pts"), in the full form's
+    colour. None for a pace that has no points (On pace, none). English never draws it: its lines fit whole."""
+    delta = pace_delta(row.percent, row.time_fraction)
+    if delta is None or row.pace not in PACE_KEYS:
+        return None
+    points = round(abs(delta))
+    return _words(locale).text(KEY + "pace.points", {"points": f"+{points}" if row.pace == "ahead" else f"-{points}"})
+
+
+def _info_plan(ink: Ink, model: WidgetModel, row: Row) -> InfoPlan:
+    """The hover line's reset (from LEFT) and pace (right-aligned at RIGHT, on a live card), INFO_GAP apart at least,
+    measured on ``ink``: while they do not fit, the pace takes its short form (_pace_short), then is left out
+    (INFO_GIVE_WAY). The reset never gives way."""
+    words = _words(model.locale)
+    reset = words.text(KEY + "resets.at", {"clock": row.resets_text}) if row.resets_text else None
+    text, role = _pace_text(row, locale=model.locale)
+    pace: str | None = text if text and not _dim(model) else None
+    body, lead = ink.face(ink.fonts.body, SIZE_FOOT, 400), ink.face(ink.fonts.body, SIZE_FOOT, 600)
+    room = RIGHT - LEFT - (ink.advance(reset, body) + INFO_GAP if reset else 0.0)
+    forms = {"pace": _pace_short(row, locale=model.locale), "pace_short": None}
+    taken: list[str] = []
+    for step in INFO_GIVE_WAY:
+        if pace is None or ink.advance(pace, lead) <= room + FIT_SLACK:
+            break
+        pace = forms[step]
+        taken.append(step)
+    return InfoPlan(reset, pace, role, tuple(taken))
+
+
+@dataclass(frozen=True, slots=True)
+class FooterPlan:
+    """What the footer draws (_footer_plan): its runs as (text, weight, colour role), and the FOOTER_GIVE_WAY steps a
+    sign-in footer took (none for the others, whose rest _footer cuts to the room the lead leaves)."""
+    runs: tuple[tuple[str, int, str], ...]
+    gave_way: tuple[str, ...] = ()
+
+
+def _footer_plan(ink: Ink, model: WidgetModel) -> FooterPlan:
+    """The footer's runs (_footer_runs) as they fit TRACK_W, measured on ``ink``. A footer of STEP_FOOTERS (its lead
+    and the step the user needs) takes the FOOTER_GIVE_WAY steps in order while the two do not fit together: "lead"
+    leaves the lead out and draws the step from LEFT without the space after the lead (rest.lstrip()), "step" cuts the
+    step to the room left. Any other footer is returned as it is."""
+    runs = _footer_runs(model)
+    if model.status not in STEP_FOOTERS or len(runs) != 2:
+        return FooterPlan(tuple(runs))
+    (lead, lead_weight, lead_role), (rest, rest_weight, rest_role) = runs
+    faces = {400: ink.face(ink.fonts.body, SIZE_FOOT, 400), 600: ink.face(ink.fonts.body, SIZE_FOOT, 600)}
+    lead_w = ink.advance(lead, faces[lead_weight])
+    state = {"lead": True, "cut": False}
+
+    def step() -> str:
+        text = rest if state["lead"] else rest.lstrip()
+        return _cut(ink, text, faces[rest_weight], TRACK_W - (lead_w if state["lead"] else 0.0)) if state["cut"] \
+            else text
+
+    def fits() -> bool:
+        return (lead_w if state["lead"] else 0.0) + ink.advance(step(), faces[rest_weight]) <= TRACK_W + FIT_SLACK
+
+    taken: list[str] = []
+    if not fits():
+        for name in FOOTER_GIVE_WAY:
+            taken.append(name)
+            if name == "lead":
+                state["lead"] = False
+            else:
+                state["cut"] = True
+            if fits():
+                break
+    drawn = ([(lead, lead_weight, lead_role)] if state["lead"] else []) + [(step(), rest_weight, rest_role)]
+    return FooterPlan(tuple(drawn), tuple(taken))
+
+
+def _strip_tag(ink: Ink, text: str, room: float = STRIP_TAG_ROOM) -> Face | None:
+    """The face the strip draws a window tag in: the first of STRIP_TAG_SIZES at which it fits ``room`` (to the rail,
+    less STRIP_TAG_AIR). None when it does not fit even at the last: the tag is left out."""
+    for size in STRIP_TAG_SIZES:
+        face = ink.face(ink.fonts.body, size, 600)
+        if ink.advance(text, face) <= room + FIT_SLACK:
+            return face
+    return None
+
+
+def _reaches_below(text: str) -> bool:
+    """Whether ``text`` holds a mark below (_BELOW: combining class 202 or 220) or one of DESCENDERS (Q1)."""
+    return any(unicodedata.combining(ch) in _BELOW or ch in DESCENDERS for ch in unicodedata.normalize("NFD", text))
+
+
+def _strip_tag_raise(text: str, top: float, plate_h: float) -> float:
+    """How far (logical px) a strip tag whose row starts at ``top`` rises on a plate ``plate_h`` tall (Q1): by
+    STRIP_TAG_RAISE where its row's line box runs past the plate and the tag reaches below the line (_reaches_below);
+    else 0. English's tags never rise."""
+    return STRIP_TAG_RAISE if top + STRIP_ROW_LINE > plate_h and _reaches_below(text) else 0.0
+
+
 def _cap_badge(ink: Ink, pal: Palette, model: WidgetModel, row: Row, name_end: float, limit: float, top: float, *,
                tight: bool) -> None:
     """"Cap 95%" in a capsule tinted with the alert colour, after the name of a row the usage guard holds on. It is
     drawn only where it fits between the name and the value (``limit``): a long scoped name keeps its room, and the
     value in the alert colour and the footer carry the state. On the hover card the badge's room is sized for
     English's "Cap 100%" beside the exact value, so there its percent has no space in any language (``tight``,
-    Chris's decision on #91): "Cap 100%" in French too. The floating widget's room fits the language's own spacing."""
+    Chris's decision on #91): "Cap 100%" in French too. The floating widget keeps the language's own spacing; beside a
+    scoped row's spaced share and value at their widest it does not fit, and is left out (#96's budgets)."""
     guard = model.guard
     cap = guard.caps.get(row.key) if guard is not None and _over_cap(model, row) else None
     if cap is None:
@@ -1320,10 +1553,11 @@ def _row(ink: Ink, pal: Palette, model: WidgetModel, row: Row, top: float, *, ex
 
 
 def _footer(ink: Ink, pal: Palette, model: WidgetModel, top: float) -> None:
-    """The state line: a semibold lead in the status colour, then regular text."""
+    """The state line: a semibold lead in the status colour, then regular text, as _footer_plan fits a sign-in footer
+    (FOOTER_GIVE_WAY); each run is cut to the room left."""
     fonts = ink.fonts
     x = float(LEFT)
-    runs = _footer_runs(model)
+    runs = _footer_plan(ink, model).runs
     faces = {400: ink.face(fonts.body, SIZE_FOOT, 400), 600: ink.face(fonts.body, SIZE_FOOT, 600)}
     baseline = ink.baseline(top, FOOT_LINE, faces[400])
     limit = RIGHT - LEFT
@@ -1508,16 +1742,15 @@ class GatesSkin:
         _header(ink, pal, model, more=False)
         body = ink.face(ink.fonts.body, SIZE_FOOT, 400)
         lead = ink.face(ink.fonts.body, SIZE_FOOT, 600)
-        words = _words(model.locale)
         for index, row in enumerate(rows):
             top = TIP_ROW0 + TIP_PITCH * index
             _row(ink, pal, model, row, top, exact=True)
             base = ink.baseline(top + TIP_INFO_DY, FOOT_LINE, body)
-            if row.resets_text:
-                ink.put(words.text(KEY + "resets.at", {"clock": row.resets_text}), LEFT, base, body, pal.text_3)
-            text, role = _pace_text(row, locale=model.locale)
-            if text and not _dim(model):
-                ink.put(text, RIGHT, base, lead, _role(pal, role), "right")
+            info = _info_plan(ink, model, row)                  # the reset, and the pace as it fits beside it
+            if info.reset:
+                ink.put(info.reset, LEFT, base, body, pal.text_3)
+            if info.pace:
+                ink.put(info.pace, RIGHT, base, lead, _role(pal, info.role), "right")
         if bar_h:
             _guard_bar(ink, pal, model, lead_w, bar_lines, rows_end + BAR_GAP, bar_h)
         if footer:
@@ -1632,13 +1865,15 @@ def _render_strip(model: WidgetModel, pal: Palette, theme: Any, height_px: int, 
     dim = _dim(model)
     if not opts.transparent_bg:
         ink.rrect(0, 0, STRIP_W, plate_h, STRIP_RADIUS, pal.plate)
-    label_face = ink.face(ink.fonts.body, SIZE_STRIP_K, 600)
     value_face = ink.face(ink.fonts.mono, SIZE_STRIP_V, 700)
     rows = list(model.rows[:2])
     words = _words(model.locale)
     for index, (label, top) in enumerate(zip((words.text(key) for key in WINDOW_KEYS), _strip_rows(plate_h))):
         row = rows[index] if index < len(rows) else None
-        ink.put(label, STRIP_K_X, ink.baseline(top, STRIP_ROW_LINE, label_face), label_face, pal.text_3)
+        label_face = _strip_tag(ink, label)                  # shrunk to fit, or None: left out
+        if label_face is not None:
+            rise = _strip_tag_raise(label, top, plate_h)
+            ink.put(label, STRIP_K_X, ink.baseline(top - rise, STRIP_ROW_LINE, label_face), label_face, pal.text_3)
         width = STRIP_RAIL_X1 - STRIP_RAIL_X0
         ink.rrect(STRIP_RAIL_X0, top + 1, STRIP_RAIL_X1, top + 3, 1.0, pal.time_track)
         if row is not None and row.time_fraction is not None:

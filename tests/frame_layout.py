@@ -14,11 +14,12 @@ frame's 1 px edge, chamfered corners and all. A frame fails when:
   rule", "run on the hazard band"), or within TOUCH buffer px of an outline's stroke, with no air between ("run
   touches an outline": Q1 keeps a mark's ink off the 1 px outline of the box it grows);
 - a run's ink is partly inside a filled box and partly outside it ("run across a fill"): a chip's word stays in it;
-- a run's ink is on a bar's cells ("run on a bar");
+- a run's ink is on a bar's cells ("run on a bar"), or, in a frame that asks for it (Frame.bar_touch: Gates', which
+  outlines no box), within that many px of a cell with no air between ("run touches a bar");
 - a run's ink is outside the body ("run leaves the body"), in x or in y.
 
-The skins whose frames are checked are THEMES: Nostromo (#94) and Night City (#95); #96 adds Gates when its words fit,
-and with it what its own drawing code needs recorded (Gates' Ink.put). Night City draws through its own ink queue
+The skins whose frames are checked are THEMES: Nostromo (#94), Night City (#95) and Gates (#96). Night City draws
+through its own ink queue
 (night_city._Ink), so the check hooks it too: each text layer _Ink.layer makes is a run (the hold chip's two shifted
 copies, a refresh hit's and the transparent_bg backing are new layers, not runs); a value's numerals and its percent sign,
 which _draw_value draws as two runs UNIT_GAP apart, are one run, the figure; an outlined chip (_chip_out) is the ring
@@ -30,11 +31,24 @@ Night City's looks place its runs differently (night_city.Look and the Edgerun p
 (NIGHT_CITY_JOBS: every layout in every language), and two languages are a format tag of their own (TAGS: fr-CA's day
 clock and es-CO's ages). It draws one state the skin-words record has not (night_city_states).
 
+Gates draws its shapes supersampled and snapped to whole output pixels (Ink.rrect, rect, disc, half_disc and the
+strip's _shield_shape) and queues its text, which Ink._draw_text draws on the finished frame at output size through
+its glyph cache (_run) and _blend, so its frames are recorded in output px: each queued run's mask where _blend puts
+it, each shape by its logical size (2 px tall or less, or 1 px wide, a rule: the rails and ticks; BAR_H tall a bar's
+cell; anything else a fill: the pill, the cap badge, the guard's capsule and bar, the lamps, the menu dots), the
+strip's plate as its body (the whole canvas when transparent_bg leaves the plate out), and the card's content box
+(LEFT to RIGHT, inside the 1 px border) as the card's. A run's ink is its mask at the lowest coverage gamma any Gates
+text takes (gates.GAMMA_LIGHT_MIN: white text), which holds every variant's ink: the variants place every run alike
+(the variant check), and a text colour's gamma only takes ink away (_text_gamma). So one variant's jobs (GATES_JOBS)
+hold every variant. Gates also draws states the record has not: its strip tags in a test catalog's words
+(GATES_WORDED: a tag that shrinks, one that rises round a mark below).
+
     python tests/frame_layout.py THEME LANGUAGE [VARIANT]    the findings, as JSON (an empty list when clean)
 """
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import subprocess
@@ -59,7 +73,7 @@ NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 INK = 64                        # the coverage (of 255) that counts as ink, as the probes for #94's plan count it
 MIN_GAP = 2.0                   # logical px of air between the ink of two runs on one line
 TOUCH = 1                       # buffer px round an outline's stroke that a run's ink must keep clear of
-THEMES: tuple[str, ...] = ("nostromo", "night_city")
+THEMES: tuple[str, ...] = ("nostromo", "night_city", "gates")
 LANGUAGES: tuple[str, ...] = ("en", "pseudo", "fr", "es", "tr")
 # A format tag drawn as a job of its own, as (language, format tag, clock): the tags whose figures the budgets' rows name
 # (fr-CA's 12-hour day clock in the hover line and the row's reset, es-CO's spaced day in the band's age).
@@ -75,6 +89,19 @@ NIGHT_CITY_JOBS: tuple[tuple[str, str], ...] = tuple(
     (language, look) for language in ("pseudo", "en", "fr", "es", "tr", *TAGS)
     for look in ("blackwall", "relic", "edgerun", "edgerun/clear"))
 CLEAR = "/clear"                # a job's variant drawn with transparent_bg
+# Gates' jobs, as Night City's: its first variant (system-dark) in every language and tag. Its ink is recorded at the
+# lowest gamma any variant's text takes (the module's docstring), so the light variants, the other accents and
+# transparent_bg ink nothing these jobs miss, and the variant check holds them to system-dark's places (#96's critic 7:
+# no light job).
+GATES_JOBS: tuple[str, ...] = ("pseudo", "en", "fr", "es", "tr", *TAGS)
+# Gates' strip tags drawn in a test catalog's words, in every Gates job at every strip layout (#96's critic 8: the
+# pseudo-locale's tags never fit, and no draft's are written yet): {name: (its state in the dump, its widget.gates
+# keys' words)}. A tag that shrinks to fit (WWI: 24.4 px at 11 px, 21.3 at 9.5, in a room of 22; any two capitals fit
+# whole), and the second row's tag with a mark below (7Ç), which rises STRIP_TAG_RAISE on a plate under 34 px.
+GATES_WORDED: dict[str, tuple[str, dict[str, str]]] = {
+    "strip_tags/shrunk": ("normal3", {"widget.gates.window.session": "WWI"}),
+    "strip_tags/mark_below": ("warning", {"widget.gates.window.weekly": "7Ç"}),
+}
 # What English already draws so, by design, and every language with it: (theme, surface, what, the run as a pattern),
 # each with the budgets' record of it. Nostromo's 5H value at 100 % (tight: "100%", Turkish "%100") meets the 5H bar's
 # last cells on a short taskbar's strip (budgets.KNOWN_ENGLISH_OVERRUNS, "nostromo.strip.value_5h"). A known overlap
@@ -82,6 +109,16 @@ CLEAR = "/clear"                # a job's variant drawn with transparent_bg
 # (KNOWN_WHERE): the 5H value only on the 5H bar's cells, never the 7D value on its own.
 KNOWN: dict[tuple[str, str, str, str], str] = {
     ("nostromo", "strip", "run on a bar", r"%?100%?"): "nostromo.strip.value_5h",
+}
+# What a language's words draw so by design that the touch rule (Frame.bar_touch) finds, never English: (theme, surface,
+# what) and why, each held to its place (known_touch). A known touch that is no longer found fails test_frame_layout.py,
+# so this list only shrinks.
+KNOWN_TOUCHES: dict[tuple[str, str, str], str] = {
+    ("gates", "floating", "run touches a bar"): (
+        "a row's tag (the mono face at 11 px) with a capital with a mark above (the pseudo-locale's share tag, its İ) "
+        "puts the mark on its line box's top row, the row right under the bar of the row above (ROW_PITCH is BAR_DY "
+        "plus BAR_H): the ink meets the bar with no air, never on it. No English tag has such a capital, and the tags' "
+        "notes ask for capitals or figures (5H, 7D) or a share word in sentence case (#96's critic 6)"),
 }
 _INK_TABLE = [255 if value >= INK else 0 for value in range(256)]
 
@@ -110,6 +147,7 @@ class Frame:
     cells: list[tuple[int, int, int, int]] = field(default_factory=list)
     hazard: list[tuple[int, int, int, int]] = field(default_factory=list)
     body: Image.Image | None = None
+    bar_touch: int = 0          # px round a bar's cell a run's ink keeps clear of (Gates' frames: TOUCH)
     # Shapes that are not rectangles (Night City's chips): (mask, x, y), the mask's 255 where the stroke or fill is, at
     # buffer px (x, y).
     stroke_masks: list[tuple[Image.Image, int, int]] = field(default_factory=list)
@@ -219,7 +257,7 @@ def recording() -> Iterator[list[Frame]]:
     spies = {"text_layer": text_layer, "stamp": stamp, "fill_rect": fill_rect, "outline_rect": outline_rect,
              "dotted_hline": dotted_hline, "segment_layers": segment_layers, "hazard": hazard,
              "gradient_fill": gradient_fill, "fill_ring": fill_ring, "finish": finish}
-    night = _night_city_spies(frame, texts, figures)
+    night = {**_night_city_spies(frame, texts, figures), **_gates_spies(frames)}
     for name, spy in spies.items():
         setattr(Canvas, name, spy)
     for (owner, name), (spy, _method) in night.items():
@@ -341,6 +379,123 @@ def _night_city_spies(frame: Callable[[Any], Frame], texts: dict[int, tuple[Any,
     return spies
 
 
+def _gates_spies(frames: list[Frame]) -> dict[tuple[Any, str], tuple[Any, Any]]:
+    """The hooks Gates' own drawing needs (the module's docstring says what each records), as {(owner, name): (spy, the
+    real one)}; each finished Gates frame, in output px, is added to ``frames``. While they record, Gates' shapes are
+    recorded, not painted, and a finished frame is its text alone on a clear image: the check reads where things are,
+    not their pixels, and painting is most of a job's time."""
+    from usage_monitor.render.skins import gates as g
+
+    Ink = g.Ink
+    real = {name: getattr(Ink, name) for name in ("rrect", "rect", "disc", "half_disc", "_draw_text", "finish")}
+    real_g = {name: getattr(g, name) for name in ("_paint_card", "_shield_shape", "_run", "_blend")}
+    live: dict[int, tuple[Any, Frame]] = {}         # by id, holding the canvas so its id is not reused while recording
+
+    def frame(ink: Any) -> Frame:
+        key = id(ink)
+        if key not in live:
+            live[key] = (ink, Frame(ink.out_w, ink.out_h, ink.out_w / ink.width, ink.out_h / ink.height,
+                                    bar_touch=TOUCH))
+        return live[key][1]
+
+    def out(ink: Any, rect: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+        return rect[0] // ink.ss, rect[1] // ink.ss, rect[2] // ink.ss, rect[3] // ink.ss
+
+    def full(target: Frame, rect: tuple[int, int, int, int]) -> Image.Image:
+        mask = Image.new("L", (target.width, target.height), 0)
+        mask.paste(255, rect)
+        return mask
+
+    def shape(ink: Any, x0: float, y0: float, x1: float, y1: float, color: Any) -> None:
+        rect = out(ink, ink._px(x0, y0, x1, y1))
+        if color[3] == 0 or rect[2] <= rect[0] or rect[3] <= rect[1]:
+            return
+        target = frame(ink)
+        if (x0, y0, x1, y1) == (0, 0, ink.width, ink.height):       # the strip's plate
+            target.body = full(target, rect)
+        elif y1 - y0 <= 2 or x1 - x0 <= 1:
+            target.rules.append(rect)
+        elif abs(y1 - y0 - g.BAR_H) < 1e-9:
+            target.cells.append(rect)
+        else:
+            target.fills.append(rect)
+
+    def rrect(self: Any, x0: float, y0: float, x1: float, y1: float, radius: float, color: Any) -> None:
+        shape(self, x0, y0, x1, y1, color)
+
+    def rect(self: Any, x0: float, y0: float, x1: float, y1: float, color: Any) -> None:
+        shape(self, x0, y0, x1, y1, color)
+
+    def disc_rect(ink: Any, cx: float, cy: float, radius: float, half: bool) -> tuple[int, int, int, int]:
+        size = max(ink.ss, round(2 * radius * ink.k / ink.ss) * ink.ss)          # as Ink.disc places its mask
+        left, top = ink._snap(cx - radius, ink.kx), ink._snap(cy - radius, ink.ky)
+        return out(ink, (left, top, left + (size // 2 if half else size), top + size))
+
+    def disc(self: Any, cx: float, cy: float, radius: float, color: Any, ring: float = 0.0) -> None:
+        if color[3]:
+            frame(self).fills.append(disc_rect(self, cx, cy, radius, False))
+
+    def half_disc(self: Any, cx: float, cy: float, radius: float, color: Any) -> None:
+        if color[3]:
+            frame(self).fills.append(disc_rect(self, cx, cy, radius, True))
+
+    def shield_shape(ink: Any, cx: float, cy: float, height: float, color: Any) -> None:
+        if color[3]:
+            width = height * 0.86
+            frame(ink).fills.append(out(ink, ink._px(cx - width / 2, cy - height / 2, cx + width / 2,
+                                                     cy + height / 2)))
+
+    def paint_card(ink: Any, pal: Any, transparent: bool) -> None:
+        target = frame(ink)
+        target.body = full(target, (math.floor(g.LEFT * target.kx), math.ceil(g.BORDER * target.ky),
+                                    math.ceil(g.RIGHT * target.kx), math.floor((ink.height - g.BORDER) * target.ky)))
+
+    def draw_text(self: Any, image: Any) -> None:
+        made: list[tuple[Any, str, float]] = []
+        placed: list[tuple[int, int, Any]] = []
+
+        def run(face: Any, text: str, gamma: float, frac: float) -> Any:
+            made.append((face, text, frac))
+            return real_g["_run"](face, text, gamma, frac)
+
+        def blend(target: Any, mask: Any, x: int, y: int, color: Any) -> None:
+            placed.append((x, y, color))
+            real_g["_blend"](target, mask, x, y, color)
+
+        g._run, g._blend = run, blend
+        try:
+            real["_draw_text"](self, image)
+        finally:
+            g._run, g._blend = real_g["_run"], real_g["_blend"]
+        assert len(made) == len(placed) == len(self._texts), (len(made), len(placed), len(self._texts))
+        target = frame(self)
+        for (face, text, frac), (x, y, color) in zip(made, placed):
+            if color[3] == 0:
+                continue
+            ink = real_g["_run"](face, text, g.GAMMA_LIGHT_MIN, frac)[0].point(_INK_TABLE)  # the most ink any text has
+            box = ink.getbbox()
+            if box is not None:
+                target.runs.append(Run(str(text), ink, x, y, (x + box[0], y + box[1], x + box[2], y + box[3])))
+
+    def finish(self: Any, *args: Any, **kwargs: Any) -> Any:
+        image = Image.new("RGBA", (self.out_w, self.out_h), (0, 0, 0, 0))     # its text alone (see the docstring)
+        self._draw_text(image)
+        target = frame(self)
+        live.pop(id(self), None)
+        if target.body is None:                     # the strip with transparent_bg: no plate, the canvas is its edge
+            target.body = full(target, (0, 0, target.width, target.height))
+        frames.append(target)
+        return image
+
+    spies: dict[tuple[Any, str], tuple[Any, Any]] = {
+        (Ink, name): (spy, real[name]) for name, spy in (("rrect", rrect), ("rect", rect), ("disc", disc),
+                                                          ("half_disc", half_disc), ("_draw_text", draw_text),
+                                                          ("finish", finish))}
+    spies[g, "_paint_card"] = (paint_card, real_g["_paint_card"])
+    spies[g, "_shield_shape"] = (shield_shape, real_g["_shield_shape"])
+    return spies
+
+
 def drawn(draw: Callable[[], Any]) -> Frame:
     """The one frame ``draw`` finishes."""
     with recording() as frames:
@@ -430,6 +585,12 @@ def check(frame: Frame) -> list[tuple[str, str, str]]:
                     found.append((what, run.text, logical(rect)))
                     on.add(what)
                     break
+        if frame.bar_touch and "run on a bar" not in on:
+            by = frame.bar_touch
+            for rect in frame.cells:
+                if _meets(run, (rect[0] - by, rect[1] - by, rect[2] + by, rect[3] + by)):
+                    found.append(("run touches a bar", run.text, logical(rect)))
+                    break
         if "run on an outline" not in on:
             for mask, x, y in frame.stroke_masks:
                 if _meets_mask(run, mask, x, y):
@@ -465,10 +626,22 @@ def strip_draws(theme_id: str) -> list[tuple[str, int, float]]:
     """(name, taskbar height in device px, display scale) for each strip the check draws: Nostromo's at every
     budgets.STRIP_SCALES, a strip exactly as tall as itself; Night City's at each taskbar height the frame dump draws
     at each display scale (budgets.SCALES), one per scale the skin settles on (night_city.render_taskbar shrinks the
-    strip to the bar less STRIP_MARGIN a side, and centres it in a taller one)."""
+    strip to the bar less STRIP_MARGIN a side, and centres it in a taller one); Gates' the same way, one per draw scale
+    and plate its _strip_fit settles on (24 layouts: plates of 30, 34 and 40 px)."""
     import budgets
     from usage_monitor.render import dump
 
+    if theme_id == "gates":
+        from usage_monitor.render.skins import gates
+
+        layouts: dict[tuple[float, float], tuple[str, int, float]] = {}
+        for scale in budgets.SCALES:
+            for height in dump.TASKBAR_HEIGHTS_AT_1X:
+                px = round(height * scale)
+                draw_scale, plate = gates._strip_fit(max(gates.STRIP_MIN_HEIGHT, px), scale)
+                layouts.setdefault((round(draw_scale, 4), round(plate, 3)),
+                                   (f"strip@{draw_scale:.4g}/{plate:.4g}", px, scale))
+        return sorted(layouts.values(), key=lambda item: item[2] * 1000 + item[1])
     if theme_id != "night_city":
         from usage_monitor.render.skins import nostromo
 
@@ -535,8 +708,35 @@ def models(language: str, theme_id: str = "nostromo") -> dict[str, Any]:
     (locale_of)."""
     import skin_words
 
-    states = night_city_states if theme_id == "night_city" else skin_words._nostromo_states
+    states = {"night_city": night_city_states, "gates": skin_words._gates_states}.get(theme_id,
+                                                                                    skin_words._nostromo_states)
     return skin_words.models(states, locale_of(language))
+
+
+@contextmanager
+def worded(words: dict[str, str]) -> Iterator[None]:
+    """While open, every catalog the widgets read (i18n.app_catalog) has ``words`` for those keys, in every language."""
+    from usage_monitor import i18n
+
+    real = i18n.app_catalog
+
+    def catalog(language: str) -> Any:
+        found = real(language)
+        return i18n.Catalog(found.language, {**found.own(), **words}, {**found.english(), **words})
+
+    i18n.app_catalog = catalog  # type: ignore[assignment]
+    try:
+        yield
+    finally:
+        i18n.app_catalog = real  # type: ignore[assignment]
+
+
+def gates_worded(language: str) -> Iterator[tuple[str, Any, dict[str, str]]]:
+    """(name, view model in ``language``'s locale, its words) for each of GATES_WORDED."""
+    from usage_monitor.render import dump
+
+    for name, (state, words) in GATES_WORDED.items():
+        yield name, dump.sample_model(state, locale=locale_of(language)), words
 
 
 def _strip_bar(group: int) -> tuple[float, float]:
@@ -564,6 +764,32 @@ def known(theme_id: str, finding: list[str]) -> tuple[str, str, str, str] | None
     return None
 
 
+def _capital_marked_above(text: str) -> bool:
+    import unicodedata
+
+    parts = unicodedata.normalize("NFD", text)
+    return any(unicodedata.combining(ch) == 230 and parts[index - 1].isupper() for index, ch in enumerate(parts)
+               if index)
+
+
+def known_touch(theme_id: str, finding: list[str]) -> tuple[str, str, str] | None:
+    """The KNOWN_TOUCHES entry a finding ([state, surface, what, run, other]) is, or None: on Gates' floating card, a
+    run with a capital with a mark above touching a row's bar (BAR_DY into the row): the tag of the row under it."""
+    from usage_monitor.render.skins import gates
+
+    _state, surface, what, text, other = finding
+    entry = (theme_id, surface.split("@")[0], what)
+    if entry not in KNOWN_TOUCHES or not _capital_marked_above(text):
+        return None
+    found = re.fullmatch(r"\([-\d.]+, ([-\d.]+), [-\d.]+, ([-\d.]+)\)", other)
+    if found is None:
+        return None
+    top, bottom = float(found[1]), float(found[2])
+    row = max(0, round((top - gates.ROW_TOP - gates.BAR_DY) / gates.ROW_PITCH))
+    bar = gates.ROW_TOP + gates.ROW_PITCH * row + gates.BAR_DY                  # a row's bar, a px of rounding
+    return entry if abs(top - bar) <= 1 and abs(bottom - bar - gates.BAR_H) <= 1 else None
+
+
 def findings(theme_id: str, language: str, variant_id: str | None = None) -> list[list[str]]:
     """Every finding in every frame of ``theme_id`` in ``language`` (a variant's, the first when None; one ending in
     CLEAR drawn with transparent_bg): [state, surface, what, run, other], the KNOWN ones too."""
@@ -579,11 +805,18 @@ def findings(theme_id: str, language: str, variant_id: str | None = None) -> lis
         for surface, draw in surfaces(theme_id, model, variant, opts):
             for what, text, other in check(drawn(draw)):
                 found.append([name, surface, what, text, other])
+    for name, model, words in (gates_worded(language) if theme_id == "gates" else ()):
+        with worded(words):
+            for surface, draw in surfaces(theme_id, model, variant, opts):
+                if surface.startswith("strip"):
+                    for what, text, other in check(drawn(draw)):
+                        found.append([name, surface, what, text, other])
     return found
 
 
 def layout_of(theme_id: str, variant: Any, clear: bool = False) -> str:
-    """Which variants draw the same runs: Nostromo's all (they differ in colour only); Night City's by its look, its
+    """Which variants draw the same runs: Nostromo's and Gates' all (they differ in colour only); Night City's by its
+    look, its
     bars and the plate: "boxed" Blackwall, "plate" the Edgerun plate, "plain" Relic and Mox (slanted bars), "cells"
     Edgerun without its plate (transparent_bg turns it off: night_city._palette), whose segmented bars end 1 px past
     the slanted one's and leave the strip's percent that much less room."""
@@ -603,8 +836,8 @@ def layout_of(theme_id: str, variant: Any, clear: bool = False) -> str:
 def runs_by_variant(theme_id: str, language: str) -> dict[str, dict[str, list[list[Any]]]]:
     """For each state, each variant's runs at 1.0 by surface (floating widget, hover card, strip: text, buffer x and y
     of the layer, its ink box), keyed "<state>|<layout>|<variant>" (layout_of), so a test can hold every variant to the
-    first of its layout. Night City's are also drawn with transparent_bg (the floating widget and the strip, the
-    surfaces that take it), keyed "<state>|<layout>/clear|<variant>"."""
+    first of its layout. Night City's and Gates' are also drawn with transparent_bg (the floating widget and the strip,
+    the surfaces that take it), keyed "<state>|<layout>/clear|<variant>"."""
     from usage_monitor.render import dump
     from usage_monitor.render.skins import RenderOptions, get_skin
 
@@ -621,7 +854,7 @@ def runs_by_variant(theme_id: str, language: str) -> dict[str, dict[str, list[li
                 "floating": runs(lambda: skin.render_floating(model, theme, variant, 1.0, None)),
                 "tooltip": runs(lambda: skin.render_tooltip(model, theme, variant, 1.0)),
                 "strip": runs(lambda: skin.render_taskbar(model, theme, variant, 48, 1.0, None))}
-            if theme_id == "night_city":
+            if theme_id in ("night_city", "gates"):
                 clear = RenderOptions(transparent_bg=True)
                 out[f"{name}|{layout_of(theme_id, variant, clear=True)}/clear|{variant.id}"] = {
                     "floating": runs(lambda: skin.render_floating(model, theme, variant, 1.0, clear)),
@@ -631,11 +864,14 @@ def runs_by_variant(theme_id: str, language: str) -> dict[str, dict[str, list[li
 
 def jobs() -> list[tuple[str, ...]]:
     """What test_frame_layout.py runs, each in a fresh Python: ("findings", theme, language[, variant]) for Nostromo in
-    every language on its first variant and for Night City's NIGHT_CITY_JOBS, and ("variants", theme, "pseudo")."""
+    every language on its first variant, for Night City's NIGHT_CITY_JOBS and for Gates' GATES_JOBS, and ("variants",
+    theme, "pseudo")."""
     found: list[tuple[str, ...]] = []
     for theme in THEMES:
         if theme == "night_city":
             found += [("findings", theme, language, variant) for language, variant in NIGHT_CITY_JOBS]
+        elif theme == "gates":
+            found += [("findings", theme, language) for language in GATES_JOBS]
         else:
             found += [("findings", theme, language) for language in LANGUAGES]
     return found + [("variants", theme, "pseudo") for theme in THEMES]

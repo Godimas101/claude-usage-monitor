@@ -6,7 +6,8 @@ that must fit it together (a header's word beside its status, a reset beside its
 skin measures it, through the skin's own code: Nostromo on its own canvas (the floating widget's and the hover card's
 280 px, the strip's 264 px, whose device pixels a glyph snaps to) at every display scale and at the smaller scales a
 short taskbar draws the strip at; Night City through its ink (with its per-run advance correction) and its own fit
-function where it shrinks text; Gates in its own faces; the tray icons' numbers in the icon's device pixels; character
+function where it shrinks text; Gates in its own faces (where it shrinks a text, at the size it shrinks to); the tray
+icons' numbers in the icon's device pixels; character
 boxes in UTF-16 units, as the tray counts them. ``drawn`` records the width each skin works out for every run the frame
 dump draws, and test_budgets.py holds each box's measure to it and each drawn run to a box. Each limit is worked out
 from the skin's constants and the widths of the English beside it (``why`` says how), and test_budgets.py pins them, so
@@ -29,25 +30,29 @@ view model's status word carry its key, and the tray tooltip is a composing box 
 worst-case tooltips the code words in the language, after the drop rule, not its English made pseudo
 (tests/widget_words.tooltip_sweep: two limits at 100 % in each status, in every format tag and clock, as a dev
 instance, with the guard holding at a resume clock, the same day's and another day's, and a countdown of every length
-they take). Since #94 a skin's own words are keys too (WORDED: Nostromo, and Night City since #95; #96 adds Gates'). A
+they take). Since #94 a skin's own words are keys too (WORDED: Nostromo, Night City since #95, Gates since #96). A
 key with a placeholder is filled (``Box.fills``: each placeholder and the FILLS kind it takes, as the skin fills it: the
 language's longest figures, cased as the skin draws them, the signed points, an age, a cap's number, a name, the
 product, the command), or its box composes its whole texts; a box of WORDED keys measures them in the pseudo-locale
 filled with the pseudo-locale's own figures, not its English made pseudo, and a box of figures alone, or of a brand
 mark drawn as written (``Box.words`` False), measures them as the pseudo-locale writes them ("13 %" with its U+00A0,
-"12 S", "CLAUDE//USAGE"), never bracketed. Each skin's guard statement composes through the skin's own _guard_statement.
+"12 S", "CLAUDE//USAGE", "Claude usage"), never bracketed. Each skin's guard statement composes through the skin's own _guard_statement.
 The toasts' keys come from #97. Counts (the pace points) get no figure: a whole number under 1000 is written alike in
 all four languages, so a box of the points alone (Night City's pace's short form) takes its English in every language.
 
 A line gives way as its skin does (``Line.gives_way``): while it is over, each step's box leaves its slot in turn (cut
 to its floor, one letter and the skin's cut mark; left out; or replaced by another box's text), and the line is
 reported only if it is still over after the last step. The lines a skin fits by a tuple take their give-way and their
-boxes' rooms from it (Nostromo's header, HEADER_STEPS; Night City's header, band and hover line, NC_PLANS), and a box's
-room in a language is the language's own, beside each format tag's own figures (header_room, nc_room); Night City's
-GUARD chip, chosen last in the room its header's word leaves, beside the language's own status words (nc_guard_room). A
+boxes' rooms from it (Nostromo's header, HEADER_STEPS; Night City's header, band and hover line, NC_PLANS; Gates'
+header, hover line and footers, G_PLANS, one per footer kind), and a box's room in a language is the language's own,
+beside each format tag's own figures (header_room, nc_room, g_room); Night City's GUARD chip, chosen last in the room
+its header's word leaves, beside the language's own status words (nc_guard_room); Gates' pill, its word and age, where
+English shows that status's age (g_pill_room), and its cap badge in the rows English shows its badge in, beside the
+language's own label, tag and value (g_badge_room). A
 box that shrinks is measured at the size it shrinks to: Night City's fit function and its strip labels'
-STRIP_LABEL_SIZES (``night_city_label``), and Nostromo's steps (``nostromo_fit``: the sign-in lines' MESSAGE_STEPS, the
-strip tags' STRIP_TAG_SIZES).
+STRIP_LABEL_SIZES (``night_city_label``), Nostromo's steps (``nostromo_fit``: the sign-in lines' MESSAGE_STEPS, the
+strip tags' STRIP_TAG_SIZES), and Gates' pill word and strip tags (``gates_fit``: PILL_SIZES; ``gates_tag``: its
+STRIP_TAG_SIZES).
 
     python tests/budgets.py [--lang ID]     what a language's text would not fit (default: pseudo)
     python tests/budgets.py --limits        every box's and line's limit, as test_budgets.py pins them
@@ -141,16 +146,20 @@ PAGE_MONEY: dict[str, tuple[str, ...]] = {"fr": ("99,9\u00a0k\u00a0$",), "es": (
 _KINDS = ("percent", "clock", "money", "duration", "age", "count")
 _ON_A_DAY = re.compile(r"\b(?:WED|Wed) \{\}")
 CAPITALS = ("nostromo", "night_city")         # the skins that draw their figures in capitals
-WORDED = ("nostromo", "night_city")          # the skins whose own words are catalog keys (#94, #95; #96 adds Gates')
+WORDED = ("nostromo", "night_city", "gates")   # the skins whose own words are catalog keys (#94, #95, #96)
 _FITS = ("none", "shrink", "ellipsis", "clip", "drop", "wrap")
 # What a placeholder of a box's key is filled with (Box.fills): a figure the language's FIGURES give (English and the
 # pseudo-locale: the widest shapes the code writes for them, ENGLISH_FILLS, the pseudo-locale's percent with its
-# U+00A0), the signed points, a cap's number (a whole one or a tenth, in the language's decimal), or a fixed sample: a
-# name, Claude Code's name, the sign-in command.
-FILLS = ("percent", "clock", "duration", "age", "count", "number", "name", "product", "command")
+# U+00A0), the signed points, the points without a sign (Gates' "by 100 pts"), a cap's number (a whole one or a tenth,
+# in the language's decimal), or a fixed sample: a name, Claude Code's name, the sign-in command.
+FILLS = ("percent", "clock", "duration", "age", "count", "points", "number", "name", "product", "command")
 ENGLISH_FILLS: dict[str, tuple[str, ...]] = {"percent": ("100%",), "clock": ("12:59 PM", "WED 12:59 PM"),
                                              "duration": ("23H 59M", "6D 23H"), "age": ("59 S", "59 M", "47 H", "100 D"),
                                              "number": ("100", "99.5")}
+# Gates' own shapes of English's figures, in English and the pseudo-locale (#96): a weekday as Gates writes it, its
+# countdowns and ages in lower case.
+_G_ENGLISH_FILLS: dict[str, tuple[str, ...]] = {"clock": ("12:59 PM", "Wed 12:59 PM"), "duration": ("23h 59m", "6d 23h"),
+                                                "age": ("59 s", "59 min", "47 h", "100 d")}
 _POINTS = ("+100", "-100")                    # the widest pace counts, signed
 _NAME = "Fable"                               # a scoped limit's name, as the budgets' English has it (FABLE WEEKLY)
 
@@ -183,7 +192,9 @@ class Measure:
     settings: nostromo (font, size, tracking, canvas), nostromo_fit (font, steps of (size, tracking), room, canvas: the
     width at the first step that fits the room, else at the last), night_city (spec), night_city_fit (spec, room,
     floor), night_city_label (room: the strip label's STRIP_LABEL_SIZES, the width at the first size that fits, else at
-    the last), night_city_value (), gates (role, size, weight), nostromo_tray (), gates_tray (), chars ()."""
+    the last), night_city_value (), gates (role, size, weight), gates_fit (role, weight, room, sizes: Gates' pill word
+    at the first of gates.PILL_SIZES that fits the room, else at the last), gates_tag (room: a strip tag at the first of
+    gates.STRIP_TAG_SIZES that fits, else at the last: gates._strip_tag), nostromo_tray (), gates_tray (), chars ()."""
 
     how: str
     args: tuple[Any, ...] = ()
@@ -237,6 +248,17 @@ def _width(m: Measure, text: str, scale: float) -> float:
         role, size, weight = m.args
         ink = _gates_ink()
         return ink.advance(text, ink.face(getattr(ink.fonts, role), size, weight, size))
+    if m.how == "gates_fit":
+        # gates._header_plan's shrink: the first of PILL_SIZES at which the word fits its room.
+        role, weight, room, sizes = m.args
+        ink = _gates_ink()
+        widths = [ink.advance(text, ink.face(getattr(ink.fonts, role), size, weight, size)) for size in sizes]
+        return next((width for width in widths if width <= room + g.FIT_SLACK), widths[-1])
+    if m.how == "gates_tag":
+        # gates._strip_tag: the first of STRIP_TAG_SIZES at which the tag fits its room.
+        ink = _gates_ink()
+        face = g._strip_tag(ink, text, m.args[0])
+        return ink.advance(text, face or ink.face(ink.fonts.body, g.STRIP_TAG_SIZES[-1], 600))
     if m.how == "nostromo_tray":
         # _tray_text: VT323 at 18 device px whatever the icon's scale.
         return engine.load_font(str(nos._faces(_theme("nostromo"))[nos.FONT_VT]), 18.0).getlength(text)
@@ -412,8 +434,9 @@ _GUARD_COUNTDOWNS = (30, 23 * 3600 + 59 * 60, 6 * 86400 + 23 * 3600)    # under 
 
 def _guard_statements(language: str, skin: str = "nostromo") -> list[str]:
     """The hover card's guard statements ``skin`` words in ``language`` (its _guard_statement), each as its _guard_lines
-    breaks it: Nostromo's the lead glued, a space, the rest; Night City's the rest alone (its lead is a run of its own,
-    never wrapped: the guard_lead box). Armed over a session, a weekly, a named and an unnamed scoped cap at 100 %, and
+    breaks it: Nostromo's the lead glued, a space, the rest; Night City's and Gates' the rest alone (the lead is a run
+    of its own, never wrapped: the guard_lead box). Armed over a session, a weekly, a named and an unnamed scoped cap
+    at 100 %, and
     holding over the four with a resume time and a countdown, in every locale of the language
     (widget_words.sweep_locales), at each length of resume clock the tooltip sweep tries (sweep_clocks) and at
     _GUARD_COUNTDOWNS."""
@@ -435,10 +458,10 @@ def _guard_statements(language: str, skin: str = "nostromo") -> list[str]:
                             kinds=kinds, scope_names=names, resume_clock=clock, resume_seconds=seconds)
                   for clock in sweep_clocks(locale) for seconds in _GUARD_COUNTDOWNS]
         for mark in marks:
-            statement = (nc if skin == "night_city" else nos)._guard_statement(replace(model, guard=mark))
+            statement = _SKIN_MODULES.get(skin, nos)._guard_statement(replace(model, guard=mark))
             assert statement is not None
             lead, rest = statement
-            if skin == "night_city":
+            if skin in ("night_city", "gates"):
                 found += [rest] if rest else []
             else:
                 found.append(engine.glue(lead) + (f" {rest}" if rest else ""))
@@ -476,18 +499,6 @@ _NC_LEADS = _nc_keys("guard.armed", "guard.armed_list", "guard.holding", "guard.
 _NC_GUARD_KEYS = _NC_LEADS + _nc_keys("guard.limit", "guard.cap", "guard.resumes", "guard.time_left") + _NC_NAMES
 _NC_CAUSE_KEYS = _nc_keys("band.offline", "band.expired", "band.refused")       # the causes a band shows an age by
 
-_G_TITLE = W_g("Claude usage", "body", 12, 600)
-_G_WORD_WIDEST = max(W_g(w, "body", 10, 600) for w in ("LIVE", "STALE", "OFFLINE", "RATE LIMITED", "NO LOGIN", "PAUSED",
-                                                       "LOADING"))
-_G_GUARD = g.GUARD_CAPSULE_W + g.GUARD_PILL_GAP                    # the guard's capsule beside the pill, holding
-_G_PILL_CHROME = g.PILL_PAD_LEFT + g.LAMP_SIZE + g.PILL_GAP + g.PILL_PAD_RIGHT
-_G_VALUE_100 = W_g("100%", "mono", 15, 700)
-_G_VALUE_EXACT = W_g("99.9%", "mono", 15, 700)
-_G_LABEL_FLOOR = W_g("S…", "body", 12, 400)
-_G_PACE_WIDEST = W_g("Ahead of pace by 444 pts", "body", 11, 600)
-_G_RESET_WIDEST = W_g("Resets Mon 10:00 AM", "body", 11, 400)
-_G_BAR_TEXT = g.RIGHT - g.BAR_PAD - (g.LEFT + g.BAR_PAD + g.BAR_ICON_W + g.BAR_TEXT_GAP)
-
 _STATUS_WORDS = ("LOADING", "LIVE", "STALE", "OFFLINE", "RATE LIMITED", "NO LOGIN", "PAUSED")
 _COUNTDOWNS = ("HOLD 20H 48M", "HOLD 23H 59M", "HOLD 6D 23H", "HOLD 2H 14M", "HOLD 2D 3H", "HOLD 9M", "HOLD <1M", "HOLD")
 _NC_CAUSES = ("RELINK // USE CLAUDE CODE", "RELINK // RUN /login", "NO SIGNAL // NET DOWN", "RATE LIMITED")
@@ -520,18 +531,24 @@ _NC_HOLD_CAUSE, _NC_BAND_CHIP, _NC_BAND_HOLD = _NCF + "band_hold_text", _NCF + "
 _NC_RESET, _NC_PACE, _NC_PACE_SHORT = _NCT + "info_reset", _NCT + "info_pace", _NCT + "info_pace_short"
 
 
+# The skins whose lines the budgets fit by the skin's own tuples (NcPlan.skin), by id.
+_SKIN_MODULES: dict[str, Any] = {"night_city": nc, "gates": g}
+
+
 @dataclass(frozen=True)
 class NcPlan:
-    """A Night City line the skin fits by one of its tuples (``order``, its name in night_city): the line's room, its
-    slots, what the skin adds beside each box's text, and what each step does to its boxes."""
+    """A line the skin fits by one of its tuples (``order``, its name in the module of ``skin``: Night City's, and
+    Gates' since #96), or by an order of its own (``order`` the steps themselves): the line's room, its slots, what the
+    skin adds beside each box's text, and what each step does to its boxes."""
     room: float
     slots: tuple[tuple[str, ...], ...]
     added: tuple[tuple[str, float], ...]
     steps: tuple[tuple[str, tuple[tuple[str, str], ...]], ...]
-    order: str
+    order: str | tuple[str, ...]
+    skin: str = "night_city"
 
     def tuple(self) -> tuple[str, ...]:
-        return tuple(getattr(nc, self.order))
+        return self.order if isinstance(self.order, tuple) else tuple(getattr(_SKIN_MODULES[self.skin], self.order))
 
     def add(self, box_id: str) -> float:
         return dict(self.added).get(box_id, 0.0)
@@ -615,13 +632,16 @@ def _nc_as_left(plan: NcPlan, other: str, upto: int, widest: Callable[[str], flo
     return (floor(box) if cut else widest(box)) + plan.add(box)
 
 
-def _nc_room(plan: NcPlan, box_id: str, widest: Callable[[str], float], floor: Callable[[str], float]) -> float:
+def _nc_room(plan: NcPlan, box_id: str, widest: Callable[[str], float], floor: Callable[[str], float],
+             becoming: bool = True) -> float:
     """A box's room on its line: the line's, less what the skin adds beside the box's text and, in each other slot, the
-    most any box there takes once every step before the box's own is taken (_nc_as_left). A box whose first step makes
-    it another box (the hold chip HOLD alone, the pace its points) has that box's room: it gives way only by becoming
-    it, and is never cut (beside the band's widest cause no countdown shows in any language, English's neither)."""
+    most any box there takes once every step before the box's own is taken (_nc_as_left). In Night City (``becoming``)
+    a box whose first step makes it another box (the hold chip HOLD alone, the pace its points) has that box's room: it
+    gives way only by becoming it, and is never cut (beside the band's widest cause no countdown shows in any language,
+    English's neither). Gates' boxes keep their own: its word shrinks where its order leaves it, and that need not be
+    where the shrunk word is cut."""
     upto = nc_rank(plan, box_id)
-    if upto < len(plan.tuple()):
+    if becoming and upto < len(plan.tuple()):
         then = next(then for source, then in plan.step(plan.tuple()[upto]) if source == box_id)
         if then not in ("cut", "drop"):
             return _nc_room(plan, then, widest, floor)
@@ -750,6 +770,588 @@ def _nc_guard_why() -> str:
             "could settle (a shorter guard word or status word)")
 
 
+# ── Gates' lines (#96), by its tuples (gates.HEADER_GIVE_WAY: Q2, an owner default; INFO_GIVE_WAY; FOOTER_GIVE_WAY: Q3)
+# and its fixed cuts ──
+# As Night City's (NcPlan): each line's slots, what the skin adds beside each box's text there, and what each step does
+# to its boxes. A line's give-way and each box's room are worked out from the line's order (nc_gives_way, _nc_room), in
+# a language its own beside each format tag's own figures (g_tags, g_room), and an answer to Q2 or Q3 changes the skin's
+# tuple alone (LIMITS and the _budget notes are then printed again). A Gates box that becomes another keeps a room of
+# its own (the word at 10 px shrinks where the order leaves it, the shrunk word is cut where the order leaves it).
+# The header's age is the first of Q2's steps: the pill's whole text, the word and its age, is budgeted where English
+# shows the age (status_pill, g_pill_room), and the header line holds the title and the word as the age leaves them.
+_GF, _GT = "gates.floating.", "gates.tooltip."
+
+
+def _g_keys(*names: str) -> tuple[str, ...]:
+    return tuple(f"widget.gates.{name}" for name in names)
+
+
+_G_CHROME = g.PILL_PAD_LEFT + g.LAMP_SIZE + g.PILL_GAP + g.PILL_PAD_RIGHT      # the pill's lamp and padding
+_G_CAPSULE = g.GUARD_CAPSULE_W + g.GUARD_PILL_GAP          # the guard's holding capsule, its widest mark, and its gap
+_G_MARKS = {"none": 0.0, "armed": g.GUARD_ARMED_W + g.GUARD_PILL_GAP, "holding": _G_CAPSULE}
+_G_FLOOR_CHARS = string.ascii_uppercase + string.ascii_lowercase + string.digits
+_G_BAR_TEXT = g.RIGHT - g.BAR_PAD - (g.LEFT + g.BAR_PAD + g.BAR_ICON_W + g.BAR_TEXT_GAP)
+# The view model's status words (its key: model.STATUS_KEYS): a guard's mark may stand beside each but LOADING's, which
+# has no reading (render/model._guard_mark), so the guard is never shown with it.
+_G_WITH_READING = ("LIVE", "STALE", "OFFLINE", "PAUSED", "RATE LIMITED", "NO LOGIN")
+# What each Gates box is drawn in: (face role, size in logical px, weight); a shrunk header word at the size it
+# shrinks to (gates.PILL_SIZES) and a strip tag at its own (gates.STRIP_TAG_SIZES), each from these.
+_G_SPEC: dict[str, tuple[str, float, int]] = {}
+for _surface in ("floating", "tooltip"):
+    _G_SPEC.update({f"gates.{_surface}.{part}": spec for part, spec in (
+        ("title", ("body", g.SIZE_TITLE, 600)), ("status_word", ("body", g.SIZE_PILL, 600)),
+        ("status_word_shrunk", ("body", g.PILL_SIZES[-1], 600)), ("loading_word", ("body", g.SIZE_PILL, 600)),
+        ("loading_word_shrunk", ("body", g.PILL_SIZES[-1], 600)), ("status_pill", ("body", g.SIZE_PILL, 600)),
+        ("row_label", ("body", g.SIZE_LABEL, 400)), ("row_tag", ("mono", g.SIZE_TAG, 400)),
+        ("row_value", ("mono", g.SIZE_VALUE, 700)), ("cap_badge", ("body", g.SIZE_PILL, 600)))})
+_G_SPEC.update({_GT + "resets": ("body", g.SIZE_FOOT, 400), _GT + "pace": ("body", g.SIZE_FOOT, 600),
+                _GT + "pace_short": ("body", g.SIZE_FOOT, 600), _GT + "guard_lead": ("body", g.SIZE_FOOT, 600),
+                _GT + "guard_text": ("body", g.SIZE_FOOT, 400), _GF + "footer_line": ("body", g.SIZE_FOOT, 400),
+                "gates.strip.window_tag": ("body", g.SIZE_STRIP_K, 600),
+                "gates.strip.value": ("mono", g.SIZE_STRIP_V, 700)})
+for _kind in ("stale", "refused", "no_login", "rate_limited", "pace", "hold"):
+    _G_SPEC[f"{_GF}{_kind}_lead"] = ("body", g.SIZE_FOOT, 600)
+for _part in ("stale_step", "stale_step_alone", "refused_step", "refused_step_alone", "no_login_step",
+              "no_login_step_alone", "rate_limited_rest", "pace_reset", "hold_rest"):
+    _G_SPEC[_GF + _part] = ("body", g.SIZE_FOOT, 400)
+# What a cut keeps before its first letter, where a box's text starts with what the skin writes before it (a footer's
+# rest: the space after its lead, or " · ").
+_G_JOINT: dict[str, str] = {**{f"{_GF}{kind}_step": " " for kind in ("stale", "refused", "no_login")},
+                            _GF + "rate_limited_rest": " ", _GF + "pace_reset": " · ", _GF + "hold_rest": " · "}
+
+
+def W_gs(text: str, box_id: str) -> float:
+    """``text`` as Gates draws it in ``box_id``'s face (a shrunk word at its floor)."""
+    return W_g(text, *_G_SPEC[box_id])
+
+
+def _g_header(surface: str, room: float) -> NcPlan:
+    """The header line of a Gates surface: the title from TITLE_X, TITLE_GAP, then the pill (its lamp and padding) and,
+    for every status word with a reading, the guard's holding capsule beside it, to the pill's right edge."""
+    p = f"gates.{surface}."
+    words = (p + "status_word", p + "status_word_shrunk", p + "loading_word", p + "loading_word_shrunk")
+    return NcPlan(
+        room, ((p + "title",), words),
+        ((p + "title", g.TITLE_GAP), (words[0], _G_CHROME + _G_CAPSULE), (words[1], _G_CHROME + _G_CAPSULE),
+         (words[2], _G_CHROME), (words[3], _G_CHROME)),
+        (("age", ()), ("shrink", ((words[0], words[1]), (words[2], words[3]))),
+         ("word", ((words[1], "cut"), (words[0], "cut"), (words[3], "cut"), (words[2], "cut")))),
+        "HEADER_GIVE_WAY", "gates")
+
+
+def _g_sign_in(kind: str) -> NcPlan:
+    """A sign-in footer (gates.STEP_FOOTERS): the lead, then the step after a space; when the lead is left out, the
+    step alone, from LEFT without the space (Q3, FOOTER_GIVE_WAY)."""
+    lead, step, alone = f"{_GF}{kind}_lead", f"{_GF}{kind}_step", f"{_GF}{kind}_step_alone"
+    return NcPlan(g.TRACK_W, ((lead,), (step, alone)), (),
+                  (("lead", ((lead, "drop"), (step, alone))), ("step", ((alone, "cut"), (step, "cut")))),
+                  "FOOTER_GIVE_WAY", "gates")
+
+
+def _g_cut(kind: str, rest: str) -> NcPlan:
+    """A footer whose lead is the news: drawn whole, the rest after it cut to the room left (_footer)."""
+    return NcPlan(g.TRACK_W, ((f"{_GF}{kind}_lead",), (f"{_GF}{kind}_{rest}",)), (),
+                  (("rest", ((f"{_GF}{kind}_{rest}", "cut"),)),), ("rest",), "gates")
+
+
+def _g_row(surface: str) -> NcPlan:
+    """A row's first line: the label from LEFT, its tag 6 px after it, the value right-aligned at RIGHT 10 px after
+    them; the tag goes first, then the label is cut (_row)."""
+    p = f"gates.{surface}."
+    return NcPlan(g.TRACK_W, ((p + "row_label",), (p + "row_tag",), (p + "row_value",)),
+                  ((p + "row_tag", 6), (p + "row_value", 10)),
+                  (("tag", ((p + "row_tag", "drop"),)), ("label", ((p + "row_label", "cut"),))), ("tag", "label"),
+                  "gates")
+
+
+G_HEADER_F = _g_header("floating", g.PILL_RIGHT - g.TITLE_X)
+G_HEADER_T = _g_header("tooltip", g.RIGHT - g.TITLE_X)
+G_INFO = NcPlan(g.TRACK_W, ((_GT + "resets",), (_GT + "pace", _GT + "pace_short")),
+                ((_GT + "pace", g.INFO_GAP), (_GT + "pace_short", g.INFO_GAP)),
+                (("pace", ((_GT + "pace", _GT + "pace_short"),)), ("pace_short", ((_GT + "pace_short", "drop"),))),
+                "INFO_GIVE_WAY", "gates")
+G_SIGN_IN = {kind: _g_sign_in(kind) for kind in ("stale", "refused", "no_login")}
+G_CUTS = {"rate_limited": _g_cut("rate_limited", "rest"), "pace": _g_cut("pace", "reset"),
+          "hold": _g_cut("hold", "rest")}
+G_ROWS = {"floating": _g_row("floating"), "tooltip": _g_row("tooltip")}
+G_PLANS: dict[str, NcPlan] = {
+    _GF + "header_line": G_HEADER_F, _GT + "header_line": G_HEADER_T, _GT + "info_line": G_INFO,
+    **{f"{_GF}{kind}_footer": plan for kind, plan in (*G_SIGN_IN.items(), *G_CUTS.items())}}
+G_HOME: dict[str, NcPlan] = {box: plan for plan in (*G_PLANS.values(), *G_ROWS.values())
+                             for slot in plan.slots for box in slot}
+# The statuses whose footer's rest is the step the user needs, by the sign-in plan that fits them (gates.STEP_FOOTERS):
+# a stale reading's (its sign-in ran out, or was refused) and a missing sign-in's.
+G_STEP_KINDS = {"stale": g.ApiStatus.STALE, "refused": g.ApiStatus.STALE, "no_login": g.ApiStatus.NO_CREDENTIALS}
+
+# English's texts in each box, as the skin draws them today (the rooms LIMITS pins are worked out from them).
+_G_AGES = (" · 12 s", " · 41 min", " · 2 min", " · 59 s", " · 1 h", " · 2 d", " · 6 min", " · 44 min", " · 59 min",
+           " · 47 h", " · 100 d")
+_G_RESETS = ("Resets 11:39 PM", "Resets 12:59 PM", "Resets Sat 8:12 PM", "Resets Fri 11:12 PM", "Resets Mon 10:00 AM",
+             "Resets Wed 12:59 PM")
+_G_STEPS = {"stale": "Send Claude Code a message.", "refused": "Run /login in Claude Code.",
+            "no_login": "Open the dashboard for help."}
+_G_LEADS = {"stale": "Hmm, we lost touch.", "refused": "Sign-in refused.", "no_login": "No sign-in found.",
+            "rate_limited": "Rate limited.", "pace": ("Nearly out", "Ahead of pace", "Under pace", "On pace"),
+            "hold": "Guard holding"}
+_G_ENGLISH: dict[str, tuple[str, ...]] = {
+    **{f"gates.{surface}.{part}": texts for surface in ("floating", "tooltip") for part, texts in (
+        ("title", (g.TITLE,)), ("status_word", _G_WITH_READING), ("status_word_shrunk", _G_WITH_READING),
+        ("loading_word", ("LOADING",)), ("loading_word_shrunk", ("LOADING",)),
+        ("row_label", ("Session", "Weekly", "Fable weekly", "Haiku weekly", "Weekly scoped", "Claude code weekly",
+                       "Claude_code weekly", "Design weekly")),
+        ("row_tag", ("5H", "7D", "50% share", "100% share")))},
+    _GF + "row_value": ("--", "0%", "2%", "13%", "96%", "100%"),
+    _GT + "row_value": ("2%", "13%", "96%", "99.9%", "100%", "--", "13.5%"),
+    _GT + "resets": _G_RESETS,
+    _GT + "pace": ("On pace", "Under pace by 18 pts", "Ahead of pace by 12 pts", "Ahead of pace by 100 pts",
+                   "Ahead of pace by 444 pts"),
+    _GT + "pace_short": ("+21 pts", "-18 pts", "+100 pts", "-100 pts"),
+    **{f"{_GF}{kind}_lead": (lead,) if isinstance(lead, str) else lead for kind, lead in _G_LEADS.items()},
+    **{f"{_GF}{kind}_step": (" " + step,) for kind, step in _G_STEPS.items()},
+    **{f"{_GF}{kind}_step_alone": (step,) for kind, step in _G_STEPS.items()},
+    _GF + "rate_limited_rest": (" Showing the last reading.",),
+    _GF + "pace_reset": tuple(f" · {reset}" for reset in _G_RESETS),
+    _GF + "hold_rest": (" · Resumes 10:26 PM (in 2h 14m)", " · Resumes Fri 11:12 PM (in 2d 3h)",
+                        " · Resumes Mon 10:00 AM (in 20h 20m)", " · Resumes Wed 12:59 PM (in 23h 59m)"),
+}
+_G_NAMES_OF = {"title": "the title", "status_word": "the status word", "status_word_shrunk": "the word, shrunk",
+               "loading_word": "LOADING's word", "loading_word_shrunk": "LOADING's word, shrunk",
+               "resets": "the reset", "pace": "the pace", "pace_short": "its points", "row_label": "the label",
+               "row_tag": "the tag", "row_value": "the value", "rate_limited_lead": "the lead",
+               "pace_lead": "the lead", "hold_lead": "the lead", "rate_limited_rest": "the rest",
+               "pace_reset": "the reset", "hold_rest": "the resume time",
+               **{f"{kind}_lead": "the lead" for kind in _G_STEPS}, **{f"{kind}_step": "the step" for kind in _G_STEPS},
+               **{f"{kind}_step_alone": "the step alone" for kind in _G_STEPS}}
+
+
+def _g_name(box_id: str) -> str:
+    return _G_NAMES_OF[box_id.split(".", 2)[2]]
+
+
+def _g_widest(box_id: str) -> float:
+    return max(W_gs(text, box_id) for text in _G_ENGLISH[box_id])
+
+
+def _g_floor(box_id: str) -> float:
+    """What a cut leaves of a box's text: its joint, one letter and "…" (the widest letter or figure); a shrunk word at
+    its floor size."""
+    return max(W_gs(_G_JOINT.get(box_id, "") + c + "…", box_id) for c in _G_FLOOR_CHARS)
+
+
+def _g_limit(box_id: str) -> float:
+    return _nc_room(G_HOME[box_id], box_id, _g_widest, _g_floor, becoming=False)
+
+
+def _g_why(box_id: str) -> str:
+    """How a Gates box's room follows from its line's order, in words."""
+    plan = G_HOME[box_id]
+    upto = nc_rank(plan, box_id)
+    parts = []
+    for slot in plan.slots:
+        if box_id in slot:
+            continue
+        for other in slot:
+            state, box = "whole, its widest", other
+            for step in plan.tuple()[:upto]:
+                for source, then in plan.step(step):
+                    if source == box and state.startswith("whole"):
+                        state = {"drop": "left out", "cut": "cut to one letter"}.get(then) or f"as {_g_name(then)}"
+                        box = then if then not in ("cut", "drop") else box
+            parts.append(f"{_g_name(other)} {state}")
+    order = f"gates.{plan.order}" if isinstance(plan.order, str) else "the skin's fixed order"
+    return (f"the line's {plan.room:g} px less what the skin adds beside it, beside the others as {order} leaves them "
+            f"while it holds, the widest of each slot: {'; '.join(parts)}")
+
+
+def _g(id_: str, limit: float, why: str, fit: str = "none", *, english: tuple[str, ...] | None = None,
+       kinds: tuple[str, ...] = (), templates: tuple[str, ...] = ("{}",), tight: bool = False,
+       keys: tuple[str, ...] = (), measure: Measure | None = None, compose: Callable[[str], Sequence[str]] | None = None,
+       fills: tuple[tuple[str, str], ...] = (), words: bool = True, note: str = "") -> Box:
+    return Box(id_, measure or Measure("gates", _G_SPEC[id_]), limit, why, fit,
+               _G_ENGLISH[id_] if english is None else english, kinds, templates, keys, tight=tight,
+               compose=compose, note=note, fills=fills, words=words)
+
+
+def _g_plan_box(id_: str, fit: str, **kwargs: Any) -> Box:
+    return _g(id_, _g_limit(id_), _g_why(id_), fit, **kwargs)
+
+
+def _g_shrunk(id_: str) -> Measure:
+    """The pill word at the first of gates.PILL_SIZES at which it fits its room, else at the floor (_header_plan)."""
+    role, _size, weight = _G_SPEC[id_]
+    return Measure("gates_fit", (role, weight, _g_limit(id_), g.PILL_SIZES))
+
+
+# The figures each format tag writes in Gates' boxes (g_tags): a reset at FIGURES' two times on the same day and on each
+# weekday, the guard's resume at the same clocks with FIGURES' widest two countdowns, and the pill's ages.
+@lru_cache(maxsize=None)
+def g_tags(language: str) -> dict[str, dict[str, tuple[str, ...]]]:
+    """Each format tag's own figures in Gates' boxes, as the skin words them: {tag/clock: {box id: texts}} for the hover
+    line's reset and the footer's (widget.gates.resets.at with the locale's clock and day clock), the guard footer's
+    rest (gates._hold_runs: the widest the tag's clocks and countdowns make, as #96's plan has it) and the pill's age. A tag's figures stand beside its
+    own (fr-CA's day clock beside fr-CA's pace room, never fr-FR's). English and the pseudo-locale have one, "", whose
+    figures are their boxes' own."""
+    from dataclasses import replace as replaced
+    from datetime import timedelta
+
+    from widget_words import sweep_locales
+
+    if language in (i18n.DEFAULT, i18n.PSEUDO):
+        return {"": {}}
+    found: dict[str, dict[str, tuple[str, ...]]] = {}
+    for locale in sweep_locales(language):
+        words = g._words(locale)
+        clocks = sorted({formats.clock(at, locale) for at in _NC_AT}
+                        | {formats.day_clock(at + timedelta(days=day), locale) for at in _NC_AT for day in range(7)})
+        resets = tuple(str(words.text("widget.gates.resets.at", {"clock": clock})) for clock in clocks)
+        model = dump.sample_model("guard_hold_session", locale=locale)
+        rests = (max((g._hold_runs(replaced(model, guard=replaced(model.guard, resume_clock=clock,
+                                                                  resume_seconds=seconds)))[1][0]
+                      for clock in clocks for seconds in _HEADER_COUNTDOWNS),
+                     key=lambda rest: W_gs(rest, _GF + "hold_rest")),)
+        ages = tuple(dict.fromkeys(" · " + str(g._age_label(replaced(model, age_seconds=seconds)))
+                                   for seconds in _HEADER_AGES))
+        found[f"{locale.format}/{locale.clock}"] = {_GT + "resets": resets, _GF + "pace_reset": tuple(
+            f" · {reset}" for reset in resets), _GF + "footer_line": resets, _GF + "hold_rest": rests, "ages": ages}
+    return found
+
+
+def g_room(box_id: str, language: str, scale: float = 1.0, tag: str | None = None) -> float:
+    """A Gates line box's room in ``language``, worked out as its limit is (_nc_room, its line's order) beside the
+    language's own widest texts: its words', and the figures of format tag ``tag`` (g_tags), or, with no tag, of the
+    tag that leaves the box least. fr-CA's 12-hour day clock is wider than English's reset, so the hover card's pace
+    has less room there. English's is the box's limit."""
+    if tag is None:
+        return min(g_room(box_id, language, scale, each) for each in g_tags(language))
+    figures = g_tags(language)[tag]
+
+    def widest(other: str) -> float:
+        box = BOX[other]
+        found = figures[other] if other in figures else (widest_text(box, language, scale),)
+        return max(box.width(text, scale) for text in found)
+
+    def floor(other: str) -> float:
+        return max(BOX[other].width(_G_JOINT.get(other, "") + c + "…", scale) for c in _G_FLOOR_CHARS) \
+            if BOX[other].measure.how == "gates" else _g_floor(other)
+
+    return _nc_room(G_HOME[box_id], box_id, widest, floor, becoming=False)
+
+
+# ── Gates' pill (gates._header_plan's first step, the age): its whole text where English shows the age ──
+def _g_pill_rooms(surface: str) -> dict[tuple[str, str], float]:
+    """The pill's text room on ``surface`` by (status, the guard's mark beside it), as _header_plan leaves it: from
+    TITLE_GAP after the title (and the mark and its gap) to the pill's right edge, less its lamp and padding. LOADING
+    has no reading, so no mark."""
+    right = g.PILL_RIGHT if surface == "floating" else g.RIGHT
+    title = W_g(g.TITLE, "body", g.SIZE_TITLE, 600)
+    return {(status, mark): right - _G_CHROME - (g.TITLE_X + title + g.TITLE_GAP + width)
+            for status in (*_G_WITH_READING, "LOADING") for mark, width in _G_MARKS.items()
+            if status != "LOADING" or mark == "none"}
+
+
+def g_pill_pairs(surface: str) -> tuple[tuple[str, str], ...]:
+    """The (status, mark) headers English shows its widest age in on ``surface`` (its pill whole: _header_plan takes no
+    step there)."""
+    widest = max(W_gs(age, _GF + "status_pill") for age in _G_AGES)
+    return tuple(pair for pair, room in _g_pill_rooms(surface).items()
+                 if W_gs(pair[0], _GF + "status_pill") + widest <= room + 0.01)
+
+
+@lru_cache(maxsize=None)
+def _g_pills(language: str, surface: str) -> dict[str, float]:
+    """The pills ``language`` draws with an age on ``surface``, each as the skin words it (the view model's status
+    word in the language, " · ", the age as gates._age_label writes it in each of the language's format tags), and the
+    room each has: the least over the headers English shows that status's age in (g_pill_pairs). A pill past it leaves
+    its age out, a cut a draft's shorter status word could settle."""
+    from widget_words import sweep_locales
+
+    words = i18n.app_catalog(language)
+    rooms = _g_pill_rooms(surface)
+    least: dict[str, float] = {}
+    for status, mark in g_pill_pairs(surface):
+        least[status] = min(least.get(status, math.inf), rooms[status, mark])
+    found: dict[str, float] = {}
+    ages = sorted({age for locale in sweep_locales(language) for age in (
+        " · " + str(g._age_label(replaced_age(locale, seconds))) for seconds in _HEADER_AGES)})
+    for status, room in least.items():
+        word = str(words.text(_STATUS_KEY[status]))
+        for age in ages:
+            found.setdefault(word + age, room)
+    return found
+
+
+def replaced_age(locale: Any, seconds: int) -> Any:
+    """A view model of ``locale`` that is ``seconds`` old (its age, as gates._age_label writes it)."""
+    from dataclasses import replace
+
+    return replace(dump.sample_model("stale", locale=locale), age_seconds=seconds)
+
+
+def g_pill_room(surface: str, language: str, text: str) -> float:
+    """The room a pill ``text`` of ``language`` has (_g_pills); a text the language does not compose, its widest."""
+    return _g_pills(language, surface).get(text, max(_g_pill_rooms(surface).values()))
+
+
+def _g_pill_why(surface: str) -> str:
+    pairs = g_pill_pairs(surface)
+    places = []
+    for status in dict.fromkeys(status for status, _mark in pairs):
+        marks = [mark for each, mark in pairs if each == status]
+        places.append(f"{status} ({', '.join(marks)})")
+    return ("the pill's word and its age, from TITLE_GAP after the title (and the guard's mark) to the pill's edge: "
+            "each status's text where English shows its widest age, the least of those headers (by the mark beside "
+            "it): " + "; ".join(places) + ". Past it the age is left out (gates.HEADER_GIVE_WAY's first step), a cut "
+            "a draft's shorter status word could settle")
+
+
+def _g_pill_compose(surface: str) -> Callable[[str], list[str]]:
+    def compose(language: str) -> list[str]:
+        return list(_g_pills(language, surface))
+    return compose
+
+
+# ── Gates' cap badge (gates._cap_badge): drawn last, where it fits after its row's label and tag ──
+# English's widest badge on each surface: the floating widget's percent keeps its space, the hover card's is tight.
+_G_BADGES = {"floating": ("Cap 95%", "Cap 90%", "Cap 100%"), "tooltip": ("Cap 95%", "Cap 90%", "Cap 100%")}
+
+
+@lru_cache(maxsize=None)
+def _g_badge_rows() -> tuple[Any, ...]:
+    """One row of each kind and name Gates' record draws (tests/skin_words.py's states), a scoped row both without a
+    share (7D) and with FIGURES' widest (100 %): each a row a cap badge can stand in."""
+    from dataclasses import replace
+
+    import skin_words
+
+    found: dict[tuple[Any, ...], Any] = {}
+    for model in skin_words.models(skin_words._gates_states).values():
+        for row in g._rows(model):
+            shares = (None, 100.0) if row.kind == "weekly_scoped" else (row.share_pct,)
+            for share in shares:
+                found.setdefault((row.kind, row.scope_name, share), replace(row, share_pct=share))
+    return tuple(found.values())
+
+
+def _g_badge_room_in(surface: str, row: Any, locale: Any) -> float:
+    """The room ``row``'s cap badge leaves its text in ``locale``, as _row and _cap_badge lay the row out: from LEFT
+    to the value (the widest the locale writes, 10 px before it), less the label, the tag 6 px after it (left out where
+    the line is tight), BADGE_GAP and the badge's padding."""
+    p = f"gates.{surface}."
+    values = [g._exact_percent_text(percent, locale) for percent in (99.9, 100.0)] if surface == "tooltip" else \
+        [g._percent_text(100.0, locale)]
+    room = g.TRACK_W - 10 - max(W_gs(value, p + "row_value") for value in values)
+    label = W_gs(str(g._row_name(row, locale=locale)), p + "row_label")
+    tag = W_gs(str(g._tag(row, locale)), p + "row_tag")
+    taken = label + 6 + tag if label + 6 + tag <= room else label
+    return room - taken - g.BADGE_GAP - 2 * g.BADGE_PAD
+
+
+def g_badge_rows(surface: str) -> tuple[Any, ...]:
+    """The rows English shows its widest badge in on ``surface``, its digits at the face's widest as the budgets hold a
+    shape (beside a scoped row named for its surface, at a 100 % share, it leaves the badge out: a long scoped name
+    keeps its room)."""
+    box_id = f"gates.{surface}.cap_badge"
+    digit = max("0123456789", key=lambda figure: W_gs(figure, box_id))
+    widest = max(W_gs(re.sub(r"\d", digit, text), box_id) for text in _G_BADGES[surface])
+    return tuple(row for row in _g_badge_rows() if widest <= _g_badge_room_in(surface, row, i18n.ENGLISH) + 0.01)
+
+
+@lru_cache(maxsize=None)
+def g_badge_room(surface: str, language: str, scale: float = 1.0) -> float:
+    """The cap badge's text room in ``language``: the least its rows leave it (_g_badge_room_in) in each of the
+    language's locales, over the rows English shows its widest badge in (g_badge_rows), with the language's own label,
+    tag and value. English's is the box's limit (Gates' widths are the same at every scale)."""
+    from widget_words import sweep_locales
+
+    return min(_g_badge_room_in(surface, row, locale) for row in g_badge_rows(surface)
+               for locale in sweep_locales(language))
+
+
+def _g_badge_limit(surface: str) -> float:
+    return g_badge_room(surface, i18n.DEFAULT)
+
+
+def _g_badge_why(surface: str) -> str:
+    kinds = sorted({str(g._row_name(row)) + (" at a share" if row.share_pct is not None else "")
+                    for row in g_badge_rows(surface)})
+    return ("after the row's label and tag, before the value (10 px before it), BADGE_GAP and its padding off, the "
+            "least the rows English shows its widest badge in leave it (" + ", ".join(kinds) + "), with the "
+            "language's own label, tag and value (g_badge_room); left out where it does not fit")
+
+
+# What gates._guard_statement reads: the leads, a limit and its cap, the resume sentence, and the limits' names.
+_G_GUARD_KEYS = _g_keys("guard.armed", "guard.armed_list", "guard.holding", "guard.holding_list", "guard.limit",
+                        "guard.cap", "guard.resumes", "guard.time_left", "guard.session", "guard.weekly",
+                        "guard.scoped", "guard.scoped_unnamed")
+
+
+def _g_guard_statements(language: str) -> list[str]:
+    return _guard_statements(language, "gates")
+
+
+# The guard footer's rests English draws (its listed texts): each resume clock with its countdown.
+_G_HOLDS = (("10:26 PM", 2 * 3600 + 14 * 60), ("Fri 11:12 PM", 2 * 86400 + 3 * 3600),
+            ("Mon 10:00 AM", 20 * 3600 + 20 * 60), ("Wed 12:59 PM", 23 * 3600 + 59 * 60))
+
+
+def _g_composed(kind: str) -> Callable[[str], list[str]]:
+    """A footer's rest, as the skin words it beside its lead in a language: the guard's resume (gates._hold_runs) at
+    English's clocks and countdowns in English and the pseudo-locale, at every format tag's own elsewhere (g_tags); the
+    reset after a pace lead the same way; a status's rest or step after the space (gates._copy) in every locale."""
+    def compose(language: str) -> list[str]:
+        from dataclasses import replace
+
+        from widget_words import sweep_locales
+
+        english = language in (i18n.DEFAULT, i18n.PSEUDO)
+        if kind in ("hold", "pace"):
+            box = _GF + ("hold_rest" if kind == "hold" else "pace_reset")
+            if not english:
+                return sorted({text for figures in g_tags(language).values() for text in figures[box]})
+            locale = i18n.dev_locale(language)
+            if kind == "pace":
+                words = g._words(locale)
+                return [" · " + str(words.text("widget.gates.resets.at", {"clock": reset.split(" ", 1)[1]}))
+                        for reset in _G_RESETS]
+            model = dump.sample_model("guard_hold_session", locale=locale)
+            return [g._hold_runs(replace(model, guard=replace(model.guard, resume_clock=clock,
+                                                              resume_seconds=seconds)))[1][0]
+                    for clock, seconds in _G_HOLDS]
+        keys = (g.FOOTER_KEYS[g.ApiStatus.RATE_LIMITED] if kind == "rate_limited" else g.REFUSED_KEYS
+                if kind == "refused" else g.FOOTER_KEYS[G_STEP_KINDS[kind]])
+        return list(dict.fromkeys(str(g._copy(keys, locale)[1]) for locale in sweep_locales(language)))
+    return compose
+
+
+_G_STEP_KEYS = {"stale": ("footer.stale", "footer.stale_step"), "refused": ("footer.refused", "footer.refused_step"),
+                "no_login": ("footer.no_login", "footer.no_login_step")}
+_G_STEP_FILLS = {"stale": (("product", "product"),), "refused": (("command", "command"), ("product", "product")),
+                 "no_login": ()}
+
+
+def _g_header_boxes(surface: str) -> tuple[Box, ...]:
+    """A surface's header: the title (#86's brand mark, drawn as written), the status word at 10 px and shrunk, the
+    same for LOADING's word (beside no guard mark: it has no reading), and the pill with its age."""
+    p = f"gates.{surface}."
+    pill_english = {"floating": ("LIVE · 12 s", "STALE · 41 min", "OFFLINE · 2 min", "PAUSED · 12 s",
+                                 "RATE LIMITED · 6 min", "RATE LIMITED · 44 min", "RATE LIMITED · 59 min",
+                                 "NO LOGIN · 2 d", "LIVE · 59 s", "STALE · 1 h"),
+                    "tooltip": ("LIVE · 12 s", "STALE · 41 min", "OFFLINE · 2 min", "PAUSED · 12 s",
+                                "RATE LIMITED · 6 min", "RATE LIMITED · 44 min", "RATE LIMITED · 59 min",
+                                "NO LOGIN · 59 min", "LOADING · 59 s")}[surface]
+    rooms = _g_pill_rooms(surface)
+    pill = min(rooms[pair] for pair in g_pill_pairs(surface))
+    shrunk, loading = _g_limit(p + "status_word_shrunk"), _g_limit(p + "loading_word_shrunk")
+    return (
+        _g_plan_box(p + "title", "none", words=False),
+        _g_plan_box(p + "status_word", "ellipsis", keys=_status_keys(*_G_WITH_READING)),
+        _g_plan_box(p + "status_word_shrunk", "ellipsis", keys=_status_keys(*_G_WITH_READING),
+                    measure=_g_shrunk(p + "status_word_shrunk"),
+                    note=f"{shrunk:g} px ({p}status_word_shrunk, ellipsis): beside the title and the guard's capsule, "
+                         "a longer word shrinks from 10 px to 9 px, then is cut"),
+        _g_plan_box(p + "loading_word", "ellipsis", keys=_status_keys("LOADING")),
+        _g_plan_box(p + "loading_word_shrunk", "ellipsis", keys=_status_keys("LOADING"),
+                    measure=_g_shrunk(p + "loading_word_shrunk"),
+                    note=f"{loading:g} px ({p}loading_word_shrunk, ellipsis): beside the title (no guard mark: there "
+                         "is no reading yet), a longer word shrinks from 10 px to 9 px, then is cut"),
+        _g(p + "status_pill", pill, _g_pill_why(surface), "drop", english=pill_english,
+           keys=_status_keys(*_G_WITH_READING, "LOADING"), compose=_g_pill_compose(surface),
+           note=f"{pill:g} px for the word and its age where English shows its age ({p}status_pill, drop): past it "
+                "the age is left out"),
+    )
+
+
+def _g_row_boxes(surface: str) -> tuple[Box, ...]:
+    """A surface's row: the label, its tag, the value (to a tenth on the hover card), and the cap badge."""
+    p = f"gates.{surface}."
+    return (
+        _g_plan_box(p + "row_label", "ellipsis",
+                    keys=_g_keys("limit.session", "limit.weekly", "limit.scoped", "limit.scoped_unnamed"),
+                    fills=(("name", "name"),)),
+        _g_plan_box(p + "row_tag", "drop", kinds=("percent",), templates=("{} share",),
+                    keys=_g_keys("window.session", "window.weekly", "share.of"), fills=(("percent", "percent"),)),
+        _g_plan_box(p + "row_value", "none", kinds=("percent",), words=False),
+        _g(p + "cap_badge", _g_badge_limit(surface), _g_badge_why(surface), "drop", english=_G_BADGES[surface],
+           kinds=("percent",), templates=("Cap {}",), keys=_g_keys("cap.tag"), fills=(("percent", "percent"),),
+           tight=surface == "tooltip"),
+    )
+
+
+def _g_footer_boxes() -> tuple[Box, ...]:
+    """The floating widget's footer (the hover card draws it too while not live), by kind: each sign-in footer's lead,
+    its step after the lead and alone (Q3); the leads whose rest is cut (rate limited, a live pace, the guard holding)
+    and their rests; and the one-run footers."""
+    found: list[Box] = []
+    for kind, (lead, step) in _G_STEP_KEYS.items():
+        found += [
+            _g_plan_box(f"{_GF}{kind}_lead", "drop", keys=_g_keys(lead),
+                        note=f"{_g_limit(_GF + kind + '_lead'):g} px ({_GF}{kind}_lead, drop): with its step after it, "
+                             f"the footer's {g.TRACK_W:g} px; past it the lead is left out and the step drawn alone"),
+            _g_plan_box(f"{_GF}{kind}_step", "ellipsis", keys=_g_keys(step), compose=_g_composed(kind)),
+            _g_plan_box(f"{_GF}{kind}_step_alone", "ellipsis", keys=_g_keys(step), fills=_G_STEP_FILLS[kind]),
+        ]
+    found += [
+        _g_plan_box(_GF + "rate_limited_lead", "ellipsis", keys=_g_keys("footer.rate_limited")),
+        _g_plan_box(_GF + "rate_limited_rest", "ellipsis", keys=_g_keys("footer.rate_limited_rest"),
+                    compose=_g_composed("rate_limited")),
+        _g_plan_box(_GF + "pace_lead", "ellipsis",
+                    keys=_g_keys("state.critical", "pace.ahead", "pace.behind", "pace.on")),
+        _g_plan_box(_GF + "pace_reset", "ellipsis", kinds=("clock",), templates=(" · Resets {}", " · Resets Wed {}"),
+                    keys=_g_keys("resets.at"), compose=_g_composed("pace")),
+        _g_plan_box(_GF + "hold_lead", "ellipsis", keys=_g_keys("guard.holding")),
+        _g_plan_box(_GF + "hold_rest", "ellipsis", kinds=("clock", "duration"),
+                    templates=(" · Resumes {} (in 23h 59m)",), keys=_g_keys("guard.resumes", "guard.time_left"),
+                    compose=_g_composed("hold")),
+        _g(_GF + "footer_line", g.TRACK_W, "a footer of one run, from LEFT to RIGHT, cut at its end", "ellipsis",
+           english=("No connection. Retrying every minute.", "Paused. Resume to keep usage live.",
+                    "Fetching your usage.", "Waiting for your first reading.", "No reset time yet.",
+                    "Resets 11:39 PM"),
+           kinds=("clock",), templates=("Resets {}",),
+           keys=_g_keys("footer.offline", "footer.paused", "footer.loading", "footer.waiting", "footer.no_reset",
+                        "resets.at"), fills=(("clock", "clock"),)),
+    ]
+    return tuple(found)
+
+
+def _g_lines() -> tuple[Line, ...]:
+    """Gates' lines: each surface's header and row line, the hover line, and each footer kind's."""
+    found: list[Line] = []
+    for surface, plan, edge in (("floating", G_HEADER_F, "PILL_RIGHT"), ("tooltip", G_HEADER_T, "RIGHT")):
+        found.append(Line(
+            f"gates.{surface}.header_line", plan.room, "the title from TITLE_X, TITLE_GAP, the guard's capsule and "
+            f"the pill, to {edge}; while over, the age is left out, the word shrinks, then it is cut "
+            "(gates.HEADER_GIVE_WAY)", "none", plan.slots, plan.added,
+            tuple((g.TITLE, word) for word in (*_G_WITH_READING, "LOADING")), nc_gives_way(plan)))
+    for surface, value in (("floating", "100%"), ("tooltip", "99.9%")):
+        plan = G_ROWS[surface]
+        found.append(Line(
+            f"gates.{surface}.row_line", plan.room, "the label, its tag and the value, 10 px apart (the tag gives way, "
+            "then the label is cut: _row)", "ellipsis", plan.slots, plan.added,
+            (("Session", "5H", value), ("Weekly", "7D", "13%"), ("Fable weekly", "100% share", value),
+             ("Weekly scoped", "100% share", value))))
+    found.append(Line(
+        _GT + "info_line", G_INFO.room, "the reset from LEFT and the pace right-aligned at RIGHT, INFO_GAP apart; "
+        "while over, the pace takes its short form, then is left out (gates.INFO_GIVE_WAY)", "none", G_INFO.slots,
+        G_INFO.added,
+        (("Resets 11:39 PM", "On pace"), ("Resets Mon 10:00 AM", "Ahead of pace by 100 pts"),
+         ("Resets Wed 12:59 PM", "Ahead of pace by 100 pts"), ("Resets Mon 10:00 AM", "Ahead of pace by 444 pts")),
+        nc_gives_way(G_INFO)))
+    for kind, plan in G_SIGN_IN.items():
+        found.append(Line(
+            f"{_GF}{kind}_footer", plan.room, "the sign-in footer: the lead, then the step after a space; while over, "
+            "the lead is left out and the step drawn alone from LEFT, then it is cut (gates.FOOTER_GIVE_WAY)",
+            "ellipsis", plan.slots, plan.added, ((_G_LEADS[kind], " " + _G_STEPS[kind]),), nc_gives_way(plan)))
+    english = {"rate_limited": (("Rate limited.", " Showing the last reading."),),
+               "pace": tuple((lead, " · Resets 11:39 PM") for lead in _G_LEADS["pace"])
+               + (("Ahead of pace", " · Resets Mon 10:00 AM"), ("Ahead of pace", " · Resets Wed 12:59 PM")),
+               "hold": (("Guard holding", ""), *(("Guard holding", rest) for rest in _G_ENGLISH[_GF + "hold_rest"]))}
+    for kind, plan in G_CUTS.items():
+        found.append(Line(
+            f"{_GF}{kind}_footer", plan.room, "the lead (the news) from LEFT, whole, and the rest after it cut to the "
+            "room left (_footer)", "ellipsis", plan.slots, plan.added, english[kind], nc_gives_way(plan)))
+    return tuple(found)
+
+
 # ── Nostromo's header line, by Q2's order (nostromo.HEADER_GIVE_WAY, an owner default on #94) ──
 # Its slots (the pill, its age, the word or chip on the right), what the skin adds beside each box's text there (the
 # pill's frame, the age's gap, a chip's 8 px, QUALIFIER_GAP between the sides), and what each of the tuple's steps does
@@ -854,13 +1456,6 @@ def _nc(id_: str, spec: str, limit: float, why: str, fit: str = "none", *, engli
         note: str = "") -> Box:
     return Box(id_, measure or Measure("night_city", (spec,)), limit, why, fit, english, kinds, templates, keys,
                tight=tight, fills=fills, words=words, note=note)
-
-
-def _g(id_: str, role: str, size: float, weight: int, limit: float, why: str, fit: str = "none", *,
-       english: tuple[str, ...], kinds: tuple[str, ...] = (), templates: tuple[str, ...] = ("{}",),
-       tight: bool = False, keys: tuple[str, ...] = ()) -> Box:
-    return Box(id_, Measure("gates", (role, size, weight)), limit, why, fit, english, kinds, templates, keys,
-               tight=tight)
 
 
 def _chars(id_: str, limit: float, why: str, fit: str, *, english: tuple[str, ...], kinds: tuple[str, ...] = (),
@@ -1124,103 +1719,40 @@ BOXES: tuple[Box, ...] = (
         "ellipsis", measure=Measure("night_city_fit", ("CHIP", _NC_HOLD_ROOM, nc.STRIP_FLOOR)), english=("HOLD",),
         keys=_nc_keys("guard.hold")),
 
-    # ── Gates: the header (_header) ──
-    _g("gates.floating.title", "body", 12, 600,
-       g.PILL_RIGHT - _G_PILL_CHROME - _G_GUARD - g.TITLE_GAP - g.TITLE_X - _G_WORD_WIDEST,
-       "left of the guard's capsule and the widest status pill", english=("Claude usage",)),
-    _g("gates.floating.status_word", "body", 10, 600,
-       g.PILL_RIGHT - _G_PILL_CHROME - g.TITLE_X - g.TITLE_GAP - _G_TITLE - _G_GUARD,
-       "the pill's word, right of the title and the guard's capsule", english=_STATUS_WORDS,
-       keys=_status_keys(*_STATUS_WORDS)),
-    _g("gates.floating.status_pill", "body", 10, 600,
-       g.PILL_RIGHT - _G_PILL_CHROME - g.TITLE_X - g.TITLE_GAP - _G_TITLE - _G_GUARD,
-       "the word and its age; the age is left out where it does not fit", "drop", kinds=("age",),
-       templates=("RATE LIMITED · {}",),
-       english=("LIVE · 12 s", "STALE · 41 min", "OFFLINE · 2 min", "PAUSED · 12 s", "RATE LIMITED · 6 min",
-                "RATE LIMITED · 44 min", "RATE LIMITED · 59 min", "NO LOGIN · 2 d", "LIVE · 59 s", "STALE · 1 h"),
-       keys=_status_keys("LIVE", "STALE", "OFFLINE", "PAUSED", "RATE LIMITED", "NO LOGIN")),
-    _g("gates.tooltip.title", "body", 12, 600,
-       g.RIGHT - _G_PILL_CHROME - _G_GUARD - g.TITLE_GAP - g.TITLE_X - _G_WORD_WIDEST,
-       "the hover card's header, to RIGHT", english=("Claude usage",)),
-    _g("gates.tooltip.status_word", "body", 10, 600,
-       g.RIGHT - _G_PILL_CHROME - g.TITLE_X - g.TITLE_GAP - _G_TITLE - _G_GUARD,
-       "the hover card's pill word", english=_STATUS_WORDS, keys=_status_keys(*_STATUS_WORDS)),
-    _g("gates.tooltip.status_pill", "body", 10, 600,
-       g.RIGHT - _G_PILL_CHROME - g.TITLE_X - g.TITLE_GAP - _G_TITLE - _G_GUARD,
-       "the hover card's word and age; the age is left out where it does not fit", "drop", kinds=("age",),
-       templates=("RATE LIMITED · {}",),
-       english=("LIVE · 12 s", "STALE · 41 min", "OFFLINE · 2 min", "PAUSED · 12 s", "RATE LIMITED · 6 min",
-                "RATE LIMITED · 44 min", "RATE LIMITED · 59 min", "NO LOGIN · 59 min", "LOADING · 59 s"),
-       keys=_status_keys("LIVE", "STALE", "OFFLINE", "PAUSED", "RATE LIMITED", "NO LOGIN", "LOADING")),
-    # ── Gates: the rows (_row, _cap_badge) ──
-    _g("gates.floating.row_label", "body", 12, 400, g.RIGHT - g.LEFT - 10 - _G_VALUE_100,
-       "left of the widest value; the tag gives way first, then the label is cut", "ellipsis",
-       english=("Session", "Weekly", "Fable weekly")),
-    _g("gates.floating.row_tag", "mono", 11, 400,
-       (g.RIGHT - g.LEFT - 10 - _G_VALUE_100) - 6 - W_g("Fable weekly", "body", 12, 400),
-       "beside the widest label, left out where it does not fit", "drop", kinds=("percent",), templates=("{} share",),
-       english=("5H", "7D", "50% share", "100% share")),
-    _g("gates.floating.row_value", "mono", 15, 700, g.RIGHT - g.LEFT - 10 - _G_LABEL_FLOOR,
-       "right-aligned at RIGHT; the label yields to its shortest cut", kinds=("percent",),
-       english=("--", "0%", "2%", "13%", "96%", "100%")),
-    _g("gates.floating.cap_badge", "body", 10, 600,
-       g.RIGHT - _G_VALUE_100 - 10 - g.LEFT - W_g("Fable weekly", "body", 12, 400) - (6 + W_g("100% share", "mono", 11, 400))
-       - g.BADGE_GAP - 2 * g.BADGE_PAD,
-       "after the widest label and tag, before the value; left out where it does not fit", "drop", kinds=("percent",),
-       templates=("Cap {}",), english=("Cap 95%", "Cap 90%", "Cap 100%")),
-    _g("gates.tooltip.row_label", "body", 12, 400, g.RIGHT - g.LEFT - 10 - _G_VALUE_EXACT,
-       "left of the exact value; the tag gives way first, then the label is cut", "ellipsis",
-       english=("Session", "Weekly", "Fable weekly")),
-    _g("gates.tooltip.row_tag", "mono", 11, 400,
-       (g.RIGHT - g.LEFT - 10 - _G_VALUE_EXACT) - 6 - W_g("Fable weekly", "body", 12, 400),
-       "beside the widest label, left out where it does not fit", "drop", kinds=("percent",), templates=("{} share",),
-       english=("5H", "7D", "50% share", "100% share")),
-    _g("gates.tooltip.row_value", "mono", 15, 700, g.RIGHT - g.LEFT - 10 - _G_LABEL_FLOOR,
-       "right-aligned; the label yields", kinds=("percent",),
-       english=("2%", "13%", "96%", "99.9%", "100%", "--", "13.5%")),
-    _g("gates.tooltip.cap_badge", "body", 10, 600,
-       g.RIGHT - _G_VALUE_EXACT - 10 - g.LEFT - W_g("Fable weekly", "body", 12, 400) - (6 + W_g("100% share", "mono", 11, 400))
-       - g.BADGE_GAP - 2 * g.BADGE_PAD,
-       "after the widest label and tag, before the exact value; left out where it does not fit", "drop",
-       kinds=("percent",), templates=("Cap {}",), english=("Cap 95%", "Cap 90%", "Cap 100%"), tight=True),
-    # ── Gates: the hover card's info line and guard bar (render_tooltip, _guard_bar_lines) ──
-    _g("gates.tooltip.resets", "body", 11, 400, g.RIGHT - g.LEFT - _G_PACE_WIDEST,
-       "from LEFT to the widest pace, right-aligned at RIGHT", kinds=("clock",), templates=("Resets {}", "Resets Wed {}"),
-       english=("Resets 11:39 PM", "Resets 12:59 PM", "Resets Sat 8:12 PM", "Resets Fri 11:12 PM", "Resets Mon 10:00 AM",
-                "Resets Wed 12:59 PM")),
-    _g("gates.tooltip.pace", "body", 11, 600, g.RIGHT - g.LEFT - _G_RESET_WIDEST,
-       "right-aligned at RIGHT, back to the widest reset", kinds=("count",),
-       english=("On pace", "Under pace by 18 pts", "Ahead of pace by 12 pts", "Ahead of pace by 100 pts",
-                "Ahead of pace by 444 pts")),
-    _g("gates.tooltip.guard_lead", "body", 11, 600, _G_BAR_TEXT, "the guard bar's text room",
-       english=("Guard armed:", "Guard holding:", "Guard armed", "Guard holding")),
-    _g("gates.tooltip.guard_text", "body", 11, 400, _G_BAR_TEXT,
-       "each line of the guard bar after its lead; it wraps and the bar grows", "wrap",
-       kinds=("percent", "clock", "duration"),
-       english=("session 95%, weekly 90%", "session 96% (cap 95%).", "Resumes 10:26 PM (in 2h 14m).", "weekly 91% (cap 90%).",
-                "Resumes Fri 11:12 PM (in 2d 3h).")),
-    # ── Gates: the footer (_footer, _footer_runs): a lead at 600, the rest at 400, each run cut to what is left ──
-    _g("gates.floating.footer_lead", "body", 11, 600, g.RIGHT - g.LEFT, "the footer's first run", "ellipsis",
-       english=("Hmm, we lost touch.", "Rate limited.", "No sign-in found.", "Sign-in refused.", "Guard holding",
-                "Nearly out", "Ahead of pace", "Under pace", "On pace")),
-    _g("gates.floating.footer_rest", "body", 11, 400, g.RIGHT - g.LEFT, "the footer's second run, after the lead",
-       "ellipsis", kinds=("clock",), templates=(" · Resets {}", " · Resumes {} (in 23h 59m)"),
-       english=(" Send Claude Code a message.", "No connection. Retrying every minute.", "Paused. Resume to keep usage live.",
-                " Showing the last reading.", " Open the dashboard for help.", "Fetching your usage.",
-                " Run /login in Claude Code.", " · Resets 11:39 PM", " · Resets Mon 10:00 AM", " · Resets Wed 12:59 PM",
-                " · Resumes 10:26 PM (in 2h 14m)", " · Resumes Fri 11:12 PM (in 2d 3h)", " · Resumes Mon 10:00 AM (in 20h 20m)",
-                " · Resumes Wed 12:59 PM (in 23h 59m)", "Resets 11:39 PM", "Waiting for your first reading.",
-                "No reset time yet.")),
-    # ── Gates: the strip and the tray ──
-    _g("gates.strip.window_tag", "body", 11, 600, g.STRIP_RAIL_X0 - g.STRIP_K_X, "from the tag to the rail",
-       english=("5H", "7D")),
-    _g("gates.strip.value", "mono", 11, 700, g.STRIP_VALUE_RIGHT - g.STRIP_RAIL_X1,
-       "right-aligned at STRIP_VALUE_RIGHT, clear of the rail's end", kinds=("percent",), english=("--", "13%", "2%", "100%")),
+    # ── Gates (#96): the header (gates._header_plan: Q2, HEADER_GIVE_WAY; the pill's age where English shows it) and
+    # the rows (_row: the tag gives way, then the label is cut; _cap_badge drawn last where it fits) ──
+    *_g_header_boxes("floating"), *_g_header_boxes("tooltip"), *_g_row_boxes("floating"), *_g_row_boxes("tooltip"),
+    # ── Gates: the hover card's info line (_info_plan: INFO_GIVE_WAY) and guard bar (_guard_bar_lines) ──
+    _g_plan_box(_GT + "resets", "none", kinds=("clock",), templates=("Resets {}", "Resets Wed {}"),
+                keys=_g_keys("resets.at"), fills=(("clock", "clock"),)),
+    _g_plan_box(_GT + "pace", "drop", kinds=("count",), keys=_g_keys("pace.on", "pace.ahead_by", "pace.behind_by"),
+                fills=(("points", "points"),)),
+    _g_plan_box(_GT + "pace_short", "drop", kinds=("count",), keys=_g_keys("pace.points"),
+                fills=(("points", "count"),)),
+    _g(_GT + "guard_lead", _G_BAR_TEXT, "the guard bar's text room: the lead is a run of its own, never wrapped "
+       "(_guard_bar_lines)", english=("Guard armed:", "Guard holding:", "Guard armed", "Guard holding"),
+       keys=_g_keys("guard.armed", "guard.armed_list", "guard.holding", "guard.holding_list")),
+    _g(_GT + "guard_text", _G_BAR_TEXT, "each line of the guard bar after its lead (gates._guard_statement's rest, as "
+       "_guard_bar_lines wraps it); it wraps and the bar grows", "wrap", kinds=("percent", "clock", "duration"),
+       english=("session 95%, weekly 90%", "session 96% (cap 95%).", "Resumes 10:26 PM (in 2h 14m).",
+                "weekly 91% (cap 90%).", "Resumes Fri 11:12 PM (in 2d 3h)."), keys=_G_GUARD_KEYS,
+       compose=_g_guard_statements),
+    # ── Gates: the footer (_footer_plan: Q3, FOOTER_GIVE_WAY, for the sign-in footers; the others cut their rest) ──
+    *_g_footer_boxes(),
+    # ── Gates: the strip (_strip_tag) and the tray ──
+    Box("gates.strip.window_tag", Measure("gates_tag", (g.STRIP_TAG_ROOM,)), g.STRIP_TAG_ROOM,
+        "from the tag to the rail less STRIP_TAG_AIR, at the size it shrinks to (gates.STRIP_TAG_SIZES: 11 px down to 9 "
+        "px), left out where 9 px does not fit", "drop", ("5H", "7D"), keys=_g_keys("window.session", "window.weekly"),
+        note=f"{g.STRIP_TAG_ROOM:g} px at 11 px (gates.strip.window_tag, drop): a longer tag shrinks to 9 px, then is "
+             "left out; any two capitals or figures fit"),
+    _g("gates.strip.value", g.STRIP_VALUE_RIGHT - g.STRIP_RAIL_X1,
+       "right-aligned at STRIP_VALUE_RIGHT, clear of the rail's end", kinds=("percent",),
+       english=("--", "13%", "2%", "100%"), words=False),
     Box("gates.tray.number", Measure("gates_tray"),
         2 * math.sqrt((g.TRAY_RING[TRAY_SIZE][0] - g.TRAY_RING[TRAY_SIZE][1] / 2) ** 2
                       - (round(TRAY_SIZE / 2 + 0.36 * g.TRAY_NUMBER_SIZE) - TRAY_SIZE / 2) ** 2),
         "the ring's hole at the number's baseline on a 32 px icon, in device px", "none",
-        ("--", "0", "13", "99", "100", "999")),
+        ("--", "0", "13", "99", "100", "999"), words=False),
 
     # ── The dashboard's money figures (fmtUsdTile, fmtUsdHero in app.js): "six characters at most", tight (#91) ──
     _chars("dashboard.nostromo.cost_tile", 6, "fmtUsdTile's six characters", "none", kinds=("money",), english=_TILES,
@@ -1322,35 +1854,7 @@ LINES: tuple[Line, ...] = (
          "(night_city.INFO_GIVE_WAY)", "none", NC_INFO.slots, NC_INFO.added,
          (("RST 11:39 PM", "ON PACE"), ("RST WED 12:59 PM", "UNDER PACE -100"), ("RST 12:59 PM", "PACE --")),
          nc_gives_way(NC_INFO)),
-    Line("gates.floating.header_line", g.PILL_RIGHT - g.TITLE_X, "the title, the guard's capsule and the pill, to "
-         "PILL_RIGHT", "none", (("gates.floating.title",), ("gates.floating.status_word",)),
-         (("gates.floating.title", g.TITLE_GAP), ("gates.floating.status_word", _G_PILL_CHROME + _G_GUARD)),
-         tuple(("Claude usage", word) for word in _STATUS_WORDS)),
-    Line("gates.tooltip.header_line", g.RIGHT - g.TITLE_X, "the title, the guard's capsule and the pill, to RIGHT", "none",
-         (("gates.tooltip.title",), ("gates.tooltip.status_word",)),
-         (("gates.tooltip.title", g.TITLE_GAP), ("gates.tooltip.status_word", _G_PILL_CHROME + _G_GUARD)),
-         tuple(("Claude usage", word) for word in _STATUS_WORDS)),
-    Line("gates.floating.row_line", g.RIGHT - g.LEFT, "the label, its tag and the value, 10 px apart", "ellipsis",
-         (("gates.floating.row_label",), ("gates.floating.row_tag",), ("gates.floating.row_value",)),
-         (("gates.floating.row_tag", 6), ("gates.floating.row_value", 10)),
-         (("Session", "5H", "100%"), ("Weekly", "7D", "13%"), ("Fable weekly", "100% share", "100%"))),
-    Line("gates.floating.footer", g.RIGHT - g.LEFT, "the lead and the rest from LEFT, each cut to the room left (themes/"
-         "gates.json's footer_widths.box_px says the same 258, but no code reads it)", "ellipsis",
-         (("gates.floating.footer_lead",), ("gates.floating.footer_rest",)), (),
-         (("Hmm, we lost touch.", " Send Claude Code a message."), ("", "No connection. Retrying every minute."),
-          ("", "Paused. Resume to keep usage live."), ("Rate limited.", " Showing the last reading."),
-          ("No sign-in found.", " Open the dashboard for help."), ("", "Fetching your usage."),
-          ("Sign-in refused.", " Run /login in Claude Code."), ("Guard holding", ""),
-          ("Guard holding", " · Resumes 10:26 PM (in 2h 14m)"), ("Guard holding", " · Resumes Fri 11:12 PM (in 2d 3h)"),
-          ("Guard holding", " · Resumes Mon 10:00 AM (in 20h 20m)"), ("Guard holding", " · Resumes Wed 12:59 PM (in 23h 59m)"),
-          ("Nearly out", " · Resets 11:39 PM"), ("Ahead of pace", " · Resets 11:39 PM"), ("Under pace", " · Resets 11:39 PM"),
-          ("On pace", " · Resets 11:39 PM"), ("Ahead of pace", " · Resets Mon 10:00 AM"),
-          ("Ahead of pace", " · Resets Wed 12:59 PM"), ("", "Resets 11:39 PM"), ("", "Waiting for your first reading."),
-          ("", "No reset time yet."))),
-    Line("gates.tooltip.info_line", g.RIGHT - g.LEFT, "the reset from LEFT and the pace right-aligned at RIGHT", "none",
-         (("gates.tooltip.resets",), ("gates.tooltip.pace",)), (),
-         (("Resets 11:39 PM", "On pace"), ("Resets Mon 10:00 AM", "Ahead of pace by 100 pts"),
-          ("Resets Wed 12:59 PM", "Ahead of pace by 100 pts"), ("Resets Mon 10:00 AM", "Ahead of pace by 444 pts"))),
+    *_g_lines(),
 )
 
 # Where English already runs past its room, as the skins draw it today (box or line id, text; a line's runs joined by
@@ -1373,8 +1877,10 @@ KNOWN_ENGLISH_OVERRUNS: frozenset[tuple[str, str]] = frozenset({
     ("gates.tooltip.status_pill", "RATE LIMITED · 6 min"),
     ("gates.tooltip.status_pill", "RATE LIMITED · 44 min"),
     ("gates.tooltip.status_pill", "RATE LIMITED · 59 min"),
-    ("gates.floating.footer", "Guard holding | · Resumes Mon 10:00 AM (in 20h 20m)"),     # the rest is cut
-    ("gates.floating.footer", "Guard holding | · Resumes Wed 12:59 PM (in 23h 59m)"),
+    ("gates.floating.hold_footer", "Guard holding | · Resumes Mon 10:00 AM (in 20h 20m)"),     # the rest is cut
+    ("gates.floating.hold_footer", "Guard holding | · Resumes Wed 12:59 PM (in 23h 59m)"),
+    ("gates.floating.hold_rest", " · Resumes Mon 10:00 AM (in 20h 20m)"),                    # (#96: by footer kind)
+    ("gates.floating.hold_rest", " · Resumes Wed 12:59 PM (in 23h 59m)"),
 } | {
     # fmtUsdTile and fmtUsdHero write more than six characters for these amounts (what they write in brackets):
     # about $99.995 to $99.999 ($100.00), $99,950 to $999,999 ($100.0K to $1000.0K), from about $99.95M ($100.0M),
@@ -1431,22 +1937,27 @@ def fill_values(box: Box, kind: str, language: str) -> tuple[str, ...]:
     the sign); the signed points; the name, Claude Code's name in the language's capitals, the command as typed."""
     if kind == "count":
         return _POINTS
+    if kind == "points":
+        return ("100",)
     if kind == "number":
         if language in (i18n.DEFAULT, i18n.PSEUDO):
             return ENGLISH_FILLS["number"]
         base = i18n.Locale(setting="system", language=language, system=i18n.DEFAULT,
                            format=i18n.BASE_FORMATS[language], clock=24, offered=(i18n.DEFAULT,))
         return tuple(dict.fromkeys(formats.number(value, base, group=False) for value in ENGLISH_FILLS["number"]))
-    if kind == "name":
+    gates = box.id.startswith("gates.")                 # Gates writes a name and Claude Code's as written (#96)
+    if kind == "name":           # Gates' scoped row: for its model, else its surface (English's own case: Q4)
+        if gates:
+            return (_NAME, g._english_name(PRODUCT, row=True) if language == i18n.DEFAULT else PRODUCT)
         return (casing.upper(_NAME, language),)
     if kind == "product":
-        return (casing.upper(PRODUCT, language),)
+        return (PRODUCT,) if gates else (casing.upper(PRODUCT, language),)
     if kind == "command":
         return (LOGIN_COMMAND,)
     if language == i18n.PSEUDO and kind == "percent":
         return (formats.percent("100", _pseudo_locale(), tight=box.tight),)
     if language in (i18n.DEFAULT, i18n.PSEUDO):
-        return ENGLISH_FILLS[kind]
+        return _G_ENGLISH_FILLS[kind] if gates and kind in _G_ENGLISH_FILLS else ENGLISH_FILLS[kind]
     figures = FIGURES[kind].get(language, ()) + (FIGURES["day_clock"].get(language, ()) if kind == "clock" else ())
     if box.tight and kind == "percent":
         figures = tuple(tight(figure) for figure in figures)
@@ -1669,14 +2180,25 @@ def nc_room(box_id: str, language: str, scale: float = 1.0, tag: str | None = No
 
 def allowed(box: Box, language: str, text: str, scale: float) -> float:
     """The room ``text`` of ``language`` has in ``box`` at ``scale``: the box's budget, and in Nostromo's header and
-    Night City's lines no more than its room in the language (header_room, nc_room) in the tags that write it (a figure)
-    or in any tag (a word), so what a line leaves out beside the language's own wider texts is reported too; Night
-    City's GUARD chip no more than the room its header leaves beside the language's own status words (nc_guard_room)."""
+    Night City's and Gates' lines no more than its room in the language (header_room, nc_room, g_room) in the tags that
+    write it (a figure) or in any tag (a word), so what a line leaves out beside the language's own wider texts is
+    reported too; Night City's GUARD chip no more than the room its header leaves beside the language's own status
+    words (nc_guard_room); Gates' pill its room where English shows the age (g_pill_room, which can be more than
+    English's widest pill), and its cap badge no more than its rows leave it beside the language's own label, tag and
+    value (g_badge_room)."""
     room = budget(box, scale)
     if language == i18n.DEFAULT:
         return room
     if box.id == _NC_GUARD:
         return min(room, nc_guard_room(language))
+    if box.id in (_GF + "status_pill", _GT + "status_pill"):        # its own room, past English's widest pill
+        return g_pill_room(box.id.split(".")[1], language, text)
+    if box.id in (_GF + "cap_badge", _GT + "cap_badge"):
+        return min(room, g_badge_room(box.id.split(".")[1], language, scale))
+    if box.id in G_HOME:
+        tags = g_tags(language)
+        writing = [tag for tag, figures in tags.items() if text in figures.get(box.id, ())]
+        return min(room, *(g_room(box.id, language, scale, tag) for tag in (writing or tags)))
     if box.id in NC_HOME:
         tags = nc_tags(language)
         writing = [tag for tag, figures in tags.items() if text in figures.get(box.id, ())]
