@@ -415,6 +415,15 @@ def format_age(fetched_at: datetime, now: datetime, locale: Locale = ENGLISH) ->
     return casing.upper(formats.ago(count, unit, locale), locale.language)
 
 
+def format_age_short(seconds: int, locale: Locale = ENGLISH) -> str:
+    """An age in its one unit (age_unit), for a readout with no room for "AGO": "12 S", "41 M", "3 H" or "2 D". Other
+    languages give CLDR's narrow unit in capitals ("41MIN" in French, "100 DÍAS" in es-CO)."""
+    count, unit = age_unit(seconds)
+    if formats.english_shapes(locale):
+        return f"{count} {unit.upper()}"
+    return casing.upper(formats.duration(((count, unit),), locale), locale.language)
+
+
 def share_text(allowance_pct: float | None, locale: Locale = ENGLISH) -> str | None:
     """"50% SHARE", its percent rounded with round() and written in ``locale``, its word from the catalog in its
     language ("50 % SHARE" in French while its catalog has no word of its own)."""

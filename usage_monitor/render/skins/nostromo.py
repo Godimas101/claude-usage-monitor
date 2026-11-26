@@ -7,6 +7,10 @@ all six variants render with the same code and no per-variant rules.
 
 Draw order per frame: background, glow halos, crisp marks, then scanlines and the hazard band.
 That is the CSS painting order, with halos kept under the marks they belong to.
+
+Its words are catalog keys (widget.nostromo.*, #94), read in the model's language with English behind it and drawn as
+written: their text is in capitals in every language. A name or a clock put into one is in the language's capitals
+first (casing), and an age or a countdown is written by the view model (format_age_short, format_countdown).
 """
 from __future__ import annotations
 
@@ -19,18 +23,20 @@ from typing import Any
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
-from usage_monitor import formats
+from usage_monitor import casing, formats, i18n
 from usage_monitor import themes as theme_registry
 from usage_monitor.themes import colour as colour_math
 from usage_monitor.data.models import ApiStatus
-from usage_monitor.i18n import Locale
+from usage_monitor.i18n import ENGLISH, Locale
 from usage_monitor.render import engine
 from usage_monitor.render.engine import Canvas, Color, Layer, TRANSPARENT, parse_color, with_alpha
 from usage_monitor.render.model import (
     LAMP_LIMITED,
     LAMP_OFFLINE,
     LAMP_PAUSED,
+    LOGIN_COMMAND,
     NO_INSETS,
+    PRODUCT,
     SEVERITY_CRITICAL,
     SEVERITY_WARNING,
     STALE_EXPIRED,
@@ -38,17 +44,13 @@ from usage_monitor.render.model import (
     STALE_REFUSED,
     SURFACE_FLOATING,
     SURFACE_TASKBAR,
-    UNIT_DAYS,
-    UNIT_HOURS,
-    UNIT_MINUTES,
-    UNIT_SECONDS,
     GuardMark,
     HoverPlay,
     Insets,
     Row,
     WidgetModel,
-    age_unit,
-    countdown_units,
+    format_age_short,
+    format_countdown,
     pace_delta,
     unknown_kind_names,
     worst_severity,
@@ -105,9 +107,9 @@ STRIP_CELL_STEP = 6
 STRIP_VALUE_TOP = 7
 STRIP_VALUE_H = 20
 STRIP_GROUPS = (
-    # label x, bar x, value right edge, window label
-    (22.0, 44.0, 126.0, "5H"),
-    (144.0, 166.0, 256.0, "7D"),
+    # label x, bar x, value right edge, the window tag's key (WINDOW_KEYS: "5H" and "7D" in English)
+    (22.0, 44.0, 126.0, "widget.nostromo.window.session"),
+    (144.0, 166.0, 256.0, "widget.nostromo.window.weekly"),
 )
 STRIP_DIVIDER_X = 134
 STRIP_HOLD_BOX = (129, 10, 140, 25)         # the hold chip that takes the divider's place while the usage guard holds
@@ -176,36 +178,37 @@ GLOW_STRIP_VALUE_LARGE_SIGMA = 2.5
 DASH_ON = 3
 DASH_OFF = 3
 
-STATE_WORDS: dict[str, str] = {
-    "normal": "NOMINAL",
-    "warning": "ADVISORY",
-    "critical": "CRITICAL",
-    "stale": "LAST KNOWN",
-    "offline": "NO CARRIER",
-    "paused": "HOLD",
-    "loading": "ACQUIRING",
-    "rate_limited": "THROTTLED",
-    "no_credentials": "AUTH REQUIRED",
+# The skin's words (#94): catalog keys, in capitals in every language. en.json's English for each is what the skin drew
+# before #94 (tests/fixtures/skin_words_english.json). The header's right-hand word, by _state_word's state:
+STATE_KEYS: dict[str, str] = {
+    "normal": "widget.nostromo.state.normal",                   # NOMINAL
+    "warning": "widget.nostromo.state.warning",                 # ADVISORY
+    "critical": "widget.nostromo.state.critical",               # CRITICAL, in a chip
+    "stale": "widget.nostromo.state.stale",                     # LAST KNOWN
+    "offline": "widget.nostromo.state.offline",                 # NO CARRIER
+    "paused": "widget.nostromo.state.paused",                   # HOLD
+    "loading": "widget.nostromo.state.loading",                 # ACQUIRING
+    "rate_limited": "widget.nostromo.state.rate_limited",       # THROTTLED
+    "no_credentials": "widget.nostromo.state.no_credentials",   # AUTH REQUIRED
 }
 
 # The dashed auth box's two lines for each reason the user must act on the sign-in (WidgetModel.stale_reason). A lost
 # sign-in has the approved mockup's wording (final.html, "stale3"); a sign-in the usage API turned down (HTTP 403) needs
 # a new one, and the command keeps its case (#55); a missing one has no mockup wording, so it reads as the view model's
-# neutral text does.
-AUTH_LINES: dict[str, tuple[str, str]] = {
-    STALE_EXPIRED: ("AUTH LINK LOST.", "USE CLAUDE CODE TO RESTORE."),
-    STALE_REFUSED: ("AUTH REFUSED.", "RUN /login IN CLAUDE CODE."),
-    STALE_NO_LOGIN: ("NO LOGIN FOUND", "OPEN THE DASHBOARD"),
+# neutral text does. {product} is Claude Code's name in the language's capitals, {command} the command as typed.
+AUTH_KEYS: dict[str, tuple[str, str]] = {
+    STALE_EXPIRED: ("widget.nostromo.auth.expired.line1", "widget.nostromo.auth.expired.line2"),
+    STALE_REFUSED: ("widget.nostromo.auth.refused.line1", "widget.nostromo.auth.refused.line2"),
+    STALE_NO_LOGIN: ("widget.nostromo.auth.no_login.line1", "widget.nostromo.auth.no_login.line2"),
 }
 
-# The skin's words for the view model's values: a row's or a guarded limit's name by kind (a scoped one is named for
-# its model or surface, "<NAME> WEEKLY"), and the units of an age ("12 S") and of a countdown ("2H 14M").
-LIMIT_NAMES: dict[str, str] = {"session": "SESSION", "weekly_all": "WEEKLY"}
-SCOPED_SUFFIX = " WEEKLY"
-UNNAMED_SCOPED = "WEEKLY SCOPED"
-UNITS: dict[str, str] = {UNIT_SECONDS: "S", UNIT_MINUTES: "M", UNIT_HOURS: "H", UNIT_DAYS: "D"}
-UNDER_A_MINUTE = "<1M"
-HOLD = "HOLD"
+# A row's or a guarded limit's name by kind. A scoped one is named for its model or surface ("FABLE WEEKLY"), the name
+# in the language's capitals.
+LIMIT_KEYS: dict[str, str] = {"session": "widget.nostromo.limit.session", "weekly_all": "widget.nostromo.limit.weekly"}
+SCOPED_KEY = "widget.nostromo.limit.scoped"
+UNNAMED_SCOPED_KEY = "widget.nostromo.limit.scoped_unnamed"
+# The session and weekly rows' tags ("5H", "7D"), which the strip's labels are too (STRIP_GROUPS).
+WINDOW_KEYS: dict[str, str] = {"session": "widget.nostromo.window.session", "weekly": "widget.nostromo.window.weekly"}
 
 
 # ── Palette ───────────────────────────────────────────────────────────────────
@@ -331,6 +334,12 @@ def _palette(theme: Any, variant: Any, model: WidgetModel) -> Palette:
 
 # ── Shared model reading ──────────────────────────────────────────────────────
 
+def _words(locale: Locale) -> i18n.Catalog:
+    """The catalog the skin's words come from: the locale's language's, English behind it (#94). It comes with the
+    model, so the skin never works out a language itself."""
+    return i18n.app_catalog(locale.language)
+
+
 def _visible_rows(model: WidgetModel) -> list[Row]:
     """The widget's rows. A message box takes the third slot, so only the first two rows show."""
     rows = list(model.rows)
@@ -377,13 +386,13 @@ def _exact_percent_text(percent: float | None, locale: Locale) -> str:
 
 
 def _qualifier(row: Row, locale: Locale) -> str | None:
-    if row.key == "session":
-        return "5H"
-    if row.key == "weekly":
-        return "7D"
+    """The tag after a row's name: its window ("5H", "7D"), or a scoped limit's share ("OF 25% SHARE")."""
+    if row.key in WINDOW_KEYS:
+        return _words(locale).text(WINDOW_KEYS[row.key])
     if row.share_pct is None:
         return None
-    return f"OF {formats.percent(str(round(row.share_pct)), locale)} SHARE"
+    return _words(locale).text("widget.nostromo.share.of",
+                               {"percent": formats.percent(str(round(row.share_pct)), locale)})
 
 
 def _short_qualifier(row: Row, locale: Locale) -> str | None:
@@ -393,18 +402,21 @@ def _short_qualifier(row: Row, locale: Locale) -> str | None:
     return formats.percent(str(round(row.share_pct)), locale)
 
 
-def _row_names(row: Row) -> tuple[str, str]:
+def _row_names(row: Row, *, locale: Locale = ENGLISH) -> tuple[str, str]:
     """(the row's name, its shorter form for a tight line). A scoped limit is named for its model, else its surface:
-    ("FABLE WEEKLY", "FABLE"), and ("WEEKLY SCOPED", "WEEKLY SCOPED") when it has neither. A kind this skin has no
-    words for is named from its code (unknown_kind_names), and a row built without a kind keeps its label whole."""
-    if row.kind in LIMIT_NAMES:
-        name = LIMIT_NAMES[row.kind]
+    ("FABLE WEEKLY", "FABLE"), the name in the language's capitals ("HAİKU WEEKLY" in Turkish), and ("WEEKLY SCOPED",
+    "WEEKLY SCOPED") when it has neither. A kind this skin has no words for is named from its code
+    (unknown_kind_names), and a row built without a kind keeps its label whole."""
+    words = _words(locale)
+    if row.kind in LIMIT_KEYS:
+        name = words.text(LIMIT_KEYS[row.kind])
         return name, name
     if row.kind == "weekly_scoped":
         if not row.scope_name:
-            return UNNAMED_SCOPED, UNNAMED_SCOPED
-        scope = row.scope_name.upper()
-        name = scope + SCOPED_SUFFIX
+            name = words.text(UNNAMED_SCOPED_KEY)
+            return name, name
+        scope = casing.upper(row.scope_name, locale.language)
+        name = words.text(SCOPED_KEY, {"name": scope})
         return name, scope.strip() or name
     if row.kind:
         return unknown_kind_names(row.kind)
@@ -430,7 +442,7 @@ def _name_line(cv: Canvas, row: Row, value: str, semi: Any, reg: Any, vt: Any,
         return used <= room
 
     qualifier, short = _qualifier(row, locale), _short_qualifier(row, locale)
-    full, shorter = _row_names(row)
+    full, shorter = _row_names(row, locale=locale)
     for name, kept in ((full, qualifier), (full, short), (shorter, short)):
         if fits(name, kept):
             return name, kept
@@ -441,17 +453,12 @@ def _name_line(cv: Canvas, row: Row, value: str, semi: Any, reg: Any, vt: Any,
     return (cut, short) if fits(cut, short) else (cut, None)
 
 
-def _countdown(seconds: int) -> str:
-    """The time left as the chip and the hover card say it: "2D 3H", "2H 14M", "9M", or "<1M" under a minute."""
-    return " ".join(f"{count}{UNITS[unit]}" for count, unit in countdown_units(seconds)) or UNDER_A_MINUTE
-
-
 def _age_text(model: WidgetModel) -> str | None:
-    """The age after the status pill ("12 S", "41 M"), shown while the values are live or last-known."""
+    """The age after the status pill ("12 S", "41 M"; "41MIN" in French), shown while the values are live or
+    last-known."""
     if model.age_seconds is None or model.status not in (ApiStatus.LIVE, ApiStatus.STALE, ApiStatus.RATE_LIMITED):
         return None
-    count, unit = age_unit(model.age_seconds)
-    return f"{count} {UNITS[unit]}"
+    return format_age_short(model.age_seconds, model.locale)
 
 
 def _hold_word(model: WidgetModel) -> str | None:
@@ -461,7 +468,11 @@ def _hold_word(model: WidgetModel) -> str | None:
     guard = model.guard
     if guard is None or not guard.holding:
         return None
-    return f"{HOLD} {_countdown(guard.resume_seconds)}" if guard.resume_seconds is not None else HOLD
+    words = _words(model.locale)
+    if guard.resume_seconds is None:
+        return words.text("widget.nostromo.guard.hold")
+    return words.text("widget.nostromo.guard.hold_for",
+                      {"countdown": format_countdown(guard.resume_seconds, model.locale)})
 
 
 def _over_cap(model: WidgetModel, row: Row) -> bool:
@@ -476,7 +487,10 @@ def _cap_text(model: WidgetModel, row: Row) -> str | None:
     """"CAP 95%" for a row that is over its cap, else None."""
     guard = model.guard
     cap = guard.caps.get(row.key) if guard is not None and _over_cap(model, row) else None
-    return None if cap is None else f"CAP {formats.percent(_number(cap), model.locale)}"
+    if cap is None:
+        return None
+    return _words(model.locale).text("widget.nostromo.cap.tag",
+                                     {"percent": formats.percent(_number(cap), model.locale)})
 
 
 def _number(value: float) -> str:
@@ -490,14 +504,15 @@ def _state_word(model: WidgetModel) -> tuple[str, str]:
     hold = _hold_word(model)
     if hold is not None:
         return hold, "chip"
+    words = _words(model.locale)
     status = model.status
     if status is ApiStatus.LIVE:
         worst = worst_severity(model.rows) if not model.stale else "normal"
         if worst == SEVERITY_CRITICAL:
-            return STATE_WORDS["critical"], "chip"
+            return words.text(STATE_KEYS["critical"]), "chip"
         if worst == SEVERITY_WARNING:
-            return STATE_WORDS["warning"], "bright"
-        return STATE_WORDS["normal"], "label"
+            return words.text(STATE_KEYS["warning"]), "bright"
+        return words.text(STATE_KEYS["normal"]), "label"
     keys = {
         ApiStatus.STALE: "stale",
         ApiStatus.OFFLINE: "offline",
@@ -506,7 +521,7 @@ def _state_word(model: WidgetModel) -> tuple[str, str]:
         ApiStatus.RATE_LIMITED: "rate_limited",
         ApiStatus.NO_CREDENTIALS: "no_credentials",
     }
-    return STATE_WORDS[keys[status]], "label"
+    return words.text(STATE_KEYS[keys[status]]), "label"
 
 
 # ── Painting plan: halos first, then marks ────────────────────────────────────
@@ -620,15 +635,18 @@ def _header(plan: _Plan, cv: Canvas, pal: Palette, model: WidgetModel, opts: Ren
         layer, _ = cv.text_layer(word, right, baseline, semi, LABEL_TRACKING, align="right")
         plan.stamp(layer, pal.bright if style == "bright" else pal.label)
     if model.guard is not None and not model.guard.holding:
-        _armed_mark(plan, cv, pal, left_end, right - word_w - (8 if style == "chip" else 0), top)
+        _armed_mark(plan, cv, pal, left_end, right - word_w - (8 if style == "chip" else 0), top, model.locale)
 
 
-def _armed_mark(plan: _Plan, cv: Canvas, pal: Palette, left_end: float, word_left: float, top: float) -> None:
+def _armed_mark(plan: _Plan, cv: Canvas, pal: Palette, left_end: float, word_left: float, top: float,
+                locale: Locale) -> None:
     """The armed guard: "[GUARD]" in the label tone after the age, in the free stretch before the state word. A
     long status ("RATE LIMITED" and its age) leaves room for the short "[G]" only, and a header with no room at
     all draws nothing: the mark is quiet by design."""
     semi = cv.font(FONT_SEMI, LABEL_SIZE)
-    for text in ("[GUARD]", "[G]"):
+    words = _words(locale)
+    for key in ("widget.nostromo.guard.mark", "widget.nostromo.guard.mark_short"):
+        text = words.text(key)
         x = left_end + ARMED_GAP
         if x + cv.advance(text, semi, LABEL_TRACKING) <= word_left - ARMED_GAP:
             layer, _ = cv.text_layer(text, x, cv.baseline_in_box(top + 1, 10, semi), semi, LABEL_TRACKING)
@@ -651,9 +669,14 @@ def _dashed_box(plan: _Plan, cv: Canvas, pal: Palette, x0: float, y0: float, x1:
 
 
 def _message_lines(model: WidgetModel) -> tuple[str, ...] | None:
-    """The lines of the dashed auth box, worded for the reason the user must act (AUTH_LINES). None when the model
+    """The lines of the dashed auth box, worded for the reason the user must act (AUTH_KEYS). None when the model
     asks for no box."""
-    return AUTH_LINES.get(model.stale_reason) if model.stale_reason is not None else None
+    keys = AUTH_KEYS.get(model.stale_reason) if model.stale_reason is not None else None
+    if keys is None:
+        return None
+    words = _words(model.locale)
+    names = {"product": casing.upper(PRODUCT, model.locale.language), "command": LOGIN_COMMAND}
+    return tuple(words.text(key, names) for key in keys)
 
 
 def _message(plan: _Plan, cv: Canvas, pal: Palette, lines: tuple[str, ...], top: float, x0: float, x1: float,
@@ -936,72 +959,93 @@ def _row_tooltip(plan: _Plan, cv: Canvas, pal: Palette, model: WidgetModel, row:
     _cell_bar(plan, cv, pal, LEFT, top + PIP_OFFSET, PIP_STEP, PIP_W, 8, PIP_CELLS, full, partial_w, lit)
 
     info_top = top + TOOLTIP_INFO_OFFSET
-    reset = f"RESETS {row.resets_text.upper()}" if row.resets_text else "RESETS --"
-    info_layer, _ = cv.text_layer(reset, LEFT, cv.baseline_in_box(info_top, 12, reg), reg, QUALIFIER_TRACKING)
+    info_layer, _ = cv.text_layer(_reset_text(row, model.locale), LEFT, cv.baseline_in_box(info_top, 12, reg), reg,
+                                  QUALIFIER_TRACKING)
     plan.stamp(info_layer, pal.label)
-    pace_text, pace_color = _pace_text(pal, row)
+    pace_text, pace_color = _pace_text(pal, row, locale=model.locale)
     pace_layer, _ = cv.text_layer(pace_text, RIGHT, cv.baseline_in_box(info_top, 12, semi), semi,
                                   LABEL_TRACKING, align="right")
     plan.stamp(pace_layer, pace_color)
 
 
+def _reset_text(row: Row, locale: Locale) -> str:
+    """The hover card's reset: "RESETS 11:39 PM", "RESETS SAT 8:12 PM" (the clock in the language's capitals:
+    "RESETS CMT 20:12" in Turkish), "RESETS --" while the time is not known."""
+    words = _words(locale)
+    if not row.resets_text:
+        return words.text("widget.nostromo.resets.unknown")
+    return words.text("widget.nostromo.resets.at", {"clock": casing.upper(row.resets_text, locale.language)})
+
+
 # ── Tooltip: the usage guard's line ───────────────────────────────────────────
 
-def _guard_name(guard: GuardMark, key: str) -> str:
+def _guard_name(guard: GuardMark, key: str, locale: Locale) -> str:
     """A limit the guard watches, in capitals, worded from its kind as the rows are: "SESSION", "WEEKLY",
     "FABLE WEEKLY", "WEEKLY SCOPED". A kind this skin has no words for, and a limit the reading no longer carries,
-    keep the guard's own label for it."""
+    keep the guard's own label for it, in its own language's capitals (English's for a label that is data)."""
+    words = _words(locale)
     kind = guard.kinds.get(key)
-    if kind in LIMIT_NAMES:
-        return LIMIT_NAMES[kind]
+    if kind in LIMIT_KEYS:
+        return words.text(LIMIT_KEYS[kind])
     if kind == "weekly_scoped":
         scope = guard.scope_names.get(key)
-        return scope.upper() + SCOPED_SUFFIX if scope else UNNAMED_SCOPED
-    return guard.labels.get(key, key).upper()
+        if scope:
+            return words.text(SCOPED_KEY, {"name": casing.upper(scope, locale.language)})
+        return words.text(UNNAMED_SCOPED_KEY)
+    return casing.upper(guard.labels.get(key, key))
 
 
-def _lead(words: str, rest: str) -> tuple[str, str]:
-    """(lead, rest): the lead takes its colon only when something follows it."""
-    return (f"{words}:" if rest else words), rest
+def _lead(lead: str, lead_to_list: str, rest: str) -> tuple[str, str]:
+    """(lead, rest): the lead that introduces a list ("GUARD ARMED:") only when something follows it."""
+    return (lead_to_list if rest else lead), rest
 
 
 def _guard_statement(model: WidgetModel) -> tuple[str, str] | None:
     """(lead, rest) of the hover card's guard line, in capitals, or None while the guard is off:
     ("GUARD ARMED:", "SESSION 95%, WEEKLY 90%") and
     ("GUARD HOLDING:", "WEEKLY 91% (CAP 90%). RESUMES FRI 7:12 PM (IN 2D 3H)."). A guard with nothing to list (no
-    caps) is its lead alone, without the colon: ("GUARD ARMED", "")."""
+    caps) is its lead alone, without the colon: ("GUARD ARMED", ""). Each limit, its cap, the resume time and the time
+    left are glued, so a wrap keeps each on one line. The ", " between limits, the space before a cap and the closing
+    periods are the code's: the four languages write them alike."""
     guard, locale = model.guard, model.locale
     if guard is None:
         return None
+    words = _words(locale)
     if not guard.holding:
-        caps = ", ".join(engine.glue(f"{_guard_name(guard, key)} {formats.percent(_number(cap), locale)}")
-                         for key, cap in guard.caps.items())
-        return _lead("GUARD ARMED", caps)
+        caps = ", ".join(engine.glue(words.text("widget.nostromo.guard.limit", {
+            "name": _guard_name(guard, key, locale), "percent": formats.percent(_number(cap), locale)}))
+            for key, cap in guard.caps.items())
+        return _lead(words.text("widget.nostromo.guard.armed"), words.text("widget.nostromo.guard.armed_list"), caps)
     limits = []
     for key in guard.over_keys:
-        name, reading, cap = _guard_name(guard, key), guard.readings.get(key), guard.caps.get(key)
-        text = engine.glue(name if reading is None else f"{name} {_percent_text(reading, locale)}")
+        name, reading, cap = _guard_name(guard, key, locale), guard.readings.get(key), guard.caps.get(key)
+        text = engine.glue(name if reading is None else words.text("widget.nostromo.guard.limit", {
+            "name": name, "percent": _percent_text(reading, locale)}))
         if cap is not None:
-            text += " " + engine.glue(f"(CAP {formats.percent(_number(cap), locale)})")
+            text += " " + engine.glue(words.text("widget.nostromo.guard.cap",
+                                                 {"percent": formats.percent(_number(cap), locale)}))
         limits.append(text)
     rest = ", ".join(limits)
     rest = f"{rest}." if rest else ""
     if guard.resume_seconds is not None and guard.resume_clock:
-        clock = engine.glue(guard.resume_clock.upper())
-        countdown = engine.glue(f"(IN {_countdown(guard.resume_seconds)})")
-        rest = f"{rest} RESUMES {clock} {countdown}."
-    return _lead("GUARD HOLDING", rest.strip())
+        clock = engine.glue(casing.upper(guard.resume_clock, locale.language))
+        time_left = engine.glue(words.text("widget.nostromo.guard.time_left",
+                                           {"countdown": format_countdown(guard.resume_seconds, locale)}))
+        rest = f"{rest} {words.text('widget.nostromo.guard.resumes', {'clock': clock, 'time_left': time_left})}."
+    return _lead(words.text("widget.nostromo.guard.holding"), words.text("widget.nostromo.guard.holding_list"),
+                 rest.strip())
 
 
 def _guard_lines(cv: Canvas, model: WidgetModel) -> tuple[str, list[str]]:
     """(the lead, the guard's line broken to the card's width), measured on ``cv`` (any canvas of the frame's scale).
-    No lines while the guard is off; a guard with nothing to list is its lead alone."""
+    No lines while the guard is off; a guard with nothing to list is its lead alone. The lead is glued, so its
+    colon stays with it (a French " :" never starts a line)."""
     statement = _guard_statement(model)
     if statement is None:
         return "", []
     lead, rest = statement
     reg = cv.font(FONT_REG, LABEL_SIZE)
-    text = f"{lead} {rest}" if rest else lead
+    text = engine.glue(lead) + (f" {rest}" if rest else "")
     return lead, engine.wrap_words(text, lambda line: cv.advance(line, reg, QUALIFIER_TRACKING), RIGHT - LEFT)
 
 
@@ -1029,15 +1073,20 @@ def _guard_block(plan: _Plan, cv: Canvas, pal: Palette, lead: str, lines: list[s
             plan.stamp(layer, pal.main)
 
 
-def _pace_text(pal: Palette, row: Row) -> tuple[str, Color]:
+def _pace_text(pal: Palette, row: Row, *, locale: Locale = ENGLISH) -> tuple[str, Color]:
+    """The hover card's pace and its tone: "AHEAD +21 PTS" (bright), "BEHIND -18 PTS", "ON PACE", or "PACE --" with
+    no reading or no reset time. The points are signed ASCII digits, as before #94: a whole number under 1000 and its
+    sign are written alike in every language the app has (no group sign; CLDR's minus is "-" in each)."""
+    words = _words(locale)
     delta = pace_delta(row.percent, row.time_fraction)
     if delta is None or row.pace is None:
-        return "PACE --", pal.label
+        return words.text("widget.nostromo.pace.none"), pal.label
     if row.pace == "on_pace":
-        return "ON PACE", pal.label
-    sign = "+" if delta >= 0 else "-"
-    word = "AHEAD" if row.pace == "ahead" else "BEHIND"
-    return f"{word} {sign}{abs(delta):.0f} PTS", pal.bright if row.pace == "ahead" else pal.label
+        return words.text("widget.nostromo.pace.on"), pal.label
+    points = f"{'+' if delta >= 0 else '-'}{abs(delta):.0f}"
+    if row.pace == "ahead":
+        return words.text("widget.nostromo.pace.ahead", {"points": points}), pal.bright
+    return words.text("widget.nostromo.pace.behind", {"points": points}), pal.label
 
 
 # ── Taskbar strip ─────────────────────────────────────────────────────────────
@@ -1058,11 +1107,12 @@ def _render_strip(model: WidgetModel, pal: Palette, scale: float, opts: RenderOp
     label_baseline = cv.baseline_in_box(STRIP_LABEL_TOP, 12, semi)
     value_baseline = cv.baseline_in_box(STRIP_VALUE_TOP, STRIP_VALUE_H, vt)
     rows = list(model.rows[:2])
+    words = _words(model.locale)
     for index, (label_x, bar_x, value_right, window) in enumerate(STRIP_GROUPS):
         row = rows[index] if index < len(rows) else None
         percent = row.percent if row is not None else None
         emphasis = _row_emphasis(model, row) if row is not None else "normal"
-        label_layer, _ = cv.text_layer(window, label_x, label_baseline, semi, STRIP_LABEL_TRACKING)
+        label_layer, _ = cv.text_layer(words.text(window), label_x, label_baseline, semi, STRIP_LABEL_TRACKING)
         plan.stamp(label_layer, pal.label)
 
         lit = _lit_color(pal, emphasis)

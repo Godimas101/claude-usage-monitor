@@ -397,6 +397,24 @@ def test_the_skins_numbers_follow_the_locale_where_they_are_drawn(runs):
     assert "96 % (CAP 95 %)" in statement.replace("\u00a0", " ")
 
 
+def test_nostromo_writes_names_and_units_in_the_language(runs):
+    """#94: Nostromo's words come from the catalog (English's while a language has none of its own), a scope's name in
+    the language's capitals on its row and in the guard's line (Turkish's dotted İ, Chris's answer on #86), and its
+    age and hold chip as the view model writes them: CLDR's narrow units in capitals outside English."""
+    at = NOW + timedelta(days=2, hours=3)
+    state = held(at, NOW, label="", scope_model="Haiku")
+    over = [*state.guard["over"], {"name": "Haiku weekly", "label": "Haiku weekly", "percent": 12.0, "cap": 10}]
+    state = dataclasses.replace(state, usage_fetched_at=NOW - timedelta(minutes=41), guard={**state.guard, "over": over})
+    for locale, name, hold, age in ((loc("tr-TR"), "HAİKU WEEKLY", "HOLD 2G 3S", "41D"),
+                                    (loc("fr-FR"), "HAIKU WEEKLY", "HOLD 2J 3H", "41MIN"),
+                                    (EN, "HAIKU WEEKLY", "HOLD 2D 3H", "41 M")):
+        model = build_model(state, NOW, show_scoped="always", locale=locale)
+        floating, tooltip = (texts(drawn(runs, "nostromo", surface, model)) for surface in ("floating", "tooltip"))
+        assert {name, hold, age} <= set(floating) and name in tooltip, (locale.format, floating)
+        assert f"{name} " in " ".join(tooltip[tooltip.index("GUARD HOLDING:"):]), (locale.format, tooltip)
+        assert not [text for text in floating + tooltip if COMBINING_DOT in text], locale.format
+
+
 # ── The tray's percent (step 1.7) and words (#93) ─────────────────────────────
 
 def test_the_tray_tooltip_writes_its_percents_in_the_locale():

@@ -7,11 +7,14 @@ local.
 """
 from __future__ import annotations
 
+import dataclasses
 import json
+import re
 from typing import Any
 
 import pytest
 
+import english_left
 import skin_words
 
 RECORDED: dict[str, Any] = skin_words.recorded()
@@ -128,3 +131,162 @@ def test_the_english_catalog_is_nostromos_english() -> None:
     paces = [helpers[f"pace/{shape}"]["rows"][0]["pace"][0] for shape in ("none", "on", "ahead_100", "behind_100")]
     assert [text("pace.none"), text("pace.on"), text("pace.ahead", points="+100"),
             text("pace.behind", points="-100")] == paces
+
+
+# ── The skin's words come from the catalog (#94 steps 2 and 3) ────────────────
+
+def _marked(english: str) -> str:
+    """``english`` with the first letter of each word in lower case, its placeholders kept: "aUTH lINK lOST.",
+    "hOLD {countdown}", "[gUARD]"."""
+    parts = re.split(r"(\{[A-Za-z_][A-Za-z0-9_]*\})", english)
+    return "".join(part if index % 2 else re.sub(r"(?<![A-Za-z])[A-Z]", lambda m: m.group(0).lower(), part)
+                   for index, part in enumerate(parts))
+
+
+def _tokens(text: str) -> list[str]:
+    return [token.strip("[](),.:;") for token in text.split()]
+
+
+def test_nostromo_takes_every_word_from_the_catalog_as_written(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every word Nostromo draws comes from a Catalog.text call on one of its keys, drawn as the catalog writes it.
+    The catalog is patched so each widget.nostromo text has each word's first letter in lower case ("nOMINAL",
+    "hOLD {countdown}"), Catalog.text is spied on, and every recorded state is drawn on every surface at 1.0. The
+    texts the skin draws that are not its words are taken out of each run first: the view model's status word (the
+    pill) and the data it read (a kind's name from its code, a guard label). After that no word of a run may be one of
+    the marked words in another case: a word drawn as a literal, or a catalog text cased again, fails (a word of one
+    letter, "5H" or "[G]", is marked all in lower case, so only capitals are seen there). The skin reads every one of
+    its keys and no other. Its faces are monospaced, so the marked frames lay out as English's, drawn first (checked):
+    each key is drawn where English draws it."""
+    from usage_monitor import casing, i18n
+    from usage_monitor.render import dump
+    from usage_monitor.render.skins import get_skin
+    from usage_monitor.render.skins import nostromo
+
+    theme = dump.load_theme_objects()["nostromo"]
+    skin, variant = get_skin("nostromo"), theme.variants[0]
+    models = skin_words.models(skin_words._nostromo_states)
+    english_runs = {name: skin_words.runs(skin, model, theme, variant, dump.TASKBAR_HEIGHTS_AT_1X, scales=(1.0,))
+                    for name, model in models.items()}
+    english = i18n.load_catalog("en").english()
+    own = {key: _marked(value) for key, value in english.items() if key.startswith("widget.nostromo.")}
+    catalog = i18n.Catalog("en", {}, {**english, **own})
+    monkeypatch.setattr(i18n, "app_catalog", lambda language: catalog)
+    data = {str(model.status_text) for model in models.values()}
+    read: set[str] = set()
+    real_text, real_names = i18n.Catalog.text, nostromo.unknown_kind_names
+
+    def text(self: Any, key: str, values: Any = None) -> Any:
+        read.add(key)
+        return real_text(self, key, values)
+
+    def unknown_kind_names(kind: str) -> tuple[str, str]:
+        names = real_names(kind)
+        data.update(names)
+        return names
+
+    class Labels(dict):  # type: ignore[type-arg]
+        """A guard's labels, saying which the skin read."""
+
+        def get(self, key: str, default: Any = None) -> Any:
+            label = super().get(key, default)
+            data.add(str(casing.upper(label)))
+            return label
+
+    monkeypatch.setattr(i18n.Catalog, "text", text)
+    monkeypatch.setattr(nostromo, "unknown_kind_names", unknown_kind_names)
+    drawn = {}
+    for name, model in models.items():
+        if model.guard is not None:
+            guard = dataclasses.replace(model.guard, labels=Labels(model.guard.labels))
+            model = dataclasses.replace(model, guard=guard)
+        drawn[name] = skin_words.runs(skin, model, theme, variant, dump.TASKBAR_HEIGHTS_AT_1X, scales=(1.0,))
+    marked = {token.upper(): token for value in own.values() for token in _tokens(value)
+              if re.search("[A-Za-z]", token) and not token.startswith("{")}
+    wrong, moved, words = [], [], 0
+    for name, surfaces in drawn.items():
+        if [[run[1:] for run in found] if not isinstance(found, str) else found for found in surfaces.values()] != [
+                [run[1:] for run in found] if not isinstance(found, str) else found
+                for found in english_runs[name].values()]:
+            moved.append(name)
+        for surface, found in surfaces.items():
+            if isinstance(found, str):
+                continue
+            for run in found:
+                rest = run[0]
+                for piece in sorted(data, key=len, reverse=True):
+                    rest = rest.replace(piece, " ")
+                for token in _tokens(rest):
+                    if token.upper() in marked:
+                        words += token == marked[token.upper()]
+                        if token != marked[token.upper()]:
+                            wrong.append((name, surface, run[0], token))
+    assert wrong == []
+    assert read == set(own), sorted(read ^ set(own))
+    assert moved == []
+    assert words > 1000
+
+
+# What Nostromo draws in English in every language, by design: data, not words.
+DATA_LEFTOVERS: dict[str, str] = {
+    "DESIGN WEEKLY": "a kind the usage API names that no catalog has words for, named from its code "
+                     "(model.unknown_kind_names, #93 D4)",
+    "OPUS WEEKLY": "a limit gone from the reading keeps the guard's own label in every language (#93 D4, owner "
+                   "default)",
+}
+
+
+def test_no_nostromo_run_is_english_in_the_pseudo_locale() -> None:
+    """Every run Nostromo draws in the pseudo-locale is the pseudo-locale's, as tests/english_left.py judges it: in
+    every recorded state (the refused sign-in, the edge and guard states and the states Nostromo's words hang on, which
+    the frame dump lacks), on every surface, at 1.0. Names are taken out (the scan's widget names, the states' scope
+    names as given and in capitals, the commands), and so are the pseudo-locale's format words (its weekdays, AM and
+    PM). What stays English is data: DATA_LEFTOVERS, each drawn."""
+    from usage_monitor import casing, i18n
+    from usage_monitor.render import dump
+    from usage_monitor.render.skins import get_skin
+
+    pseudo = i18n.dev_locale(i18n.PSEUDO)
+    models = skin_words.models(skin_words._nostromo_states, pseudo)
+    scopes = {scope for model in models.values()
+              for scope in [*(row.scope_name for row in model.rows),
+                            *(model.guard.scope_names.values() if model.guard is not None else ())] if scope}
+    names = (*english_left.widget_names(), *i18n.COMMANDS, *sorted(scopes),
+             *sorted(casing.upper(scope, pseudo.language) for scope in scopes))
+    theme = dump.load_theme_objects()["nostromo"]
+    skin, variant = get_skin("nostromo"), theme.variants[0]
+    texts: dict[str, str] = {}
+    for name, model in models.items():
+        for surface, found in skin_words.runs(skin, model, theme, variant, dump.TASKBAR_HEIGHTS_AT_1X,
+                                              scales=(1.0,)).items():
+            for run in ([] if isinstance(found, str) else found):
+                texts.setdefault(run[0], f"{name} {surface}")
+    format_words = english_left.pseudo_format_words()
+    left = english_left.english(texts, (*names, *DATA_LEFTOVERS), format_words)
+    assert left == set(), {text: where for text, where in texts.items() if english_left.entry(text) in left}
+    assert all(any(leftover in text for text in texts) for leftover in DATA_LEFTOVERS)
+    assert {"Claude Code", "claude_code", "Haiku"} <= scopes
+    refused = RECORDED["nostromo"]["refused"]["runs"]["floating@1"]
+    assert english_left.english([run[0] for run in refused], names, format_words) >= {
+        "AUTH REFUSED.", "RUN /login IN CLAUDE CODE."}                     # English is caught
+
+
+def test_the_guard_lead_keeps_its_colon_on_its_line(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The guard line's lead is the language's, its colon too, and French writes a space before it ("GARDE EN
+    ATTENTE :"). The code keeps the lead on one line, so at no length of the lead, up to past the card's width, does a
+    line of the statement start with the colon: the first line starts with the whole lead."""
+    from usage_monitor import i18n
+    from usage_monitor.render import dump
+    from usage_monitor.render.skins import nostromo
+
+    english = i18n.load_catalog("en").english()
+    cv = nostromo._canvas(nostromo.FLOAT_W, 1, 1.0, dump.load_theme_objects()["nostromo"])
+    for state, key in (("guard_hold_session", "widget.nostromo.guard.holding_list"),
+                       ("guard_armed", "widget.nostromo.guard.armed_list")):
+        model = dump.sample_model(state, locale=i18n.dev_locale("fr"))
+        for length in range(1, 60):
+            lead = ("GARDE EN ATTENTE " * 4)[:length].rstrip() + " :"
+            catalog = i18n.Catalog("fr", {key: lead}, english)
+            monkeypatch.setattr(i18n, "app_catalog", lambda language, catalog=catalog: catalog)
+            drawn, lines = nostromo._guard_lines(cv, model)
+            assert drawn == lead and lines[0].startswith(lead), (state, length, lines)
+            assert not [line for line in lines if line.startswith(":")], (state, length, lines)

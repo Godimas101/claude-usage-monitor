@@ -6,7 +6,8 @@ str.upper(), lower(), capitalize(), title(), casefold() or swapcase() uses the d
 id (a limit kind, a key, the guard's identity strings, a tag or a currency code) or for English that is cased the way it
 always was. The files the widgets', the tray's and the alerts' words come from may hold only the calls listed here, each
 with its reason; a new one fails until it goes through casing or is listed. A listed call that goes away is struck, so
-the list only shrinks. The skins' own calls move to casing in #94 to #96, which add the skins here.
+the list only shrinks. The skins' own calls move to casing in #94 to #96, and each adds its skin here: Nostromo (#94)
+has none left.
 """
 from __future__ import annotations
 
@@ -24,6 +25,8 @@ ALLOWED: dict[tuple[str, str, str], str] = {
         "English: the unit code in capitals, as English always wrote it (other languages go through casing)",
     ("usage_monitor/render/model.py", "format_countdown", "unit.upper()"):
         "English: the unit code in capitals, as English always wrote it (other languages go through casing)",
+    ("usage_monitor/render/model.py", "format_age_short", "unit.upper()"):
+        "English: the unit code in capitals, as Nostromo always wrote it (other languages go through casing)",
     ("usage_monitor/render/model.py", "_scoped_name", "(limit.scope_model or limit.label or '').strip().lower()"):
         "id: a scoped row's key",
     ("usage_monitor/render/model.py", "_guard_mark", "str(limit.label or 'scoped').lower()"):
@@ -62,7 +65,8 @@ ALLOWED: dict[tuple[str, str, str], str] = {
         "id: an ISO 4217 currency code",
 }
 SCANNED = ("usage_monitor/render/model.py", "usage_monitor/app.py", "usage_monitor/data/alerts.py",
-           "usage_monitor/data/identity.py", "usage_monitor/data/usage_api.py", "usage_monitor/formats.py")
+           "usage_monitor/data/identity.py", "usage_monitor/data/usage_api.py", "usage_monitor/formats.py",
+           "usage_monitor/render/skins/nostromo.py")
 
 
 class _Finder(ast.NodeVisitor):
