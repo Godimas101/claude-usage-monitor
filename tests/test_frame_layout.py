@@ -70,8 +70,9 @@ def test_every_variant_draws_the_first_variants_runs(found: dict[tuple[str, ...]
     every recorded state, every variant's runs at 1.0 (floating widget, hover card, strip) are the first variant's of
     its layout, text, place and ink alike. Nostromo's variants share one; Night City's are its looks (Blackwall boxed,
     the Edgerun plate, Relic and Mox plain), and with transparent_bg (floating widget and strip) each draws the runs it
-    draws without it, but Edgerun, which drops its plate there for a layout of its own (segmented bars, no box). Each
-    layout is drawn by a findings job in the pseudo-locale."""
+    draws without it, but Edgerun, which drops its plate there for a layout of its own (segmented bars, no box). This
+    runs in the pseudo-locale alone, so each layout it leaves apart is drawn by a findings job in every language and
+    tag the check draws (the others are held to those by this result)."""
     runs = found["variants", theme, VARIANTS_IN]
     first: dict[str, Any] = {}
     members: dict[str, set[str]] = {}
@@ -93,10 +94,13 @@ def test_every_variant_draws_the_first_variants_runs(found: dict[tuple[str, ...]
             opaque = runs[f"{state}|{layout.split('/')[0]}|{variant}"]
             assert drawn == {surface: opaque[surface] for surface in drawn}, key
     theme_object = dump.load_theme_objects()[theme]
-    looks = {frame_layout.layout_of(theme, theme_object.variant(variant.split("/")[0]), variant.endswith("/clear"))
-             + ("/clear" if variant.endswith("/clear") else "")
-             for language, variant in frame_layout.NIGHT_CITY_JOBS if language == VARIANTS_IN}
-    assert looks == {"boxed", "plate", "plain", "cells/clear"}
+    drawn_in = {language for language, _variant in frame_layout.NIGHT_CITY_JOBS}
+    assert drawn_in == {*frame_layout.LANGUAGES, *frame_layout.TAGS}
+    for each in drawn_in:
+        looks = {frame_layout.layout_of(theme, theme_object.variant(variant.split("/")[0]), variant.endswith("/clear"))
+                 + ("/clear" if variant.endswith("/clear") else "")
+                 for language, variant in frame_layout.NIGHT_CITY_JOBS if language == each}
+        assert looks == {"boxed", "plate", "plain", "cells/clear"}, each
 
 
 def _value_parts(text: str) -> list[str]:
@@ -111,8 +115,9 @@ def test_the_check_sees_night_citys_runs() -> None:
     """Night City draws through its own ink queue (night_city._Ink), whose text layers are new ones, so the recorder
     hooks it: every run tests/skin_words.py sees the skin draw (skin_words.runs, through engine.Canvas.text_layer, in
     this process, so the clocks are this time zone's) is a run of the frame (a value's numerals and its sign joined
-    into one), each state's floating widget, hover card and strip at 1.0, Blackwall's; and the frame records the chips'
-    outlines and fills, the hazard strips, the bars and the body."""
+    into one), each state's floating widget, hover card and strip at 1.0, Blackwall's, the state the record has not
+    among them (frame_layout.night_city_states); and the frame records the chips' outlines and fills, the hazard strips,
+    the bars and the body."""
     from usage_monitor.render.skins import get_skin
 
     theme = dump.load_theme_objects()["night_city"]
@@ -120,7 +125,7 @@ def test_the_check_sees_night_citys_runs() -> None:
     models = frame_layout.models("en", "night_city")
     seen = {"stroke_masks": 0, "fill_masks": 0, "hazard": 0, "cells": 0}
     for name in ("normal3/auto", "warning/auto", "critical/auto", "stale3/auto", "paused/auto", "guard_hold_session/auto",
-                 "guard_armed/auto", "band_hold/stale3", "guard_armed_paused"):
+                 "guard_armed/auto", "band_hold/stale3", "guard_armed_paused", "band_hold/no_credentials"):
         model = models[name]
         seen_runs = skin_words.runs(skin, model, theme, variant, (48,), (1.0,))
         for surface, draw in (("floating@1", lambda: skin.render_floating(model, theme, variant, 1.0, None)),

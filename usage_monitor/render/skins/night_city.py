@@ -283,14 +283,15 @@ FIT_SLACK = 1e-6                    # float error in a sum of advances: a line e
 #   tag MARK_GROWTH_UP["body"] px; Blackwall's outlined reset box MARK_GROWTH_UP["mono"]; the band as far as its
 #   cause's, its age's or its hold chip's word asks, its top hazard strip, outline and hold chip with it (the chip keeps
 #   its word on the band's baseline);
-# - down, round a cedilla or a comma below (Ç Ş Ș) or one of DESCENDERS: Blackwall's outlined LIVE tag and strip tag
-#   MARK_GROWTH_DOWN px; the outlined chip CHIP_GROWTH_DOWN px round a comma below alone (Ș ș: a cedilla keeps 1 px of air
-#   over its 4 px deeper edge).
+# - down, round a mark below (_BELOW, combining class 202 or 220, as Nostromo's rule: a cedilla, an ogonek, a comma or a
+#   dot below; Ç Ş Ș Ą Ạ) or one of DESCENDERS: Blackwall's outlined LIVE tag and strip tag MARK_GROWTH_DOWN px; the
+#   outlined chip CHIP_GROWTH_DOWN px round a comma below alone (Ș ș: a cedilla keeps 1 px of air over its 4 px deeper
+#   edge, an ogonek 3).
 # The filled chips (CRIT, CAP, HOLD) and the Edgerun plate's tags never grow: every mark stays inside the fill. English
 # never moves: none of its boxed words holds such a character. A word with no mark but a DESCENDERS glyph (QUOTA, a
 # bracket) grows the tags down too: without it, its ink lands on the stroke. Where a grown box meets a neighbouring
-# stroke with no air (never overlapping), GROWN_MEETS says so (tests/test_skin_night_city_fit.py holds every other box to
-# keep air round its neighbours).
+# stroke with no air (never overlapping), or a neighbour crosses it by design, GROWN_MEETS says so
+# (tests/test_skin_night_city_fit.py holds every other box to keep air round its neighbours).
 MARK_GROWTH_UP: dict[str, int] = {"body": 1, "mono": 2}
 MARK_GROWTH_DOWN = 2
 CHIP_GROWTH_DOWN = 1
@@ -298,14 +299,18 @@ CHIP_GROWTH_DOWN = 1
 # the outlined tags' bottom stroke. Held to the faces by tests/test_skin_night_city_fit.py.
 RISERS: dict[str, frozenset[str]] = {"body": frozenset(), "mono": frozenset("$()/[\\]^{|}")}
 DESCENDERS = frozenset("();Q[]gjpqy{}")
-REACHING_MARKS = frozenset({unicodedata.lookup("COMBINING CEDILLA"), unicodedata.lookup("COMBINING COMMA BELOW")})
+# Of the marks below, the one whose ink reaches the outlined chip's bottom stroke (measured: the others keep air there).
 CHIP_REACHING_MARKS = frozenset({unicodedata.lookup("COMBINING COMMA BELOW")})
-_ABOVE = 230                        # the canonical combining class of a mark above
+_ABOVE, _BELOW = 230, (202, 220)    # the canonical combining classes of a mark above, and of one below
 # Which face each growing box's word is in, by the name _mark_growth takes.
 MARK_FACES: dict[str, str] = {"chip": "body", "tag": "body", "band": "body", "reset": "mono", "band_age": "mono"}
-# The neighbouring strokes a grown box meets with no air, never overlapping (Q1's recorded conflicts).
+# Q1's recorded conflicts: the neighbouring strokes a grown box meets with no air (never overlapping), and the one that
+# crosses boxes by design.
 GROWN_MEETS: tuple[str, ...] = (
     "a row's WARN chip grown CHIP_GROWTH_DOWN px down round a comma below (Ș ș) meets its row's rail (top + 15)",
+    "a row's pace tick (top + 13 to top + 19, drawn after the chip and the reset box) crosses the bottom stroke of the "
+    "row's WARN chip and of Blackwall's reset box by design, in English too; round a comma below it crosses the grown "
+    "WARN chip's stroke and its last row inside",
 )
 
 
@@ -1044,8 +1049,8 @@ def _mark_growth(text: str | None, box: str) -> tuple[int, int]:
     """(px up, px down) the box named ``box`` (MARK_FACES: "chip" the outlined chip, "tag" Blackwall's outlined LIVE and
     strip tags, "reset" its reset box, "band" and "band_age" the stale band round its cause or hold chip and round its
     age) grows round ``text`` (Q1, see MARK_GROWTH_UP): up for a capital with a mark above or one of its face's RISERS;
-    the tags down for a cedilla or a comma below (REACHING_MARKS) or one of DESCENDERS, the chip down for a comma below.
-    (0, 0) for English's boxed words."""
+    the tags down for a mark below (_BELOW: combining class 202 or 220) or one of DESCENDERS, the chip down for a comma
+    below (CHIP_REACHING_MARKS). (0, 0) for English's boxed words."""
     face = MARK_FACES[box]
     up = below = comma = False
     base = ""
@@ -1057,7 +1062,7 @@ def _mark_growth(text: str | None, box: str) -> tuple[int, int]:
             below = below or ch in DESCENDERS
         elif mark == _ABOVE:
             up = up or base.isupper()
-        elif ch in REACHING_MARKS:
+        elif mark in _BELOW:
             below = True
             comma = comma or ch in CHIP_REACHING_MARKS
     down = (MARK_GROWTH_DOWN if below else 0) if box == "tag" else (CHIP_GROWTH_DOWN if comma else 0) \
@@ -1147,9 +1152,10 @@ def _chip_hold(ink: _Ink, x: float, y: float, word: str, height: float = CHIP_H,
     numerals. The split stays still: the chip is a state, not an event. The Edgerun plate has no bright tone (its
     text is ink, for the yellow) and no glow, so there the word is the CRIT chip's red and the split is left out,
     and so it is for a stale frame (``glitch`` False), which is drawn flat: the fringes would outshine the dimmed
-    word. ``height`` is the chip's, 14 px in the header and 12 inside the stale band, between its hazard strips (14 in a
-    band grown round marks, Q1). The word sits on ``baseline`` (the band's), else centred as in a 14 px chip; ``spec`` is
-    its style (the strip's shrinks, _fit_type). Returns its width."""
+    word. ``height`` is the chip's, 14 px in the header and 12 inside the stale band, between its hazard strips (13 or 14
+    in a band grown round marks, Q1: 1 px for the cause's or the chip's word, 2 for the age's; the band grows as far as
+    the largest of the three asks, _band_growth). The word sits on ``baseline`` (the band's), else centred as in a 14 px
+    chip; ``spec`` is its style (the strip's shrinks, _fit_type). Returns its width."""
     pal = ink.pal
     width = _chip_hold_width(ink, word, spec)
     x0, x1 = ink.snap(x), ink.snap(x + width)

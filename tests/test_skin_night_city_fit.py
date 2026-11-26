@@ -255,6 +255,39 @@ def test_the_band_leaves_an_age_out_before_it_cuts_its_cause(english: dict[str, 
         assert "cause" not in plan.gave_way and (hold is not None or plan.gave_way == ()), (name, plan)
 
 
+def test_a_missing_sign_in_keeps_its_cause_beside_a_holding_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A missing sign-in keeps the last reading (usage_api's NO_CREDENTIALS result), so the guard can hold over the
+    no-login band (#95's review): English's cause stays whole beside HOLD alone, its countdown given way, as before
+    #95; the budgets hold band.no_login to that room as well as to the whole band (band_hold_text, band_text_no_age):
+    the longest cause the skin keeps whole beside the hold chip fits band_hold_text's limit, and one letter more is cut.
+    The frame check draws the state (frame_layout.night_city_states)."""
+    from usage_monitor.render.model import build_model
+
+    state = frame_layout.night_city_states()["band_hold/no_credentials"]
+    model = build_model(state, dump.SAMPLE_NOW, show_scoped="always")
+    assert model.status is nc.ApiStatus.NO_CREDENTIALS and model.guard is not None and model.guard.holding
+    ink = _ink()
+    plan = nc._band_plan(ink, model, nc._band_text(THEME, model), nc._age_tag(model), HOLD_WORD(model))
+    assert plan == nc.BandPlan("NO LOGIN // OPEN DASHBOARD", None, "HOLD", ("countdown",))
+    hold_box, whole_box = (budgets.BOX[f"night_city.floating.{part}"] for part in ("band_hold_text", "band_text_no_age"))
+    assert all("widget.night_city.band.no_login" in box.keys for box in (hold_box, whole_box))
+    assert plan.cause in hold_box.english
+
+    def whole(n: int) -> bool:
+        _catalog(monkeypatch, band__no_login="W" * n)
+        drawn = build_model(state, dump.SAMPLE_NOW, show_scoped="always")
+        cause = nc._band_text(THEME, drawn)
+        assert cause == "W" * n
+        return nc._band_plan(ink, drawn, cause, nc._age_tag(drawn), HOLD_WORD(drawn)).cause == cause
+
+    low, high = 1, 60                                   # whole(low) holds, whole(high) not
+    while high - low > 1:
+        middle = (low + high) // 2
+        low, high = (middle, high) if whole(middle) else (low, middle)
+    assert hold_box.width("W" * low) <= hold_box.limit + 0.01 < hold_box.width("W" * (low + 1)), (low, hold_box.limit)
+    assert hold_box.limit < whole_box.limit
+
+
 # ── The strip ─────────────────────────────────────────────────────────────────
 
 LABEL_ROOM = nc.STRIP_BAR_X - nc.STRIP_LABEL_X - nc.STRIP_LABEL_AIR
@@ -312,11 +345,13 @@ def test_a_strip_word_shrinks_before_it_is_cut(kind: str, monkeypatch: pytest.Mo
 
 def _letters() -> list[str]:
     """Printable ASCII, the French, Spanish and Turkish letters (test_font_coverage's floor) in both cases by each
-    language's rule, the pseudo-locale's letters, and the letters with a comma below (Ș ș Ț ț), the deepest marks the
-    faces have."""
+    language's rule, the pseudo-locale's letters, the letters with a comma below (Ș ș Ț ț), the deepest marks the faces
+    have, and with the other marks below a language may bring: an ogonek (Ą ą Ę ę Į į Ų ų) and a dot below (Ạ ạ Ọ ọ
+    Ṣ ṣ)."""
     from test_font_coverage import FLOOR
 
-    found = set(string.printable.strip()) | set(i18n.pseudo_text(string.ascii_letters)) | {"…"} | set("ȘșȚț")
+    found = (set(string.printable.strip()) | set(i18n.pseudo_text(string.ascii_letters)) | {"…"} | set("ȘșȚț")
+             | set("ĄąĘęĮįŲų") | set("ẠạỌọṢṣ"))
     for language, text in FLOOR.items():
         found |= set(text) | set(casing.upper(text, language))
     return sorted(ch for ch in found if len(ch) == 1)
@@ -393,14 +428,15 @@ def _air(ch: str, box: str, up: int, down: int) -> tuple[int, int]:
 
 
 def _by_rule(ch: str, side: str) -> bool:
-    """Whether ``ch`` is in the rule's own class for a side: a capital with a mark above, or a letter with a cedilla or
-    a comma below (it grows the box whether its mark reaches the edge or not: Ț's comma sits higher than Ș's)."""
+    """Whether ``ch`` is in the rule's own class for a side: a capital with a mark above, or a letter with a mark below
+    (combining class 202 or 220, as Nostromo's rule: it grows the box whether its mark reaches the edge or not: Ț's
+    comma sits higher than Ș's, a dot below higher than a cedilla)."""
     import unicodedata
 
     parts = unicodedata.normalize("NFD", ch)
     if side == "up":
         return parts[0].isupper() and any(unicodedata.combining(part) == nc._ABOVE for part in parts[1:])
-    return any(part in nc.REACHING_MARKS for part in parts[1:])
+    return any(unicodedata.combining(part) in nc._BELOW for part in parts[1:])
 
 
 def test_the_marks_that_grow_a_box_are_the_ones_that_reach_its_edge() -> None:
@@ -408,9 +444,10 @@ def test_the_marks_that_grow_a_box_are_the_ones_that_reach_its_edge() -> None:
     draw (and the comma-below letters), each whose ink keeps less than frame_layout.TOUCH of air over the top stroke of
     any box of a face (or puts ink on the band's hazard strip or out of a fill) at some scale and card height grows
     every box of that face up, and a letter that grows them and reaches none is in the rule's own class (a capital with
-    a mark above); the same below for the outlined tags (a cedilla, a comma below, DESCENDERS) and the outlined chip (a
-    comma below alone). Each grown box keeps that air round every such letter, and its growth is the least that does:
-    one px less leaves a letter on the stroke (Share Tech Mono's 2 px up, the tags' 2 px down)."""
+    a mark above); the same below for the outlined tags (a mark below of class 202 or 220, DESCENDERS: an ogonek reaches
+    the strip tag's stroke, a dot below grows it by the rule alone) and the outlined chip (a comma below alone). Each
+    grown box keeps that air round every such letter, and its growth is the least that does: one px less leaves a
+    letter on the stroke (Share Tech Mono's 2 px up, the tags' 2 px down)."""
     wrong = []
     reach: dict[tuple[str, str], set[str]] = {}
     grows: dict[tuple[str, str], set[str]] = {}
@@ -441,6 +478,7 @@ def test_the_marks_that_grow_a_box_are_the_ones_that_reach_its_edge() -> None:
     assert wrong == []
     assert set(reach) == {("up", "body"), ("up", "mono"), ("down", "tag"), ("down", "chip")}
     assert grows[("down", "chip")] == set("ȘșȚț") and reach[("down", "chip")] == set("Șș")
+    assert set("ĄąĘęĮįŲų") <= reach[("down", "tag")] and set("ẠạỌọṢṣ") <= grows[("down", "tag")] - reach[("down", "tag")]
     least = {("reset", "up"): (nc.MARK_GROWTH_UP["mono"] - 1, 0), ("band_age", "up"): (nc.MARK_GROWTH_UP["mono"] - 1, 0),
              ("live_tag", "down"): (0, nc.MARK_GROWTH_DOWN - 1), ("strip_tag", "down"): (0, nc.MARK_GROWTH_DOWN - 1)}
     for (box, side), growth in least.items():
@@ -506,8 +544,10 @@ def test_the_grown_boxes_keep_off_their_neighbours(scale: float) -> None:
     """At every scale and frame height, in the buffer pixels the canvas draws: a row's grown chip and reset box keep air
     under the row above (its bar, or the header and the band), the hover card's grown info line keeps air under its
     row's bar, the grown header boxes and the band keep air under the frame's top and over the first row's grown
-    boxes, and the grown strip tag stays inside the strip with air. The one conflict GROWN_MEETS records: a row's chip
-    grown CHIP_GROWTH_DOWN round a comma below meets its row's rail with no air, never overlapping."""
+    boxes, and the grown strip tag stays inside the strip with air. The two conflicts GROWN_MEETS records: a row's chip
+    grown CHIP_GROWTH_DOWN round a comma below meets its row's rail with no air, never overlapping; and the row's pace
+    tick crosses the bottom stroke of its WARN chip and of Blackwall's reset box by design (English's too), starting on
+    the ungrown box's stroke and no higher than the grown chip's last row inside, and ending on the bar's top."""
     up_body, up_mono = nc.MARK_GROWTH_UP["body"], nc.MARK_GROWTH_UP["mono"]
     up = max(up_body, up_mono)
     for height in _TALL:
@@ -536,6 +576,12 @@ def test_the_grown_boxes_keep_off_their_neighbours(scale: float) -> None:
                 rail = rows(top + nc.RAIL_Y, top + nc.RAIL_Y + nc.RAIL_H)
                 chip = rows(top, top + nc.CHIP_H + nc.CHIP_GROWTH_DOWN)
                 assert chip[1] == rail[0] < rail[1], (height, scale, pitch, index)       # meets, never overlaps
+                tick = rows(top + nc.TICK_TOP, top + nc.TICK_TOP + nc.TICK_H)
+                stroke = rows(top + nc.CHIP_H - 1, top + nc.CHIP_H)          # the ungrown chip's and reset box's
+                inside = rows(top + nc.CHIP_H + nc.CHIP_GROWTH_DOWN - 2, top + nc.CHIP_H + nc.CHIP_GROWTH_DOWN - 1)
+                bar = rows(top + nc.BAR_Y, top + nc.BAR_Y + nc.BAR_H)
+                assert stroke[0] <= tick[0] < stroke[1] and inside[0] <= tick[0] and chip[1] < tick[1] <= bar[0], (
+                    height, scale, pitch, index, tick)                                   # crosses, by design
                 if info:
                     bar = rows(top + nc.BAR_Y, top + nc.BAR_Y + nc.BAR_H)[1]
                     line = top + nc.TOOLTIP_INFO
@@ -544,5 +590,9 @@ def test_the_grown_boxes_keep_off_their_neighbours(scale: float) -> None:
     body = strip._rect_px(0, 1, 1, nc.STRIP_H - 1)[1::2]
     tag = strip._rect_px(0, nc.STRIP_TAG[1] - up_body, 1, nc.STRIP_TAG[3] + nc.MARK_GROWTH_DOWN)[1::2]
     assert body[0] < tag[0] and tag[1] < body[1], scale
-    assert nc.GROWN_MEETS == ("a row's WARN chip grown CHIP_GROWTH_DOWN px down round a comma below (Ș ș) meets its "
-                              "row's rail (top + 15)",)
+    assert nc.GROWN_MEETS == (
+        "a row's WARN chip grown CHIP_GROWTH_DOWN px down round a comma below (Ș ș) meets its row's rail (top + 15)",
+        "a row's pace tick (top + 13 to top + 19, drawn after the chip and the reset box) crosses the bottom stroke of "
+        "the row's WARN chip and of Blackwall's reset box by design, in English too; round a comma below it crosses the "
+        "grown WARN chip's stroke and its last row inside")
+    assert (nc.TICK_TOP, nc.TICK_TOP + nc.TICK_H) == (13, 19)          # as GROWN_MEETS words it

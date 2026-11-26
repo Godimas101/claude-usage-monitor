@@ -702,7 +702,9 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
     armed guard's GUARD chip is drawn only in the room left, as before.
   - The stale band (`_band_plan`, `BAND_GIVE_WAY`, one tuple for both paths): the hold chip drops its countdown, the age
     is left out, and last the cause is cut. Before #95 the band without the guard cut its cause beside an age that did
-    not fit and then dropped the age too (es-CO's `100 DÍAS OLD`).
+    not fit and then dropped the age too; now that Night City writes its age with `format_age_short`, es-CO's
+    `100 DÍAS OLD` would have met that. A missing sign-in has no age but keeps the last reading, so the guard can hold
+    and its cause sit beside the hold chip.
   - The hover card's line (`_info_plan`, `INFO_GIVE_WAY`): the reset never gives way; the pace keeps `VALUE_GAP` off
     it, takes its signed points (`-18`, in its chip and colour, or plain on a stale card), then is left out; a pace with
     no points (ON PACE, PACE --) is left out at once.
@@ -715,11 +717,14 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
     `$()/[\]^{|}`) grows the outlined chip (the header's status and GUARD chips, a row's WARN, the pace chip) and
     Blackwall's LIVE and strip tags 1 px up, Blackwall's reset box 2 px up (`MARK_GROWTH_UP`), and the stale band as
     far as its words ask, its top hazard strip, outline and hold chip with it, the chip's word on the band's baseline.
-    A cedilla or a comma below (Ç Ş Ș), or a Rajdhani glyph that drops below the line (`DESCENDERS`: `();Q[]gjpqy{}`),
-    grows Blackwall's LIVE and strip tags 2 px down; the outlined chip grows 1 px down round a comma below alone. The
-    filled chips and the Edgerun plate's tags never grow. English never moves. The one conflict, recorded in
-    `GROWN_MEETS`: a row's WARN chip grown round a comma below meets its row's rail with no air (never overlapping);
-    every other grown box keeps air round its neighbours.
+    A mark below (combining class 202 or 220, as Nostromo's rule: a cedilla, an ogonek, a comma or a dot below, Ç Ş Ș
+    Ą Ạ), or a Rajdhani glyph that drops below the line (`DESCENDERS`: `();Q[]gjpqy{}`), grows Blackwall's LIVE and
+    strip tags 2 px down; the outlined chip grows 1 px down round a comma below alone. The filled chips and the Edgerun
+    plate's tags never grow. English never moves. Two conflicts, recorded in `GROWN_MEETS`: a row's WARN chip grown
+    round a comma below meets its row's rail with no air (never overlapping); and the row's pace tick (top + 13 to
+    top + 19) crosses the bottom stroke of its WARN chip and of Blackwall's reset box by design, in English too, and
+    round a comma below the grown chip's stroke and its last row inside. Every other grown box keeps air round its
+    neighbours.
 - **Test tools (#89).** The pseudo-locale (`i18n.PSEUDO`, `pseudo`) is `en.json` made longer (about 40%), accented
   (`İ ı ğ ş é ñ` among the look-alikes) and bracketed (`i18n.pseudo_text`), so English left over, a missing glyph
   and a cut end all show. A dev instance shows it with `USAGE_MONITOR_LANG=pseudo`, and the dev server with
@@ -761,7 +766,9 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   own age and hold chip, so a text past them is reported as the cut the header makes. Night City's header, band and
   hover line take their give-way and their boxes' rooms from the skin's tuples the same way (`NC_PLANS`, `_nc_room`; a
   box that gives way by becoming another, the hold chip HOLD alone and the pace its points, has that box's room), and
-  in a language its own (`nc_room`, beside each format tag's own ages, hold chips and resets, `nc_tags`). Its strip
+  in a language its own (`nc_room`, beside each format tag's own ages, hold chips and resets, `nc_tags`). Its GUARD
+  chip, chosen last in the room the header's word leaves, is held to the least of the headers English draws it in,
+  beside the language's own LIVE tag and status words (`nc_guard_room`). Its strip
   labels are measured at the size they shrink to (`night_city_label`), and the pace's points, which have no key, as
   English writes them in every language. `ACCEPTED_CUTS` in `test_budgets.py` holds,
   apart from `FOR_91`, the cuts a CLDR format causes: the ages Nostromo's header leaves out beside a tag's own hold chip
@@ -796,11 +803,13 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   City; #96 adds Gates') in English, the pseudo-locale and the French, Spanish and Turkish dev locales: the floating
   widget and the hover card at every display scale up to 200 % (1.75 too) and the strip at every scale a taskbar draws
   it at. Nostromo draws its first variant (every variant's runs are the first's, checked at 1.0 in the pseudo-locale).
-  Night City's looks place their runs differently, so its jobs are per look (`NIGHT_CITY_JOBS`): each layout in the
-  pseudo-locale (Blackwall, Relic, Edgerun, and Edgerun with `transparent_bg`, which drops its plate there; Mox is
-  Relic's layout), English, French, Spanish and Turkish on Blackwall and Relic, and fr-CA's and es-CO's formats on a
-  12-hour clock on Blackwall (`TAGS`); the variant check holds every variant to the first of its layout (`layout_of`),
-  with and without `transparent_bg`. The check hooks Night City's own drawing:
+  Night City's looks place their runs differently, so its jobs are per look (`NIGHT_CITY_JOBS`): each layout that
+  draws its runs apart (Blackwall, Relic, Edgerun, and Edgerun with `transparent_bg`, which drops its plate there) in
+  the pseudo-locale, English, French, Spanish and Turkish, and fr-CA's and es-CO's formats on a 12-hour clock
+  (`TAGS`). The variant check, in the pseudo-locale alone, holds every variant to the first of its layout
+  (`layout_of`), with and without `transparent_bg`: Mox to Relic, and Blackwall and Relic drawn with `transparent_bg`
+  to their own runs, which covers those three in the other languages. Beside the recorded states it draws a missing
+  sign-in that keeps its reading while the guard holds (`night_city_states`). The check hooks Night City's own drawing:
   its ink queue's text layers, a value's numerals and sign as one run, its chips' polygon outlines and fills, its
   hazard tiles, bars, pip and body. Each job is a process of its own, all side by side. It fails a run whose ink
   (coverage 64 of 255 and up) shares a pixel with another run or comes within 2 px of one on its line, meets an

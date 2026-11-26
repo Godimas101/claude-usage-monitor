@@ -27,7 +27,8 @@ outlines and fills are; the hazard strips are the tiles _Ink.hazard pastes; the 
 _draw_slanted's bar; the pip is a fill; and the body is the polygon inside the frame's edge (_paint_frame).
 
 Night City's looks place its runs differently (night_city.Look and the Edgerun plate), so its jobs are per look
-(NIGHT_CITY_JOBS), and two of them draw a format tag of their own (TAGS: fr-CA's day clock and es-CO's ages).
+(NIGHT_CITY_JOBS: every layout in every language), and two languages are a format tag of their own (TAGS: fr-CA's day
+clock and es-CO's ages). It draws one state the skin-words record has not (night_city_states).
 
     python tests/frame_layout.py THEME LANGUAGE [VARIANT]    the findings, as JSON (an empty list when clean)
 """
@@ -63,15 +64,16 @@ LANGUAGES: tuple[str, ...] = ("en", "pseudo", "fr", "es", "tr")
 # A format tag drawn as a job of its own, as (language, format tag, clock): the tags whose figures the budgets' rows name
 # (fr-CA's 12-hour day clock in the hover line and the row's reset, es-CO's spaced day in the band's age).
 TAGS: dict[str, tuple[str, str, int]] = {"fr-CA": ("fr", "fr-CA", 12), "es-CO": ("es", "es-CO", 12)}
-# Night City's jobs, as (language or tag, variant): every layout (layout_of) in the pseudo-locale, where the words give
-# way the most: the three looks, and Edgerun with transparent_bg ("edgerun/clear": the floating widget and the strip,
-# the surfaces that take it), which drops the plate for a look of its own; English, French, Spanish and Turkish on a
-# boxed look (Blackwall) and a plain one (Relic); the two tags on Blackwall, whose boxes their figures fill. The
-# critic's cost cut (#95 critic 4): the other looks in those languages are held to these by the variant check.
-NIGHT_CITY_JOBS: tuple[tuple[str, str], ...] = (
-    ("pseudo", "blackwall"), ("pseudo", "relic"), ("pseudo", "edgerun"), ("pseudo", "edgerun/clear"),
-    *((language, look) for language in ("en", "fr", "es", "tr") for look in ("blackwall", "relic")),
-    ("fr-CA", "blackwall"), ("es-CO", "blackwall"))
+# Night City's jobs, as (language or tag, variant): every layout that draws its runs apart (layout_of), in the
+# pseudo-locale, where the words give way the most, in English, French, Spanish and Turkish and in the two tags: boxed
+# (Blackwall), plain (Relic), the plate (Edgerun), and Edgerun with transparent_bg ("edgerun/clear": the floating
+# widget and the strip, the surfaces that take it), which drops the plate for a layout of its own (cells). The variant
+# check runs in the pseudo-locale alone: there it holds Mox to Relic's runs and Blackwall and Relic drawn with
+# transparent_bg to their own, so in the other languages those three are covered by that result, not drawn (#95
+# critic 4's cost cut).
+NIGHT_CITY_JOBS: tuple[tuple[str, str], ...] = tuple(
+    (language, look) for language in ("pseudo", "en", "fr", "es", "tr", *TAGS)
+    for look in ("blackwall", "relic", "edgerun", "edgerun/clear"))
 CLEAR = "/clear"                # a job's variant drawn with transparent_bg
 # What English already draws so, by design, and every language with it: (theme, surface, what, the run as a pattern),
 # each with the budgets' record of it. Nostromo's 5H value at 100 % (tight: "100%", Turkish "%100") meets the 5H bar's
@@ -513,12 +515,27 @@ def locale_of(language: str) -> Any:
     return i18n.dev_locale(language)
 
 
+def night_city_states() -> dict[str, Any]:
+    """The states tests/skin_words.py records for Night City (frozen with its English, so it takes no new one), and the
+    ones the frame check draws besides: a missing sign-in that keeps its last reading while the guard holds, so the
+    band's no-login cause sits beside the hold chip (#95's review)."""
+    import dataclasses
+
+    import skin_words
+    from usage_monitor.data.models import ApiStatus
+    from usage_monitor.render import dump
+
+    return {**skin_words._night_city_states(), "band_hold/no_credentials": dataclasses.replace(
+        dump.sample_state("guard_hold_session"), status=ApiStatus.NO_CREDENTIALS)}
+
+
 def models(language: str, theme_id: str = "nostromo") -> dict[str, Any]:
     """Every state tests/skin_words.py records for ``theme_id`` (the dump's in every show_scoped mode, the edge and
-    guard states and the theme's own), as view models in ``language``'s locale (locale_of)."""
+    guard states and the theme's own; for Night City night_city_states), as view models in ``language``'s locale
+    (locale_of)."""
     import skin_words
 
-    states = skin_words._night_city_states if theme_id == "night_city" else skin_words._nostromo_states
+    states = night_city_states if theme_id == "night_city" else skin_words._nostromo_states
     return skin_words.models(states, locale_of(language))
 
 

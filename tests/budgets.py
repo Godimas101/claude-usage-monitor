@@ -43,10 +43,11 @@ A line gives way as its skin does (``Line.gives_way``): while it is over, each s
 to its floor, one letter and the skin's cut mark; left out; or replaced by another box's text), and the line is
 reported only if it is still over after the last step. The lines a skin fits by a tuple take their give-way and their
 boxes' rooms from it (Nostromo's header, HEADER_STEPS; Night City's header, band and hover line, NC_PLANS), and a box's
-room in a language is the language's own, beside each format tag's own figures (header_room, nc_room). A box that
-shrinks is measured at the size it shrinks to: Night City's fit function and its strip labels' STRIP_LABEL_SIZES
-(``night_city_label``), and Nostromo's steps (``nostromo_fit``: the sign-in lines' MESSAGE_STEPS, the strip tags'
-STRIP_TAG_SIZES).
+room in a language is the language's own, beside each format tag's own figures (header_room, nc_room); Night City's
+GUARD chip, chosen last in the room its header's word leaves, beside the language's own status words (nc_guard_room). A
+box that shrinks is measured at the size it shrinks to: Night City's fit function and its strip labels'
+STRIP_LABEL_SIZES (``night_city_label``), and Nostromo's steps (``nostromo_fit``: the sign-in lines' MESSAGE_STEPS, the
+strip tags' STRIP_TAG_SIZES).
 
     python tests/budgets.py [--lang ID]     what a language's text would not fit (default: pseudo)
     python tests/budgets.py --limits        every box's and line's limit, as test_budgets.py pins them
@@ -565,6 +566,8 @@ NC_HOME: dict[str, NcPlan] = {box: plan for plan in (NC_BAND_HOLD, NC_INFO, NC_B
 # English's texts in each, and the style it is drawn in, for the rooms LIMITS pins.
 _NC_HOLDS = tuple(text for text in _COUNTDOWNS if text != "HOLD")
 _NC_AGES = ("41 M OLD", "59 S OLD", "47 H OLD", "2 D OLD", "100 D OLD", "2 M OLD", "6 M OLD")
+# Beside the hold chip, a missing sign-in's cause too: it keeps the last reading, so the guard can hold (its age is none).
+_NC_HOLD_CAUSES = (*_NC_CAUSES, "NO LOGIN // OPEN DASHBOARD")
 _NC_PACES = ("PACE --", "ON PACE", "AHEAD +41", "AHEAD +100", "UNDER PACE -18", "UNDER PACE -100")
 _NC_SHORT_PACES = ("+41", "+100", "-18", "-100")
 _NC_SPEC: dict[str, str] = {_NC_BRAND_BOX: "BRAND", _NC_LIVE: "STATUS", _NC_CHIP: "CHIP", _NC_HOLD: "CHIP",
@@ -573,7 +576,7 @@ _NC_SPEC: dict[str, str] = {_NC_BRAND_BOX: "BRAND", _NC_LIVE: "STATUS", _NC_CHIP
                             _NC_RESET: "RESET", _NC_PACE: "CHIP", _NC_PACE_SHORT: "CHIP"}
 _NC_ENGLISH: dict[str, tuple[str, ...]] = {
     _NC_BRAND_BOX: (nc.BRAND_MARK,), _NC_LIVE: ("LIVE",), _NC_CHIP: ("PAUSED", "LOADING"), _NC_HOLD: _NC_HOLDS,
-    _NC_HOLD_ALONE: ("HOLD",), _NC_CAUSE: _NC_CAUSES, _NC_AGE: _NC_AGES, _NC_HOLD_CAUSE: _NC_CAUSES,
+    _NC_HOLD_ALONE: ("HOLD",), _NC_CAUSE: _NC_CAUSES, _NC_AGE: _NC_AGES, _NC_HOLD_CAUSE: _NC_HOLD_CAUSES,
     _NC_BAND_CHIP: _NC_HOLDS, _NC_BAND_HOLD: ("HOLD",), _NC_RESET: _NC_RESETS, _NC_PACE: _NC_PACES,
     _NC_PACE_SHORT: _NC_SHORT_PACES}
 _NC_NAMES_OF = {_NC_BRAND_BOX: "the brand", _NC_LIVE: "the LIVE tag", _NC_CHIP: "the status chip",
@@ -669,6 +672,80 @@ def _nc_why(box_id: str) -> str:
 
 def _nc_plan_box(id_: str, fit: str, **kwargs: Any) -> Box:
     return _nc(id_, _NC_SPEC[id_], _nc_limit(id_), _nc_why(id_), fit, english=_NC_ENGLISH[id_], **kwargs)
+
+
+# ── Night City's GUARD chip (night_city._header_plan): chosen last, in the room the header's right-hand word leaves, so
+# it stays out of NC_HEADER (it never takes room from the LIVE tag, the status chip or the hold chips) ──
+_NC_GUARD = _NCF + "guard_chip"
+# The statuses the guard can be armed in: every one with a reading (render/model._guard_mark gives no mark while loading,
+# which has none).
+_NC_ARMED = tuple(status for status in nc.ApiStatus if status is not nc.ApiStatus.LOADING)
+
+
+@lru_cache(maxsize=None)
+def _nc_heads() -> tuple[tuple[str, float, float, float], ...]:
+    """Each Night City look's header as the GUARD chip's room hangs on it, from the skin's own palette and look: (its
+    first variant, where the brand ends, what the LIVE tag adds beside its word, what the status chip adds:
+    night_city._brand_x, _right_pad)."""
+    theme = _theme("night_city")
+    found: dict[tuple[float, float, float], str] = {}
+    for variant in theme.variants:
+        ink = nc._Ink(nc._canvas(nc.FLOAT_W, 100, 1.0, theme), nc.Palette.for_variant(theme, variant), RenderOptions())
+        look = nc.look_for(variant)
+        found.setdefault((nc._brand_x(ink.pal) + _NC_BRAND, nc._right_pad(ink, look, "live"),
+                          nc._right_pad(ink, look, "chip")), variant.id)
+    return tuple((variant, *head) for head, variant in found.items())
+
+
+def _nc_guard_rooms(words: i18n.Catalog) -> dict[tuple[str, str], float]:
+    """The GUARD chip's room for its word, by (status, look), as _header_plan leaves it while the guard is armed: from
+    GUARD_GAP after the brand to GUARD_GAP before the right-hand word (``words``' LIVE tag's while live, else the view
+    model's status word in its chip, each as HEADER_GIVE_WAY cuts it), less the chip's 12 px."""
+    ink = _nc_ink()
+    rooms = {}
+    for status in _NC_ARMED:
+        live = status is nc.ApiStatus.LIVE
+        word = str(words.text(nc.STATE_KEYS[status] if live else STATUS_KEYS[status]))
+        spec = nc.STATUS if live else nc.CHIP
+        for variant, brand_end, live_pad, chip_pad in _nc_heads():
+            pad = live_pad if live else chip_pad
+            drawn = nc._cut(ink, word, spec, nc.RIGHT - brand_end - nc.GUARD_GAP - pad)
+            rooms[status.name, variant] = (nc.RIGHT - (ink.width(drawn, spec) + pad) - 2 * nc.GUARD_GAP - brand_end
+                                           - 12)
+    return rooms
+
+
+def nc_guard_pairs() -> tuple[tuple[str, str], ...]:
+    """The (status, look) headers English draws its GUARD chip in: where its GUARD fits beside its own word."""
+    english = i18n.load_catalog(i18n.DEFAULT)
+    guard = W_nc(str(english.text("widget.night_city.guard.mark")), "CHIP")
+    return tuple(pair for pair, room in _nc_guard_rooms(english).items() if guard <= room)
+
+
+def nc_guard_room(language: str) -> float:
+    """The GUARD chip's room in ``language``: the least the header leaves it beside the language's own LIVE tag and
+    status words in each (status, look) English draws its chip in (nc_guard_pairs), so a guard word that a longer status
+    word leaves out where English's stays is reported. Its words hold no figure, so no format tag changes it. English's
+    is the box's limit."""
+    rooms = _nc_guard_rooms(i18n.app_catalog(language))
+    return min(rooms[pair] for pair in nc_guard_pairs())
+
+
+def _nc_guard_why() -> str:
+    """How the GUARD chip's room follows from the header, with the headers English draws it in by their words."""
+    english = i18n.load_catalog(i18n.DEFAULT)
+    pairs = nc_guard_pairs()
+    looks = {variant for _status, variant in pairs}
+    places = []
+    for status in dict.fromkeys(status for status, _variant in pairs):
+        word = "LIVE" if status == "LIVE" else str(english.text(STATUS_KEYS[nc.ApiStatus[status]]))
+        on = sorted(variant for each, variant in pairs if each == status)
+        places.append(word if set(on) == looks else f"{word} on {'/'.join(on)}")
+    return ("between the brand and the right-hand word (the LIVE tag, else the status chip), GUARD_GAP off each, in "
+            "the room that word leaves (_header_plan): the least of the headers English draws it in ("
+            + ", ".join(places) + "), "
+            "beside the language's own words (nc_guard_room); left out where it does not fit, which a draft's word "
+            "could settle (a shorter guard word or status word)")
 
 
 # ── Nostromo's header line, by Q2's order (nostromo.HEADER_GIVE_WAY, an owner default on #94) ──
@@ -936,10 +1013,11 @@ BOXES: tuple[Box, ...] = (
     _nc_plan_box(_NC_BRAND_BOX, "none", words=False),
     _nc_plan_box(_NC_LIVE, "ellipsis", keys=_nc_keys("state.live")),
     _nc_plan_box(_NC_CHIP, "ellipsis", keys=_status_keys("PAUSED", "LOADING")),
-    _nc("night_city.floating.guard_chip", "CHIP",
-        nc.RIGHT - (W_nc("PAUSED", "CHIP") + 12) - 2 * nc.GUARD_GAP - (_NC_HEAD + _NC_BRAND) - 12,
-        "between the brand and a status chip, GUARD_GAP off each, left out where it does not fit (_header_plan)", "drop",
-        english=("GUARD",), keys=_nc_keys("guard.mark")),
+    _nc(_NC_GUARD, "CHIP", nc_guard_room(i18n.DEFAULT), _nc_guard_why(), "drop", english=("GUARD",),
+        keys=_nc_keys("guard.mark"),
+        note=f"{nc_guard_room(i18n.DEFAULT):g} px in English ({_NC_GUARD}, drop): what the header leaves beside the "
+             "language's own LIVE tag (widget.night_city.state.live) and status chip (widget.status.*) words where "
+             "English draws it, so a longer status word leaves it less; left out where it does not fit"),
     _nc_plan_box(_NC_HOLD, "drop", kinds=("duration",), templates=("HOLD {}",), keys=_nc_keys("guard.hold_for"),
                  fills=(("countdown", "duration"),)),
     _nc_plan_box(_NC_HOLD_ALONE, "ellipsis", keys=_nc_keys("guard.hold")),
@@ -947,11 +1025,13 @@ BOXES: tuple[Box, ...] = (
     _nc_plan_box(_NC_CAUSE, "ellipsis", keys=(*_NC_CAUSE_KEYS, *_status_keys("RATE LIMITED")),
                  fills=(("product", "product"), ("command", "command"))),
     _nc("night_city.floating.band_text_no_age", "BAND_TYPE", NC_BAND.room,
-        "the whole band: a missing sign-in has no age, and the guard does not hold without a reading", "ellipsis",
+        "the whole band while the guard does not hold: a missing sign-in has no age, but it keeps the last reading, so "
+        "the guard can hold, and then the cause sits beside the hold chip (band_hold_text)", "ellipsis",
         english=("NO LOGIN // OPEN DASHBOARD",), keys=_nc_keys("band.no_login")),
     _nc_plan_box(_NC_AGE, "drop", kinds=("age",), templates=("{} OLD",), keys=_nc_keys("age.old"),
                  fills=(("age", "age"),)),
-    _nc_plan_box(_NC_HOLD_CAUSE, "ellipsis", keys=(*_NC_CAUSE_KEYS, *_status_keys("RATE LIMITED")),
+    _nc_plan_box(_NC_HOLD_CAUSE, "ellipsis",
+                 keys=(*_NC_CAUSE_KEYS, *_nc_keys("band.no_login"), *_status_keys("RATE LIMITED")),
                  fills=(("product", "product"), ("command", "command"))),
     _nc_plan_box(_NC_BAND_CHIP, "drop", kinds=("duration",), templates=("HOLD {}",), keys=_nc_keys("guard.hold_for"),
                  fills=(("countdown", "duration"),)),
@@ -1231,7 +1311,8 @@ LINES: tuple[Line, ...] = (
     Line("night_city.floating.band_hold_line", NC_BAND_HOLD.room, "the cause, its age and the hold chip; while over, "
          "the chip drops its countdown, the age is left out, then the cause is cut (night_city.BAND_GIVE_WAY)",
          "ellipsis", NC_BAND_HOLD.slots, NC_BAND_HOLD.added,
-         (("RELINK // USE CLAUDE CODE", "", "HOLD"), ("RATE LIMITED", "41 M OLD", "HOLD 2H 14M")),
+         (("RELINK // USE CLAUDE CODE", "", "HOLD"), ("RATE LIMITED", "41 M OLD", "HOLD 2H 14M"),
+          ("NO LOGIN // OPEN DASHBOARD", "", "HOLD")),
          nc_gives_way(NC_BAND_HOLD)),
     Line("night_city.tooltip.info_line", NC_INFO.room, "the reset (boxed: 8 px more) from LEFT and the pace (a chip: 12 "
          "px more) right-aligned at RIGHT, VALUE_GAP apart; while over, the pace takes its short form, then is left out "
@@ -1586,10 +1667,13 @@ def nc_room(box_id: str, language: str, scale: float = 1.0, tag: str | None = No
 def allowed(box: Box, language: str, text: str, scale: float) -> float:
     """The room ``text`` of ``language`` has in ``box`` at ``scale``: the box's budget, and in Nostromo's header and
     Night City's lines no more than its room in the language (header_room, nc_room) in the tags that write it (a figure)
-    or in any tag (a word), so what a line leaves out beside the language's own wider texts is reported too."""
+    or in any tag (a word), so what a line leaves out beside the language's own wider texts is reported too; Night
+    City's GUARD chip no more than the room its header leaves beside the language's own status words (nc_guard_room)."""
     room = budget(box, scale)
     if language == i18n.DEFAULT:
         return room
+    if box.id == _NC_GUARD:
+        return min(room, nc_guard_room(language))
     if box.id in NC_HOME:
         tags = nc_tags(language)
         writing = [tag for tag, figures in tags.items() if text in figures.get(box.id, ())]

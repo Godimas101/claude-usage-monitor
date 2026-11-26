@@ -44,7 +44,7 @@ LIMITS: dict[str, float] = {
     "nostromo.strip.value_5h": 24.0, "nostromo.strip.value_5h_chip": 20.0, "nostromo.strip.value_7d": 32.0,
     "nostromo.strip.value_7d_chip": 28.0, "nostromo.tray.readout": 20.0, "night_city.floating.brand": 179.746,
     "night_city.floating.live_tag": 102.417, "night_city.floating.status_chip": 98.417,
-    "night_city.floating.guard_chip": 39.056, "night_city.floating.hold_chip": 93.417,
+    "night_city.floating.guard_chip": 38.235, "night_city.floating.hold_chip": 93.417,
     "night_city.floating.hold_word": 93.417, "night_city.floating.band_text": 220.0,
     "night_city.floating.band_text_no_age": 220, "night_city.floating.band_age": 62.359,
     "night_city.floating.band_hold_text": 168.921, "night_city.floating.band_hold_chip": 175.866,
@@ -1209,6 +1209,60 @@ def test_a_night_city_boxs_room_in_a_language_is_its_own_tags() -> None:
     assert "100 DÍAS OLD" in budgets.nc_tags("es")["es-CO/24"][age.id]
     assert budgets.allowed(age, "es", "100 DÍAS OLD", 1.0) == pytest.approx(age.limit)
     assert budgets.allowed(age, i18n.DEFAULT, "41 M OLD", 1.0) == budgets.budget(age, 1.0)
+
+
+def test_night_citys_guard_chip_has_the_room_its_header_leaves_beside_the_languages_words(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """#95's review (look-1): the GUARD chip is chosen last, in the room the header's right-hand word leaves
+    (night_city._header_plan), so its room in a language is beside that language's own LIVE tag and status words
+    (budgets.nc_guard_room), the least of the headers English draws its chip in: English's is the box's limit; a short
+    guard word beside a wide status word, which the header leaves out where English's GUARD stays, is reported as the
+    box's cut (drop: a draft's word could settle it); and in each of those headers the room is the one the skin leaves
+    beside the word as it draws it (a status word too wide for the header cut first), and the skin keeps a guard word as
+    wide as that room and leaves out one a letter wider."""
+    import dataclasses
+
+    box = budgets.BOX["night_city.floating.guard_chip"]
+    pairs = budgets.nc_guard_pairs()
+    assert budgets.nc_guard_room(i18n.DEFAULT) == pytest.approx(box.limit) and box.fit == "drop"
+    assert {("LIVE", "blackwall"), ("PAUSED", "blackwall"), ("OFFLINE", "relic"), ("NO_CREDENTIALS", "edgerun")} <= set(
+        pairs) and not any(status in ("RATE_LIMITED", "LOADING") for status, _variant in pairs)
+    assert budgets.over("fr", [box]) == []                  # French has no words of its own here yet: English's room
+    words = {"widget.status.paused": "EN PAUSE", "widget.night_city.guard.mark": "GARDE"}
+    _nc_catalog(monkeypatch, words)
+    rooms = budgets._nc_guard_rooms(i18n.app_catalog("fr"))
+    assert rooms["PAUSED", "blackwall"] < budgets.W_nc("GARDE", "CHIP") < box.limit
+    rows = budgets.over("fr", [box])
+    assert [(row.box.id, row.text) for row in rows] == [(box.id, "GARDE")] and not rows[0].box.enforced
+    assert rows[0].budget == pytest.approx(budgets.nc_guard_room("fr")) and budgets.nc_guard_room("fr") < box.limit
+    words["widget.status.stale"] = "W" * 30                 # wider than the header's right-hand room: cut there
+    _nc_catalog(monkeypatch, words)
+    rooms = budgets._nc_guard_rooms(i18n.app_catalog("fr"))
+    theme = dump.load_theme_objects()["night_city"]
+    armed = dump.sample_model("guard_armed")
+    for status_name, variant_id in pairs:
+        variant = theme.variant(variant_id)
+        ink = nc._Ink(nc._canvas(nc.FLOAT_W, 126, 1.0, theme), nc.Palette.for_variant(theme, variant), RenderOptions())
+        look, status = nc.look_for(variant), nc.ApiStatus[status_name]
+        model = dataclasses.replace(armed, status=status, stale=status not in (nc.ApiStatus.LIVE, nc.ApiStatus.PAUSED),
+                                    status_text=i18n.app_catalog("fr").text(budgets.STATUS_KEYS[status]))
+        room = rooms[status_name, variant_id]
+        plan = nc._header_plan(ink, look, model)
+        spec = nc.STATUS if plan.kind == "live" else nc.CHIP
+        left = nc.RIGHT - (ink.width(plan.word, spec) + nc._right_pad(ink, look, plan.kind))
+        brand_end = nc._brand_x(ink.pal) + ink.width(nc.BRAND_MARK, nc.BRAND)
+        assert room == pytest.approx(left - 2 * nc.GUARD_GAP - brand_end - 12), (status_name, variant_id, plan)
+
+        def kept(n: int) -> bool:
+            _nc_catalog(monkeypatch, {**words, "widget.night_city.guard.mark": "W" * n})
+            return nc._header_plan(ink, look, model).mark is not None
+
+        most = max((n for n in range(1, 12) if kept(n)), default=0)
+        assert (most == 0 or budgets.W_nc("W" * most, "CHIP") <= room + 0.01) and room < budgets.W_nc(
+            "W" * (most + 1), "CHIP"), (status_name, variant_id, most, room)
+        _nc_catalog(monkeypatch, words)
+    assert rooms["STALE", "blackwall"] < 0 and min(rooms[pair] for pair in pairs) == pytest.approx(
+        budgets.nc_guard_room("fr"))
 
 
 # ── The report ────────────────────────────────────────────────────────────────────────────────────────────────────
