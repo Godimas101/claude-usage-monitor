@@ -42,10 +42,10 @@ from typing import Any
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
-from usage_monitor import formats
+from usage_monitor import casing, formats, i18n
 from usage_monitor import themes as theme_registry
 from usage_monitor.data.models import ApiStatus
-from usage_monitor.i18n import Locale
+from usage_monitor.i18n import ENGLISH, Locale
 from usage_monitor.log import get_logger
 from usage_monitor.render import engine
 from usage_monitor.render.engine import Canvas, Color, Layer, TRANSPARENT, parse_color, with_alpha
@@ -55,7 +55,9 @@ from usage_monitor.render.model import (
     LAMP_OFFLINE,
     LAMP_PAUSED,
     LAMP_STALE,
+    LOGIN_COMMAND,
     NO_INSETS,
+    PRODUCT,
     SEVERITY_CRITICAL,
     SEVERITY_NORMAL,
     SEVERITY_WARNING,
@@ -195,11 +197,22 @@ TRAY_NUMBER_SIZE = 10.0
 KEYLINE = 0.6                   # px: the outline that keeps the ring readable on a taskbar of the other mode
 KEYLINE_ALPHA = 0xC0
 
-# The skin's words for the view model's values: a row's name ("Fable weekly") and a guarded limit's ("Fable weekly" too,
-# but a model name keeps its case there) by kind, and the units of an age ("41 min") and of a countdown ("2h 14m").
-ROW_NAMES: dict[str, str] = {"session": "Session", "weekly_all": "Weekly"}
-GUARD_NAMES: dict[str, str] = {"session": "session", "weekly_all": "weekly"}
-UNNAMED_SCOPED = "Weekly scoped"
+# The skin's words are the catalog's widget.gates.* (#96), drawn as it writes them in the model's language (English's
+# while a language has none of its own), and never cased again. The title is #86's brand mark, drawn as written in every
+# language. Ages ("41 min") and countdowns ("2h 14m") are formats: Gates' own shapes in English and the pseudo-locale
+# (AGE_UNITS, COUNTDOWN_UNITS, UNDER_A_MINUTE), CLDR's narrow units in their own case elsewhere (_age_label,
+# _countdown).
+TITLE = "Claude usage"
+KEY = "widget.gates."
+LIMIT_KEYS: dict[str, str] = {"session": KEY + "limit.session", "weekly_all": KEY + "limit.weekly"}     # a row's name
+GUARD_NAME_KEYS: dict[str, str] = {"session": KEY + "guard.session", "weekly_all": KEY + "guard.weekly"}  # mid-sentence
+WINDOW_KEYS: tuple[str, str] = (KEY + "window.session", KEY + "window.weekly")    # the 5H and 7D tags, the strip's too
+# The footer's lead on a live card by the driving row's pace (a critical row says state.critical), and the hover card's
+# pace readout by Row.pace (on pace otherwise), each with its colour role.
+LEAD_KEYS: dict[str, tuple[str, str]] = {"ahead": (KEY + "pace.ahead", "warn"), "behind": (KEY + "pace.behind", "ok"),
+                                         "on_pace": (KEY + "pace.on", "ok")}
+PACE_KEYS: dict[str, tuple[str, str]] = {"ahead": (KEY + "pace.ahead_by", "warn"),
+                                         "behind": (KEY + "pace.behind_by", "ok")}
 AGE_UNITS: dict[str, str] = {UNIT_SECONDS: "s", UNIT_MINUTES: "min", UNIT_HOURS: "h", UNIT_DAYS: "d"}
 COUNTDOWN_UNITS: dict[str, str] = {UNIT_MINUTES: "m", UNIT_HOURS: "h", UNIT_DAYS: "d"}
 UNDER_A_MINUTE = "<1m"
@@ -791,17 +804,52 @@ _LAMP_KIND = {
     ApiStatus.LOADING: LAMP_OFFLINE,
 }
 
-# status -> (lead, rest, lead colour role). The three the mockup shows are STALE, OFFLINE and PAUSED.
-_STATUS_COPY: dict[ApiStatus, tuple[str, str, str]] = {
-    ApiStatus.STALE: ("Hmm, we lost touch.", " Send Claude Code a message.", "warn"),
-    ApiStatus.OFFLINE: ("", "No connection. Retrying every minute.", "text_3"),
-    ApiStatus.PAUSED: ("", "Paused. Resume to keep usage live.", "text_3"),
-    ApiStatus.RATE_LIMITED: ("Rate limited.", " Showing the last reading.", "warn"),
-    ApiStatus.NO_CREDENTIALS: ("No sign-in found.", " Open the dashboard for help.", "warn"),
-    ApiStatus.LOADING: ("", "Fetching your usage.", "text_3"),
+# status -> (lead key or None, the rest's key, the lead's colour role): the footer while the card is not live. The three
+# the mockup shows are STALE, OFFLINE and PAUSED. A sign-in the usage API turned down (HTTP 403, #55) has its own:
+# a message to Claude Code does not fix it, only /login does.
+FOOTER_KEYS: dict[ApiStatus, tuple[str | None, str, str]] = {
+    ApiStatus.STALE: (KEY + "footer.stale", KEY + "footer.stale_step", "warn"),
+    ApiStatus.OFFLINE: (None, KEY + "footer.offline", "text_3"),
+    ApiStatus.PAUSED: (None, KEY + "footer.paused", "text_3"),
+    ApiStatus.RATE_LIMITED: (KEY + "footer.rate_limited", KEY + "footer.rate_limited_rest", "warn"),
+    ApiStatus.NO_CREDENTIALS: (KEY + "footer.no_login", KEY + "footer.no_login_step", "warn"),
+    ApiStatus.LOADING: (None, KEY + "footer.loading", "text_3"),
 }
-# A sign-in the usage API turned down (HTTP 403, #55): a message to Claude Code does not fix it, only /login does.
-_REFUSED_COPY: tuple[str, str, str] = ("Sign-in refused.", " Run /login in Claude Code.", "warn")
+REFUSED_KEYS: tuple[str, str, str] = (KEY + "footer.refused", KEY + "footer.refused_step", "warn")
+
+
+def _words(locale: Locale) -> i18n.Catalog:
+    """The catalog Gates draws its words from: the locale's language, English's text where it has none of its own."""
+    return i18n.app_catalog(locale.language)
+
+
+def _copy(keys: tuple[str | None, str, str], locale: Locale) -> tuple[str, str, str]:
+    """(lead, rest, the lead's colour role) of a footer that is not live: the catalog's lead, then its rest after a
+    space ("Hmm, we lost touch." and " Send Claude Code a message."), or the rest alone ("", "Fetching your
+    usage.")."""
+    lead_key, rest_key, role = keys
+    words = _words(locale)
+    rest = words.text(rest_key, {"product": PRODUCT, "command": LOGIN_COMMAND})
+    if lead_key is None:
+        return "", rest, role
+    return words.text(lead_key), " " + rest, role
+
+
+class _EnglishFooters(Mapping[ApiStatus, tuple[str, str, str]]):
+    """The footer of each status but LIVE in English, (lead, rest, the lead's colour role), read from the catalog when
+    asked (an older test reads it). The skin draws the model's language (_footer_runs)."""
+
+    def __getitem__(self, status: ApiStatus) -> tuple[str, str, str]:
+        return _copy(FOOTER_KEYS[status], ENGLISH)
+
+    def __iter__(self):  # type: ignore[no-untyped-def]
+        return iter(FOOTER_KEYS)
+
+    def __len__(self) -> int:
+        return len(FOOTER_KEYS)
+
+
+_STATUS_COPY: Mapping[ApiStatus, tuple[str, str, str]] = _EnglishFooters()
 
 
 def _dim(model: WidgetModel) -> bool:
@@ -829,61 +877,91 @@ def _exact_percent_text(percent: float | None, locale: Locale) -> str:
 
 
 def _age_label(model: WidgetModel) -> str | None:
-    """The model's age as the pill shows it: "12 s", "41 min", "3 h", "2 d"."""
+    """The model's age as the pill shows it: "12 s", "41 min", "3 h", "2 d" in English and the pseudo-locale; CLDR's
+    narrow unit in its own case elsewhere ("41min" in French, "100 días" in es-CO, "41d" in Turkish)."""
     if model.age_seconds is None:
         return None
     count, unit = age_unit(model.age_seconds)
-    return f"{count} {AGE_UNITS[unit]}"
+    if formats.english_shapes(model.locale):
+        return f"{count} {AGE_UNITS[unit]}"
+    return formats.duration(((count, unit),), model.locale)
 
 
-def _countdown(seconds: int) -> str:
-    """The time left as the footer and the hover card say it: "2d 3h", "2h 14m", "9m", or "<1m" under a minute."""
-    return " ".join(f"{count}{COUNTDOWN_UNITS[unit]}" for count, unit in countdown_units(seconds)) or UNDER_A_MINUTE
+def _countdown(seconds: int, *, locale: Locale = ENGLISH) -> str:
+    """The time left as the footer and the hover card say it: "2d 3h", "2h 14m", "9m", or "<1m" under a minute in
+    English and the pseudo-locale; CLDR's narrow units in their own case elsewhere ("2h 14min" in fr-FR, "2s 14d" in
+    Turkish, "<1min" in fr-FR under a minute), as the tray's tooltip writes it (app._tray_countdown)."""
+    units = countdown_units(seconds)
+    if formats.english_shapes(locale):
+        return " ".join(f"{count}{COUNTDOWN_UNITS[unit]}" for count, unit in units) or UNDER_A_MINUTE
+    return formats.duration(units, locale) if units else "<" + formats.duration(((1, UNIT_MINUTES),), locale)
 
 
 def _sentence(label: str) -> str:
-    """"FABLE WEEKLY" as "Fable weekly"; a label that already has lower case is kept."""
+    """"DESIGN WEEKLY" as "Design weekly"; a label that already has lower case is kept. For a kind no catalog has
+    words for, named from its code (identity text, English in every language, #93 D4)."""
     return label.capitalize() if label.isupper() else label
 
 
-def _row_name(row: Row) -> str:
-    """The row's name in sentence case: "Session", "Weekly", and a scoped limit named for its model, else its surface,
-    "Fable weekly", or "Weekly scoped" when it has neither. A kind this skin has no words for, and a row built
-    without one, keep their label (in sentence case when it is all capitals)."""
-    if row.kind in ROW_NAMES:
-        return ROW_NAMES[row.kind]
+def _english_name(name: str, *, row: bool) -> str:
+    """A scoped limit's name as English has always written it, kept byte for byte where the template is English's
+    (#96, an owner default; data/alerts.py keeps its own quirk the same way): a row's name went in in capitals first,
+    so its tail is in lower case ("Claude design weekly"); the guard line's name for a surface went in in lower case
+    ("claude_code weekly"). Dropping the quirks is these two lines: the name would go in as written."""
+    capitals = name.upper()
+    return capitals.capitalize() if row else capitals.lower()
+
+
+def _row_name(row: Row, *, locale: Locale = ENGLISH) -> str:
+    """The row's name, from the catalog: "Session", "Weekly", a scoped limit named for its model, else its surface,
+    "Fable weekly", or "Weekly scoped" when it has neither. The name goes into English's template in English's own
+    case (_english_name), into another language's as written, its first letter in capitals by the language's rule
+    when the row's name starts with it (casing.cased); the template's own words are drawn as written. A kind this
+    skin has no words for, and a row built without one, keep their label (_sentence)."""
+    words = _words(locale)
+    if row.kind in LIMIT_KEYS:
+        return words.text(LIMIT_KEYS[row.kind])
     if row.kind == "weekly_scoped":
         if not row.scope_name:
-            return UNNAMED_SCOPED
-        # In capitals first, as the limit's label always was, so capitalize() gives what it gave that label: the rest
-        # of the name in lower case ("Claude design weekly"), a quirk kept for now (#90).
-        return _sentence(f"{row.scope_name.upper()} WEEKLY")
+            return words.text(KEY + "limit.scoped_unnamed")
+        template = words.text(KEY + "limit.scoped")
+        name = row.scope_name
+        if template.language == i18n.DEFAULT:
+            name = _english_name(name, row=True)
+        elif not any(ch.isalpha() for ch in template.split("{name}", 1)[0]):
+            name = casing.cased("{name}", "sentence", template.language, name=name)
+        return words.text(KEY + "limit.scoped", {"name": name})
     return _sentence(row.label)
 
 
-def _guard_name(guard: GuardMark, key: str) -> str:
-    """A limit the guard watches, as its line names it: "session", "weekly", a scoped limit "Fable weekly" with its
-    model's own case, and one named for its surface or for nothing in lower case, as the guard words a limit it knows
-    only by its label ("claude_code weekly", "weekly scoped"). A kind this skin has no words for, and a limit the
-    reading no longer carries, keep the guard's own label for it."""
+def _guard_name(guard: GuardMark, key: str, *, locale: Locale = ENGLISH) -> str:
+    """A limit the guard watches, as its line names it (mid-sentence), from the catalog: "session", "weekly", a scoped
+    limit "Fable weekly" with its model's name as written, one named for its surface, and "weekly scoped" for one
+    named for nothing. A surface's name goes into English's template in English's own case ("claude_code weekly",
+    _english_name), into another language's as written. A kind this skin has no words for, and a limit the reading
+    no longer carries, keep the guard's own label for it."""
+    words = _words(locale)
     kind = guard.kinds.get(key)
-    if kind in GUARD_NAMES:
-        return GUARD_NAMES[kind]
+    if kind in GUARD_NAME_KEYS:
+        return words.text(GUARD_NAME_KEYS[kind])
     if kind == "weekly_scoped":
-        model = guard.models.get(key)
-        if model:
-            return f"{model} weekly"
-        scope = guard.scope_names.get(key)
-        return f"{scope.upper()} WEEKLY".lower() if scope else UNNAMED_SCOPED.lower()
+        model, scope = guard.models.get(key), guard.scope_names.get(key)
+        if not model and not scope:
+            return words.text(KEY + "guard.scoped_unnamed")
+        template = words.text(KEY + "guard.scoped")
+        name = model or (_english_name(scope, row=False) if template.language == i18n.DEFAULT else scope)
+        return words.text(KEY + "guard.scoped", {"name": name})
     return guard.labels.get(key, key)
 
 
 def _tag(row: Row, locale: Locale) -> str:
+    """The tag after a row's name: the window (5H, 7D) or a scoped limit's share ("50% share")."""
+    words = _words(locale)
     if row.key == "session":
-        return "5H"
+        return words.text(WINDOW_KEYS[0])
     if row.key == "weekly" or row.share_pct is None:
-        return "7D"
-    return f"{formats.percent(str(round(row.share_pct)), locale)} share"
+        return words.text(WINDOW_KEYS[1])
+    return words.text(KEY + "share.of", {"percent": formats.percent(str(round(row.share_pct)), locale)})
 
 
 def _blank_row(key: str, label: str, kind: str) -> Row:
@@ -936,9 +1014,13 @@ def _hold_runs(model: WidgetModel) -> list[tuple[str, int, str]]:
     guard = model.guard
     if guard is None or not guard.holding:
         return []
-    runs = [("Guard holding", 600, "alert")]
+    words = _words(model.locale)
+    runs = [(words.text(KEY + "guard.holding"), 600, "alert")]
     if guard.resume_seconds is not None and guard.resume_clock:
-        runs.append((f" · Resumes {guard.resume_clock} (in {_countdown(guard.resume_seconds)})", 400, "text_3"))
+        time_left = words.text(KEY + "guard.time_left",
+                               {"countdown": _countdown(guard.resume_seconds, locale=model.locale)})
+        runs.append((" · " + words.text(KEY + "guard.resumes", {"clock": guard.resume_clock, "time_left": time_left}),
+                     400, "text_3"))
     return runs
 
 
@@ -948,44 +1030,43 @@ def _footer_runs(model: WidgetModel) -> list[tuple[str, int, str]]:
     connection) keeps its own words."""
     if model.status is not ApiStatus.LIVE:
         refused = model.status is ApiStatus.STALE and model.stale_reason == STALE_REFUSED
-        lead, rest, role = _REFUSED_COPY if refused else _STATUS_COPY[model.status]
+        lead, rest, role = _copy(REFUSED_KEYS if refused else FOOTER_KEYS[model.status], model.locale)
         return ([(lead, 600, role)] if lead else []) + [(rest, 400, "text_3")]
     holding = _hold_runs(model)
     if holding:
         return holding
+    words = _words(model.locale)
     row = _driver(model)
     if row is None:
-        return [("Waiting for your first reading.", 400, "text_3")]
+        return [(words.text(KEY + "footer.waiting"), 400, "text_3")]
     if row.severity == SEVERITY_CRITICAL:
-        lead, role = "Nearly out", "alert"
-    elif row.pace == "ahead":
-        lead, role = "Ahead of pace", "warn"
-    elif row.pace == "behind":
-        lead, role = "Under pace", "ok"
-    elif row.pace == "on_pace":
-        lead, role = "On pace", "ok"
+        lead, role = words.text(KEY + "state.critical"), "alert"
+    elif row.pace in LEAD_KEYS:
+        key, role = LEAD_KEYS[row.pace]
+        lead = words.text(key)
     else:
         lead, role = "", "text_3"
-    reset = f"Resets {row.resets_text}" if row.resets_text else ""
+    reset = words.text(KEY + "resets.at", {"clock": row.resets_text}) if row.resets_text else ""
     runs: list[tuple[str, int, str]] = []
     if lead:
         runs.append((lead, 600, role))
     if reset:
         runs.append((f" · {reset}" if lead else reset, 400, "text_3"))
-    return runs or [("No reset time yet.", 400, "text_3")]
+    return runs or [(words.text(KEY + "footer.no_reset"), 400, "text_3")]
 
 
-def _pace_text(row: Row) -> tuple[str, str]:
-    """(text, colour role) of the tooltip's pace readout."""
+def _pace_text(row: Row, *, locale: Locale = ENGLISH) -> tuple[str, str]:
+    """(text, colour role) of the tooltip's pace readout: "Ahead of pace by 41 pts", "Under pace by 18 pts" (the
+    points without a sign) or "On pace"."""
     delta = pace_delta(row.percent, row.time_fraction)
     if delta is None or row.pace is None:
         return "", "text_3"
     points = round(abs(delta))
-    if row.pace == "ahead":
-        return f"Ahead of pace by {points} pts", "warn"
-    if row.pace == "behind":
-        return f"Under pace by {points} pts", "ok"
-    return "On pace", "ok"
+    words = _words(locale)
+    if row.pace in PACE_KEYS:
+        key, role = PACE_KEYS[row.pace]
+        return words.text(key, {"points": points}), role
+    return words.text(KEY + "pace.on"), "ok"
 
 
 # ── Shared drawing pieces ─────────────────────────────────────────────────────
@@ -1135,7 +1216,7 @@ def _header(ink: Ink, pal: Palette, model: WidgetModel, *, more: bool) -> None:
     else:
         _timer_glyph(ink, pal.accent, ICON_X + ICON_W / 2, HEAD_MID)
     title = ink.face(fonts.body, SIZE_TITLE, 600)
-    title_w = ink.put("Claude usage", TITLE_X, ink.baseline(HEAD_TOP, HEAD_H, title), title, pal.text_bright)
+    title_w = ink.put(TITLE, TITLE_X, ink.baseline(HEAD_TOP, HEAD_H, title), title, pal.text_bright)
 
     pill = ink.face(fonts.body, SIZE_PILL, 600)
     right = PILL_RIGHT if more else RIGHT
@@ -1180,7 +1261,8 @@ def _cap_badge(ink: Ink, pal: Palette, model: WidgetModel, row: Row, name_end: f
     if cap is None:
         return
     face = ink.face(ink.fonts.body, SIZE_PILL, 600)
-    text = f"Cap {formats.percent(_number(cap), model.locale, tight=tight)}"
+    text = _words(model.locale).text(KEY + "cap.tag",
+                                     {"percent": formats.percent(_number(cap), model.locale, tight=tight)})
     left = name_end + BADGE_GAP
     width = BADGE_PAD + ink.advance(text, face) + BADGE_PAD
     if left + width > limit:
@@ -1201,7 +1283,7 @@ def _row(ink: Ink, pal: Palette, model: WidgetModel, row: Row, top: float, *, ex
     value = _exact_percent_text(row.percent, model.locale) if exact else _percent_text(row.percent, model.locale)
     value_w = ink.advance(value, value_face)
     room = RIGHT - LEFT - value_w - 10
-    label = _row_name(row)
+    label = _row_name(row, locale=model.locale)
     tag = _tag(row, model.locale)
     label_w = ink.advance(label, label_face)
     tag_w = ink.advance(tag, tag_face)
@@ -1253,37 +1335,43 @@ def _footer(ink: Ink, pal: Palette, model: WidgetModel, top: float) -> None:
 
 # ── Tooltip: the usage guard's bar ────────────────────────────────────────────
 
-def _lead(words: str, rest: str) -> tuple[str, str]:
-    """(lead, rest): the lead takes its colon only when something follows it."""
-    return (f"{words}:" if rest else words), rest
+def _lead(lead: str, lead_to_list: str, rest: str) -> tuple[str, str]:
+    """(lead, rest): the lead with its colon (the language's, in the catalog) only when something follows it."""
+    return (lead_to_list if rest else lead), rest
 
 
 def _guard_statement(model: WidgetModel) -> tuple[str, str] | None:
     """(lead, rest) of the hover card's guard line, or None while the guard is off:
     ("Guard armed:", "session 95%, weekly 90%") and
     ("Guard holding:", "weekly 91% (cap 90%). Resumes Fri 7:12 PM (in 2d 3h)."). A guard with nothing to list (no
-    caps) is its lead alone, without the colon: ("Guard armed", "")."""
+    caps) is its lead alone, without the colon: ("Guard armed", ""). The words are the catalog's; the code adds the
+    ", " between limits, the space before a cap and the periods, and keeps a limit, a cap, the clock and the time
+    left each on one line (engine.glue)."""
     guard, locale = model.guard, model.locale
     if guard is None:
         return None
+    words = _words(locale)
     if not guard.holding:
-        caps = ", ".join(engine.glue(f"{_guard_name(guard, key)} {formats.percent(_number(cap), locale)}")
-                         for key, cap in guard.caps.items())
-        return _lead("Guard armed", caps)
+        caps = ", ".join(engine.glue(words.text(KEY + "guard.limit", {
+            "name": _guard_name(guard, key, locale=locale), "percent": formats.percent(_number(cap), locale)}))
+            for key, cap in guard.caps.items())
+        return _lead(words.text(KEY + "guard.armed"), words.text(KEY + "guard.armed_list"), caps)
     limits = []
     for key in guard.over_keys:
-        name, reading, cap = _guard_name(guard, key), guard.readings.get(key), guard.caps.get(key)
-        text = engine.glue(name if reading is None else f"{name} {_percent_text(reading, locale)}")
+        name, reading, cap = _guard_name(guard, key, locale=locale), guard.readings.get(key), guard.caps.get(key)
+        text = engine.glue(name if reading is None else words.text(KEY + "guard.limit", {
+            "name": name, "percent": _percent_text(reading, locale)}))
         if cap is not None:
-            text += " " + engine.glue(f"(cap {formats.percent(_number(cap), locale)})")
+            text += " " + engine.glue(words.text(KEY + "guard.cap", {"percent": formats.percent(_number(cap), locale)}))
         limits.append(text)
     rest = ", ".join(limits)
     rest = f"{rest}." if rest else ""
     if guard.resume_seconds is not None and guard.resume_clock:
-        clock = engine.glue(guard.resume_clock)
-        countdown = engine.glue("(in " + _countdown(guard.resume_seconds) + ")")
-        rest = f"{rest} Resumes {clock} {countdown}."
-    return _lead("Guard holding", rest.strip())
+        time_left = engine.glue(words.text(KEY + "guard.time_left",
+                                           {"countdown": _countdown(guard.resume_seconds, locale=locale)}))
+        rest = f"{rest} " + words.text(KEY + "guard.resumes", {"clock": engine.glue(guard.resume_clock),
+                                                               "time_left": time_left}) + "."
+    return _lead(words.text(KEY + "guard.holding"), words.text(KEY + "guard.holding_list"), rest.strip())
 
 
 def _guard_bar_lines(ink: Ink, model: WidgetModel) -> tuple[str, list[str]]:
@@ -1420,13 +1508,14 @@ class GatesSkin:
         _header(ink, pal, model, more=False)
         body = ink.face(ink.fonts.body, SIZE_FOOT, 400)
         lead = ink.face(ink.fonts.body, SIZE_FOOT, 600)
+        words = _words(model.locale)
         for index, row in enumerate(rows):
             top = TIP_ROW0 + TIP_PITCH * index
             _row(ink, pal, model, row, top, exact=True)
             base = ink.baseline(top + TIP_INFO_DY, FOOT_LINE, body)
             if row.resets_text:
-                ink.put(f"Resets {row.resets_text}", LEFT, base, body, pal.text_3)
-            text, role = _pace_text(row)
+                ink.put(words.text(KEY + "resets.at", {"clock": row.resets_text}), LEFT, base, body, pal.text_3)
+            text, role = _pace_text(row, locale=model.locale)
             if text and not _dim(model):
                 ink.put(text, RIGHT, base, lead, _role(pal, role), "right")
         if bar_h:
@@ -1546,7 +1635,8 @@ def _render_strip(model: WidgetModel, pal: Palette, theme: Any, height_px: int, 
     label_face = ink.face(ink.fonts.body, SIZE_STRIP_K, 600)
     value_face = ink.face(ink.fonts.mono, SIZE_STRIP_V, 700)
     rows = list(model.rows[:2])
-    for index, (label, top) in enumerate(zip(("5H", "7D"), _strip_rows(plate_h))):
+    words = _words(model.locale)
+    for index, (label, top) in enumerate(zip((words.text(key) for key in WINDOW_KEYS), _strip_rows(plate_h))):
         row = rows[index] if index < len(rows) else None
         ink.put(label, STRIP_K_X, ink.baseline(top, STRIP_ROW_LINE, label_face), label_face, pal.text_3)
         width = STRIP_RAIL_X1 - STRIP_RAIL_X0

@@ -717,8 +717,9 @@ def turkish_frames() -> dict[str, list[str]]:
 
 def test_no_turkish_frame_draws_a_combining_dot(turkish_frames):
     """A U+0307 comes from lower-casing Turkish's İ by the default rule (str.lower, str.capitalize); casing never
-    writes one. Nostromo's own case calls moved to casing in #94 and Night City's in #95; Gates' do in #96: this holds
-    every frame meanwhile."""
+    writes one. Nostromo's own case calls moved to casing in #94, Night City's in #95 and Gates' in #96 (which keeps
+    English's own case of a scoped name for English's words alone, a name no Turkish casing has touched): this holds
+    every frame."""
     assert set(turkish_frames) == {"24 Fable", "24 Haiku", "12 Fable", "12 Haiku"}
     for frames, runs in turkish_frames.items():
         assert runs and [run for run in runs if COMBINING_DOT in run] == [], frames
@@ -740,10 +741,70 @@ def test_turkish_frames_draw_turkish_weekdays_percents_and_clocks(turkish_frames
 def test_a_name_with_an_i_reaches_the_turkish_frames(turkish_frames):
     """Haiku, scoped in place of Fable, is drawn in every skin's own case, so the combining-dot check above has an i to
     see: in Turkish capitals in Nostromo since #94 ("HAİKU WEEKLY") and in Night City since #95 ("HAİKU", a scoped row
-    shows the name alone), and as written in Gates ("Haiku weekly"). No skin writes it by English's rule ("HAIKU")."""
+    shows the name alone), and in Gates in English's words while Turkish has none of its own ("Haiku weekly", English's
+    own case of the name: gates._english_name). No skin writes it by English's rule ("HAIKU")."""
     for clock in (24, 12):
         runs = turkish_frames[f"{clock} Haiku"]
         assert {"HAİKU", "Haiku weekly", "HAİKU WEEKLY"} <= set(runs), clock
         assert not [run for run in runs if "HAIKU" in run], clock
         assert not [run for run in runs if "Fable" in run or "FABLE" in run], clock
     assert any(re.search("Fable|FABLE", run) for run in turkish_frames["24 Fable"])
+
+
+def test_gates_writes_names_ages_and_countdowns_in_the_language(runs, monkeypatch):
+    """#96: Gates' words come from the catalog (English's while a language has none of its own). A name goes into a
+    language's own words as written, its first letter in capitals where a row's name starts with it (casing.cased, by
+    the language's rule: Turkish's dotted İ), and into English's words in English's own case ("Claude_code weekly",
+    "claude_code weekly" in the guard's line, gates._english_name). The pill's age and the countdowns are formats:
+    Gates' own shapes in English and the pseudo-locale, CLDR's narrow units in their own case elsewhere, the countdown
+    always as the tray's tooltip writes it (app._tray_countdown)."""
+    from usage_monitor import app
+    from usage_monitor.agent import guard
+    from usage_monitor.data.identity import legacy_label
+
+    at = NOW + timedelta(days=2, hours=3)
+    limits = [limit("session", 96.0, at), limit("weekly_all", 40.0, at),
+              limit("weekly_scoped", 60.0, at, label=legacy_label("weekly_scoped", "Haiku", None), scope_model="Haiku",
+                    allowance_pct=50.0),
+              *(limit("weekly_scoped", 60.0, at, label=legacy_label("weekly_scoped", None, surface),
+                      scope_surface=surface, allowance_pct=25.0) for surface in ("claude_code", "iphone"))]
+    state = dump._state(NOW, ApiStatus.LIVE, limits, 12)
+    policy = {**dump.GUARD_SAMPLE_POLICY, "scoped_cap": 50}           # the session and the three scoped rows are over
+    state = dataclasses.replace(state, guard=guard.evaluate(guard.limits_doc(state.usage), policy, NOW))
+    turkish = {"widget.gates.limit.scoped": "{name} haftalık", "widget.gates.guard.scoped": "{name} haftalık"}
+    shipped = i18n.app_catalog
+    catalogs = {"tr": i18n.Catalog("tr", turkish, i18n.load_catalog("en").english())}
+    monkeypatch.setattr(i18n, "app_catalog", lambda language: catalogs.get(language) or shipped(language))
+    for locale, rows, guard_names in (
+            (loc("tr-TR"), ["Haiku haftalık", "Claude_code haftalık", "İphone haftalık"],
+             ["Haiku haftalık", "claude_code haftalık", "iphone haftalık"]),
+            (EN, ["Haiku weekly", "Claude_code weekly", "Iphone weekly"],
+             ["Haiku weekly", "claude_code weekly", "iphone weekly"])):
+        model = build_model(state, NOW, show_scoped="always", locale=locale)
+        floating, tooltip = (texts(drawn(runs, "gates", surface, model)) for surface in ("floating", "tooltip"))
+        assert set(rows) <= set(floating) and set(rows) <= set(tooltip), (locale.format, floating)
+        guard_line = " ".join(tooltip[tooltip.index(gates._guard_statement(model)[0]):]).replace(engine.NO_BREAK, " ")
+        assert all(f"{name} " in guard_line for name in guard_names), (locale.format, guard_line)
+        assert not [text for text in floating + tooltip if COMBINING_DOT in text], locale.format
+    turkish_model = build_model(state, NOW, show_scoped="always", locale=loc("tr-TR"))
+    catalogs.clear()                                         # Turkish has no Gates words yet: English's, as before
+    assert [gates._row_name(row, locale=loc("tr-TR")) for row in turkish_model.rows[2:]] == [
+        "Haiku weekly", "Claude_code weekly", "Iphone weekly"]
+    stale = dataclasses.replace(state, status=ApiStatus.STALE, guard=None, usage_fetched_at=NOW - timedelta(minutes=41))
+    days = dataclasses.replace(stale, usage_fetched_at=NOW - timedelta(days=100))
+    for locale, minutes, hundred in ((loc("fr-FR"), "41min", "100j"), (loc("es-CO"), "41 min", "100 días"),
+                                     (loc("tr-TR"), "41d", "100g"), (EN, "41 min", "100 d"),
+                                     (PSEUDO, "41 min", "100 d")):
+        model = build_model(stale, NOW, show_scoped="always", locale=locale)
+        assert gates._age_label(model) == minutes, locale.format
+        assert gates._age_label(build_model(days, NOW, locale=locale)) == hundred, locale.format
+        assert any(text.endswith(" · " + minutes) for text in texts(drawn(runs, "gates", "floating", model))), \
+            locale.format
+    for language in ("en", i18n.PSEUDO, "fr", "es", "tr"):
+        for locale in widget_words.sweep_locales(language):
+            for seconds in widget_words.sweep_countdowns(locale):
+                assert gates._countdown(seconds, locale=locale) == app._tray_countdown(seconds, locale), (
+                    locale.format, seconds)
+    assert [gates._countdown(seconds) for seconds in (30, 9 * 60, 2 * 3600 + 14 * 60, 2 * 86400 + 3 * 3600)] == [
+        "<1m", "9m", "2h 14m", "2d 3h"]
+    assert gates._countdown(2 * 3600 + 14 * 60, locale=loc("fr-FR")) == "2h 14min"

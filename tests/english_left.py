@@ -353,14 +353,17 @@ def widget_names() -> tuple[str, ...]:
 
 def pseudo_format_words() -> tuple[str, ...]:
     """The pseudo-locale's format words: its weekday names and its AM and PM, as written and in capitals (the skins draw
-    both). They are English's, since #91 gives the pseudo-locale English's formats. The widget half treats them as
-    formats, as it treats numbers (#93); the dashboard half's record still lists the date names the page shows."""
+    both), and Gates' unit words of two letters or more as Gates writes them (its age's "min", #96). They are
+    English's, since #91 gives the pseudo-locale English's formats. The widget half treats them as formats, as it treats
+    numbers (#93); the dashboard half's record still lists the date names the page shows."""
     from usage_monitor import casing, formats
+    from usage_monitor.render.skins import gates
 
     locale = i18n.dev_locale(i18n.PSEUDO)
     words = [formats.weekday(day, locale) for day in range(7)]
     words += [formats.clock(datetime(2026, 1, 1, hour), locale).split()[-1] for hour in (0, 12)]
-    return tuple(dict.fromkeys([*words, *(casing.upper(word, locale.language) for word in words)]))
+    units = [unit for unit in (*gates.AGE_UNITS.values(), *gates.COUNTDOWN_UNITS.values()) if len(unit) >= 2]
+    return tuple(dict.fromkeys([*words, *(casing.upper(word, locale.language) for word in words), *units]))
 
 
 def _menu_labels(locale: i18n.Locale) -> list[str]:

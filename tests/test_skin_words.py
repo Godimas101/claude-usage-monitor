@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import re
+import subprocess
+import sys
 from typing import Any
 
 import pytest
@@ -131,7 +134,7 @@ def test_gates_record_is_whole() -> None:
     numbers = 0
     for words in gates.values():
         assert set(words) == {"helpers", "runs"} and set(words["runs"]) == surfaces
-        tray = words["runs"]["tray/32"]                  # the number, or nothing beside a lamp's mark (offline, limited)
+        tray = words["runs"]["tray/32"]               # the number, or nothing beside a lamp's mark (offline, limited)
         assert isinstance(tray, list) and len(tray) <= 1 and all(len(run[-1]) == 2 for run in tray), tray
         numbers += len(tray)
     assert numbers > 50
@@ -787,3 +790,244 @@ def test_no_night_city_run_is_english_in_the_pseudo_locale() -> None:
     refused = RECORDED["night_city"]["refused"]["runs"]["floating@1"]
     assert english_left.english([run[0] for run in refused], names, format_words) >= {
         "RELINK // RUN /login", "SESSION"}                                 # English is caught
+
+
+# ── Gates' words come from the catalog (#96 step 2) ───────────────────────────
+
+_PLACEHOLDERS = re.compile(r"(\{[A-Za-z_][A-Za-z0-9_]*\})")
+
+
+def _swapped(english: str) -> str:
+    """``english`` with the case of its first letter swapped, the first after a leading placeholder: "session",
+    "{name} Weekly", "5h", "(Cap {percent})". A text with no letter is kept ("{name} {percent}")."""
+    parts = _PLACEHOLDERS.split(english)
+    for index in range(0, len(parts), 2):
+        at = next((i for i, ch in enumerate(parts[index]) if ch.isalpha()), None)
+        if at is not None:
+            parts[index] = parts[index][:at] + parts[index][at].swapcase() + parts[index][at + 1:]
+            break
+    return "".join(parts)
+
+
+def _gates_draw(models: dict[str, Any], scales: tuple[float, ...] = (1.0,)) -> dict[str, dict[str, Any]]:
+    from usage_monitor.render import dump
+    from usage_monitor.render.skins import get_skin
+
+    theme = dump.load_theme_objects()["gates"]
+    skin, variant = get_skin("gates"), theme.variants[0]
+    return {name: skin_words.gates_runs(skin, model, theme, variant, dump.TASKBAR_HEIGHTS_AT_1X, scales=scales)
+            for name, model in models.items()}
+
+
+def _gates_pieces(english: dict[str, str]) -> dict[str, str]:
+    """Each widget.gates text's pieces between its placeholders, English's to the marked one's, where the mark is,
+    without the spaces round them (the guard bar may break its line there)."""
+    found: dict[str, str] = {}
+    for key, value in english.items():
+        if key.startswith("widget.gates."):
+            for was, now in zip(_PLACEHOLDERS.split(value)[::2], _PLACEHOLDERS.split(_swapped(value))[::2]):
+                was, now = was.strip(), now.strip()
+                if was != now:
+                    assert found.get(was, now) == now, (key, was)
+                    found[was] = now
+    return found
+
+
+def _gates_mark(text: str, pieces: dict[str, str], data: set[str]) -> str:
+    """``text`` (a run English drew) with each of Gates' pieces in it marked, the data in it left as it is."""
+    kept: list[str] = []
+
+    def keep(match: re.Match[str]) -> str:
+        kept.append(match.group(0))
+        return f"\x00{len(kept) - 1}\x00"
+
+    if data:
+        text = re.sub("|".join(map(re.escape, sorted(data, key=len, reverse=True))), keep, text)
+    text = re.sub("|".join(map(re.escape, sorted(pieces, key=len, reverse=True))), lambda m: pieces[m.group(0)], text)
+    return re.sub("\x00(\\d+)\x00", lambda m: kept[int(m.group(1))], text)
+
+
+def _gates_same(english: str, marked: str, pieces: dict[str, str], data: set[str]) -> bool:
+    """Whether ``marked`` is ``english`` with its pieces marked; where either is cut ("…"), whether the one is the
+    other's start: a marked word is wider or narrower, so a cut falls elsewhere."""
+    want = _gates_mark(english, pieces, data)
+    if want == marked:
+        return True
+    if not (english.endswith("…") or marked.endswith("…")):
+        return False
+    a, b = want.removesuffix("…").rstrip(), marked.removesuffix("…").rstrip()
+    return a.startswith(b) or b.startswith(a)
+
+
+# Gates' marker test draws in a fresh Python with the time zone pinned, as the record was (TZ=UTC0): the wide resumes
+# English's footer cuts are wide only at the record's clock. The script reads the marked widget.gates texts on stdin,
+# draws every recorded state on every surface at 1.0 and 1.25 in English, then again with the catalog patched to the
+# marked texts, Catalog.text spied on, and the data the skin read (a kind's label in sentence case, a guard's label)
+# noted; it prints both sets of runs, the keys read and the data.
+_GATES_MARKED = """
+import dataclasses
+import json
+import sys
+
+sys.path.insert(0, "tests")
+import skin_words
+from usage_monitor import i18n
+from usage_monitor.render import dump
+from usage_monitor.render.skins import gates, get_skin
+
+own = json.loads(sys.stdin.read())
+theme = dump.load_theme_objects()["gates"]
+skin, variant = get_skin("gates"), theme.variants[0]
+models = skin_words.models(skin_words._gates_states)
+
+
+def draw():
+    return {name: skin_words.gates_runs(skin, model, theme, variant, dump.TASKBAR_HEIGHTS_AT_1X)
+            for name, model in models.items()}
+
+
+english = draw()
+catalog = i18n.Catalog("en", {}, {**i18n.load_catalog("en").english(), **own})
+i18n.app_catalog = lambda language: catalog
+data = {str(model.status_text) for model in models.values()}
+read = set()
+real_text, real_sentence = i18n.Catalog.text, gates._sentence
+
+
+def text(self, key, values=None):
+    read.add(key)
+    return real_text(self, key, values)
+
+
+def sentence(label):
+    found = real_sentence(label)
+    data.add(found)
+    return found
+
+
+class Labels(dict):
+    def get(self, key, default=None):
+        label = super().get(key, default)
+        data.add(str(label))
+        return label
+
+
+i18n.Catalog.text, gates._sentence = text, sentence
+for name, model in models.items():
+    if model.guard is not None:
+        models[name] = dataclasses.replace(model, guard=dataclasses.replace(model.guard,
+                                                                           labels=Labels(model.guard.labels)))
+marked = draw()
+sys.stdout.reconfigure(encoding="utf-8")
+print(json.dumps({"english": english, "marked": marked, "read": sorted(read), "data": sorted(data)},
+                 ensure_ascii=False))
+"""
+
+
+def test_gates_takes_every_word_from_the_catalog_as_written() -> None:
+    """Every word Gates draws comes from a Catalog.text call on one of its keys, drawn as the catalog writes it. The
+    catalog is patched so each widget.gates text has the case of its first letter swapped ("session", "{name} Weekly",
+    "5h", "hmm, we lost touch."), Catalog.text is spied on, and every recorded state is drawn on every surface at 1.0
+    and 1.25 (_GATES_MARKED, at the record's clock). Each run is held to the run English draws in its place: English's
+    with each of Gates' pieces marked and its data as it is (the view model's status word, a kind's label in sentence
+    case, a guard's label), so a literal, a key read for another or a catalog text cased again fails. Gates' faces are
+    proportional, so a marked word is wider or narrower: where a run is cut ("…", English's two wide resumes) the one
+    need only start the other, and where the hover card's guard bar breaks its lines elsewhere its words, in order,
+    are held instead. The skin reads every one of its keys and no other."""
+    from usage_monitor import i18n
+
+    english = i18n.load_catalog("en").english()
+    own = {key: _swapped(value) for key, value in english.items() if key.startswith("widget.gates.")}
+    pieces = _gates_pieces(english)
+    done = subprocess.run([sys.executable, "-c", _GATES_MARKED], cwd=skin_words.REPO, input=json.dumps(own),
+                          capture_output=True, encoding="utf-8", timeout=900, check=False,
+                          env={**os.environ, "TZ": skin_words.PINNED_TZ, "PYTHONPATH": str(skin_words.REPO)},
+                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    assert done.returncode == 0, done.stderr[-3000:]
+    found = json.loads(done.stdout)
+    assert found["english"] == {name: words["runs"] for name, words in RECORDED["gates"].items()}    # the record's
+    data = set(found["data"]) - {""}
+    wrong, rewrapped, cut, marks = [], [], [], 0
+    for name, surfaces in found["marked"].items():
+        for surface in surfaces:
+            was = [run[0] for run in _resolved(found["english"][name], surface)]
+            now = [run[0] for run in _resolved(surfaces, surface)]
+            if len(was) == len(now) and all(_gates_same(a, b, pieces, data) for a, b in zip(was, now)):
+                for a, b in zip(was, now):
+                    marks += a != b
+                    cut += [(name, surface, a, b)] if _gates_mark(a, pieces, data) != b else []
+                continue
+            rewrapped.append((name, surface))                  # the guard bar's lines break elsewhere: its words
+            if " ".join(_gates_mark(text, pieces, data) for text in was).split() != " ".join(now).split():
+                wrong.append((name, surface, was, now))
+    assert wrong == [], wrong[:4]
+    assert set(found["read"]) == set(own), sorted(set(found["read"]) ^ set(own))
+    assert marks > 3000
+    assert {surface.split("@")[0] for _name, surface in rewrapped} == {"tooltip"}
+    assert {(name, surface) for name, surface, _a, _b in cut} >= {
+        (f"guard_hold/{wide}", f"floating@{scale}") for wide in ("resume_mon_10am", "resume_wed_1259pm")
+        for scale in ("1", "1.25")}, cut
+    assert all(a.endswith("…") or b.endswith("…") for _name, _surface, a, b in cut), cut
+
+
+def test_gates_english_footers_are_the_catalogs() -> None:
+    """gates._STATUS_COPY, which an older test reads, is no copy of the words: each status's footer in English, read
+    from the catalog when asked, as the skin draws it for an English model of that status (#96's plan critic 1)."""
+    from usage_monitor import i18n
+    from usage_monitor.data.models import ApiStatus
+    from usage_monitor.render import dump
+    from usage_monitor.render.skins import gates
+
+    en = i18n.load_catalog("en")
+    assert set(gates._STATUS_COPY) == set(ApiStatus) - {ApiStatus.LIVE}
+    for status, (lead_key, rest_key, role) in gates.FOOTER_KEYS.items():
+        rest = str(en.text(rest_key, {"product": "Claude Code", "command": "/login"}))
+        assert gates._STATUS_COPY[status] == ((str(en.text(lead_key)), " " + rest, role) if lead_key else
+                                              ("", rest, role)), status
+    for name in ("stale", "offline", "paused", "rate_limited", "no_credentials", "loading"):
+        model = dump.sample_model(name)
+        lead, rest, role = gates._STATUS_COPY[model.status]
+        assert gates._footer_runs(model) == ([(lead, 600, role)] if lead else []) + [(rest, 400, "text_3")], name
+
+
+# What Gates draws in English in every language, by design: data, not words.
+GATES_DATA_LEFTOVERS: dict[str, str] = {
+    "Design weekly": "a scoped row of a kind no catalog has words for, named from its code in sentence case "
+                     "(gates._sentence, model.unknown_kind_names, #93 D4)",
+    "design weekly": "the guard's own label for a limit of a kind no catalog has words for (#93 D4)",
+    "Opus weekly": "a limit gone from the reading keeps the guard's own label in every language (#93 D4, owner "
+                   "default)",
+}
+
+
+def test_no_gates_run_is_english_in_the_pseudo_locale() -> None:
+    """Every run Gates draws in the pseudo-locale is the pseudo-locale's, as tests/english_left.py judges it: in every
+    recorded state (the refused sign-in, the edge and guard states and the states Gates' words hang on, which the
+    frame dump lacks), on every surface, at 1.0. Names are taken out (the scan's widget names, the commands, the
+    states' scope names as given and as a row's name starts with them), and so are the pseudo-locale's format words
+    (its weekdays, AM, PM and Gates' "min"). What stays English is data: GATES_DATA_LEFTOVERS, each drawn. The skin
+    never cases a catalog text again: a pseudo-locale İ lowered by the default rule would draw a combining dot."""
+    from usage_monitor import casing, i18n
+
+    pseudo = i18n.dev_locale(i18n.PSEUDO)
+    models = skin_words.models(skin_words._gates_states, pseudo)
+    scopes = {scope for model in models.values()
+              for scope in [*(row.scope_name for row in model.rows),
+                            *(model.guard.scope_names.values() if model.guard is not None else ())] if scope}
+    names = (*english_left.widget_names(), *i18n.COMMANDS, *sorted(scopes),
+             *sorted(casing.cased("{name}", "sentence", pseudo.language, name=scope) for scope in scopes))
+    texts: dict[str, str] = {}
+    for name, surfaces in _gates_draw(models).items():
+        for surface, found in surfaces.items():
+            for run in ([] if isinstance(found, str) else found):
+                texts.setdefault(run[0], f"{name} {surface}")
+    format_words = english_left.pseudo_format_words()
+    left = english_left.english(texts, (*names, *GATES_DATA_LEFTOVERS), format_words)
+    assert left == set(), {text: where for text, where in texts.items() if english_left.entry(text) in left}
+    assert all(any(leftover in text for text in texts) for leftover in GATES_DATA_LEFTOVERS)
+    assert {"Claude Code", "claude_code", "Haiku"} <= scopes
+    assert [text for text in texts if chr(0x307) in text] == []
+    assert any(text.startswith("[Claude_code ") for text in texts)            # a name starting a row, in capitals
+    refused = RECORDED["gates"]["refused"]["runs"]["floating@1"]
+    assert english_left.english([run[0] for run in refused], names, format_words) >= {
+        "Sign-in refused.", "Run /login in Claude Code."}                     # English is caught

@@ -160,14 +160,15 @@ def test_names_are_taken_out_before_a_run_is_judged() -> None:
 
 
 def test_the_pseudo_locales_format_words_and_the_dev_mark_are_no_english_on_the_widgets() -> None:
-    """#91 gives the pseudo-locale English's formats, so its weekday names and AM/PM are English's: the widget half
-    treats them as formats, as it treats numbers, and takes them out as whole words only. The dev instance's "(dev)" is
-    a developer's mark (#93). The dashboard half's record keeps the date names the page shows."""
+    """#91 gives the pseudo-locale English's formats, so its weekday names and AM/PM are English's, and Gates' age
+    unit "min" (#96): the widget half treats them as formats, as it treats numbers, and takes them out as whole words
+    only. The dev instance's "(dev)" is a developer's mark (#93). The dashboard half's record keeps the date names the
+    page shows."""
     from usage_monitor import app
 
     days = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
     words = english_left.pseudo_format_words()
-    assert set(words) == {*days, *(day.upper() for day in days), "AM", "PM"}
+    assert set(words) == {*days, *(day.upper() for day in days), "AM", "PM", "min"}
     names = english_left.widget_names()
     assert english_left.DEV_MARK == app.DEV_MARK.strip() and english_left.DEV_MARK in names
     held = P("guard holding, resumes {clock} (in {countdown})").replace("{clock}", "Fri 9:59 PM").replace(
@@ -175,6 +176,10 @@ def test_the_pseudo_locales_format_words_and_the_dev_mark_are_no_english_on_the_
     assert english([held, P("RESETS {clock}").replace("{clock}", "SAT 4:00 AM")], names, words) == set()
     assert english([held], names) == {entry(held)}                         # without the format words it is English
     assert english([P("live") + " (dev)"], names, words) == set()
+    assert english([P("stale") + " · 41 min"], names, words) == set()                 # Gates' pill beside its age
+    assert english([P("stale") + " · 41 min"], names, [w for w in words if w != "min"]) == {
+        entry(P("stale") + " · 41 min")}
+    assert english(["minute", "admin"], names, words) == {"minute", "admin"}
     assert english([P("live") + " (dev)"], (PRODUCT, *WIDGET_MARKS), words) == {entry(P("live") + " (dev)")}
     assert english(["AMP", "Monk", "SUNK", "Friday", P("weekly") + " Monday"], names, words) == {
         "AMP", "Monk", "SUNK", "Friday", entry(P("weekly") + " Monday")}    # whole words only

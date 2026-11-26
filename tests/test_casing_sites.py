@@ -6,8 +6,9 @@ str.upper(), lower(), capitalize(), title(), casefold() or swapcase() uses the d
 id (a limit kind, a key, the guard's identity strings, a tag or a currency code) or for English that is cased the way it
 always was. The files the widgets', the tray's and the alerts' words come from may hold only the calls listed here, each
 with its reason; a new one fails until it goes through casing or is listed. A listed call that goes away is struck, so
-the list only shrinks. The skins' own calls move to casing in #94 to #96, and each adds its skin here: Nostromo (#94)
-and Night City (#95) have none left.
+the list only shrinks. The skins' own calls moved to casing in #94 to #96, and each added its skin here: Nostromo (#94)
+and Night City (#95) have none left; Gates (#96) keeps a font's axis names (ids), an unknown kind's label in sentence
+case, and English's own case of a scoped limit's name, kept for English's words alone as the alerts keep theirs.
 """
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 CASE_METHODS = frozenset({"upper", "lower", "capitalize", "title", "casefold", "swapcase"})
+GATES = "usage_monitor/render/skins/gates.py"
 
 # (file, enclosing function, the call as ast.unparse writes it): why the plain rules are right there.
 ALLOWED: dict[tuple[str, str, str], str] = {
@@ -63,10 +65,24 @@ ALLOWED: dict[tuple[str, str, str], str] = {
         "id: a BCP 47 tag's other subtags",
     ("usage_monitor/formats.py", "money", "(currency or '').strip().upper()"):
         "id: an ISO 4217 currency code",
+    (GATES, "_font", "axis['name'].decode('utf-8', 'replace').lower()"):
+        "id: a variable font's axis name, matched against weight and optical",
+    (GATES, "_font", "str(axis['name']).lower()"):
+        "id: as above",
+    (GATES, "_sentence", "label.capitalize()"):
+        "data: a kind no catalog has words for, named from its code in sentence case (identity text, English in every "
+        "language, #93 D4)",
+    (GATES, "_english_name", "name.upper()"):
+        "English: a scoped limit's name in capitals first, as English always wrote it, for English's words only "
+        "(Gates' own quirk, kept byte for byte as data/alerts.py keeps its own; #96, an owner default)",
+    (GATES, "_english_name", "capitals.capitalize()"):
+        "English: as above (\"Claude design weekly\" on a row)",
+    (GATES, "_english_name", "capitals.lower()"):
+        "English: as above (\"claude_code weekly\" in the guard's line)",
 }
 SCANNED = ("usage_monitor/render/model.py", "usage_monitor/app.py", "usage_monitor/data/alerts.py",
            "usage_monitor/data/identity.py", "usage_monitor/data/usage_api.py", "usage_monitor/formats.py",
-           "usage_monitor/render/skins/nostromo.py", "usage_monitor/render/skins/night_city.py")
+           "usage_monitor/render/skins/nostromo.py", "usage_monitor/render/skins/night_city.py", GATES)
 
 
 class _Finder(ast.NodeVisitor):
