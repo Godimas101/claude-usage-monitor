@@ -1447,14 +1447,33 @@ def test_the_budgets_give_way_as_gates_does(language: str, monkeypatch: pytest.M
     assert any(taken) == (language == i18n.PSEUDO), taken
 
 
+# Ages a pill can show (gates._age_label), so a test can give the skin English's widest at a size.
+_G_AGE_SECONDS = (12, 59, 120, 360, 41 * 60, 44 * 60, 59 * 60, 3600, 47 * 3600, 2 * 86400, 100 * 86400)
+
+
+def _g_longest(whole: Any) -> int:
+    """The most W a header keeps whole (whole(n) holds for 1, not for 40, and turns false once)."""
+    low, high = 1, 40
+    assert whole(low) and not whole(high)
+    while high - low > 1:
+        middle = (low + high) // 2
+        low, high = (middle, high) if whole(middle) else (low, middle)
+    return low
+
+
 @pytest.mark.parametrize("order", list(itertools.permutations(g.HEADER_GIVE_WAY)))
 def test_the_budgets_take_the_header_order_from_gates_tuple(order: tuple[str, ...],
                                                              monkeypatch: pytest.MonkeyPatch) -> None:
-    """Q2 lives in gates.HEADER_GIVE_WAY alone (the hover line's and the sign-in footers' orders in theirs): every
-    Gates plan line's give-way is its tuple's steps as boxes (budgets.nc_gives_way); in any order of Q2's, so is the
-    header's; and the status word's room on each surface (budgets._nc_room, which LIMITS pins) is where the skin's
-    _header_plan stops keeping the word whole at 10 px beside the guard's holding capsule: the longest word of its
-    shape it keeps whole fits the room, and one letter more does not."""
+    """Q2 lives in gates.HEADER_GIVE_WAY alone (the hover line's and the sign-in footers' orders in theirs; #96's
+    review F1): every Gates plan line's give-way is its tuple's steps as boxes (budgets.nc_gives_way), and in any order
+    of Q2's so is the header's, its line built with the age beside the word too. Each header box's room is where the
+    skin's _header_plan stops keeping its text whole beside the guard's holding capsule, with the pill's age where the
+    order keeps it beside the word (its step after the word's: budgets.GHeaderPlan): the status word at 10 px and the
+    shrunk word at the floor (where the order shrinks it before it cuts it), with English's widest age at that size (a
+    word with no age keeps as much at least), and in a language beside each format tag's own ages (g_room); and the
+    pill's text, its word and age, beside each guard mark at the size the order draws it whole at (_g_pill_size), past
+    which its age is left out or its word cut (_g_pill_fit). Shipped (the age first) the word's rooms are the limits
+    LIMITS pins. The longest text of its shape the skin keeps whole fits the room, and one letter more does not."""
     import dataclasses
 
     for line_id, plan in budgets.G_PLANS.items():
@@ -1463,21 +1482,55 @@ def test_the_budgets_take_the_header_order_from_gates_tuple(order: tuple[str, ..
     for plan in (budgets.G_HEADER_F, budgets.G_HEADER_T):
         assert budgets.nc_gives_way(plan) == tuple(item for step in order for item in plan.step(step))
     ink = _g_ink()
+    base = dump.sample_model("guard_hold_session")
+
+    def age(seconds: int) -> str:
+        return " · " + g._age_label(dataclasses.replace(base, age_seconds=seconds))
+
+    spanish = budgets.g_tags("es")
+    lines = {line.id: line for line in budgets._g_lines()}         # as an answer to Q2 would build them
     for surface, more, plan in (("floating", True, budgets.G_HEADER_F), ("tooltip", False, budgets.G_HEADER_T)):
-        box = budgets.BOX[f"gates.{surface}.status_word"]
-        room = budgets._nc_room(plan, box.id, budgets._g_widest, budgets._g_floor, becoming=False)
-        assert room == pytest.approx(box.limit), surface
+        p = f"gates.{surface}."
+        line = lines[p + "header_line"]
+        assert line.gives_way == budgets.nc_gives_way(plan) and all(
+            line.added(box) == pytest.approx(plan.add(box)) for slot in plan.slots for box in slot), (surface, order)
+        for box_id, size, at in ((p + "status_word", g.SIZE_PILL, lambda drawn: drawn.size == g.SIZE_PILL),
+                                 (p + "status_word_shrunk", g.PILL_SIZES[-1], lambda drawn: True)):
+            if box_id.endswith("_shrunk") and order.index("word") < order.index("shrink"):
+                continue                                    # the word is cut at 10 px: it never shrinks
+            room = budgets._nc_room(plan, box_id, budgets._g_widest, budgets._g_floor, becoming=False)
+            if order[0] == "age":
+                assert room == pytest.approx(budgets.BOX[box_id].limit) and plan.age(box_id) == 0, box_id
+            widest = max(_G_AGE_SECONDS, key=lambda seconds: budgets.W_g(age(seconds), "body", size, 600))
+            assert budgets.W_g(age(widest), "body", size, 600) == pytest.approx(
+                max(budgets.W_g(text, "body", size, 600) for text in budgets._G_AGES))
+            fits = _g_longest(lambda n: budgets.W_g("W" * n, "body", size, 600) <= room + 0.01)
+            for seconds in (widest, None):
 
-        def whole(n: int, more: bool = more) -> bool:
-            model = dataclasses.replace(dump.sample_model("guard_hold_session"), status_text="W" * n,
-                                        age_seconds=None)
-            return g._header_plan(ink, model, more=more).gave_way == ()
+                def whole(n: int, seconds: int | None = seconds) -> bool:
+                    model = dataclasses.replace(base, status_text="W" * n, age_seconds=seconds)
+                    drawn = g._header_plan(ink, model, more=more)
+                    return drawn.word == "W" * n and at(drawn)
 
-        low, high = 1, 40                                   # whole(low) holds, whole(high) not
-        while high - low > 1:
-            middle = (low + high) // 2
-            low, high = (middle, high) if whole(middle) else (low, middle)
-        assert box.width("W" * low) <= room + 0.01 < box.width("W" * (low + 1)), (surface, order, low, room)
+                kept = _g_longest(whole)
+                assert kept == fits if seconds else kept >= fits, (box_id, order, seconds, kept, fits, room)
+            for tag, figures in spanish.items():          # the tag's own ages beside the word (es-CO's 100 días)
+                ages = max(budgets.W_g(text, "body", size, 600) for text in figures["ages"])
+                assert budgets.g_room(box_id, "es", 1.0, tag) == pytest.approx(
+                    room + plan.age(box_id) - (ages if plan.age(box_id) else 0.0)), (box_id, tag)
+        size, rooms = budgets._g_pill_size(), budgets._g_pill_rooms(surface)
+        for mark, state in (("none", "normal3"), ("armed", "guard_armed"), ("holding", "guard_hold_session")):
+            model = dump.sample_model(state)
+
+            def pill(n: int, model: Any = model) -> Any:
+                return g._header_plan(ink, dataclasses.replace(model, status_text="W" * n, age_seconds=12), more=more)
+
+            kept = _g_longest(lambda n: pill(n).word == "W" * n and pill(n).age is not None)
+            room = rooms["LIVE", mark]
+            assert budgets.W_g("W" * kept + " · 12 s", "body", size, 600) <= room + 0.01 < budgets.W_g(
+                "W" * (kept + 1) + " · 12 s", "body", size, 600), (surface, mark, order, kept, room)
+            past = pill(kept + 1)
+            assert (past.age is None) == (budgets._g_pill_fit() == "drop"), (surface, mark, order, past)
 
 
 def test_a_gates_box_room_in_a_language_is_its_own_tags() -> None:
@@ -1549,6 +1602,65 @@ def test_gates_pill_age_room_is_its_headers_beside_the_languages_words(monkeypat
     finally:
         monkeypatch.undo()
         budgets._g_pills.cache_clear()
+
+
+# Each status's pill room (budgets.g_pill_least), as probed for #96's review F5: the least of the headers English shows
+# that status's widest age in, by the guard's mark beside it.
+G_PILL_ROOMS = {
+    "floating": {"LIVE": 76.184, "STALE": 76.184, "OFFLINE": 86.184, "PAUSED": 86.184, "RATE LIMITED": 106.184,
+                 "NO LOGIN": 106.184, "LOADING": 106.184},
+    "tooltip": {"LIVE": 97.184, "STALE": 97.184, "OFFLINE": 97.184, "PAUSED": 97.184, "RATE LIMITED": 107.184,
+                "NO LOGIN": 97.184, "LOADING": 127.184},
+}
+
+
+def test_each_status_words_pill_note_is_its_own_room() -> None:
+    """#96's review F5: a status word's budget note gives the room its own pill has on each surface (g_pill_least, the
+    room allowed and g_pill_room hold that word's pill to), not the box's least: RATE LIMITED is never shown with its
+    age beside the holding capsule, so its pill has 30 px more on the floating widget than LIVE's."""
+    notes = budgets.notes()
+    for surface, rooms in G_PILL_ROOMS.items():
+        assert {status: round(room, 3) for status, room in budgets.g_pill_least(surface).items()} == rooms, surface
+        box = budgets.BOX[f"gates.{surface}.status_pill"]
+        assert box.limit == pytest.approx(min(rooms.values())), surface
+        pills = budgets._g_pills(i18n.DEFAULT, surface)
+        for status, room in rooms.items():
+            note = notes[f"_budget.{budgets._STATUS_KEY[status]}"]
+            assert f"{room:g} px for the word and its age where English shows its age (gates.{surface}.status_pill, " \
+                   f"drop): past it the age is left out" in note, (surface, status, note)
+            assert pills[f"{status} · 59 s"] == pytest.approx(room), (surface, status)
+
+
+def test_a_sign_in_step_past_its_room_is_reported_as_its_lead_left_out(capsys: pytest.CaptureFixture[str],
+                                                                       monkeypatch: pytest.MonkeyPatch) -> None:
+    """#96's review F4: beside its lead a sign-in footer's step is never cut (Q3: past its room the lead is left out and
+    the step drawn whole from LEFT), so the report says what gives way there, not a cut, and its note says so; the
+    skin's _footer_plan draws each such step of the pseudo-locale whole beside the language's widest lead, with no
+    lead."""
+    import dataclasses
+
+    rows = [row for row in budgets.over(i18n.PSEUDO) if row.box.id in {
+        f"gates.floating.{kind}_step" for kind in budgets.G_STEP_KINDS}]
+    assert {row.box.id for row in rows} == {f"gates.floating.{kind}_step" for kind in budgets.G_STEP_KINDS}
+    notes = budgets.notes()
+    ink = _g_ink()
+    for row in rows:
+        kind = row.box.id.split(".")[2][:-len("_step")]
+        assert row.box.gives == "the lead left out; the step drawn whole", row.box.id
+        assert notes[f"_budget.{row.box.keys[0]}"].startswith(
+            f"{row.box.limit:g} px ({row.box.id}): beside its lead; past it the lead is left out"), row.box.id
+        lead = budgets.widest_text(budgets.BOX[f"gates.floating.{kind}_lead"], i18n.PSEUDO, 1.0)
+        monkeypatch.setattr(g, "_footer_runs", lambda _model, lead=lead, step=row.text: [(lead, 600, "warn"),
+                                                                                         (step, 400, "text_3")])
+        plan = g._footer_plan(ink, dataclasses.replace(dump.sample_model("stale"),
+                                                       status=budgets.G_STEP_KINDS[kind]))
+        assert plan.gave_way == ("lead",) and [run[0] for run in plan.runs] == [row.text.lstrip()], (kind, plan)
+    monkeypatch.undo()
+    budgets.main(["--lang", i18n.PSEUDO])
+    out = capsys.readouterr().out
+    for row in rows:
+        assert f"\n  gives {row.box.id}: " in out and f"\n  cut   {row.box.id}: " not in out, row.box.id
+        assert "(the lead left out; the step drawn whole)" in out
 
 
 def test_gates_cap_badge_room_is_its_rows_beside_the_languages_words(monkeypatch: pytest.MonkeyPatch) -> None:

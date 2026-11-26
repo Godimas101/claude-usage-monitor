@@ -231,9 +231,11 @@ their times, ages, countdowns and percents are in the model's locale (#91). The 
 own text from the values beside them, and never cut, split or match those texts to find a value:
 - A row is named from its `kind`: session and weekly by the skin's own words, a scoped limit for its `scope_name`
   ("FABLE WEEKLY", Night City's "FABLE", Gates' "Fable weekly"), or "WEEKLY SCOPED" when it has neither. A kind a skin
-  has no words for, and a row built without a kind, keep their label whole. In English Gates puts the name in
-  capitals before `capitalize()`, as it did the label, so a model name reads "Claude design weekly"; in another
-  language the name goes in as written (#96, Q4).
+  has no words for, and a row built without a kind, keep their label whole. Where the template is English's (English,
+  or a language without the key), Gates puts the name in capitals before `capitalize()`, as it did the label, so a
+  model name reads "Claude design weekly" (a label with a letter that has no capital stays in capitals, "ĸRA WEEKLY",
+  as before); in another language's words the name goes in as written, its first letter in capitals by the language's
+  rule where it starts the row's name (`casing.cased`, #96, Q4).
 - The share is `share_pct`, rounded with `round()` as `share_text` is ("50% SHARE", Gates' "50% share").
 - The age is `age_seconds` told in its unit by `age_unit`; each skin has its own words for the unit codes
   ("12 S", Night City's "12 S OLD", Gates' "12 s" and "41 min" in English and the pseudo-locale, CLDR's narrow units
@@ -241,8 +243,9 @@ own text from the values beside them, and never cut, split or match those texts 
 - The sign-in copy is picked by `stale_reason` (see "Sign-in copy" below).
 - The guard's limits are worded from `GuardMark.kinds`, `models` and `scope_names` as the rows are. A limit the
   reading no longer carries, and a kind the skin has no words for, keep the guard's own label. Gates keeps a model's own
-  case there ("Fable weekly"), and English words a limit named for its surface in lower case ("claude_code weekly",
-  as the guard does; another language as written, #96) and one named for nothing by its key ("weekly scoped").
+  case there ("Fable weekly"); where the template is English's (English, or a language without the key), a limit named
+  for its surface goes in lower case ("claude_code weekly", as the guard does), and in another language's words as
+  written (mid-sentence, no capitals, #96); one named for nothing is worded by its key ("weekly scoped").
 - Every countdown (the HOLD chips, the hover card, Gates' footer, the tray) is `resume_seconds` through
   `countdown_units`, in the skin's units ("2H 14M", Gates' and the tray's "2h 14m"; Gates' in English and the
   pseudo-locale, CLDR's narrow units elsewhere, as the tray's, #96).
@@ -758,13 +761,17 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   - The strip's window tags (`_strip_tag`) shrink from 11 px to 9 px in half pixels (`STRIP_TAG_SIZES`), keeping
     `STRIP_TAG_AIR` (2 px) off the rail, then are left out; any two capitals or figures fit at 11 px.
   - Marks (Q1, an owner default Chris may overturn): the filled pill and cap badge hold every mark, so no box grows. On
-    a plate too short for the second row's line (the 30 px plate of a short taskbar) the second tag rises
-    `STRIP_TAG_RAISE` (2 px, the least that keeps every mark on the plate; 1 px does not) where it holds a mark below
-    (combining class 202 or 220, as Nostromo's and Night City's rule) or a glyph of its face that drops below the line
-    (`DESCENDERS`: `()[]_gjpqy{|}¡¿`, measured), decided by its letters (`_strip_tag_raise`). English's tags never
-    rise. The conflicts, recorded in `STRIP_TAG_MEETS`: raised, a second tag's capital with a mark above can meet the
-    first tag's ink where that one reaches the foot of its line (Q, a capital with a mark below) by up to 3 px, and
-    unraised by up to 1 px, as before #96 (the rows are 14 px apart there).
+    a plate too short for the second row's 14 px line (under 32 px: the 30 px plate of a short taskbar, and the 30.8
+    to 31.6 px plates some taskbars give) the second tag rises `STRIP_TAG_RAISE` (2 px, the least that keeps every mark
+    on the plate; 1 px does not) where it holds a mark below (combining class 202 or 220, as Nostromo's and Night
+    City's rule) or a glyph of its face that drops below the line (`DESCENDERS`: `()[]_gjpqy{|}¡¿`, `µ þ ŋ ǥ ȷ` and
+    the face's other Latin letters that do, measured over the Latin blocks it maps; a language in another script adds
+    its letters to that test), decided by its letters (`_strip_tag_raise`). English's tags never rise. Three of the
+    face's letters no language writes (`ȴ`, `Ḁ`, `ḁ`) still leave a 32 or 33 px plate by 1 px unraised: the raise is
+    held to plates whose line runs past them. The conflicts, recorded in `STRIP_TAG_MEETS` for tags of capitals or
+    figures (the strip tags' rule): raised, a second tag's capital with a mark above can meet the first tag's ink where
+    that one reaches the foot of its line (Q, a capital with a mark below) by up to 3 px; and unraised by up to 1 px,
+    as before #96, on any plate whose rows are 14 px apart (under 36 px, the 34 px plate too).
   - `tests/test_budgets.py` holds the budgets' give-way to the skin's; the frame check (`tests/frame_layout.py`,
     below) holds every frame clear.
 - **Test tools (#89).** The pseudo-locale (`i18n.PSEUDO`, `pseudo`) is `en.json` made longer (about 40%), accented
@@ -815,11 +822,15 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   LIVE tag and paused word (`nc_guard_room`). Its strip
   labels are measured at the size they shrink to (`night_city_label`), and the pace's points, which have no key, as
   English writes them in every language. Gates' header, hover line and footers (#96) take their give-way and rooms from
-  its tuples the same way (`G_PLANS`, one plan per footer kind, so no lead is budgeted beside another kind's rest), and
-  in a language its own (`g_room`, beside each format tag's resets and the widest guard rest its clocks and countdowns
-  make, `g_tags`); its rows' rooms are beside the language's own widest label, tag and value. The pill's text, its
+  its tuples the same way (`G_PLANS`, one plan per footer kind, so no lead is budgeted beside another kind's rest; the
+  header's word carries the pill's age beside it where Q2's order keeps it there, `GHeaderPlan`, so any order of
+  `HEADER_GIVE_WAY` is followed; a sign-in step past its room beside its lead is reported as the lead left out,
+  `Box.gives`, since the step is drawn whole), and in a language its own (`g_room`, beside each format tag's resets,
+  ages and the widest guard rest its clocks and countdowns make, `g_tags`); its rows' rooms are beside the language's
+  own widest label, tag and value. The pill's text, its
   word and age, is held per status to the least of the headers English shows that status's widest age in, beside the
-  language's own word (`g_pill_room`: RATE LIMITED's without the holding capsule only), and the cap badge to the least
+  language's own word, at the size Q2's order draws it whole at (`g_pill_room`: RATE LIMITED's without the holding
+  capsule only; each status word's note gives its own), and the cap badge to the least
   its rows leave it where English shows its widest badge (`g_badge_room`). `ACCEPTED_CUTS` in `test_budgets.py` holds,
   apart from `FOR_91`, the cuts a CLDR format causes: the ages Nostromo's header leaves out beside a tag's own hold chip
   (every French tag's but fr-CA's, every Spanish tag's, and in es-CO every age) and the state word Spanish's widest ages

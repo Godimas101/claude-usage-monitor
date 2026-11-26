@@ -69,7 +69,7 @@ import string
 import sys
 import tempfile
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -306,6 +306,9 @@ class Box:
     note: str = ""                  # its keys' budget note, where the limit is the whole text's, not a phrase's
     fills: tuple[tuple[str, str], ...] = ()     # each placeholder of its keys and the FILLS kind it takes (#94)
     words: bool = True              # False for a box of figures alone: the pseudo-locale writes them as figures (#94)
+    key_notes: tuple[tuple[str, str], ...] = ()     # a key's own budget note, where its room is not the box's (#96)
+    gives: str = ""                 # what gives way past its room while its own text stays whole (#96: a sign-in
+                                    # step's lead), as the report prints it in place of the fit
 
     @property
     def unit(self) -> str:
@@ -777,9 +780,41 @@ def _nc_guard_why() -> str:
 # a language its own beside each format tag's own figures (g_tags, g_room), and an answer to Q2 or Q3 changes the skin's
 # tuple alone (LIMITS and the _budget notes are then printed again). A Gates box that becomes another keeps a room of
 # its own (the word at 10 px shrinks where the order leaves it, the shrunk word is cut where the order leaves it).
-# The header's age is the first of Q2's steps: the pill's whole text, the word and its age, is budgeted where English
-# shows the age (status_pill, g_pill_room), and the header line holds the title and the word as the age leaves them.
+# The header's age has a box of its own only in the pill's whole text (status_pill, g_pill_room: the word and its age,
+# where English shows the age, at the size Q2's order draws it whole at). The header line holds the title and the word;
+# where Q2's order keeps the age while the word shrinks or is cut (its step after the word's), the word's boxes carry
+# the age beside them (GHeaderPlan), English's widest or each format tag's own, so their rooms and the line's give-way
+# follow any order of the tuple. Shipped, the age goes first, and nothing is carried.
 _GF, _GT = "gates.floating.", "gates.tooltip."
+# English's ages after the pill's word, " · " and all (gates._age_label: "12 s" up to "100 d").
+_G_AGES = (" · 12 s", " · 41 min", " · 2 min", " · 59 s", " · 1 h", " · 2 d", " · 6 min", " · 44 min", " · 59 min",
+           " · 47 h", " · 100 d")
+
+
+def _g_pill_size() -> float:
+    """The size the pill's text, its word and its age, is drawn whole at, at the least, by gates.HEADER_GIVE_WAY (Q2):
+    the floor of PILL_SIZES where the pill shrinks before it leaves its age out or cuts its word, else 10 px."""
+    order = g.HEADER_GIVE_WAY
+    return g.PILL_SIZES[-1] if order.index("shrink") < min(order.index("age"), order.index("word")) else g.SIZE_PILL
+
+
+def _g_pill_fit() -> str:
+    """What gives way past the pill's room, by gates.HEADER_GIVE_WAY: its age ("drop") where the age's step comes
+    before the word's, else its word, cut beside the age ("ellipsis")."""
+    order = g.HEADER_GIVE_WAY
+    return "drop" if order.index("age") < order.index("word") else "ellipsis"
+
+
+def _g_pill_past() -> str:
+    """The same in words, for the pill's notes."""
+    size = "" if _g_pill_size() == g.SIZE_PILL else f" (it shrinks to {g.PILL_SIZES[-1]:g} px first)"
+    return ("the age is left out" if _g_pill_fit() == "drop" else "the word is cut beside its age") + size
+
+
+def _g_word_steps() -> str:
+    """What a status word longer than its room does, by gates.HEADER_GIVE_WAY's steps for the word."""
+    order = [step for step in g.HEADER_GIVE_WAY if step != "age"]
+    return "shrinks from 10 px to 9 px, then is cut" if order == ["shrink", "word"] else "is cut at 10 px"
 
 
 def _g_keys(*names: str) -> tuple[str, ...]:
@@ -801,7 +836,7 @@ for _surface in ("floating", "tooltip"):
     _G_SPEC.update({f"gates.{_surface}.{part}": spec for part, spec in (
         ("title", ("body", g.SIZE_TITLE, 600)), ("status_word", ("body", g.SIZE_PILL, 600)),
         ("status_word_shrunk", ("body", g.PILL_SIZES[-1], 600)), ("loading_word", ("body", g.SIZE_PILL, 600)),
-        ("loading_word_shrunk", ("body", g.PILL_SIZES[-1], 600)), ("status_pill", ("body", g.SIZE_PILL, 600)),
+        ("loading_word_shrunk", ("body", g.PILL_SIZES[-1], 600)), ("status_pill", ("body", _g_pill_size(), 600)),
         ("row_label", ("body", g.SIZE_LABEL, 400)), ("row_tag", ("mono", g.SIZE_TAG, 400)),
         ("row_value", ("mono", g.SIZE_VALUE, 700)), ("cap_badge", ("body", g.SIZE_PILL, 600)))})
 _G_SPEC.update({_GT + "resets": ("body", g.SIZE_FOOT, 400), _GT + "pace": ("body", g.SIZE_FOOT, 600),
@@ -825,18 +860,40 @@ def W_gs(text: str, box_id: str) -> float:
     return W_g(text, *_G_SPEC[box_id])
 
 
-def _g_header(surface: str, room: float) -> NcPlan:
+@dataclass(frozen=True)
+class GHeaderPlan(NcPlan):
+    """Gates' header line (Q2): an NcPlan whose status words with a reading carry the pill's age beside them (its " · "
+    and the widest of ``ages``, at the size the word is drawn at there, ``aged``) while gates.HEADER_GIVE_WAY keeps it
+    there: where the age's step comes after the word box's own first step. The skin keeps the age beside a word that
+    shrinks or is cut in any such order (_header_plan), so the word's room and the line's give-way follow the tuple with
+    the age too. LOADING has no reading, so no age; shipped, the age goes first and nothing is carried."""
+    aged: tuple[tuple[str, float], ...] = ()     # each word box an age can stand beside, and the age's size there
+    ages: tuple[str, ...] = ()                   # the ages beside it, " · " and all: English's, or a format tag's
+
+    def age(self, box_id: str) -> float:
+        """The widest age beside ``box_id`` while the tuple keeps it there; 0 where it goes first or there is none."""
+        size = dict(self.aged).get(box_id)
+        if size is None or not self.ages or self.tuple().index("age") < nc_rank(self, box_id):
+            return 0.0
+        return max(W_g(age, "body", size, 600) for age in self.ages)
+
+    def add(self, box_id: str) -> float:
+        return super().add(box_id) + self.age(box_id)
+
+
+def _g_header(surface: str, room: float) -> GHeaderPlan:
     """The header line of a Gates surface: the title from TITLE_X, TITLE_GAP, then the pill (its lamp and padding) and,
-    for every status word with a reading, the guard's holding capsule beside it, to the pill's right edge."""
+    for every status word with a reading, the guard's holding capsule beside it, to the pill's right edge; the word at
+    10 px and shrunk to the floor, each with the age beside it where Q2's order keeps it (GHeaderPlan)."""
     p = f"gates.{surface}."
     words = (p + "status_word", p + "status_word_shrunk", p + "loading_word", p + "loading_word_shrunk")
-    return NcPlan(
+    return GHeaderPlan(
         room, ((p + "title",), words),
         ((p + "title", g.TITLE_GAP), (words[0], _G_CHROME + _G_CAPSULE), (words[1], _G_CHROME + _G_CAPSULE),
          (words[2], _G_CHROME), (words[3], _G_CHROME)),
         (("age", ()), ("shrink", ((words[0], words[1]), (words[2], words[3]))),
          ("word", ((words[1], "cut"), (words[0], "cut"), (words[3], "cut"), (words[2], "cut")))),
-        "HEADER_GIVE_WAY", "gates")
+        "HEADER_GIVE_WAY", "gates", aged=((words[0], g.SIZE_PILL), (words[1], g.PILL_SIZES[-1])), ages=_G_AGES)
 
 
 def _g_sign_in(kind: str) -> NcPlan:
@@ -884,8 +941,6 @@ G_HOME: dict[str, NcPlan] = {box: plan for plan in (*G_PLANS.values(), *G_ROWS.v
 G_STEP_KINDS = {"stale": g.ApiStatus.STALE, "refused": g.ApiStatus.STALE, "no_login": g.ApiStatus.NO_CREDENTIALS}
 
 # English's texts in each box, as the skin draws them today (the rooms LIMITS pins are worked out from them).
-_G_AGES = (" · 12 s", " · 41 min", " · 2 min", " · 59 s", " · 1 h", " · 2 d", " · 6 min", " · 44 min", " · 59 min",
-           " · 47 h", " · 100 d")
 _G_RESETS = ("Resets 11:39 PM", "Resets 12:59 PM", "Resets Sat 8:12 PM", "Resets Fri 11:12 PM", "Resets Mon 10:00 AM",
              "Resets Wed 12:59 PM")
 _G_STEPS = {"stale": "Send Claude Code a message.", "refused": "Run /login in Claude Code.",
@@ -958,18 +1013,26 @@ def _g_why(box_id: str) -> str:
                         state = {"drop": "left out", "cut": "cut to one letter"}.get(then) or f"as {_g_name(then)}"
                         box = then if then not in ("cut", "drop") else box
             parts.append(f"{_g_name(other)} {state}")
-    order = f"gates.{plan.order}" if isinstance(plan.order, str) else "the skin's fixed order"
-    return (f"the line's {plan.room:g} px less what the skin adds beside it, beside the others as {order} leaves them "
-            f"while it holds, the widest of each slot: {'; '.join(parts)}")
+    if isinstance(plan, GHeaderPlan) and plan.age(box_id):
+        parts.append(f"and the pill's age beside it, its widest ({plan.age(box_id):g} px), which "
+                     f"{_g_order(plan)} keeps there")
+    return (f"the line's {plan.room:g} px less what the skin adds beside it, beside the others as {_g_order(plan)} "
+            f"leaves them while it holds, the widest of each slot: {'; '.join(parts)}")
+
+
+def _g_order(plan: NcPlan) -> str:
+    """A Gates plan's order as the code names it."""
+    return f"gates.{plan.order}" if isinstance(plan.order, str) else "the skin's fixed order"
 
 
 def _g(id_: str, limit: float, why: str, fit: str = "none", *, english: tuple[str, ...] | None = None,
        kinds: tuple[str, ...] = (), templates: tuple[str, ...] = ("{}",), tight: bool = False,
        keys: tuple[str, ...] = (), measure: Measure | None = None, compose: Callable[[str], Sequence[str]] | None = None,
-       fills: tuple[tuple[str, str], ...] = (), words: bool = True, note: str = "") -> Box:
+       fills: tuple[tuple[str, str], ...] = (), words: bool = True, note: str = "",
+       key_notes: tuple[tuple[str, str], ...] = (), gives: str = "") -> Box:
     return Box(id_, measure or Measure("gates", _G_SPEC[id_]), limit, why, fit,
                _G_ENGLISH[id_] if english is None else english, kinds, templates, keys, tight=tight,
-               compose=compose, note=note, fills=fills, words=words)
+               compose=compose, note=note, fills=fills, words=words, key_notes=key_notes, gives=gives)
 
 
 def _g_plan_box(id_: str, fit: str, **kwargs: Any) -> Box:
@@ -1020,21 +1083,26 @@ def g_room(box_id: str, language: str, scale: float = 1.0, tag: str | None = Non
     """A Gates line box's room in ``language``, worked out as its limit is (_nc_room, its line's order) beside the
     language's own widest texts: its words', and the figures of format tag ``tag`` (g_tags), or, with no tag, of the
     tag that leaves the box least. fr-CA's 12-hour day clock is wider than English's reset, so the hover card's pace
-    has less room there. English's is the box's limit."""
+    has less room there; where Q2's order keeps the pill's age beside the word, the tag's own ages stand there (es-CO's
+    "100 días"). English's is the box's limit."""
     if tag is None:
         return min(g_room(box_id, language, scale, each) for each in g_tags(language))
     figures = g_tags(language)[tag]
 
     def widest(other: str) -> float:
         box = BOX[other]
-        found = figures[other] if other in figures else (widest_text(box, language, scale),)
+        # The title, drawn as written, has no text of a language's own: its English stands beside the word there.
+        found = figures[other] if other in figures else (texts(box, language) or box.english)
         return max(box.width(text, scale) for text in found)
 
     def floor(other: str) -> float:
         return max(BOX[other].width(_G_JOINT.get(other, "") + c + "…", scale) for c in _G_FLOOR_CHARS) \
             if BOX[other].measure.how == "gates" else _g_floor(other)
 
-    return _nc_room(G_HOME[box_id], box_id, widest, floor, becoming=False)
+    plan = G_HOME[box_id]
+    if isinstance(plan, GHeaderPlan) and "ages" in figures:            # the tag's own ages beside a word
+        plan = replace(plan, ages=figures["ages"])
+    return _nc_room(plan, box_id, widest, floor, becoming=False)
 
 
 # ── Gates' pill (gates._header_plan's first step, the age): its whole text where English shows the age ──
@@ -1050,26 +1118,24 @@ def _g_pill_rooms(surface: str) -> dict[tuple[str, str], float]:
 
 
 def g_pill_pairs(surface: str) -> tuple[tuple[str, str], ...]:
-    """The (status, mark) headers English shows its widest age in on ``surface`` (its pill whole: _header_plan takes no
-    step there)."""
-    widest = max(W_gs(age, _GF + "status_pill") for age in _G_AGES)
+    """The (status, mark) headers English shows its widest age in on ``surface``: its pill whole, word and age, at the
+    size Q2's order draws it whole at (_g_pill_size)."""
+    size = _g_pill_size()
+    widest = max(W_g(age, "body", size, 600) for age in _G_AGES)
     return tuple(pair for pair, room in _g_pill_rooms(surface).items()
-                 if W_gs(pair[0], _GF + "status_pill") + widest <= room + 0.01)
+                 if W_g(pair[0], "body", size, 600) + widest <= room + 0.01)
 
 
 @lru_cache(maxsize=None)
 def _g_pills(language: str, surface: str) -> dict[str, float]:
     """The pills ``language`` draws with an age on ``surface``, each as the skin words it (the view model's status
     word in the language, " · ", the age as gates._age_label writes it in each of the language's format tags), and the
-    room each has: the least over the headers English shows that status's age in (g_pill_pairs). A pill past it leaves
-    its age out, a cut a draft's shorter status word could settle."""
+    room each has (g_pill_least). A pill past it gives way as Q2's order has it (_g_pill_past: shipped, its age is left
+    out), a cut a draft's shorter status word could settle."""
     from widget_words import sweep_locales
 
     words = i18n.app_catalog(language)
-    rooms = _g_pill_rooms(surface)
-    least: dict[str, float] = {}
-    for status, mark in g_pill_pairs(surface):
-        least[status] = min(least.get(status, math.inf), rooms[status, mark])
+    least = g_pill_least(surface)
     found: dict[str, float] = {}
     ages = sorted({age for locale in sweep_locales(language) for age in (
         " · " + str(g._age_label(replaced_age(locale, seconds))) for seconds in _HEADER_AGES)})
@@ -1078,6 +1144,17 @@ def _g_pills(language: str, surface: str) -> dict[str, float]:
         for age in ages:
             found.setdefault(word + age, room)
     return found
+
+
+def g_pill_least(surface: str) -> dict[str, float]:
+    """Each status's pill room on ``surface``: the least over the headers English shows that status's widest age in
+    (g_pill_pairs), by the guard's mark beside it. This, not the box's least, is each status word's room for its pill
+    (allowed, g_pill_room) and its key's note."""
+    rooms = _g_pill_rooms(surface)
+    least: dict[str, float] = {}
+    for status, mark in g_pill_pairs(surface):
+        least[status] = min(least.get(status, math.inf), rooms[status, mark])
+    return least
 
 
 def replaced_age(locale: Any, seconds: int) -> Any:
@@ -1098,10 +1175,10 @@ def _g_pill_why(surface: str) -> str:
     for status in dict.fromkeys(status for status, _mark in pairs):
         marks = [mark for each, mark in pairs if each == status]
         places.append(f"{status} ({', '.join(marks)})")
-    return ("the pill's word and its age, from TITLE_GAP after the title (and the guard's mark) to the pill's edge: "
-            "each status's text where English shows its widest age, the least of those headers (by the mark beside "
-            "it): " + "; ".join(places) + ". Past it the age is left out (gates.HEADER_GIVE_WAY's first step), a cut "
-            "a draft's shorter status word could settle")
+    return (f"the pill's word and its age at {_g_pill_size():g} px, from TITLE_GAP after the title (and the guard's "
+            "mark) to the pill's edge: each status's text where English shows its widest age, the least of those "
+            "headers (by the mark beside it): " + "; ".join(places) + f". Past it {_g_pill_past()} "
+            "(gates.HEADER_GIVE_WAY), a cut a draft's shorter status word could settle")
 
 
 def _g_pill_compose(surface: str) -> Callable[[str], list[str]]:
@@ -1239,25 +1316,30 @@ def _g_header_boxes(surface: str) -> tuple[Box, ...]:
                     "tooltip": ("LIVE · 12 s", "STALE · 41 min", "OFFLINE · 2 min", "PAUSED · 12 s",
                                 "RATE LIMITED · 6 min", "RATE LIMITED · 44 min", "RATE LIMITED · 59 min",
                                 "NO LOGIN · 59 min", "LOADING · 59 s")}[surface]
-    rooms = _g_pill_rooms(surface)
-    pill = min(rooms[pair] for pair in g_pill_pairs(surface))
+    least = g_pill_least(surface)
+    assert set(least) == {*_G_WITH_READING, "LOADING"}, least              # each status's pill has a room
+    pill, fit = min(least.values()), _g_pill_fit()
     shrunk, loading = _g_limit(p + "status_word_shrunk"), _g_limit(p + "loading_word_shrunk")
+    aged = " and the pill's age" if G_HOME[p + "status_word_shrunk"].age(p + "status_word_shrunk") else ""
     return (
         _g_plan_box(p + "title", "none", words=False),
         _g_plan_box(p + "status_word", "ellipsis", keys=_status_keys(*_G_WITH_READING)),
         _g_plan_box(p + "status_word_shrunk", "ellipsis", keys=_status_keys(*_G_WITH_READING),
                     measure=_g_shrunk(p + "status_word_shrunk"),
-                    note=f"{shrunk:g} px ({p}status_word_shrunk, ellipsis): beside the title and the guard's capsule, "
-                         "a longer word shrinks from 10 px to 9 px, then is cut"),
+                    note=f"{shrunk:g} px ({p}status_word_shrunk, ellipsis): beside the title and the guard's "
+                         f"capsule{aged}, a longer word {_g_word_steps()}"),
         _g_plan_box(p + "loading_word", "ellipsis", keys=_status_keys("LOADING")),
         _g_plan_box(p + "loading_word_shrunk", "ellipsis", keys=_status_keys("LOADING"),
                     measure=_g_shrunk(p + "loading_word_shrunk"),
                     note=f"{loading:g} px ({p}loading_word_shrunk, ellipsis): beside the title (no guard mark: there "
-                         "is no reading yet), a longer word shrinks from 10 px to 9 px, then is cut"),
-        _g(p + "status_pill", pill, _g_pill_why(surface), "drop", english=pill_english,
+                         f"is no reading yet), a longer word {_g_word_steps()}"),
+        # Its limit is the least status's room; each status word's key notes its own (g_pill_least), the room the
+        # budgets hold that word's pill to (#96's review F5).
+        _g(p + "status_pill", pill, _g_pill_why(surface), fit, english=pill_english,
            keys=_status_keys(*_G_WITH_READING, "LOADING"), compose=_g_pill_compose(surface),
-           note=f"{pill:g} px for the word and its age where English shows its age ({p}status_pill, drop): past it "
-                "the age is left out"),
+           key_notes=tuple((_STATUS_KEY[status], f"{room:g} px for the word and its age where English shows its age "
+                                                 f"({p}status_pill, {fit}): past it {_g_pill_past()}")
+                           for status, room in least.items())),
     )
 
 
@@ -1287,7 +1369,12 @@ def _g_footer_boxes() -> tuple[Box, ...]:
             _g_plan_box(f"{_GF}{kind}_lead", "drop", keys=_g_keys(lead),
                         note=f"{_g_limit(_GF + kind + '_lead'):g} px ({_GF}{kind}_lead, drop): with its step after it, "
                              f"the footer's {g.TRACK_W:g} px; past it the lead is left out and the step drawn alone"),
-            _g_plan_box(f"{_GF}{kind}_step", "ellipsis", keys=_g_keys(step), compose=_g_composed(kind)),
+            # Beside its lead the step is never cut: past this room the lead is left out (Q3), so the report says so.
+            _g_plan_box(f"{_GF}{kind}_step", "ellipsis", keys=_g_keys(step), compose=_g_composed(kind),
+                        gives="the lead left out; the step drawn whole",
+                        note=f"{_g_limit(_GF + kind + '_step'):g} px ({_GF}{kind}_step): beside its lead; past it the "
+                             f"lead is left out and the step drawn alone from LEFT (gates.FOOTER_GIVE_WAY), cut only "
+                             f"past {kind}_step_alone's {g.TRACK_W:g} px"),
             _g_plan_box(f"{_GF}{kind}_step_alone", "ellipsis", keys=_g_keys(step), fills=_G_STEP_FILLS[kind]),
         ]
     found += [
@@ -1316,11 +1403,14 @@ def _g_footer_boxes() -> tuple[Box, ...]:
 def _g_lines() -> tuple[Line, ...]:
     """Gates' lines: each surface's header and row line, the hover line, and each footer kind's."""
     found: list[Line] = []
+    steps = {"age": "the age is left out", "shrink": "the word shrinks", "word": "the word is cut"}
     for surface, plan, edge in (("floating", G_HEADER_F, "PILL_RIGHT"), ("tooltip", G_HEADER_T, "RIGHT")):
+        # What the skin adds beside each box, with the age beside a word where the order keeps it there (GHeaderPlan).
+        extra = tuple((box, plan.add(box)) for slot in plan.slots for box in slot if plan.add(box))
         found.append(Line(
             f"gates.{surface}.header_line", plan.room, "the title from TITLE_X, TITLE_GAP, the guard's capsule and "
-            f"the pill, to {edge}; while over, the age is left out, the word shrinks, then it is cut "
-            "(gates.HEADER_GIVE_WAY)", "none", plan.slots, plan.added,
+            f"the pill, to {edge}; while over, " + ", then ".join(steps[step] for step in plan.tuple())
+            + " (gates.HEADER_GIVE_WAY)", "none", plan.slots, extra,
             tuple((g.TITLE, word) for word in (*_G_WITH_READING, "LOADING")), nc_gives_way(plan)))
     for surface, value in (("floating", "100%"), ("tooltip", "99.9%")):
         plan = G_ROWS[surface]
@@ -2270,12 +2360,14 @@ def english_overruns() -> set[tuple[str, str]]:
 
 def notes() -> dict[str, str]:
     """The budget note each box key carries just after it in en.json, so translators see the limit: every box the key
-    sits in, by id, each as "<limit> <unit> (<box id>, <fit>)" or the box's own note, joined by "; "."""
+    sits in, by id, each as "<limit> <unit> (<box id>, <fit>)", the box's own note, or the key's own in that box
+    (Box.key_notes: Gates' pill, whose room is each status's), joined by "; "."""
     boxes: dict[str, list[Box]] = {}
     for box in BOXES:
         for key in box.keys:
             boxes.setdefault(key, []).append(box)
-    return {f"_budget.{key}": "; ".join(box.note or f"{box.limit:g} {box.unit} ({box.id}, {box.fit})"
+    return {f"_budget.{key}": "; ".join(dict(box.key_notes).get(key) or box.note
+                                        or f"{box.limit:g} {box.unit} ({box.id}, {box.fit})"
                                         for box in sorted(found, key=lambda box: box.id))
             for key, found in boxes.items()}
 
@@ -2421,9 +2513,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"{args.lang}: {len(rows)} texts past their budget, "
           f"{sum(r.box.enforced for r in rows)} of them in boxes or lines with no fallback or only shrinking")
     for r in sorted(rows, key=lambda r: (not r.box.enforced, r.box.id)):
-        mark = "FAULT" if r.box.enforced else "cut  "
+        gives = getattr(r.box, "gives", "")
+        mark = "FAULT" if r.box.enforced else "gives" if gives else "cut  "
         print(f"  {mark} {r.box.id}: {json.dumps(r.text, ensure_ascii=False)} {r.width:.1f} > {r.budget:.1f} "
-              f"{r.box.unit} at {r.scale:g}x ({r.box.fit})")
+              f"{r.box.unit} at {r.scale:g}x ({gives or r.box.fit})")
     return 1 if args.lang in i18n.OFFERED and any(r.box.enforced for r in rows) else 0
 
 

@@ -999,6 +999,35 @@ def test_gates_english_footers_are_the_catalogs() -> None:
         assert gates._footer_runs(model) == ([(lead, 600, role)] if lead else []) + [(rest, 400, "text_3")], name
 
 
+# A scoped limit's name as English wrote it before #96 (b60172c: a row's label was _sentence(f"{name.upper()} WEEKLY"),
+# the guard line's f"{name.upper()} WEEKLY".lower()), for names the record does not hold: a letter with no capital
+# (ĸ, ɕ) left the row's label all in capitals, since it was not all capitals and so was never capitalized.
+GATES_ENGLISH_NAMES: dict[str, tuple[str, str]] = {
+    "Fable": ("Fable weekly", "fable weekly"),
+    "claude_design": ("Claude_design weekly", "claude_design weekly"),
+    "Claude Design": ("Claude design weekly", "claude design weekly"),
+    "ĸra": ("ĸRA WEEKLY", "ĸra weekly"),
+    "ɕa": ("ɕA WEEKLY", "ɕa weekly"),
+    "ß": ("Ss weekly", "ss weekly"),
+    "123": ("123 weekly", "123 weekly"),
+    " lead": (" lead weekly", " lead weekly"),
+}
+
+
+def test_gates_english_names_are_englishs_bytes() -> None:
+    """Q4 keeps English's quirks byte for byte (#96's review W1): a row named for its scope, and the guard line's limit
+    named for its surface, read as they did before #96, a name with a letter that has no capital among them."""
+    from usage_monitor.render import dump
+    from usage_monitor.render.skins import gates
+
+    row = next(row for row in dump.sample_model("normal3").rows if row.kind == "weekly_scoped")
+    guard = dump.sample_model("guard_hold_session").guard
+    for name, (row_name, guard_name) in GATES_ENGLISH_NAMES.items():
+        assert gates._row_name(dataclasses.replace(row, scope_name=name)) == row_name, name
+        mark = dataclasses.replace(guard, kinds={"k": "weekly_scoped"}, models={}, scope_names={"k": name})
+        assert gates._guard_name(mark, "k") == guard_name, name
+
+
 # What Gates draws in English in every language, by design: data, not words.
 GATES_DATA_LEFTOVERS: dict[str, str] = {
     "Design weekly": "a scoped row of a kind no catalog has words for, named from its code in sentence case "

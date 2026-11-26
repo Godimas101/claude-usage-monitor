@@ -362,7 +362,8 @@ def test_a_strip_tag_past_its_room_shrinks_then_is_left_out(monkeypatch: pytest.
 def _letters() -> list[str]:
     """Printable ASCII, the French, Spanish and Turkish letters (test_font_coverage's floor) in both cases by each
     language's rule, the pseudo-locale's letters, the letters with a comma below (Ș ș Ț ț), and the other marks below a
-    language may bring: an ogonek (Ą ą Ę ę Į į Ų ų) and a dot below (Ạ ạ Ọ ọ Ṣ ṣ)."""
+    language may bring: an ogonek (Ą ą Ę ę Į į Ų ų) and a dot below (Ạ ạ Ọ ọ Ṣ ṣ). The letters a tag may draw; a new
+    language's draft adds its own here."""
     from test_font_coverage import FLOOR
 
     found = (set(string.printable.strip()) | set(i18n.pseudo_text(string.ascii_letters)) | {"…"} | set("ȘșȚț")
@@ -372,24 +373,67 @@ def _letters() -> list[str]:
     return sorted(ch for ch in found if len(ch) == 1)
 
 
+# The face's Latin blocks past ASCII (Latin-1 Supplement, Latin Extended-A and -B, Latin Extended Additional): the
+# letters DESCENDERS is measured over, with _letters() (#96's review F3: the face's descenders, not only the ones the
+# shipped languages draw). A language in another script adds its block here.
+LATIN_BLOCKS = ((0x00A0, 0x0100), (0x0100, 0x0180), (0x0180, 0x0250), (0x1E00, 0x1F00))
+
+
+@lru_cache(maxsize=None)
+def _face_letters() -> tuple[str, ...]:
+    """_letters() and every letter of LATIN_BLOCKS the strip tag's face maps (its character map)."""
+    from usage_monitor.render import glyphs
+
+    cmap = glyphs.cmap(gates._fonts(THEME).body.file_for(600))
+    assert cmap, "the body face's character map"
+    latin = {chr(code) for low, high in LATIN_BLOCKS for code in range(low, high)
+             if code in cmap and unicodedata.category(chr(code)).startswith("L")}
+    return tuple(sorted(set(_letters()) | latin))
+
+
+# Glyphs of the face that leave a plate whose second line box fits it (32 and 33 px, the rows 14 px apart) by 1 px at
+# one size, unraised: Q1 raises a tag only where its line box runs past the plate (an owner default). No language the
+# app offers or plans writes them; a draft that does brings it to the owner. Asserted exactly, so it only shrinks.
+DEEP_ON_A_FULL_LINE: dict[str, str] = {
+    "ȴ": "l with curl (Latin Extended-B, a phonetic letter): its curl, at 10 px",
+    "Ḁ": "A with ring below (Latin Extended Additional): its ring, at 11 px",
+    "ḁ": "a with ring below: its ring, at 11 px",
+}
+
+
 @lru_cache(maxsize=None)
 def _strip_ink(draw_scale: float, plate: float) -> gates.Ink:
     return gates.Ink(gates.STRIP_W, plate, draw_scale, gates._fonts(THEME))
 
 
 @lru_cache(maxsize=None)
+def _glyph(ch: str, size: float, draw_scale: float) -> tuple[int, int] | None:
+    """(top, bottom) output rows of ``ch``'s ink from its baseline's row, its bottom exclusive, for a tag of ``size``
+    px at ``draw_scale`` (Ink._draw_text's placement), at the most any variant inks it."""
+    ink = _strip_ink(draw_scale, float(gates.STRIP_MIN_PLATE))
+    face = ink.face(ink.fonts.body, size, 600)
+    mask, pad, ascent = gates._run(face, ch, gates.GAMMA_LIGHT_MIN, 0.0)
+    box = mask.point([255 if value >= frame_layout.INK else 0 for value in range(256)]).getbbox()
+    return None if box is None else (box[1] - ascent - pad, box[3] - ascent - pad)
+
+
+@lru_cache(maxsize=None)
+def _baseline(size: float, draw_scale: float, plate: float, row: int, rise: float) -> int:
+    """The output row of a tag's baseline in row ``row``, risen ``rise`` px (Ink.baseline)."""
+    ink = _strip_ink(draw_scale, plate)
+    face = ink.face(ink.fonts.body, size, 600)
+    return round(ink.baseline(gates._strip_rows(plate)[row] - rise, gates.STRIP_ROW_LINE, face) * ink.scale)
+
+
+@lru_cache(maxsize=None)
 def _rows(ch: str, size: float, draw_scale: float, plate: float, row: int, rise: float) -> tuple[int, int] | None:
     """(top, bottom) output rows of ``ch``'s ink, its bottom exclusive, as the strip draws a tag of ``size`` px in row
     ``row`` risen ``rise`` px (Ink.baseline and Ink._draw_text's placement), at the most any variant inks it."""
-    ink = _strip_ink(draw_scale, plate)
-    face = ink.face(ink.fonts.body, size, 600)
-    base = ink.baseline(gates._strip_rows(plate)[row] - rise, gates.STRIP_ROW_LINE, face)
-    mask, pad, ascent = gates._run(face, ch, gates.GAMMA_LIGHT_MIN, 0.0)
-    box = mask.point([255 if value >= frame_layout.INK else 0 for value in range(256)]).getbbox()
-    if box is None:
+    glyph = _glyph(ch, size, draw_scale)
+    if glyph is None:
         return None
-    y = round(base * ink.scale) - ascent - pad
-    return y + box[1], y + box[3]
+    y = _baseline(size, draw_scale, plate, row, rise)
+    return y + glyph[0], y + glyph[1]
 
 
 def _plate_bottom(draw_scale: float, plate: float) -> int:
@@ -400,33 +444,58 @@ def _below_by_rule(ch: str) -> bool:
     return any(unicodedata.combining(part) in gates._BELOW for part in unicodedata.normalize("NFD", ch))
 
 
+# Taskbars the frame check does not draw whose plates sit at the edges of Q1's rule (#96's review F2): 31 px (37 px at
+# 100 %, 74 px at 200 %) and 30.8 to 31.6 px at the other scales, where the second row still rises; 32 and 33 px (38
+# and 39 px at 100 %), where it no longer does but the rows are still 14 px apart; and 35 and 36 px.
+EDGE_TASKBARS = ((37, 1.0), (38, 1.0), (39, 1.0), (41, 1.0), (42, 1.0), (46, 1.25), (47, 1.25), (56, 1.5), (65, 1.75),
+                 (74, 2.0), (75, 2.0))
+
+
+@lru_cache(maxsize=None)
+def _q1_layouts() -> tuple[tuple[str, float, float], ...]:
+    """Every strip layout the frame check draws and the edge taskbars': (name, draw scale, plate)."""
+    found = {(round(draw_scale, 4), round(plate, 3)): (name, draw_scale, plate)
+             for name, _px, _scale, draw_scale, plate in _layouts()}
+    for px, scale in EDGE_TASKBARS:
+        draw_scale, plate = gates._strip_fit(px, scale)
+        found.setdefault((round(draw_scale, 4), round(plate, 3)),
+                         (f"strip@{draw_scale:.4g}/{plate:.4g}", draw_scale, plate))
+    return tuple(found.values())
+
+
 def _short_layouts() -> list[tuple[str, float, float]]:
-    """The strip layouts whose second row runs past the plate (a plate under 34 px): (name, draw scale, plate)."""
-    return [(name, draw_scale, plate) for name, _px, _scale, draw_scale, plate in _layouts()
+    """The strip layouts whose second row's 14 px line box runs past the plate (a plate under 32 px): (name, draw
+    scale, plate)."""
+    return [(name, draw_scale, plate) for name, draw_scale, plate in _q1_layouts()
             if gates._strip_rows(plate)[1] + gates.STRIP_ROW_LINE > plate]
 
 
 def test_the_glyphs_that_raise_a_strip_tag_are_the_ones_that_leave_the_plate() -> None:
-    """Q1 decides by characters, held to the face: of every letter the four languages and the pseudo-locale draw, those
-    whose ink leaves the plate in the strip's second row at some short layout and size are exactly the rule's (a mark
-    below, combining class 202 or 220) and DESCENDERS (bases with no mark below: ( ) [ ] _ g j p q y { | } ¡ ¿); the
-    first row's never leave, nor do the second row's on the 34 and 40 px plates. Raised STRIP_TAG_RAISE, every one stays
-    on the plate, and that is the least raise that does: a px less leaves one off."""
+    """Q1 decides by characters, held to the face (#96's review F3): of the face's Latin letters (_face_letters), those
+    whose ink leaves the plate in the strip's second row at some short layout (every plate under 32 px) and size are
+    exactly the rule's (a mark below, combining class 202 or 220) and DESCENDERS (bases with no mark below: ( ) [ ] _
+    g j p q y { | } ¡ ¿ µ þ ŋ ǥ ȷ and the others); the first row's never leave, nor do the second row's on a plate of
+    32 px or more but DEEP_ON_A_FULL_LINE's. Raised STRIP_TAG_RAISE, every one stays on the plate, and that is the least
+    raise that does: a px less leaves one off. Every mark below the shipped languages may bring leaves it."""
     short = _short_layouts()
-    assert short and all(math.isclose(plate, gates.STRIP_MIN_PLATE) for _name, _scale, plate in short)
+    assert all(plate < 32 for _name, _scale, plate in short)
+    assert {round(plate, 3) for _name, _scale, plate in short} >= {30.0, 31.0, 31.6}
+    assert all(layout[2] >= 32 for layout in _q1_layouts() if layout not in short)
     leave: set[str] = set()
+    full: set[str] = set()
     low: set[str] = set()
     deep: set[str] = set()
-    for ch in _letters():
-        for name, _px, _scale, draw_scale, plate in _layouts():
+    for ch in _face_letters():
+        for name, draw_scale, plate in _q1_layouts():
             bottom = _plate_bottom(draw_scale, plate)
             for size in gates.STRIP_TAG_SIZES:
                 for row in (0, 1):
                     rows = _rows(ch, size, draw_scale, plate, row, 0.0)
                     if rows is not None and rows[1] > bottom:
-                        assert row == 1 and (name, draw_scale, plate) in short, (ch, name, row)
-                        leave.add(ch)
-    for ch in _letters():
+                        assert row == 1, (ch, name)
+                        (leave if (name, draw_scale, plate) in short else full).add(ch)
+    assert full == set(DEEP_ON_A_FULL_LINE), "".join(sorted(full))
+    for ch in _face_letters():
         if not gates._reaches_below(ch):
             continue
         for _name, draw_scale, plate in short:
@@ -439,17 +508,20 @@ def test_the_glyphs_that_raise_a_strip_tag_are_the_ones_that_leave_the_plate() -
     assert bases == set(gates.DESCENDERS), "".join(sorted(bases ^ set(gates.DESCENDERS)))
     assert all(_below_by_rule(ch) or unicodedata.normalize("NFD", ch)[0] in gates.DESCENDERS for ch in leave)
     assert {ch for ch in _letters() if _below_by_rule(ch)} <= leave          # every mark below leaves it
+    assert set("þŋµǥȷƴɉǉǌȴ") <= set(gates.DESCENDERS)
     assert deep == set() and low, (sorted(deep), sorted(low))
 
 
 def test_a_strip_tag_rises_round_marks_below_and_never_in_english(english: dict[str, Any]) -> None:
-    """A tag rises STRIP_TAG_RAISE where its row's line box runs past the plate and it reaches below the line (a mark
-    below or a descender), and only there: 7Ç and 7g rise in the second row of a 30 px plate, not on the 34 and 40 px
-    plates and never in the first row; English's tags (every recorded state's) never rise."""
-    for _name, _px, _scale, _draw_scale, plate in _layouts():
+    """A tag rises STRIP_TAG_RAISE where its row's line box runs past the plate (under 32 px) and it reaches below the
+    line (a mark below or a descender), and only there: 7Ç, 7g and 7ŋ rise in the second row of the 30 to 31.6 px
+    plates, not on the 32 px plates and up, and never in the first row; English's tags (every recorded state's) never
+    rise."""
+    for _name, _draw_scale, plate in _q1_layouts():
         tops = gates._strip_rows(plate)
         short = tops[1] + gates.STRIP_ROW_LINE > plate
-        for text in ("7Ç", "7g", "5Ş", "ŞĞ"):
+        assert short == (plate < 32), plate
+        for text in ("7Ç", "7g", "5Ş", "ŞĞ", "7ŋ"):
             assert gates._strip_tag_raise(text, tops[0], plate) == 0, (text, plate)
             assert gates._strip_tag_raise(text, tops[1], plate) == (gates.STRIP_TAG_RAISE if short else 0), (text, plate)
         for text in ("7D", "5H", "7É", "7Q"):
@@ -482,35 +554,49 @@ def _capital_marked_above(ch: str) -> bool:
 
 
 def test_a_raised_tag_stays_on_the_plate_and_off_the_tag_above() -> None:
-    """Critic 9 of #96's plan: at every short strip layout, a raised second tag keeps its ink on the plate (the test
-    above) and keeps a px of air under every capital or figure the first tag may have, where its own highest letter is
-    a capital or figure with no mark above (7Ç under 5Q). The pairs that meet are STRIP_TAG_MEETS's, and only those: a
-    raised tag with a capital with a mark above under a first tag that reaches the foot of its line (Q, a capital with
-    a mark below), by up to 3 px; and, with no raise, a capital with a mark above under a capital with a mark below, by
-    up to 1 px, as before #96."""
+    """Critic 9 of #96's plan, at every strip layout (#96's review F2 and look F1), for the tags the drafts' rule allows
+    (capitals or figures) of the letters a language may draw (_letters). Raised, on every short layout (a plate under
+    32 px), a second tag keeps its ink on the plate (the test above) and a px of air under every capital or figure the
+    first tag may have, where its own highest letter is a capital or figure with no mark above (7Ç under 5Q). The pairs
+    that meet are STRIP_TAG_MEETS's, and only those: raised, a capital with a mark above under a first tag that reaches
+    the foot of its line (Q, a capital with a mark below), by up to 3 px; and, with no raise, on any layout whose rows
+    are 14 px apart (a plate under 36 px: the 34 px plates the frame check draws too), a capital with a mark above under
+    a capital with a mark below, by up to 1 px, as before #96. The 36 and 40 px plates keep air."""
     letters = _letters()
     capitals = [ch for ch in letters if unicodedata.normalize("NFD", ch)[0].isupper() or ch.isdigit()]
     plain = [ch for ch in capitals if len(unicodedata.normalize("NFD", ch)) == 1]
     marked = [ch for ch in capitals if _capital_marked_above(ch)]
     meets: dict[str, set[str]] = {"raised": set(), "unraised": set()}
     least = {"raised": 99, "unraised": 99}
+    where: dict[str, set[float]] = {"raised": set(), "unraised": set()}
     for _name, draw_scale, plate in _short_layouts():
         for first in capitals:
             for second in plain:
                 assert _air(first, second, draw_scale, plate, gates.STRIP_TAG_RAISE) >= 1, (first, second, plate)
-            for kind, rise in (("raised", gates.STRIP_TAG_RAISE), ("unraised", 0.0)):
-                air = min(_air(first, second, draw_scale, plate, rise) for second in marked)
-                least[kind] = min(least[kind], air)
-                if air < 1:
-                    meets[kind].add(first)
+            air = min(_air(first, second, draw_scale, plate, gates.STRIP_TAG_RAISE) for second in marked)
+            least["raised"] = min(least["raised"], air)
+            if air < 1:
+                meets["raised"].add(first)
+                where["raised"].add(plate)
+    for _name, draw_scale, plate in _q1_layouts():
+        tops = gates._strip_rows(plate)
+        for first in capitals:
+            air = min(_air(first, second, draw_scale, plate, 0.0) for second in marked)
+            least["unraised"] = min(least["unraised"], air)
+            if air < 1:
+                assert tops[1] - tops[0] == 14 and plate < 36, (first, plate)
+                meets["unraised"].add(first)
+                where["unraised"].add(plate)
     reach = {ch for ch in capitals if _below_by_rule(ch)}
     assert meets["raised"] == reach | {"Q"} and meets["unraised"] <= reach and meets["unraised"], meets
     assert least == {"raised": -3, "unraised": -1}, least
+    assert 34.0 in where["unraised"] and max(where["raised"]) < 32, where
     assert gates.STRIP_TAG_MEETS == (
-        "on a plate under 34 px, a raised second tag that has a capital with a mark above (É, as well as the mark below "
+        "on a plate under 32 px, a raised second tag that has a capital with a mark above (É, as well as the mark below "
         "or descender that raises it) meets the first tag's ink at the same place where that tag reaches the foot of its "
         "line (Q, or a capital with a mark below), by up to 3 px",
-        "on a plate under 34 px, a second tag with a capital with a mark above meets a first tag with a capital with a "
-        "mark below at the same place by up to 1 px with no raise, as before #96: the rows are 14 px apart there",
+        "on a plate under 36 px, where the rows are 14 px apart (the 34 px plate too), a second tag with a capital with a "
+        "mark above meets a first tag with a capital with a mark below at the same place by up to 1 px with no raise, as "
+        "before #96",
     )
     assert math.isclose(gates.STRIP_TAG_RAISE, 2.0)

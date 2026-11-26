@@ -227,7 +227,8 @@ UNDER_A_MINUTE = "<1m"
 # shrinks (PILL_SIZES, 10 px down to 9), then it is cut with "…", one letter at least. The title (#86's brand mark), the
 # guard's shield (armed) or capsule (holding) and the menu dots never give way: the lamp's shape still tells the status
 # when its word is cut. _header_plan takes the steps in this tuple's order, whatever it is, and tests/budgets.py derives
-# the header line's give-way and its boxes' rooms from it: an answer changes this tuple alone (then test_budgets.py's
+# the header line's give-way and its boxes' rooms from it, with the age beside the word where the order keeps it there
+# and the pill at the size the order draws it whole at: an answer changes this tuple alone (then test_budgets.py's
 # LIMITS and the _budget notes are printed again).
 HEADER_GIVE_WAY = ("age", "shrink", "word")
 PILL_SIZES = (SIZE_PILL, 9.5, 9.0)      # the pill's text as it shrinks: SIZE_PILL first, the floor last
@@ -252,22 +253,24 @@ FIT_SLACK = 1e-6                        # float error in a sum of advances: a li
 
 # Q1, an owner default on #96 that Chris may overturn (as Nostromo's on #94 and Night City's on #95): Gates outlines no
 # box round a word, and its filled pill and cap badge keep every mark inside them at every scale, so no box grows. The
-# one clip is on a short taskbar: on a plate under 34 px the strip's second row's line box runs past the plate, and a
-# tag that reaches below the line there (a mark below, _BELOW: combining class 202 or 220, as Nostromo's rule: a
-# cedilla, an ogonek, a comma or a dot below, Ç Ş Ș Ą Ạ; or one of DESCENDERS, the glyphs of the tag's face that leave
-# that plate at 9 to 11 px, held to the face by a test) would lose up to 2 px of ink. Such a tag rises STRIP_TAG_RAISE,
-# decided by its letters (_strip_tag_raise). English's 5H and 7D never move, and the first row, which has room under it,
-# never does. Where a tag meets the tag above it, STRIP_TAG_MEETS says so (tests/test_skin_gates_fit.py holds every
-# other pair to keep air).
+# one clip is on a short taskbar: on a plate under 32 px the strip's second row's 14 px line box runs past the plate,
+# and a tag that reaches below the line there (a mark below, _BELOW: combining class 202 or 220, as Nostromo's rule: a
+# cedilla, an ogonek, a comma or a dot below, Ç Ş Ș Ą Ạ; or one of DESCENDERS, the glyphs of the face's Latin letters
+# that leave that plate at 9 to 11 px, measured on the face by a test; a language in another script adds its letters to
+# that test) would lose up to 2 px of ink. Such a tag rises STRIP_TAG_RAISE, decided by its letters
+# (_strip_tag_raise). English's 5H and 7D never move, and the first row, which has room under it, never does. Where a
+# tag meets the tag above it, STRIP_TAG_MEETS says so (tests/test_skin_gates_fit.py holds every other pair of capitals
+# and figures, the strip tags' rule, to keep air).
 STRIP_TAG_RAISE = 2.0
 _BELOW = (202, 220)
-DESCENDERS = frozenset("()[]_gjpqy{|}¡¿")
+DESCENDERS = frozenset("()[]_gjpqy{|}¡µ¿þĳŊŋƍƑƔƝƞƥƪƫƮƴƷƸƹƺƿǀǁǂǈǉǋǌǥǷȜȝȠȡȴȵȶȷȹȿɀɉɊɋɏʒ")
 STRIP_TAG_MEETS = (
-    "on a plate under 34 px, a raised second tag that has a capital with a mark above (É, as well as the mark below "
+    "on a plate under 32 px, a raised second tag that has a capital with a mark above (É, as well as the mark below "
     "or descender that raises it) meets the first tag's ink at the same place where that tag reaches the foot of its "
     "line (Q, or a capital with a mark below), by up to 3 px",
-    "on a plate under 34 px, a second tag with a capital with a mark above meets a first tag with a capital with a "
-    "mark below at the same place by up to 1 px with no raise, as before #96: the rows are 14 px apart there",
+    "on a plate under 36 px, where the rows are 14 px apart (the 34 px plate too), a second tag with a capital with a "
+    "mark above meets a first tag with a capital with a mark below at the same place by up to 1 px with no raise, as "
+    "before #96",
 )
 
 
@@ -960,7 +963,9 @@ def _english_name(name: str, *, row: bool) -> str:
     """A scoped limit's name as English has always written it, kept byte for byte where the template is English's
     (#96, an owner default; data/alerts.py keeps its own quirk the same way): a row's name went in in capitals first,
     so its tail is in lower case ("Claude design weekly"); the guard line's name for a surface went in in lower case
-    ("claude_code weekly"). Dropping the quirks is these two lines: the name would go in as written."""
+    ("claude_code weekly"). A row's label that was not all capitals then (a letter with no capital: "ĸRA WEEKLY") was
+    never capitalized, and _row_name keeps it so, just before it calls this. Dropping the quirks is these two lines
+    and that fall-through: the name would go in as written."""
     capitals = name.upper()
     return capitals.capitalize() if row else capitals.lower()
 
@@ -980,6 +985,9 @@ def _row_name(row: Row, *, locale: Locale = ENGLISH) -> str:
         template = words.text(KEY + "limit.scoped")
         name = row.scope_name
         if template.language == i18n.DEFAULT:
+            capitals = words.text(KEY + "limit.scoped", {"name": name}).upper()     # English's label, as it always was
+            if not capitals.isupper():          # a letter with no capital: English kept the label in capitals
+                return capitals
             name = _english_name(name, row=True)
         elif not any(ch.isalpha() for ch in template.split("{name}", 1)[0]):
             name = casing.cased("{name}", "sentence", template.language, name=name)

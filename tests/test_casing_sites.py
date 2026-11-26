@@ -79,6 +79,9 @@ ALLOWED: dict[tuple[str, str, str], str] = {
         "English: as above (\"Claude design weekly\" on a row)",
     (GATES, "_english_name", "capitals.lower()"):
         "English: as above (\"claude_code weekly\" in the guard's line)",
+    (GATES, "_row_name", "words.text(KEY + 'limit.scoped', {'name': name}).upper()"):
+        "English: a row's label in capitals, as English always wrote it, kept so where a letter has no capital "
+        "(\"ĸRA WEEKLY\"), for English's words only (Gates' own quirk, beside _english_name's)",
 }
 SCANNED = ("usage_monitor/render/model.py", "usage_monitor/app.py", "usage_monitor/data/alerts.py",
            "usage_monitor/data/identity.py", "usage_monitor/data/usage_api.py", "usage_monitor/formats.py",

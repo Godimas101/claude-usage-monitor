@@ -97,7 +97,7 @@ GATES_JOBS: tuple[str, ...] = ("pseudo", "en", "fr", "es", "tr", *TAGS)
 # Gates' strip tags drawn in a test catalog's words, in every Gates job at every strip layout (#96's critic 8: the
 # pseudo-locale's tags never fit, and no draft's are written yet): {name: (its state in the dump, its widget.gates
 # keys' words)}. A tag that shrinks to fit (WWI: 24.4 px at 11 px, 21.3 at 9.5, in a room of 22; any two capitals fit
-# whole), and the second row's tag with a mark below (7Ç), which rises STRIP_TAG_RAISE on a plate under 34 px.
+# whole), and the second row's tag with a mark below (7Ç), which rises STRIP_TAG_RAISE on a plate under 32 px.
 GATES_WORDED: dict[str, tuple[str, dict[str, str]]] = {
     "strip_tags/shrunk": ("normal3", {"widget.gates.window.session": "WWI"}),
     "strip_tags/mark_below": ("warning", {"widget.gates.window.weekly": "7Ç"}),
