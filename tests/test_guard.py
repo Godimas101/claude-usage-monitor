@@ -216,3 +216,20 @@ def test_resume_now_releases_waits_that_started_before_it(tmp_path):
     sessions.resume_now(tmp_path)
     assert sessions.resumed_since(tmp_path, started)
     assert not sessions.resumed_since(tmp_path, time.time() + 60)
+
+
+def test_resume_now_counts_a_marker_the_file_clock_stamped_just_before_the_wait_started(tmp_path):
+    """The file clock is coarser than time.time() (#113): a marker touched just after a wait started can carry a time
+    a tick before it, and still releases that wait. One stamped well before the wait does not."""
+    import os
+    import time
+
+    from usage_monitor.agent import sessions
+
+    started = time.time()
+    sessions.resume_now(tmp_path)
+    marker = tmp_path / sessions.RESUME_NAME
+    os.utime(marker, (started - 0.016, started - 0.016))     # one Windows clock tick before the wait's start
+    assert sessions.resumed_since(tmp_path, started)
+    os.utime(marker, (started - 5, started - 5))
+    assert not sessions.resumed_since(tmp_path, started)

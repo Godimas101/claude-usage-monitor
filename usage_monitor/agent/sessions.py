@@ -36,6 +36,10 @@ SEEN_NAME = "hook-seen.json"
 WAITING_DIR = "waiting"
 RELEASED_NAME = "wait-released"
 RESUME_NAME = "resume-now"
+# A file's time comes from the file clock, which is coarser than time.time(): Windows stamps a file from its clock
+# tick (up to 15.6 ms; FAT keeps 2 s), so a marker touched just after a wait started can read as just before it
+# (#113). The marker counts that far back; a press that close to a wait's start releases it too, as Resume now asks.
+FILE_CLOCK_SLACK_S = 2.0
 WATCHING_DIR = "watching"
 ALIVE, GONE, UNKNOWN = "alive", "gone", "unknown"
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
@@ -119,9 +123,10 @@ def resume_now(folder: Path) -> None:
 
 
 def resumed_since(folder: Path, started_epoch: float) -> bool:
-    """Whether "Resume now" was pressed after ``started_epoch`` (time.time())."""
+    """Whether "Resume now" was pressed after ``started_epoch`` (time.time()), allowing the file clock's slack
+    (FILE_CLOCK_SLACK_S)."""
     try:
-        return (folder / RESUME_NAME).stat().st_mtime >= started_epoch
+        return (folder / RESUME_NAME).stat().st_mtime >= started_epoch - FILE_CLOCK_SLACK_S
     except OSError:
         return False
 
