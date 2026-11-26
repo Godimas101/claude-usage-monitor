@@ -680,7 +680,8 @@ def _pace_short(row: Row, *, locale: Locale = ENGLISH) -> str | None:
     delta = pace_delta(row.percent, row.time_fraction)
     if delta is None or row.pace not in ("ahead", "behind"):
         return None
-    return _words(locale).text("widget.nostromo.pace.points", {"points": f"{'+' if delta >= 0 else '-'}{abs(delta):.0f}"})
+    points = f"{'+' if delta >= 0 else '-'}{abs(delta):.0f}"
+    return _words(locale).text("widget.nostromo.pace.points", {"points": points})
 
 
 def _info_plan(cv: Canvas, row: Row, locale: Locale) -> InfoPlan:

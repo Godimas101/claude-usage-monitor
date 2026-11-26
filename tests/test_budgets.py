@@ -19,7 +19,7 @@ import pytest
 
 import budgets
 from usage_monitor import cldr, formats, i18n
-from usage_monitor.render import dump
+from usage_monitor.render import dump, engine
 from usage_monitor.render.skins import night_city as nc
 from usage_monitor.render.skins import nostromo as nos
 from usage_monitor.ui import tray
@@ -31,46 +31,47 @@ NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 # Every box's and line's limit in its unit, as budgets.py works it out from its skin's constants and the English beside
 # it. After a change to a skin that moves a room, `python tests/budgets.py --limits` prints this table again.
 LIMITS: dict[str, float] = {
-    "nostromo.floating.status_pill": 103.2, "nostromo.floating.age": 43.2, "nostromo.floating.state_word": 111.2,
-    "nostromo.floating.state_chip": 103.2, "nostromo.floating.armed_guard": 50.4,
-    "nostromo.floating.armed_guard_short": 21.6, "nostromo.floating.row_name": 202.0,
-    "nostromo.floating.row_qualifier": 102.4, "nostromo.floating.row_value": 223.6, "nostromo.floating.cap_tag": 112.4,
-    "nostromo.floating.message": 242, "nostromo.tooltip.row_name": 199.0, "nostromo.tooltip.row_qualifier": 99.4,
-    "nostromo.tooltip.row_value": 229.6, "nostromo.tooltip.cap_tag": 109.4, "nostromo.tooltip.resets": 144.0,
-    "nostromo.tooltip.pace": 126.6, "nostromo.tooltip.guard_lead": 252, "nostromo.tooltip.guard_lines": 252,
-    "nostromo.strip.window_tag": 22.0, "nostromo.strip.value_5h": 24.0, "nostromo.strip.value_5h_chip": 20.0,
-    "nostromo.strip.value_7d": 32.0, "nostromo.strip.value_7d_chip": 28.0, "nostromo.tray.readout": 20.0,
-    "night_city.floating.brand": 132.236, "night_city.floating.live_tag": 110.417,
-    "night_city.floating.status_chip": 106.417, "night_city.floating.guard_chip": 39.056,
-    "night_city.floating.hold_chip": 101.417, "night_city.floating.band_text": 154.556,
-    "night_city.floating.band_text_no_age": 220, "night_city.floating.band_age": 62.359,
-    "night_city.floating.band_hold_text": 168.921, "night_city.floating.band_hold_chip": 175.866,
-    "night_city.floating.row_name": 137.372, "night_city.floating.row_chip": 153.065,
-    "night_city.floating.row_tag": 91.192, "night_city.floating.row_reset": 128.331,
-    "night_city.floating.row_value": 143.921, "night_city.tooltip.row_name": 129.271,
-    "night_city.tooltip.row_chip": 144.965, "night_city.tooltip.row_tag": 83.092,
-    "night_city.tooltip.row_value": 143.921, "night_city.tooltip.info_reset": 129.245,
-    "night_city.tooltip.info_pace": 117.433, "night_city.tooltip.guard_lead": 236,
-    "night_city.tooltip.guard_lines": 236, "night_city.strip.window_label": 18, "night_city.strip.percent": 21,
-    "night_city.strip.status_live": 40, "night_city.strip.status_word": 45, "night_city.strip.hold_chip": 36,
-    "gates.floating.title": 84.54, "gates.floating.status_word": 76.184, "gates.floating.status_pill": 76.184,
-    "gates.tooltip.title": 105.54, "gates.tooltip.status_word": 97.184, "gates.tooltip.status_pill": 97.184,
-    "gates.floating.row_label": 212.84, "gates.floating.row_tag": 139.496, "gates.floating.row_value": 232.82,
-    "gates.floating.cap_badge": 55.036, "gates.tooltip.row_label": 204.05, "gates.tooltip.row_tag": 130.706,
-    "gates.tooltip.row_value": 232.82, "gates.tooltip.cap_badge": 46.246, "gates.tooltip.resets": 130.565,
-    "gates.tooltip.pace": 153.962, "gates.tooltip.guard_lead": 220, "gates.tooltip.guard_text": 220,
-    "gates.floating.footer_lead": 258, "gates.floating.footer_rest": 258, "gates.strip.window_tag": 24,
-    "gates.strip.value": 38, "gates.tray.number": 17.013, "dashboard.nostromo.cost_tile": 6,
-    "dashboard.night_city.cost_tile": 6, "dashboard.gates.cost_tile": 6, "dashboard.nostromo.cost_hero": 6,
-    "dashboard.night_city.cost_hero": 6, "dashboard.gates.cost_hero": 6, "app.tray.tooltip": 127,
-    "app.toast.alert_threshold.title": 63, "app.toast.alert_resets.body": 255, "app.toast.alert_reset.title": 63,
-    "app.toast.alert_reset_ended.body": 255, "app.toast.alert_credits.title": 63, "app.toast.alert_credits.body": 255,
-    "app.toast.update.title": 63, "app.toast.update.body": 255, "app.toast.update_note.title": 63,
-    "app.toast.update_note.body": 250, "nostromo.floating.header_line": 240.0, "nostromo.floating.row_name_line": 202.0,
-    "nostromo.tooltip.row_name_line": 199.0, "nostromo.tooltip.info_line": 252, "night_city.floating.header_line": 223,
-    "night_city.floating.band_line": 220, "night_city.floating.band_hold_line": 220,
-    "night_city.tooltip.info_line": 236, "gates.floating.header_line": 216, "gates.tooltip.header_line": 237,
-    "gates.floating.row_line": 258, "gates.floating.footer": 258, "gates.tooltip.info_line": 258,
+    "nostromo.floating.status_pill": 129.6, "nostromo.floating.age": 37.2, "nostromo.floating.state_word": 105.2,
+    "nostromo.floating.state_chip": 97.2, "nostromo.floating.hold_chip": 201.6, "nostromo.floating.hold_word": 201.6,
+    "nostromo.floating.armed_guard": 50.4, "nostromo.floating.armed_guard_short": 21.6,
+    "nostromo.floating.row_name": 202.0, "nostromo.floating.row_qualifier": 102.4, "nostromo.floating.row_value": 223.6,
+    "nostromo.floating.cap_tag": 112.4, "nostromo.floating.message": 242, "nostromo.tooltip.row_name": 199.0,
+    "nostromo.tooltip.row_qualifier": 99.4, "nostromo.tooltip.row_value": 229.6, "nostromo.tooltip.cap_tag": 109.4,
+    "nostromo.tooltip.resets": 252, "nostromo.tooltip.pace": 120.6, "nostromo.tooltip.pace_short": 120.6,
+    "nostromo.tooltip.guard_lead": 252, "nostromo.tooltip.guard_lines": 252, "nostromo.strip.window_tag": 22.0,
+    "nostromo.strip.value_5h": 24.0, "nostromo.strip.value_5h_chip": 20.0, "nostromo.strip.value_7d": 32.0,
+    "nostromo.strip.value_7d_chip": 28.0, "nostromo.tray.readout": 20.0, "night_city.floating.brand": 132.236,
+    "night_city.floating.live_tag": 110.417, "night_city.floating.status_chip": 106.417,
+    "night_city.floating.guard_chip": 39.056, "night_city.floating.hold_chip": 101.417,
+    "night_city.floating.band_text": 154.556, "night_city.floating.band_text_no_age": 220,
+    "night_city.floating.band_age": 62.359, "night_city.floating.band_hold_text": 168.921,
+    "night_city.floating.band_hold_chip": 175.866, "night_city.floating.row_name": 137.372,
+    "night_city.floating.row_chip": 153.065, "night_city.floating.row_tag": 91.192,
+    "night_city.floating.row_reset": 128.331, "night_city.floating.row_value": 143.921,
+    "night_city.tooltip.row_name": 129.271, "night_city.tooltip.row_chip": 144.965,
+    "night_city.tooltip.row_tag": 83.092, "night_city.tooltip.row_value": 143.921,
+    "night_city.tooltip.info_reset": 129.245, "night_city.tooltip.info_pace": 117.433,
+    "night_city.tooltip.guard_lead": 236, "night_city.tooltip.guard_lines": 236, "night_city.strip.window_label": 18,
+    "night_city.strip.percent": 21, "night_city.strip.status_live": 40, "night_city.strip.status_word": 45,
+    "night_city.strip.hold_chip": 36, "gates.floating.title": 84.54, "gates.floating.status_word": 76.184,
+    "gates.floating.status_pill": 76.184, "gates.tooltip.title": 105.54, "gates.tooltip.status_word": 97.184,
+    "gates.tooltip.status_pill": 97.184, "gates.floating.row_label": 212.84, "gates.floating.row_tag": 139.496,
+    "gates.floating.row_value": 232.82, "gates.floating.cap_badge": 55.036, "gates.tooltip.row_label": 204.05,
+    "gates.tooltip.row_tag": 130.706, "gates.tooltip.row_value": 232.82, "gates.tooltip.cap_badge": 46.246,
+    "gates.tooltip.resets": 130.565, "gates.tooltip.pace": 153.962, "gates.tooltip.guard_lead": 220,
+    "gates.tooltip.guard_text": 220, "gates.floating.footer_lead": 258, "gates.floating.footer_rest": 258,
+    "gates.strip.window_tag": 24, "gates.strip.value": 38, "gates.tray.number": 17.013,
+    "dashboard.nostromo.cost_tile": 6, "dashboard.night_city.cost_tile": 6, "dashboard.gates.cost_tile": 6,
+    "dashboard.nostromo.cost_hero": 6, "dashboard.night_city.cost_hero": 6, "dashboard.gates.cost_hero": 6,
+    "app.tray.tooltip": 127, "app.toast.alert_threshold.title": 63, "app.toast.alert_resets.body": 255,
+    "app.toast.alert_reset.title": 63, "app.toast.alert_reset_ended.body": 255, "app.toast.alert_credits.title": 63,
+    "app.toast.alert_credits.body": 255, "app.toast.update.title": 63, "app.toast.update.body": 255,
+    "app.toast.update_note.title": 63, "app.toast.update_note.body": 250, "nostromo.floating.header_line": 240.0,
+    "nostromo.floating.row_name_line": 202.0, "nostromo.tooltip.row_name_line": 199.0,
+    "nostromo.tooltip.info_line": 252, "night_city.floating.header_line": 223, "night_city.floating.band_line": 220,
+    "night_city.floating.band_hold_line": 220, "night_city.tooltip.info_line": 236, "gates.floating.header_line": 216,
+    "gates.tooltip.header_line": 237, "gates.floating.row_line": 258, "gates.floating.footer": 258,
+    "gates.tooltip.info_line": 258,
 }
 
 # Where a box's runs are drawn. The hover cards draw the floating widget's header, band, message and footer with the
@@ -78,16 +79,17 @@ LIMITS: dict[str, float] = {
 STANDS_ON: dict[str, tuple[str, ...]] = {"floating": ("floating", "tooltip"), "tooltip": ("tooltip",),
                                           "strip": ("strip",), "tray": ("tray",)}
 
-# The box the frame dump never draws: [G], since every sample state leaves room for [GUARD].
-NOT_DRAWN_WHOLE = frozenset({"nostromo.floating.armed_guard_short"})
+# The boxes the frame dump never draws: [G], since every sample state leaves room for [GUARD]; and the pace's short
+# form, which English never needs (#94).
+NOT_DRAWN_WHOLE = frozenset({"nostromo.floating.armed_guard_short", "nostromo.tooltip.pace_short"})
 
 # What still runs past before French or Spanish is offered (#107), each with the ticket that settles it: #91 the
-# dashboard's money figures, #94 Nostromo's boxes, #95 Night City's, #96 Gates'. The dollar is the plain "$" (Chris's
-# decision on #91), and the boxes sized for English's figures (the strips' values, the cap badge on Gates' hover card,
-# the dashboard's cost tiles and big cost figure) draw their percents and dollars without the space beside the sign
-# (Box.tight, Chris's decision on #91): Turkish's "%100" fits, and so do the cents and whole dollars of every language.
-# Gates' floating badge has room for "Cap 100 %" and keeps the space. Recompute with budgets.over() after a change,
-# never by hand.
+# dashboard's money figures, #95 Night City's boxes, #96 Gates' (#94 settled Nostromo's). The dollar is the plain "$"
+# (Chris's decision on #91), and the boxes sized for English's figures (the strips' values, the cap badge on Gates'
+# hover card, the dashboard's cost tiles and big cost figure) draw their percents and dollars without the space beside
+# the sign (Box.tight, Chris's decision on #91): Turkish's "%100" fits, and so do the cents and whole dollars of every
+# language. Gates' floating badge has room for "Cap 100 %" and keeps the space. Recompute with budgets.over() after a
+# change, never by hand.
 _MONEY = tuple(f"dashboard.{skin}.cost_{part}" for part in ("tile", "hero")
                for skin in ("nostromo", "night_city", "gates"))
 TIGHT_BOXES = frozenset({"nostromo.strip.value_5h", "nostromo.strip.value_5h_chip", "nostromo.strip.value_7d",
@@ -98,24 +100,28 @@ TIGHT_BOXES = frozenset({"nostromo.strip.value_5h", "nostromo.strip.value_5h_chi
 _COMPACT = {language: {(box, budgets.tight(figure)) for box in _MONEY for figure in budgets.PAGE_MONEY[language]}
             for language in ("fr", "es", "tr")}
 _FR_DAYS = ("LUN.", "MAR.", "MER.", "JEU.", "VEN.", "SAM.", "DIM.")
-_ES_DAYS = ("LUN,", "MAR,", "MIÉ,", "JUE,", "VIE,", "SÁB,", "DOM,")
 FOR_91: dict[str, set[tuple[str, str]]] = {
-    "fr": {("nostromo.tooltip.resets", f"RESETS {day} {time}")                                 # #94: fr-CA's and
-           for day in _FR_DAYS for time in ("12 H 59\u202fP.M.", "12:59\u202fP.M.")}             # fr-MA's day clocks
-    | {(box, f"RST {day} 12 H 59\u202fP.M.") for day in _FR_DAYS                                    # #95: the same
-       for box in ("night_city.floating.row_reset", "night_city.tooltip.info_reset")}
-    # #94: the header's status word (its key since #93) beside the widest age and hold chip
-    | {("nostromo.floating.header_line", "RATE LIMITED | 59MIN | HOLD 23H 59MIN")}
+    "fr": {(box, f"RST {day} 12 H 59\u202fP.M.") for day in _FR_DAYS                                  # #95: fr-CA's and
+           for box in ("night_city.floating.row_reset", "night_city.tooltip.info_reset")}           # fr-MA's day clocks
     | _COMPACT["fr"],                                                     # #91: the compact tiles (above)
     "es": _COMPACT["es"]                                                  # #91: the compact tiles (above)
-    | {("nostromo.tooltip.resets", f"RESETS {day} 12:59\u202f{period}")                       # #94: es-ES's and
-       for day in _ES_DAYS for period in ("P.M.", "P.\u202fM.")}                                # es-419's day clocks
-    | {("nostromo.floating.age", "100 DÍAS"), ("nostromo.floating.state_chip", "HOLD 23 H 59 MIN"),   # #94: es-CO's
-       ("nostromo.floating.state_chip", "HOLD 6 DÍAS 23 H")}                                         # units
-    | {("night_city.floating.band_age", "100 DÍAS OLD")}                                            # #95: the same
-    | {("nostromo.floating.header_line", "RATE LIMITED | 100 DÍAS | HOLD 23 H 59 MIN")}             # #94: as in fr
+    | {("night_city.floating.band_age", "100 DÍAS OLD")}                                            # #95: es-CO's unit
     | {(box, "RATE LIMITED · 100 días") for box in ("gates.floating.status_pill", "gates.tooltip.status_pill")},  # #96
     "tr": _COMPACT["tr"],                                                 # #91: the compact tiles (above)
+}
+# What the budgets report and nothing will settle, kept apart from FOR_91 (critic 7 of #94's plan): a cut that comes
+# from a CLDR format, not from a word, so no draft (#104 to #106) can shorten it. Each row says which format tags write
+# it and why the cut is right. A cut a draft's word causes is no row here: it goes in that draft's reviewer questions.
+# Recompute with budgets.over() after a change, never by hand.
+ACCEPTED_CUTS: dict[str, dict[tuple[str, str], str]] = {
+    "es": {
+        # Nostromo's header leaves its age out before it cuts the pill (Q2, nostromo.HEADER_GIVE_WAY): beside the widest
+        # English status and hold chip an age past 37.2 px is left out, and these ages are CLDR's narrow units.
+        ("nostromo.floating.age", "100 DÍAS"): "es-CO's narrow day: the age is left out beside a long hold chip",
+        ("nostromo.floating.age", "59 MIN"): "es-CO's narrow minute, as above",
+        ("nostromo.floating.age", "100DD."): "es-419's narrow day (and most Latin American tags'), as above",
+        ("nostromo.floating.age", "59SEG."): "es-AR's narrow second, as above",
+    },
 }
 
 # Each language's longest tray tooltip in UTF-16 units (#93: "the longest tooltip per language is recorded as the
@@ -137,6 +143,22 @@ OWN_STATUS_WORDS: dict[str, str] = {
     "night_city.strip.status_live": "Night City's own LIVE on the strip, #95",
     "night_city.strip.status_word": "Night City's STRIP_WORDS, #95",
 }
+
+# Nostromo's boxes that draw its own words (#94): every box of its floating widget, hover card and strip but the
+# figures', whose keys are widget.nostromo.* (and the pill's, the view model's status word). The guard's statement
+# composes its texts instead.
+NOSTROMO_WORDED = frozenset({
+    *(f"nostromo.floating.{part}" for part in ("status_pill", "state_word", "state_chip", "hold_chip", "hold_word",
+                                               "armed_guard", "armed_guard_short", "row_name", "row_qualifier",
+                                               "cap_tag", "message")),
+    *(f"nostromo.tooltip.{part}" for part in ("row_name", "row_qualifier", "cap_tag", "resets", "pace", "pace_short",
+                                              "guard_lead")),
+    "nostromo.strip.window_tag",
+})
+# Nostromo's boxes of figures alone, measured in the pseudo-locale as it writes figures (Box.words False, #94).
+NOSTROMO_FIGURES = frozenset({"nostromo.floating.age", "nostromo.floating.row_value", "nostromo.tooltip.row_value",
+                              "nostromo.strip.value_5h", "nostromo.strip.value_5h_chip", "nostromo.strip.value_7d",
+                              "nostromo.strip.value_7d_chip", "nostromo.tray.readout"})
 
 
 # ── As the skins draw ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -303,9 +325,14 @@ def test_no_offered_language_is_past_a_budget() -> None:
 
 
 def test_what_91_has_to_settle_is_all_that_runs_past() -> None:
-    """French's and Spanish's longest figures run past only where FOR_91 says; #91 strikes each as it settles it."""
-    for language, expected in FOR_91.items():
+    """French's and Spanish's longest figures run past only where FOR_91 says, or where ACCEPTED_CUTS accepts a
+    format's cut; #91 and the skins' tickets strike each FOR_91 row as they settle it. An accepted cut is a box that
+    gives way (never a fault), and no FOR_91 row is Nostromo's: #94 settled them."""
+    for language in sorted(set(FOR_91) | set(ACCEPTED_CUTS)):
+        expected = FOR_91.get(language, set()) | set(ACCEPTED_CUTS.get(language, {}))
         assert {(r.box.id, r.text) for r in budgets.over(language)} == expected, language
+    assert not any(budgets.BOX[box].enforced for cuts in ACCEPTED_CUTS.values() for box, _text in cuts)
+    assert not any(box.startswith("nostromo.") for rows in FOR_91.values() for box, _text in rows)
 
 
 def test_the_boxes_sized_for_englishs_figures_take_their_percents_and_dollars_tight() -> None:
@@ -379,12 +406,14 @@ def _grown(box: budgets.Box, text: str) -> str:
 
 
 def test_a_line_is_measured_with_each_slots_widest_text(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A reset and a pace that each fit their own box can still not fit Nostromo's hover-card line together, so a line
-    takes each slot's widest text in the language, as the language would draw them side by side."""
-    line = next(item for item in budgets.LINES if item.id == "nostromo.tooltip.info_line")
-    resets, pace = budgets.BOX["nostromo.tooltip.resets"], budgets.BOX["nostromo.tooltip.pace"]
-    reset_text, pace_text = _grown(resets, "RESETS WED 12:59 PM"), _grown(pace, "BEHIND -100 PTS")
-    made = {resets.id: [reset_text, "RESETS --"], pace.id: [pace_text, "ON PACE"]}
+    """A reset and a pace that each fit their own box can still not fit Gates' hover-card line together, so a line
+    takes each slot's widest text in the language, as the language would draw them side by side. (Nostromo's line
+    gives way instead: test_a_line_gives_way_before_it_is_reported.)"""
+    line = next(item for item in budgets.LINES if item.id == "gates.tooltip.info_line")
+    resets, pace = budgets.BOX["gates.tooltip.resets"], budgets.BOX["gates.tooltip.pace"]
+    assert not line.gives_way
+    reset_text, pace_text = _grown(resets, "Resets Wed 12:59 PM"), _grown(pace, "Ahead of pace by 444 pts")
+    made = {resets.id: [reset_text, "Resets 11:39 PM"], pace.id: [pace_text, "On pace"]}
     monkeypatch.setattr(budgets, "texts", lambda box, _language: made.get(box.id, []))
     assert budgets.over("xx", [resets, pace]) == []
     [hit] = budgets.over("xx", [line])
@@ -421,15 +450,16 @@ def test_each_languages_longest_figures_are_set_in_the_boxs_text() -> None:
     assert "Resets sam. 12 h 59\u202fp.m." in french and len(french) == 6 + 7 * 6
     assert "RESETS MER. 12 H 59\u202fP.M." in budgets.texts(budgets.BOX["nostromo.tooltip.resets"], "fr")
     assert "RST CMT ÖS\u202f12:59" in budgets.texts(budgets.BOX["night_city.floating.row_reset"], "tr")
-    assert budgets.texts(budgets.BOX["nostromo.floating.state_chip"], "fr") == ["HOLD 23H 59MIN", "HOLD 23H 59M",
-                                                                                "HOLD 6J 23H"]
+    assert budgets.texts(budgets.BOX["nostromo.floating.hold_chip"], "fr") == ["HOLD 23H 59MIN", "HOLD 23H 59M",
+                                                                               "HOLD 6J 23H"]
     assert budgets.texts(budgets.BOX["night_city.floating.band_age"], "tr") == ["59SN OLD", "59D OLD", "47S OLD",
                                                                                 "100G OLD"]
     assert "RATE LIMITED · 100 días" in budgets.texts(budgets.BOX["gates.floating.status_pill"], "es")
     guard = budgets.texts(budgets.BOX["gates.tooltip.guard_text"], "fr")
     assert {"16\u00a0h\u00a012", "12\u00a0h\u00a059\u202fp.m.", "23h\u00a059min"} <= set(guard)
     assert budgets.texts(budgets.BOX["nostromo.floating.cap_tag"], "tr") == ["CAP %100"]
-    assert budgets.texts(budgets.BOX["nostromo.floating.message"], "fr") == []      # no figure; its words are #94's
+    assert budgets.texts(budgets.BOX["nostromo.floating.message"], "fr") == list(                 # no figure; its keys
+        budgets.BOX["nostromo.floating.message"].english)                         # are English's until #104 drafts them
     assert budgets.texts(body, i18n.PSEUDO) == [i18n.pseudo_text(text) for text in body.english]
     tile = budgets.BOX["dashboard.nostromo.cost_tile"]                      # the page's own figures, tight (#91)
     assert budgets.texts(tile, "fr") == ["99,9\u00a0k$"] and budgets.texts(tile, "tr") == ["99,9\u00a0Mn$"]
@@ -562,7 +592,8 @@ def _english(key: str) -> Any:
 
 
 def test_a_boxs_keys_are_the_words_it_draws() -> None:
-    """A box's key is one of the texts it draws, or the word before " · " (Gates' pill, its age after it); and a box
+    """A box's key, filled, is one of the texts it draws, or the word before " · " (Gates' pill, its age after it);
+    test_a_worded_boxs_english_is_its_keys_filled holds the other way round. And a box
     whose text is the view model's status word carries that word's key, but for OWN_STATUS_WORDS, the skins' own words.
     The tooltip, a composing box, carries every tray.tip key and reads no other (the next test)."""
     from usage_monitor.render.model import STATUS_KEYS
@@ -574,16 +605,16 @@ def test_a_boxs_keys_are_the_words_it_draws() -> None:
             continue
         leads = {text.split(" · ")[0] for text in box.english}
         for key in box.keys:
-            if _english(key) not in leads:
+            if not any(budgets.key_pattern(_english(key)).fullmatch(lead) for lead in leads):
                 wrong.append((box.id, key))
         for lead in sorted(leads & set(status)):
             if status[lead] not in box.keys and box.id not in OWN_STATUS_WORDS:
                 missing.append((box.id, lead))
     assert wrong == [] and missing == []
     keyed = {box.id for box in budgets.BOXES if box.keys and box.compose is None}
-    assert keyed == {"nostromo.floating.status_pill", "gates.floating.status_word", "gates.tooltip.status_word",
-                     "gates.floating.status_pill", "gates.tooltip.status_pill", "night_city.floating.status_chip",
-                     "night_city.floating.band_text", "night_city.floating.band_hold_text"}
+    assert keyed == {"gates.floating.status_word", "gates.tooltip.status_word", "gates.floating.status_pill",
+                     "gates.tooltip.status_pill", "night_city.floating.status_chip", "night_city.floating.band_text",
+                     "night_city.floating.band_hold_text", *NOSTROMO_WORDED}
     for box_id in OWN_STATUS_WORDS:
         assert not budgets.BOX[box_id].keys and set(budgets.BOX[box_id].english) & set(status), box_id
     raw = json.loads((i18n.CATALOG_DIR / "en.json").read_text(encoding="utf-8"))
@@ -620,14 +651,20 @@ def test_the_tooltip_box_composes_the_tooltips_the_code_words(monkeypatch: pytes
     assert read and read <= set(box.keys), sorted(read - set(box.keys))
 
 
-def test_only_a_composing_box_takes_a_key_with_a_placeholder() -> None:
-    """A box measures its keys' text as written, so a key with a placeholder ("session {percent}") would be measured
-    with "{percent}" in it: only a composing box, which measures its whole texts as the code words them, may hold
-    one."""
-    placeholders = [(box.id, key) for box in budgets.BOXES for key in box.keys
-                    if isinstance(_english(key), str) and i18n._placeholders(_english(key))]
-    assert placeholders and all(budgets.BOX[box_id].compose is not None for box_id, _key in placeholders), placeholders
-    assert not any("{" in text for text in budgets.texts(budgets.BOX["app.tray.tooltip"], i18n.PSEUDO))
+def test_every_key_with_a_placeholder_is_filled_or_composed() -> None:
+    """A key with a placeholder ("RESETS {clock}") is measured filled as the skin fills it (Box.fills, each placeholder
+    with a FILLS kind), or its box composes its whole texts as the code words them: no box's text, in any language,
+    keeps a placeholder as written."""
+    found = []
+    for box in budgets.BOXES:
+        names = set().union(*(i18n._placeholders(_english(key)) for key in box.keys if isinstance(_english(key), str)))
+        assert set(dict(box.fills)) <= names and set(dict(box.fills).values()) <= set(budgets.FILLS), box.id
+        if box.compose is None:
+            assert names <= set(dict(box.fills)), (box.id, sorted(names - set(dict(box.fills))))
+        found += [(box.id, name) for name in names]
+        for language in i18n.DEV_LANGUAGES:
+            assert not any(re.search(r"\{[a-z_]+\}", text) for text in budgets.texts(box, language)), (box.id, language)
+    assert {name for _box, name in found} >= {"percent", "clock", "countdown", "points", "name", "product", "command"}
 
 
 def test_a_key_in_several_boxes_has_one_note_naming_them_all() -> None:
@@ -636,7 +673,7 @@ def test_a_key_in_several_boxes_has_one_note_naming_them_all() -> None:
     boxes = sorted(box.id for box in budgets.BOXES if "widget.status.rate_limited" in box.keys)
     assert len(boxes) == 7 and [piece.split("(")[1].split(",")[0] for piece in note.split("; ")] == boxes
     pill = budgets.BOX["nostromo.floating.status_pill"]
-    assert f"{pill.limit:g} px ({pill.id}, none)" in note.split("; ")
+    assert f"{pill.limit:g} px ({pill.id}, ellipsis)" in note.split("; ")
     tip = budgets.notes()["_budget.tray.tip.lead"]
     assert tip == budgets.BOX["app.tray.tooltip"].note and tip.startswith("the whole tooltip: 127 UTF-16 units")
 
@@ -663,6 +700,182 @@ def test_the_pseudo_tooltip_fits(monkeypatch: pytest.MonkeyPatch) -> None:
     assert box.fit == "drop" and box.compose is not None
     assert budgets.texts(box, i18n.PSEUDO)
     assert max(box.width(i18n.pseudo_text(text)) for text in box.english) > tray.TIP_LIMIT
+
+
+# ── Nostromo's words and fits (#94) ───────────────────────────────────────────────────────────────────────────────
+
+def test_nostromo_passes_its_budgets_in_the_pseudo_locale() -> None:
+    """In the pseudo-locale (about 40 % longer, bracketed, accented) no Nostromo box or line that has no fallback or
+    only shrinks runs past its budget: its words come from its keys and fit, shrink or give way as the skin makes them.
+    What gives way is reported as a cut. Every Nostromo box is worded by keys, holds figures alone, or composes."""
+    rows = budgets.over(i18n.PSEUDO)
+    assert [(r.box.id, r.text) for r in rows if r.box.id.startswith("nostromo.") and r.box.enforced] == []
+    cut = {r.box.id for r in rows if r.box.id.startswith("nostromo.")}
+    assert {"nostromo.floating.status_pill", "nostromo.floating.state_word", "nostromo.tooltip.pace",
+            "nostromo.strip.window_tag"} <= cut
+    nostromo = {box.id for box in budgets.BOXES if box.id.startswith("nostromo.")}
+    assert {box.id for box in budgets.BOXES if box.id in nostromo and box.keys and box.compose is None} == \
+        NOSTROMO_WORDED
+    assert {box.id for box in budgets.BOXES if not box.words} == NOSTROMO_FIGURES
+    assert nostromo == NOSTROMO_WORDED | NOSTROMO_FIGURES | {"nostromo.tooltip.guard_lines"}
+
+
+def test_a_line_gives_way_before_it_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    """While a line is over, it gives up its boxes in its order (Nostromo's header: the state word, the age, the pill,
+    the hold chip's countdown) and is reported only when even its last step does not fit, with the runs it is left
+    with."""
+    line = next(item for item in budgets.LINES if item.id == "nostromo.floating.header_line")
+    pill, age, word, hold, alone = (budgets.BOX[f"nostromo.floating.{part}"]
+                                    for part in ("status_pill", "age", "state_word", "hold_chip", "hold_word"))
+    steps, width, _after = line.give_way([(pill.id, "P" * 20), (age.id, "59 M"), (word.id, "W" * 30)], 1.0, {})
+    assert steps == (word.id,) and width <= line.limit
+    steps, width, after = line.give_way([(pill.id, "P" * 20), (age.id, "59 M"), (hold.id, "HOLD " + "9" * 30)], 1.0,
+                                        {alone.id: "HOLD"})
+    assert steps == (age.id, pill.id, hold.id) and width <= line.limit
+    assert after == [(pill.id, "P" + nos.ELLIPSIS), (age.id, ""), (alone.id, "HOLD")]
+    made = {pill.id: ["P" * 20], age.id: ["59 M"], hold.id: ["HOLD " + "9" * 30], alone.id: ["HOLD"]}
+    monkeypatch.setattr(budgets, "texts", lambda box, _language: made.get(box.id, []))
+    assert budgets.over("xx", [line]) == []
+    made[alone.id] = ["H" * 40]
+    [hit] = budgets.over("xx", [line])
+    assert hit.text == f"P{nos.ELLIPSIS} | {'H' * 40}" and hit.width > hit.budget == line.limit
+
+
+def test_a_worded_box_is_measured_by_its_keys_in_the_pseudo_locale() -> None:
+    """A box of Nostromo's keys measures them in the pseudo-locale, filled with its figures (the reset's key made
+    pseudo, with WED 12:59 PM in it), not its English made pseudo whole; what of its English is no key's is measured
+    as the pseudo-locale draws it: a share alone as its percent, a name as written."""
+    resets = budgets.texts(budgets.BOX["nostromo.tooltip.resets"], i18n.PSEUDO)
+    template = str(i18n.app_catalog(i18n.PSEUDO).lookup("widget.nostromo.resets.at").value)
+    assert i18n.fill(template, {"clock": "WED 12:59 PM"}) in resets
+    assert i18n.pseudo_text("RESETS WED 12:59 PM") not in resets and len(resets) == 3
+    qualifier = budgets.texts(budgets.BOX["nostromo.floating.row_qualifier"], i18n.PSEUDO)
+    assert {"50\u00a0%", "100\u00a0%", i18n.pseudo_text("5H")} <= set(qualifier)
+    assert "FABLE" in budgets.texts(budgets.BOX["nostromo.floating.row_name"], i18n.PSEUDO)
+
+
+def test_a_figure_box_is_measured_with_the_pseudo_locales_figures() -> None:
+    """A box of figures alone (Box.words False) measures them in the pseudo-locale as it writes them: a percent with
+    its U+00A0 (tight where the box is), an age and a number as English writes them, never bracketed."""
+    for box_id in NOSTROMO_FIGURES:
+        found = budgets.texts(budgets.BOX[box_id], i18n.PSEUDO)
+        assert found and not any("[" in text for text in found), box_id
+    strip = budgets.BOX["nostromo.strip.value_5h"]
+    assert budgets.texts(strip, i18n.PSEUDO) == list(strip.english)
+    assert "13\u00a0%" in budgets.texts(budgets.BOX["nostromo.floating.row_value"], i18n.PSEUDO)
+    age = budgets.BOX["nostromo.floating.age"]
+    assert budgets.texts(age, i18n.PSEUDO) == list(age.english)
+
+
+def test_a_worded_boxs_english_is_its_keys_filled() -> None:
+    """Each English text of a box of Nostromo's keys is one of its keys' English filled (each placeholder standing for
+    any text), or the box's data: a figure alone or a name alone; and each key's English, filled, is one of them."""
+    english = i18n.load_catalog(i18n.DEFAULT)
+    for box_id in sorted(NOSTROMO_WORDED):
+        box = budgets.BOX[box_id]
+        patterns = [budgets.key_pattern(str(english.lookup(key).value)) for key in box.keys]
+        data = [text for text in box.english if not any(pattern.fullmatch(text) for pattern in patterns)]
+        names = budgets.fill_values(box, "name", i18n.DEFAULT)
+        assert all(re.fullmatch(r"[0-9.]+%", text) or text in names for text in data), (box_id, data)
+        assert all(any(pattern.fullmatch(text) for text in box.english) for pattern in patterns), box_id
+
+
+def test_the_guard_line_box_composes_the_statements_the_skin_words(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The guard line's texts are nostromo._guard_statement's, as _guard_lines breaks them (the lead glued), in every
+    language and every locale of it, worded through exactly the keys the box lists."""
+    read: set[str] = set()
+    inside = [0]
+    real_text, real_statement = i18n.Catalog.text, nos._guard_statement
+
+    def text(self: Any, key: str, *args: Any, **kwargs: Any) -> Any:
+        if inside[0]:
+            read.add(key)
+        return real_text(self, key, *args, **kwargs)
+
+    def statement(*args: Any, **kwargs: Any) -> Any:
+        inside[0] += 1
+        try:
+            return real_statement(*args, **kwargs)
+        finally:
+            inside[0] -= 1
+
+    monkeypatch.setattr(i18n.Catalog, "text", text)
+    monkeypatch.setattr(nos, "_guard_statement", statement)
+    box = budgets.BOX["nostromo.tooltip.guard_lines"]
+    assert box.compose is not None
+    for language in i18n.DEV_LANGUAGES:
+        composed = box.compose(language)
+        assert composed and all(engine.NO_BREAK in statement.split(" ")[0] for statement in composed), language
+    assert read == set(box.keys), sorted(read ^ set(box.keys))
+    glued = engine.glue("(IN 6D 23H).")
+    assert any(glued in statement for statement in box.compose(i18n.DEFAULT))
+
+
+def test_a_nostromo_box_that_shrinks_is_measured_at_its_step(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A sign-in line is measured at the first of nostromo.MESSAGE_STEPS where it fits (as _message_fit draws it), and
+    a strip tag at the first of STRIP_TAG_SIZES; a line too long even at 9 px is a fault, a tag that long a cut."""
+    message, tag = budgets.BOX["nostromo.floating.message"], budgets.BOX["nostromo.strip.window_tag"]
+    cv = nos._canvas(nos.FLOAT_W, 100, 1.0, dump.load_theme_objects()["nostromo"])
+    line = "X" * 38
+    assert budgets.W_nos(line, nos.FONT_SEMI, 10, nos.MESSAGE_TRACKING) > message.limit
+    assert message.width(line) == pytest.approx(cv.advance(line, cv.font(nos.FONT_SEMI, 10), 0.0))
+    assert message.width(line) <= message.limit
+    assert all(tag.width("7GN", scale) <= tag.limit for scale in tag.scales)
+    assert tag.width("7GN", 1.0) < budgets.nos_run(nos.FONT_SEMI, 11, 1.1, "strip").width("7GN", 1.0)
+    pseudo_tag = i18n.pseudo_text("5H")
+    monkeypatch.setattr(budgets, "texts", lambda box, _language: {message.id: [line, "X" * 60],
+                                                                  tag.id: ["7GN", pseudo_tag]}[box.id])
+    assert [(r.box.id, r.text, r.box.enforced) for r in budgets.over("xx", [message, tag])] == [
+        (message.id, "X" * 60, True), (tag.id, pseudo_tag, False)]
+
+
+_STEP_BOXES = {"age": "nostromo.floating.age", "pill": "nostromo.floating.status_pill",
+               "countdown": "nostromo.floating.hold_chip", "pace": "nostromo.tooltip.pace",
+               "pace_short": "nostromo.tooltip.pace_short"}
+
+
+@pytest.mark.parametrize("language", ["fr", "es", i18n.PSEUDO])
+def test_the_budgets_give_way_as_the_skin_does(language: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Critic 18 of #94's plan: for the language's worst header (with a state word, the CRITICAL chip and a hold chip on
+    its right) and its worst hover line, at every scale, the skin's plan (_header_plan, _info_plan) gives up the same
+    boxes in the same order as the budgets' Line.gives_way, and both fit after."""
+    import dataclasses
+
+    theme = dump.load_theme_objects()["nostromo"]
+    locale = i18n.dev_locale(language)
+    box = budgets.BOX
+    header = next(item for item in budgets.LINES if item.id == "nostromo.floating.header_line")
+    info = next(item for item in budgets.LINES if item.id == "nostromo.tooltip.info_line")
+    pill, age = box["nostromo.floating.status_pill"], box["nostromo.floating.age"]
+    alone = box["nostromo.floating.hold_word"]
+    resets, pace, short = (box[f"nostromo.tooltip.{part}"] for part in ("resets", "pace", "pace_short"))
+    taken = []
+    for scale in budgets.SCALES:
+        cv = nos._canvas(nos.FLOAT_W, 100, scale, theme)
+        for right in ("state_word", "state_chip", "hold_chip"):
+            right_box = box[f"nostromo.floating.{right}"]
+            texts = [budgets.widest_text(b, language, scale) for b in (pill, age, right_box)]
+            steps, width, _after = header.give_way(list(zip((pill.id, age.id, right_box.id), texts)), scale,
+                                                   {alone.id: budgets.widest_text(alone, language, scale)})
+            holding, style = right == "hold_chip", "label" if right == "state_word" else "chip"
+            monkeypatch.setattr(nos, "_age_text", lambda _model, text=texts[1]: text)
+            monkeypatch.setattr(nos, "_state_word", lambda _model, text=texts[2], style=style: (text, style))
+            monkeypatch.setattr(nos, "_hold_word", lambda _model, text=texts[2], holding=holding:
+                                text if holding else None)
+            model = dump.sample_model("guard_hold_session" if holding else "normal3", locale=locale)
+            plan = nos._header_plan(cv, dataclasses.replace(model, status_text=texts[0]))
+            mapped = tuple(right_box.id if step == "state_word" else _STEP_BOXES[step] for step in plan.gave_way)
+            assert mapped == steps and width <= header.limit, (scale, right, plan, steps)
+            taken.append(steps)
+        texts = [budgets.widest_text(b, language, scale) for b in (resets, pace, short)]
+        steps, width, _after = info.give_way(list(zip((resets.id, pace.id), texts)), scale, {short.id: texts[2]})
+        monkeypatch.setattr(nos, "_reset_text", lambda _row, _locale, text=texts[0]: text)
+        monkeypatch.setattr(nos, "_pace_word", lambda _row, _locale, text=texts[1]: text)
+        monkeypatch.setattr(nos, "_pace_short", lambda _row, *, locale, text=texts[2]: text)
+        plan = nos._info_plan(cv, dump.sample_model("normal3", locale=locale).rows[0], locale)
+        assert tuple(_STEP_BOXES[step] for step in plan.gave_way) == steps and width <= info.limit, (scale, plan)
+        taken.append(steps)
+    assert any(taken)                                       # each language's worst lines give way somewhere
 
 
 # ── The report ────────────────────────────────────────────────────────────────────────────────────────────────────

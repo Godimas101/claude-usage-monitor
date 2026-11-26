@@ -1,5 +1,5 @@
-"""The frame check (#94): every run of text a skin draws, read as the ink it puts down, against every other run and every
-box, rule, bar and edge of its frame. For tests/test_frame_layout.py, which runs it in a fresh Python with the time zone
+"""The frame check (#94): every run of text a skin draws, read as the ink it puts down, against every other run and
+every box, rule, bar and edge of its frame. For tests/test_frame_layout.py, which runs it in a fresh Python with the time zone
 pinned (reset times are local), and for the fit tests.
 
 A frame is recorded while a skin draws it, through engine.Canvas: each text layer the skin stamps (its ink: the

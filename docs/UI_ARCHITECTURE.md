@@ -195,6 +195,7 @@ countdown_units(seconds) -> ((2, "d"), (3, "h")) | ((2, "h"), (14, "m")) | ((9, 
 # the texts below are in the locale given (English by default): other languages' times from formats, their ages and
 # countdowns from CLDR's units in capitals (the examples' spaces may be CLDR's no-break ones)
 format_countdown(seconds, locale=ENGLISH) -> "2D 3H" | "2H 14M" | "9M" | "<1M"     # whole minutes, rounded down
+format_age_short(seconds, locale=ENGLISH) -> "12 S" | "41 M" | "3 H" | "2 D"      # one unit, no AGO: fr "41MIN"
 format_resets(resets_at, now, locale=ENGLISH) -> "7:39 PM" | "Sat 4:00 PM"        # fr-CA: "16 h 12" | "sam. 16 h 12"
 format_age(fetched_at, now, locale=ENGLISH) -> "12 S AGO"                         # fr: "IL Y A 12 S"
 share_text(allowance_pct, locale=ENGLISH) -> "50% SHARE" | None                   # fr: "50 % SHARE"
@@ -254,8 +255,9 @@ for an exact value) and writes the digits with `formats.number` and `formats.per
 draws its small percent sign on the side `formats.percent_parts` gives (before the numerals in Turkish). The boxes
 sized for English's figures (Nostromo's strip values, Night City's strip percent, the cap badge on Gates' hover card)
 take the percent without its space ("100%"; Turkish "%100", Chris's decision on #91); Gates' floating badge has the
-room and keeps the language's space. The tray icons' numbers stay digits. The skins' own words, units and case calls
-are #94 to #96's.
+room and keeps the language's space. The tray icons' numbers stay digits. Nostromo's own words, units and case calls
+come from the catalog and `casing` since #94 (see "Languages", "Skin words"); Night City's and Gates' are #95's and
+#96's.
 
 **Lamp kinds.** A status with no room for words (the strip, the tray icon) is drawn by `WidgetModel.lamp`
 (`model.LAMP_KINDS`): `live`, `paused`, `stale` (sign-in lost or missing: the user acts), `offline` (no connection),
@@ -328,7 +330,7 @@ Sign-in copy. `WidgetModel.stale_reason` says why the user must act (`expired`, 
 `stale_message` is its neutral wording ("LOGIN EXPIRED - USE CLAUDE CODE", `widget.stale.*` in the model's language
 since #93). Each skin picks its copy by the reason,
 as its approved mockup words it, and never reads the neutral text. Nostromo: the dashed auth box reads
-"AUTH LINK LOST." / "USE CLAUDE CODE TO RESTORE." (`AUTH_LINES`, by reason). Night City: the hazard band reads "RELINK // USE CLAUDE CODE"
+"AUTH LINK LOST." / "USE CLAUDE CODE TO RESTORE." (`AUTH_KEYS`, by reason: `widget.nostromo.auth.*`). Night City: the hazard band reads "RELINK // USE CLAUDE CODE"
 (`theme.extras.copy.stale_auth`). Gates: the footer reads "Hmm, we lost touch. Send Claude Code a message."
 Each says to use Claude Code, not to open it: Claude Code renews the sign-in only when it sends a request, so
 an open but idle Claude Code lets it run out (#52).
@@ -487,8 +489,8 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   import of `locale`, a `setlocale`, `getlocale` or `localeconv` call, or a `strftime` format that names a weekday, a
   month, a day period or the zone (the agent modes' English `Mon 09:00` in `agent/status.py` is the one listed
   exception). The widgets, the tray tooltip and the alerts write their numbers, percents, clocks and weekdays this
-  way. The view model's, the tray tooltip's and the tray menu's words come from the catalog since #93; the skins' own
-  words stay English until #94 to #96, the toasts' until #97. The alerts read the app's locale on each evaluation
+  way. The view model's, the tray tooltip's and the tray menu's words come from the catalog since #93, Nostromo's own
+  words since #94; Night City's and Gates' stay English until #95 and #96, the toasts' until #97. The alerts read the app's locale on each evaluation
   (`AlertEngine(settings, locale_provider=)`, English without one or when it fails); English alerts keep their trailing
   `USD`, other languages write each amount with the plain `$` (US dollars) or the currency's code. The dashboard has its
   own: `webui/formats.js` (`window.MonitorFormats`: `make(locale)`, and `active()` from the `monitor-locale` meta),
@@ -545,8 +547,8 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   lower or sentence case it keeps its own letters (`Claude Instant`, never `ınstant`). English keeps its old quirks byte
   for byte. Ids (limit kinds, keys, the guard's identity strings, tags, currency codes) keep the plain calls:
   `tests/test_casing_sites.py` lists every bare call allowed in the files the widgets', the tray's and the alerts' words
-  come from (render/model.py, app.py, data/alerts.py, data/identity.py, data/usage_api.py, formats.py); the skins' own
-  calls move to `casing`, and the skins join that list, in #94 to #96. `tests/test_locale_surfaces.py` draws every
+  come from (render/model.py, app.py, data/alerts.py, data/identity.py, data/usage_api.py, formats.py) and Nostromo's
+  skin, whose own calls moved to `casing` in #94 with no bare call left; Night City and Gates join it in #95 and #96. `tests/test_locale_surfaces.py` draws every
   theme, state and surface in Turkish and finds no U+0307. On the page, `formats.js`'s `upper` and `lower` follow the
   same rule (for a language or a tag; the page's language when none is given): `app.js` cases a name in capitals by the
   page's language (`FMT.upper(name)`: a model, a plan, a surface), English words by English's (`FMT.upper(text, "en")`,
@@ -633,6 +635,42 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   `en.json` a translator's note `_note.<key>` sits just before its key and the budget note `_budget.<key>` just after
   it. `tests/fixtures/widget_words_english.json`, recorded before #93 moved a word, holds the English of all three
   byte for byte (`tests/test_widget_words.py`, worked out in a fresh Python with the time zone pinned).
+- **Skin words (#94).** A skin's own words are catalog keys named surface first, as the other keys are:
+  `widget.<theme id>.<group>.<name>`. Nostromo's are `widget.nostromo.state.*` (the header's word), `.guard.*` (the
+  hold chip, the armed mark, the hover card's guard line), `.auth.*.line1`/`.line2` (the sign-in box), `.limit.*`,
+  `.window.*`, `.share.of`, `.cap.tag`, `.resets.at`/`.unknown` and `.pace.*`; Night City's (#95) and Gates' (#96) take
+  `widget.night_city.*` and `widget.gates.*` with the same groups, and `tests/test_widget_words.py`'s key set leaves
+  `widget.<theme id>.*` out. A value is in the theme's case (Nostromo's capitals) and nothing cases it again. A name goes
+  in in the theme's case (`casing.upper(name, language)` for Nostromo: `HAİKU WEEKLY` in Turkish), the sign-in command
+  as typed, and Claude Code's name, a percent, a clock, a countdown and the pace's signed points as placeholders; ages
+  and countdowns are formats (`format_age_short`, `format_countdown`). The code keeps the `, ` between the guard line's
+  limits, the space before a cap, its closing periods and the ellipsis, which the four languages write alike; it keeps
+  the guard line's lead on one line, so a French ` :` never starts the second. `tests/fixtures/skin_words_english.json`
+  holds each skin's English as it drew it before its words moved (every helper's text and every drawn run, worked out
+  by `tests/skin_words.py` in a fresh Python with the time zone pinned), and `tests/test_skin_words.py` draws every
+  recorded state with each key marked, to show every word comes from its key as written. Where a language's words are
+  longer than English's, Nostromo's frames give way by pure helpers the tests read; English never meets any of them, so
+  its frames are as before:
+  - The header (`_header_plan`) gives way in `HEADER_GIVE_WAY`'s order, an owner default (Q2) Chris may overturn. The
+    armed mark goes first, as before #94: it is drawn only in the room the rest leaves. Then the state word or the
+    `CRITICAL` chip is cut with an ellipsis, since it mostly repeats the pill and in LIVE the colours and the hazard band
+    carry the severity; then the age goes; then the pill's word is cut, to one letter at least; last the hold chip drops
+    its countdown and reads `HOLD` alone. The age and the countdown are facts the floating widget shows nowhere else.
+    The two sides keep `QUALIFIER_GAP` (6 px) apart, and a word cut at one step takes back the room a later step frees.
+  - The hover card's reset line (`_info_plan`): the pace takes its short form, the signed points alone
+    (`widget.nostromo.pace.points`, `+21 PTS`), then is left out; the reset never gives way.
+  - The sign-in box (`_message_fit`): both lines take one step of `MESSAGE_STEPS`, the tracking to 0 and then 9 px; only
+    a line too long at 9 px is cut. The strip's window tags (`_strip_tag`) shrink from 11 px to 9 px (`STRIP_TAG_SIZES`,
+    the tracking 0.1 em), then are left out.
+  - Marks (Q1, an owner default Chris may overturn): the status pill, the header's chip and a cap tag grow round a word
+    whose marks would touch their edge, decided by its characters (`_mark_growth`), so a box is the same at every scale.
+    A capital with a mark above grows an outlined box (the pill, a cap tag) 2 px up and the filled chip 1 px; a mark
+    below, or a glyph that drops below the line (`DESCENDERS`), grows any of them 2 px down, to 1 px over the rule. The
+    conflict, recorded in `MARK_GROWTH_UP`: the grown pill's top is then y = 4, the hazard band's bottom edge, so in a
+    LIVE frame with a critical limit the two meet with no air between (they never overlap); 1 px up would keep the air
+    but leaves the stroke on the mark in the hover card at 1.25x.
+  - `tests/test_skin_nostromo_fit.py` reads each decision; `tests/test_budgets.py` holds the budgets' give-way to the
+    skin's; the frame check (`tests/frame_layout.py`, below) holds every frame clear.
 - **Test tools (#89).** The pseudo-locale (`i18n.PSEUDO`, `pseudo`) is `en.json` made longer (about 40%), accented
   (`İ ı ğ ş é ñ` among the look-alikes) and bracketed (`i18n.pseudo_text`), so English left over, a missing glyph
   and a cut end all show. A dev instance shows it with `USAGE_MONITOR_LANG=pseudo`, and the dev server with
@@ -661,7 +699,16 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   before and after noon; the countdown at every minute under a day, every hour from a day to a week, and under a
   minute. Clock and countdown are paired freely, so a figure can come out longer than the longest real tooltip, never
   shorter.
-  Only a composing box may hold a key with a placeholder. `python tests/budgets.py --tooltips` prints each language's
+  Since #94 a key with a placeholder is filled as the skin fills it (`Box.fills`: each placeholder takes the language's
+  longest figures, the signed points, a name, Claude Code's name or the command), or its box composes its whole texts
+  (Nostromo's guard line composes through the skin's own `_guard_statement`). A box of a skin whose own words are keys
+  (`budgets.WORDED`: Nostromo) is measured in the pseudo-locale by those keys made pseudo and filled, not by its English
+  made pseudo, and a box of figures alone (`Box.words=False`) by the figures as the pseudo-locale writes them. A line
+  gives way as its skin does (`Line.gives_way`: a box cut to its first letter and the ellipsis, left out, or replaced by
+  another box) and is reported only if it is still over after its last step; Nostromo's sign-in lines and strip tags
+  are measured at the step they shrink to (`nostromo_fit`). `ACCEPTED_CUTS` in `test_budgets.py` holds, apart from
+  `FOR_91`, the cuts a CLDR format causes (Spanish ages that Nostromo's header leaves out), which no draft can settle.
+  `python tests/budgets.py --tooltips` prints each language's
   longest tooltip, which `test_budgets.py` pins as `TOOLTIPS` (en 113, fr 120, es 121, tr 114, pseudo 127 units today;
   the pseudo-locale's is a same-day resume that keeps its countdown at the shell's limit).
   `tests/test_budgets.py` holds each box's measure to the widths the skins work out as the frame dump draws, and every
@@ -682,6 +729,16 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   `tests/test_english_left.py` holds the result to `tests/fixtures/english_left.json`, which each extraction ticket
   (#93 to #101) shrinks by recording again (`python tests/english_left.py --record`, which adds new English only with
   `--allow-new`).
+  The frame check (`tests/frame_layout.py`, held by `tests/test_frame_layout.py`; no window, so not gated, #94) draws
+  every state `tests/skin_words.py` records for the skins in `frame_layout.THEMES` (Nostromo; #95 and #96 add
+  theirs) in English, the pseudo-locale and the French, Spanish and Turkish dev locales: the floating widget and the
+  hover card at every display scale up to 200 % (1.75 too) and the strip at every scale a taskbar draws it at, first
+  variant (every variant's runs are the first's, checked at 1.0 in the pseudo-locale). It fails a run whose ink
+  (coverage 64 of 255 and up) shares a pixel with another run or comes within 2 px of one on its line, meets an
+  outline, a rule, a bar or the hazard band, crosses a fill's edge, or leaves the frame's body, its chamfered
+  corners included. `KNOWN` lists what English draws so by design (the strip's 5H value at 100 %, on the budgets'
+  record too). A cut a fit makes in the pseudo-locale (`[THR…`) is the pseudo-locale's to the English scan: a
+  bracketed string a run ends inside with the ellipsis was cut.
 - **Fonts (#92).** The widgets draw U+202F, the narrow no-break space of French grouping and of some 12-hour clocks, as
   U+00A0 (`engine.drawn`), in all three run builders. No bundled face has U+202F, and U+00A0 is as wide as a space in
   every face the widgets use, so a figure measures the same on every machine. A theme role may list fallback families,

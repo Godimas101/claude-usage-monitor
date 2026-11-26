@@ -283,7 +283,8 @@ def test_the_grown_boxes_keep_off_the_hazard_band_and_the_rules(scale: float) ->
         pill = rows(nos.HEADER_TOP - nos.MARK_GROWTH_UP, nos.HEADER_TOP + nos.HEADER_H + nos.MARK_GROWTH_DOWN)
         chip = rows(nos.HEADER_TOP - nos.CHIP_GROWTH_UP, nos.HEADER_TOP + nos.HEADER_H + nos.MARK_GROWTH_DOWN)
         assert pill[0] == band[1] and chip[0] > band[1] and pill[1] < rule[0] and chip[1] < rule[0], (height, scale)
-        for pitch, above in ((nos.ROW_PITCH, nos.PIP_OFFSET + 8), (nos.TOOLTIP_ROW_PITCH, nos.TOOLTIP_INFO_OFFSET + 12)):
+        for pitch, above in ((nos.ROW_PITCH, nos.PIP_OFFSET + 8),
+                             (nos.TOOLTIP_ROW_PITCH, nos.TOOLTIP_INFO_OFFSET + 12)):
             for index in range(3):
                 top = nos.ROW_TOP + pitch * index
                 tag = rows(top - nos.MARK_GROWTH_UP, top + nos.HEADER_H + nos.MARK_GROWTH_DOWN)

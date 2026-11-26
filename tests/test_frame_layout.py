@@ -1,8 +1,8 @@
 """No frame overlaps (#94; tests/frame_layout.py): every run of text a checked skin draws keeps off every other run and
 every box, rule, bar and edge of its frame, in English, the pseudo-locale and the French, Spanish and Turkish dev
-locales, at every display scale and every scale a taskbar draws the strip at. The skins whose frames are checked are
-frame_layout.THEMES (#95 and #96 add theirs). No window opens: the frames are drawn in memory, in a fresh Python with the
-time zone pinned, one per language, all started together."""
+locales, at every display scale and every scale a taskbar draws the strip at. The skins whose frames are checked
+are frame_layout.THEMES (#95 and #96 add theirs). No window opens: the frames are drawn in memory, in a fresh Python
+with the time zone pinned, one per language, all started together."""
 from __future__ import annotations
 
 import json
@@ -23,8 +23,8 @@ VARIANTS_IN = "pseudo"          # the language whose words give way the most
 
 @pytest.fixture(scope="module")
 def found() -> dict[tuple[str, str, str], Any]:
-    """Each case's findings, and each theme's runs per variant, each worked out by frame_layout.py in a fresh Python with
-    the time zone pinned; the processes run side by side."""
+    """Each case's findings, and each theme's runs per variant, each worked out by frame_layout.py in a fresh Python
+    with the time zone pinned; the processes run side by side."""
     jobs = [("findings", theme, language) for theme, language in CASES]
     jobs += [("variants", theme, VARIANTS_IN) for theme in frame_layout.THEMES]
     env = {**os.environ, "TZ": frame_layout.PINNED_TZ,
@@ -109,7 +109,8 @@ def test_the_check_finds_each_kind_of_overlap(scale: float) -> None:
     assert kinds(lambda cv: (cv.fill_rect(16, 9, 28, 23, (9, 9, 9, 255)), _text(cv, "AB", 20, 20))) == {
         "run across a fill"}
     assert kinds(lambda cv: (cv.fill_rect(16, 21, 60, 22, (9, 9, 9, 255)), _text(cv, "AB", 20, 20))) == set()
-    assert kinds(lambda cv: (cv.fill_rect(16, 16, 60, 17, (9, 9, 9, 255)), _text(cv, "AB", 20, 20))) == {"run on a rule"}
+    assert kinds(lambda cv: (cv.fill_rect(16, 16, 60, 17, (9, 9, 9, 255)), _text(cv, "AB", 20, 20))) == {
+        "run on a rule"}
     assert kinds(lambda cv: (cv.dotted_hline(16, 60, 16, 3, 3, (9, 9, 9, 255)), _text(cv, "AB", 20, 20))) == {
         "run on a rule"}
     assert kinds(lambda cv: (cv.segment_layers(40, 12, 6, 4, 8, 5, 2), _text(cv, "AB", 20, 20))) == set()

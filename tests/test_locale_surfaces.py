@@ -693,7 +693,8 @@ def turkish_frames() -> dict[str, list[str]]:
 
 def test_no_turkish_frame_draws_a_combining_dot(turkish_frames):
     """A U+0307 comes from lower-casing Turkish's İ by the default rule (str.lower, str.capitalize); casing never
-    writes one. The skins' own case calls move to casing in #94 to #96: this holds every frame meanwhile."""
+    writes one. Nostromo's own case calls moved to casing in #94, Night City's and Gates' do in #95 and #96: this holds
+    every frame meanwhile."""
     assert set(turkish_frames) == {"24 Fable", "24 Haiku", "12 Fable", "12 Haiku"}
     for frames, runs in turkish_frames.items():
         assert runs and [run for run in runs if COMBINING_DOT in run] == [], frames
@@ -713,10 +714,11 @@ def test_turkish_frames_draw_turkish_weekdays_percents_and_clocks(turkish_frames
 
 
 def test_a_name_with_an_i_reaches_the_turkish_frames(turkish_frames):
-    """Haiku, scoped in place of Fable, is drawn in every skin's own case ("HAIKU", "Haiku weekly"; the Turkish
-    capitals HAİKU come with #94 to #96), so the combining-dot check above has an i to see."""
+    """Haiku, scoped in place of Fable, is drawn in every skin's own case, so the combining-dot check above has an i to
+    see: in Nostromo's Turkish capitals since #94 ("HAİKU WEEKLY"), still by English's rule in Night City until #95
+    ("HAIKU"), and as written in Gates ("Haiku weekly")."""
     for clock in (24, 12):
         runs = turkish_frames[f"{clock} Haiku"]
-        assert {"HAIKU", "Haiku weekly"} <= set(runs), clock
+        assert {"HAIKU", "Haiku weekly", "HAİKU WEEKLY"} <= set(runs), clock
         assert not [run for run in runs if "Fable" in run or "FABLE" in run], clock
     assert any(re.search("Fable|FABLE", run) for run in turkish_frames["24 Fable"])

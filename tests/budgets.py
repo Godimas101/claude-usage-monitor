@@ -29,9 +29,19 @@ view model's status word carry its key, and the tray tooltip is a composing box 
 worst-case tooltips the code words in the language, after the drop rule, not its English made pseudo
 (tests/widget_words.tooltip_sweep: two limits at 100 % in each status, in every format tag and clock, as a dev
 instance, with the guard holding at a resume clock, the same day's and another day's, and a countdown of every length
-they take). Only a composing box may hold a key with a placeholder: any other box would
-measure the placeholder as written. The skins' own words get their keys from #94 to #96, the toasts' from #97. Counts
-(the pace points) get no figure: a whole number under 1000 is written alike in all four languages.
+they take). Since #94 a skin's own words are keys too (WORDED: Nostromo; #95 and #96 add theirs). A key with a
+placeholder is filled (``Box.fills``: each placeholder and the FILLS kind it takes, as the skin fills it: the language's
+longest figures, cased as the skin draws them, the signed points, a name, the product, the command), or its box composes
+its whole texts; a box of WORDED keys measures them in the pseudo-locale filled with the pseudo-locale's own figures,
+not its English made pseudo, and a box of figures alone (``Box.words`` False) measures them as the pseudo-locale writes
+them ("13 %" with its U+00A0, "12 S"), never bracketed. Nostromo's guard statement composes through the skin's own
+_guard_statement. The toasts' keys come from #97. Counts (the pace points) get no figure: a whole number under 1000 is
+written alike in all four languages.
+
+A line gives way as its skin does (``Line.gives_way``): while it is over, each step's box leaves its slot in turn (cut
+to its floor, one letter and the ellipsis; left out; or replaced by another box's text), and the line is reported only
+if it is still over after the last step. A box that shrinks is measured at the size it shrinks to: Night City's fit
+function, and Nostromo's steps (``nostromo_fit``: the sign-in lines' MESSAGE_STEPS, the strip tags' STRIP_TAG_SIZES).
 
     python tests/budgets.py [--lang ID]     what a language's text would not fit (default: pseudo)
     python tests/budgets.py --limits        every box's and line's limit, as test_budgets.py pins them
@@ -40,6 +50,7 @@ measure the placeholder as written. The skins' own words get their keys from #94
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import math
 import re
@@ -56,9 +67,9 @@ REPO = Path(__file__).resolve().parent.parent
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from usage_monitor import casing, i18n  # noqa: E402
+from usage_monitor import casing, formats, i18n  # noqa: E402
 from usage_monitor.render import dump, engine  # noqa: E402
-from usage_monitor.render.model import STATUS_KEYS  # noqa: E402
+from usage_monitor.render.model import LOGIN_COMMAND, PRODUCT, STATUS_KEYS  # noqa: E402
 from usage_monitor.render.skins import RenderOptions  # noqa: E402
 from usage_monitor.render.skins import gates as g  # noqa: E402
 from usage_monitor.render.skins import night_city as nc  # noqa: E402
@@ -122,7 +133,16 @@ PAGE_MONEY: dict[str, tuple[str, ...]] = {"fr": ("99,9\u00a0k\u00a0$",), "es": (
 _KINDS = ("percent", "clock", "money", "duration", "age", "count")
 _ON_A_DAY = re.compile(r"\b(?:WED|Wed) \{\}")
 CAPITALS = ("nostromo", "night_city")         # the skins that draw their figures in capitals
+WORDED = ("nostromo",)                        # the skins whose own words are catalog keys (#94; #95 and #96 add theirs)
 _FITS = ("none", "shrink", "ellipsis", "clip", "drop", "wrap")
+# What a placeholder of a box's key is filled with (Box.fills): a figure the language's FIGURES give (English and the
+# pseudo-locale: the widest shapes the code writes for them, ENGLISH_FILLS, the pseudo-locale's percent with its
+# U+00A0), the signed points, or a fixed sample: a name, Claude Code's name, the sign-in command.
+FILLS = ("percent", "clock", "duration", "count", "name", "product", "command")
+ENGLISH_FILLS: dict[str, tuple[str, ...]] = {"percent": ("100%",), "clock": ("12:59 PM", "WED 12:59 PM"),
+                                             "duration": ("23H 59M", "6D 23H")}
+_POINTS = ("+100", "-100")                    # the widest pace counts, signed
+_NAME = "Fable"                               # a scoped limit's name, as the budgets' English has it (FABLE WEEKLY)
 
 
 # ── Measuring as each skin does ───────────────────────────────────────────────────────────────────────────────────
@@ -150,8 +170,9 @@ def _gates_ink() -> Any:
 @dataclass(frozen=True)
 class Measure:
     """How a skin measures a run of text in a box, and at which scales. ``how`` names the skin's way; ``args`` its
-    settings: nostromo (font, size, tracking, canvas), night_city (spec), night_city_fit (spec, room, floor),
-    night_city_value (), gates (role, size, weight), nostromo_tray (), gates_tray (), chars ()."""
+    settings: nostromo (font, size, tracking, canvas), nostromo_fit (font, steps of (size, tracking), room, canvas: the
+    width at the first step that fits the room, else at the last), night_city (spec), night_city_fit (spec, room,
+    floor), night_city_value (), gates (role, size, weight), nostromo_tray (), gates_tray (), chars ()."""
 
     how: str
     args: tuple[Any, ...] = ()
@@ -162,7 +183,7 @@ class Measure:
 
     @property
     def scales(self) -> tuple[float, ...]:
-        if self.how == "nostromo":
+        if self.how in ("nostromo", "nostromo_fit"):
             return STRIP_SCALES if self.args[3] == "strip" else SCALES
         return (1.0,)
 
@@ -178,6 +199,12 @@ def _width(m: Measure, text: str, scale: float) -> float:
         font, size, tracking, canvas = m.args
         cv = _nos_canvas(*((nos.STRIP_W, nos.STRIP_H) if canvas == "strip" else (nos.FLOAT_W, 100)), scale)
         return cv.advance(text, cv.font(font, size), tracking)
+    if m.how == "nostromo_fit":
+        # nostromo._message_fit and _strip_tag: the first step at which the text fits its room.
+        font, steps, room, canvas = m.args
+        cv = _nos_canvas(*((nos.STRIP_W, nos.STRIP_H) if canvas == "strip" else (nos.FLOAT_W, 100)), scale)
+        widths = [cv.advance(text, cv.font(font, size), tracking) for size, tracking in steps]
+        return next((width for width in widths if width <= room), widths[-1])
     if m.how == "night_city":
         return _nc_ink().width(text, getattr(nc, m.args[0]))
     if m.how == "night_city_fit":
@@ -239,6 +266,8 @@ class Box:
     tight: bool = False             # sized for English's figures: no space beside its "%" or "$" (#91)
     compose: Callable[[str], Sequence[str]] | None = None   # a composing box: its whole texts, as the code words them
     note: str = ""                  # its keys' budget note, where the limit is the whole text's, not a phrase's
+    fills: tuple[tuple[str, str], ...] = ()     # each placeholder of its keys and the FILLS kind it takes (#94)
+    words: bool = True              # False for a box of figures alone: the pseudo-locale writes them as figures (#94)
 
     @property
     def unit(self) -> str:
@@ -265,7 +294,8 @@ class Line:
     """Runs drawn side by side, each from a box of its own, that must fit ``limit`` together. ``slots``: for each run,
     the boxes that can stand there (a header's word or chip); ``extra``: the pixels the skin adds beside a box's text
     there (a chip's padding, a gap). ``english``: the English lines as drawn, one text per slot ("" for none); a text
-    is measured in the first box of its slot that lists it."""
+    is measured in the first box of its slot that lists it. ``gives_way``: what the skin gives up while the line is
+    over, in order (#94): (box id, "cut" | "drop" | another box of the same slot); see give_way."""
 
     id: str
     limit: float
@@ -274,6 +304,7 @@ class Line:
     slots: tuple[tuple[str, ...], ...]
     extra: tuple[tuple[str, float], ...] = ()
     english: tuple[tuple[str, ...], ...] = ()
+    gives_way: tuple[tuple[str, str], ...] = ()
 
     @property
     def enforced(self) -> bool:
@@ -300,6 +331,33 @@ class Line:
             total += box.width(text, scale) + self.added(box.id)
         return total
 
+    def give_way(self, runs: Sequence[tuple[str, str]], scale: float, instead: dict[str, str]
+                 ) -> tuple[tuple[str, ...], float, list[tuple[str, str]]]:
+        """(the boxes that gave way, in order; the width after; the runs after) of the line drawn as ``runs`` (each
+        slot's box and text, "" for none) at ``scale``. While the line is over its limit, each step of gives_way whose
+        box holds its slot is taken: "cut" leaves the box's floor there (its first letter and the ellipsis), "drop"
+        leaves the slot empty, and a box id puts that box's text from ``instead`` there."""
+        runs = list(runs)
+
+        def width() -> float:
+            return sum(BOX[box].width(text, scale) + self.added(box) for box, text in runs if text)
+
+        taken: list[str] = []
+        for box_id, then in self.gives_way:
+            if width() <= self.limit + 0.01:
+                break
+            at = next((index for index, (box, text) in enumerate(runs) if box == box_id and text), None)
+            if at is None:
+                continue
+            if then == "cut":
+                runs[at] = (box_id, runs[at][1][0] + nos.ELLIPSIS)
+            elif then == "drop":
+                runs[at] = (box_id, "")
+            else:
+                runs[at] = (then, instead[then])
+            taken.append(box_id)
+        return tuple(taken), width(), runs
+
 
 SEMI, REG, VT = nos.FONT_SEMI, nos.FONT_REG, nos.FONT_VT
 HEADER = nos.RIGHT - (nos.LEFT + 6.0 + 6)                        # the header line's room: past the dot, to RIGHT
@@ -316,6 +374,53 @@ _NOS_RESET_WIDEST = W_nos("RESETS WED 12:59 PM", REG, 10, 0.6)
 _NOS_STRIP_ROOM = [grp[2] - (grp[1] + nos.STRIP_CELL_STEP * (nos.STRIP_CELLS - 1) + nos.STRIP_CELL_W)
                    for grp in nos.STRIP_GROUPS]
 _TRAY = nos._tray_geometry(TRAY_SIZE)
+_GAP = nos.QUALIFIER_GAP                                           # between the header's sides, a reset and its pace
+_NOS_MESSAGE = (nos.RIGHT - 1) - (nos.LEFT + 9)                    # a sign-in line, inside the dashed border
+_NOS_TAG_ROOM = nos.STRIP_GROUPS[0][1] - nos.STRIP_GROUPS[0][0]    # a strip tag, from its group's start to its bar
+_NOS_TAG_STEPS = tuple((size, nos.STRIP_LABEL_TRACKING * (size / nos.STRIP_LABEL_SIZE)) for size in nos.STRIP_TAG_SIZES)
+
+
+def _nos_keys(*names: str) -> tuple[str, ...]:
+    return tuple(f"widget.nostromo.{name}" for name in names)
+
+
+_NOS_NAMES = _nos_keys("limit.session", "limit.weekly", "limit.scoped", "limit.scoped_unnamed")
+_NOS_QUALIFIERS = _nos_keys("window.session", "window.weekly", "share.of")
+# What nostromo._guard_statement reads: the leads, a limit and its cap, the resume sentence, and the limits' names.
+_NOS_GUARD_KEYS = _nos_keys("guard.armed", "guard.armed_list", "guard.holding", "guard.holding_list", "guard.limit",
+                            "guard.cap", "guard.resumes", "guard.time_left") + _NOS_NAMES
+_GUARD_COUNTDOWNS = (30, 23 * 3600 + 59 * 60, 6 * 86400 + 23 * 3600)    # under a minute, and FIGURES' widest two
+
+
+def _guard_statements(language: str) -> list[str]:
+    """The hover card's guard statements Nostromo words in ``language`` (nostromo._guard_statement), each as
+    _guard_lines breaks it (the lead glued, a space, the rest): armed over a session, a weekly, a named and an unnamed
+    scoped cap at 100 %, and holding over the four with a resume time and a countdown, in every locale of the language
+    (widget_words.sweep_locales), at each length of resume clock the tooltip sweep tries (sweep_clocks) and at
+    _GUARD_COUNTDOWNS."""
+    from dataclasses import replace
+
+    from widget_words import sweep_clocks, sweep_locales
+
+    from usage_monitor.render.model import GuardMark
+
+    caps: dict[str, int | float] = {"session": 100, "weekly": 100, "scoped:fable": 100, "scoped:other": 100}
+    kinds = {"session": "session", "weekly": "weekly_all", "scoped:fable": "weekly_scoped",
+             "scoped:other": "weekly_scoped"}
+    names: dict[str, str | None] = {"scoped:fable": _NAME, "scoped:other": None}
+    found: list[str] = []
+    for locale in sweep_locales(language):
+        model = dump.sample_model("guard_hold_session", locale=locale)
+        marks = [GuardMark(state="armed", caps=caps, kinds=kinds, scope_names=names)]
+        marks += [GuardMark(state="holding", over_keys=tuple(caps), caps=caps, readings={key: 100.0 for key in caps},
+                            kinds=kinds, scope_names=names, resume_clock=clock, resume_seconds=seconds)
+                  for clock in sweep_clocks(locale) for seconds in _GUARD_COUNTDOWNS]
+        for mark in marks:
+            statement = nos._guard_statement(replace(model, guard=mark))
+            assert statement is not None
+            lead, rest = statement
+            found.append(engine.glue(lead) + (f" {rest}" if rest else ""))
+    return list(dict.fromkeys(found))
 
 _NC_HEAD = nc.LEFT + nc.PIP + nc.BRAND_GAP                         # where the brand starts
 _NC_BRAND = W_nc("CLAUDE//USAGE", "BRAND")
@@ -359,9 +464,10 @@ _WAIT_N = "12 sessions waiting on the usage guard were let go early."
 
 def _nos(id_: str, font: str, size: float, tracking: float, limit: float, why: str, fit: str = "none", *,
          english: tuple[str, ...], kinds: tuple[str, ...] = (), templates: tuple[str, ...] = ("{}",),
-         canvas: str = "frame", tight: bool = False, keys: tuple[str, ...] = ()) -> Box:
+         canvas: str = "frame", tight: bool = False, keys: tuple[str, ...] = (),
+         fills: tuple[tuple[str, str], ...] = (), words: bool = True) -> Box:
     return Box(id_, nos_run(font, size, tracking, canvas), limit, why, fit, english, kinds, templates, keys,
-               tight=tight)
+               tight=tight, fills=fills, words=words)
 
 
 def _nc(id_: str, spec: str, limit: float, why: str, fit: str = "none", *, english: tuple[str, ...],
@@ -408,98 +514,134 @@ def _tooltips(language: str) -> list[str]:
 
 
 BOXES: tuple[Box, ...] = (
-    # ── Nostromo: the floating widget's header (nostromo._header, _pill, _state_word, _armed_mark) ──
-    _nos("nostromo.floating.status_pill", SEMI, 10, 1.2,
-         HEADER - 10 - (6 + _AGE_WIDEST) - (_HOLD_WIDEST + 8),
-         "header room less the pill's frame, the widest age and the widest hold chip", english=_STATUS_WORDS,
-         keys=_status_keys(*_STATUS_WORDS)),
-    _nos("nostromo.floating.age", REG, 10, 0.6,
-         nos.RIGHT - (_HOLD_WIDEST + 8) - (nos.LEFT + 12 + 10 + _PILL_WIDEST + 6),
-         "from the widest pill's end to the widest hold chip", kinds=("age",),
-         english=("12 S", "41 M", "6 M", "59 M", "3 H", "47 H", "2 D")),
-    _nos("nostromo.floating.state_word", SEMI, 10, 1.2,
-         nos.RIGHT - (nos.LEFT + 12 + 10 + _PILL_WIDEST + 6 + _AGE_WIDEST),
-         "right-aligned at RIGHT, back to the widest pill and age",
-         english=("NOMINAL", "ADVISORY", "LAST KNOWN", "NO CARRIER", "HOLD", "ACQUIRING", "THROTTLED", "AUTH REQUIRED")),
-    _nos("nostromo.floating.state_chip", SEMI, 10, 1.2,
-         nos.RIGHT - (nos.LEFT + 12 + 10 + _PILL_WIDEST + 6 + _AGE_WIDEST) - 8,
-         "the state word's room less the chip's 8 px", kinds=("duration",), templates=("HOLD {}",),
-         english=("CRITICAL", "HOLD <1M", "HOLD 9M", "HOLD 2H", "HOLD 2H 14M", "HOLD 23H 59M", "HOLD 1D", "HOLD 2D",
-                  "HOLD 2D 3H", "HOLD 6D 23H")),
+    # ── Nostromo: the floating widget's header (nostromo._header_plan, _pill, _state_word): its rooms follow Q2's order
+    # (nostromo.HEADER_GIVE_WAY): a box is never cut or left out while a box that gives way before it can make room ──
+    _nos("nostromo.floating.status_pill", SEMI, 10, 1.2, HEADER - 10 - _GAP - (_HOLD_WIDEST + 8),
+         "header room less the pill's frame, the gap and the widest hold chip, which gives way last (the state word "
+         "and the age go first)", "ellipsis", english=_STATUS_WORDS, keys=_status_keys(*_STATUS_WORDS)),
+    _nos("nostromo.floating.age", REG, 10, 0.6, HEADER - (10 + _PILL_WIDEST) - 6 - _GAP - (_HOLD_WIDEST + 8),
+         "from the widest pill's end to the widest hold chip, less the gap; left out before the pill is cut", "drop",
+         kinds=("age",), english=("12 S", "41 M", "6 M", "59 M", "3 H", "47 H", "2 D"), words=False),
+    _nos("nostromo.floating.state_word", SEMI, 10, 1.2, HEADER - (10 + _PILL_WIDEST) - (6 + _AGE_WIDEST) - _GAP,
+         "right-aligned at RIGHT, back to the widest pill and age and the gap; cut first", "ellipsis",
+         english=("NOMINAL", "ADVISORY", "LAST KNOWN", "NO CARRIER", "HOLD", "ACQUIRING", "THROTTLED", "AUTH REQUIRED"),
+         keys=_nos_keys("state.normal", "state.warning", "state.stale", "state.offline", "state.paused",
+                        "state.loading", "state.rate_limited", "state.no_credentials")),
+    _nos("nostromo.floating.state_chip", SEMI, 10, 1.2, HEADER - (10 + _PILL_WIDEST) - (6 + _AGE_WIDEST) - _GAP - 8,
+         "the state word's room less the chip's 8 px: CRITICAL, cut first", "ellipsis", english=("CRITICAL",),
+         keys=_nos_keys("state.critical")),
+    _nos("nostromo.floating.hold_chip", SEMI, 10, 1.2, HEADER - (10 + _NOS_NAME_FLOOR) - _GAP - 8,
+         "beside the pill cut to one letter, the chip 8 px wider than its text; never cut, its countdown goes last",
+         "drop", kinds=("duration",), templates=("HOLD {}",),
+         english=("HOLD <1M", "HOLD 9M", "HOLD 2H", "HOLD 2H 14M", "HOLD 23H 59M", "HOLD 1D", "HOLD 2D", "HOLD 2D 3H",
+                  "HOLD 6D 23H"), keys=_nos_keys("guard.hold_for"), fills=(("countdown", "duration"),)),
+    _nos("nostromo.floating.hold_word", SEMI, 10, 1.2, HEADER - (10 + _NOS_NAME_FLOOR) - _GAP - 8,
+         "the hold chip with no countdown, beside the pill cut to one letter", english=("HOLD",),
+         keys=_nos_keys("guard.hold")),
     _nos("nostromo.floating.armed_guard", SEMI, 10, 1.2, W_nos("[GUARD]", SEMI, 10, 1.2),
-         "drawn in the header's free stretch only where it fits (_armed_mark), else [G]", "drop", english=("[GUARD]",)),
+         "drawn in the header's free stretch only where it fits (_header_plan), else [G]", "drop", english=("[GUARD]",),
+         keys=_nos_keys("guard.mark")),
     _nos("nostromo.floating.armed_guard_short", SEMI, 10, 1.2, W_nos("[G]", SEMI, 10, 1.2),
-         "the armed mark's fallback, left out where it does not fit", "drop", english=("[G]",)),
+         "the armed mark's fallback, left out where it does not fit", "drop", english=("[G]",),
+         keys=_nos_keys("guard.mark_short")),
     # ── Nostromo: the floating widget's rows (_row_widget, _name_line, _cap_text) ──
     _nos("nostromo.floating.row_name", SEMI, 10, 1.2,
          nos.RIGHT - nos.LEFT - nos.VALUE_CLEARANCE - nos.VALUE_CHIP_PAD - _NOS_VALUE,
          "from LEFT to the chipped value; the qualifier gives way first (_name_line), then the name is cut", "ellipsis",
-         english=("SESSION", "WEEKLY", "FABLE WEEKLY", "WEEKLY SCOPED", "FABLE")),
+         english=("SESSION", "WEEKLY", "FABLE WEEKLY", "WEEKLY SCOPED", "FABLE"), keys=_NOS_NAMES,
+         fills=(("name", "name"),)),
     _nos("nostromo.floating.row_qualifier", REG, 10, 0.6,
          nos.RIGHT - nos.LEFT - nos.VALUE_CLEARANCE - nos.VALUE_CHIP_PAD - _NOS_VALUE - W_nos("WEEKLY SCOPED", SEMI, 10, 1.2) - 6,
          "beside the widest name: shortened to its share, then left out (_name_line)", "drop", kinds=("percent",),
-         templates=("OF {} SHARE", "{}"), english=("5H", "7D", "OF 50% SHARE", "OF 100% SHARE", "50%", "100%")),
+         templates=("OF {} SHARE", "{}"), english=("5H", "7D", "OF 50% SHARE", "OF 100% SHARE", "50%", "100%"),
+         keys=_NOS_QUALIFIERS, fills=(("percent", "percent"),)),
     _nos("nostromo.floating.row_value", VT, 22, 0,
          nos.RIGHT - nos.LEFT - nos.VALUE_CLEARANCE - nos.VALUE_CHIP_PAD - _NOS_NAME_FLOOR,
          "right-aligned; the name line gives way down to one letter and the ellipsis", kinds=("percent",),
-         english=("--", "0%", "2%", "13%", "93%", "100%")),
+         english=("--", "0%", "2%", "13%", "93%", "100%"), words=False),
     _nos("nostromo.floating.cap_tag", SEMI, 10, 1.2,
          (nos.RIGHT - _NOS_VALUE - nos.VALUE_CHIP_PAD) - nos.VALUE_CLEARANCE - (_NOS_SESSION_5H + nos.ARMED_GAP) - 10,
          "between SESSION 5H and the chipped value, left out whole where it does not fit", "drop", kinds=("percent",),
-         templates=("CAP {}",), english=("CAP 95%", "CAP 90%", "CAP 100%")),
-    _nos("nostromo.floating.message", SEMI, 10, 0.8, (nos.RIGHT - 1) - (nos.LEFT + 9),
-         "each of the message box's two lines, inside the dashed border",
-         english=("AUTH LINK LOST.", "USE CLAUDE CODE TO RESTORE.", "AUTH REFUSED.", "RUN /login IN CLAUDE CODE.",
-                  "NO LOGIN FOUND", "OPEN THE DASHBOARD")),
-    # ── Nostromo: the hover card (_row_tooltip, _pace_text, _guard_lines) ──
+         templates=("CAP {}",), english=("CAP 95%", "CAP 90%", "CAP 100%"), keys=_nos_keys("cap.tag"),
+         fills=(("percent", "percent"),)),
+    Box("nostromo.floating.message", Measure("nostromo_fit", (SEMI, nos.MESSAGE_STEPS, _NOS_MESSAGE, "frame")),
+        _NOS_MESSAGE, "each of the message box's two lines, inside the dashed border, at the step it shrinks to "
+        "(nostromo.MESSAGE_STEPS: tracking 0, then 9 px)", "shrink",
+        ("AUTH LINK LOST.", "USE CLAUDE CODE TO RESTORE.", "AUTH REFUSED.", "RUN /login IN CLAUDE CODE.",
+         "NO LOGIN FOUND", "OPEN THE DASHBOARD"),
+        keys=_nos_keys(*(f"auth.{reason}.line{line}" for reason in ("expired", "refused", "no_login")
+                         for line in (1, 2))),
+        fills=(("product", "product"), ("command", "command")),
+        note=f"{_NOS_MESSAGE:g} px at 10 px (nostromo.floating.message, shrink): a longer line shrinks, its tracking "
+             "to 0 and then to 9 px, and only a line too long at 9 px is cut"),
+    # ── Nostromo: the hover card (_row_tooltip, _info_plan, _guard_lines) ──
     _nos("nostromo.tooltip.row_name", SEMI, 10, 1.2, nos.RIGHT - _NOS_EXACT - nos.VALUE_CLEARANCE - nos.LEFT,
          "from LEFT to the exact value; the qualifier gives way first, then the name is cut", "ellipsis",
-         english=("SESSION", "WEEKLY", "FABLE WEEKLY", "WEEKLY SCOPED", "FABLE")),
+         english=("SESSION", "WEEKLY", "FABLE WEEKLY", "WEEKLY SCOPED", "FABLE"), keys=_NOS_NAMES,
+         fills=(("name", "name"),)),
     _nos("nostromo.tooltip.row_qualifier", REG, 10, 0.6,
          nos.RIGHT - _NOS_EXACT - nos.VALUE_CLEARANCE - nos.LEFT - W_nos("WEEKLY SCOPED", SEMI, 10, 1.2) - 6,
          "beside the widest name, shortened then left out", "drop", kinds=("percent",), templates=("OF {} SHARE", "{}"),
-         english=("5H", "7D", "OF 50% SHARE", "OF 100% SHARE", "50%", "100%")),
+         english=("5H", "7D", "OF 50% SHARE", "OF 100% SHARE", "50%", "100%"), keys=_NOS_QUALIFIERS,
+         fills=(("percent", "percent"),)),
     _nos("nostromo.tooltip.row_value", VT, 22, 0, nos.RIGHT - nos.LEFT - nos.VALUE_CLEARANCE - _NOS_NAME_FLOOR,
-         "right-aligned; the name line yields", kinds=("percent",), english=("--", "2%", "13%", "12.3%", "99.5%", "100%")),
+         "right-aligned; the name line yields", kinds=("percent",),
+         english=("--", "2%", "13%", "12.3%", "99.5%", "100%"), words=False),
     _nos("nostromo.tooltip.cap_tag", SEMI, 10, 1.2,
          (nos.RIGHT - _NOS_EXACT) - nos.VALUE_CLEARANCE - (_NOS_SESSION_5H + nos.ARMED_GAP) - 10,
          "between SESSION 5H and the exact value, left out whole where it does not fit", "drop", kinds=("percent",),
-         templates=("CAP {}",), english=("CAP 95%", "CAP 90%", "CAP 100%")),
-    _nos("nostromo.tooltip.resets", REG, 10, 0.6, nos.RIGHT - nos.LEFT - _NOS_PACE_WIDEST,
-         "from LEFT to the widest pace, right-aligned at RIGHT", kinds=("clock",),
+         templates=("CAP {}",), english=("CAP 95%", "CAP 90%", "CAP 100%"), keys=_nos_keys("cap.tag"),
+         fills=(("percent", "percent"),)),
+    _nos("nostromo.tooltip.resets", REG, 10, 0.6, nos.RIGHT - nos.LEFT,
+         "from LEFT; the pace gives way to it (nostromo.INFO_GIVE_WAY), so it may take the line", kinds=("clock",),
          templates=("RESETS {}", "RESETS WED {}"),
          english=("RESETS --", "RESETS 11:39 PM", "RESETS 10:26 PM", "RESETS SAT 8:12 PM", "RESETS FRI 11:12 PM",
-                  "RESETS SAT 12:59 PM", "RESETS WED 12:59 PM")),
-    _nos("nostromo.tooltip.pace", SEMI, 10, 1.2, nos.RIGHT - nos.LEFT - _NOS_RESET_WIDEST,
-         "right-aligned at RIGHT, back to the widest reset", kinds=("count",),
+                  "RESETS SAT 12:59 PM", "RESETS WED 12:59 PM"), keys=_nos_keys("resets.at", "resets.unknown"),
+         fills=(("clock", "clock"),)),
+    _nos("nostromo.tooltip.pace", SEMI, 10, 1.2, nos.RIGHT - nos.LEFT - _NOS_RESET_WIDEST - _GAP,
+         "right-aligned at RIGHT, back to the widest reset and the gap; it takes its short form, then is left out",
+         "drop", kinds=("count",),
          english=("PACE --", "ON PACE", "AHEAD +12 PTS", "AHEAD +21 PTS", "BEHIND -12 PTS", "BEHIND -18 PTS",
-                  "BEHIND -55 PTS", "AHEAD +100 PTS", "BEHIND -100 PTS")),
+                  "BEHIND -55 PTS", "AHEAD +100 PTS", "BEHIND -100 PTS"),
+         keys=_nos_keys("pace.none", "pace.on", "pace.ahead", "pace.behind"), fills=(("points", "count"),)),
+    _nos("nostromo.tooltip.pace_short", SEMI, 10, 1.2, nos.RIGHT - nos.LEFT - _NOS_RESET_WIDEST - _GAP,
+         "the pace's short form (_pace_short), where the pace does not fit; left out in turn", "drop", kinds=("count",),
+         english=("+21 PTS", "-18 PTS", "+100 PTS", "-100 PTS"), keys=_nos_keys("pace.points"),
+         fills=(("points", "count"),)),
     _nos("nostromo.tooltip.guard_lead", SEMI, 10, 0.6, nos.RIGHT - nos.LEFT,
-         "the statement's lead, drawn semibold at the statement's tracking; it wraps with the statement", "wrap",
-         english=("GUARD ARMED:", "GUARD HOLDING:", "GUARD ARMED", "GUARD HOLDING")),
-    _nos("nostromo.tooltip.guard_lines", REG, 10, 0.6, nos.RIGHT - nos.LEFT,
-         "each line of the guard's statement: the first lead and all, as _guard_lines measures it, and its rest after "
-         "the lead, as _guard_block draws it; it wraps at spaces and the card grows", "wrap",
-         kinds=("percent", "clock", "duration"),
-         english=("GUARD ARMED: SESSION 95%, WEEKLY 90%", "GUARD HOLDING: SESSION 96% (CAP 95%).",
-                  "GUARD HOLDING: WEEKLY 91% (CAP 90%).", " SESSION 95%, WEEKLY 90%", " SESSION 96% (CAP 95%).",
-                  " WEEKLY 91% (CAP 90%).", "RESUMES 10:26 PM (IN 2H 14M).", "RESUMES FRI 11:12 PM (IN 2D 3H).")),
-    # ── Nostromo: the taskbar strip (_render_strip) and the tray (_tray_text) ──
-    _nos("nostromo.strip.window_tag", SEMI, 11, 1.1, nos.STRIP_GROUPS[0][1] - nos.STRIP_GROUPS[0][0],
-         "from the group's start to its bar (STRIP_GROUPS)", canvas="strip", english=("5H", "7D")),
+         "the statement's lead, drawn semibold at the statement's tracking and kept on its first line whole "
+         "(_guard_lines glues it)", english=("GUARD ARMED:", "GUARD HOLDING:", "GUARD ARMED", "GUARD HOLDING"),
+         keys=_nos_keys("guard.armed", "guard.armed_list", "guard.holding", "guard.holding_list")),
+    Box("nostromo.tooltip.guard_lines", nos_run(REG, 10, 0.6), nos.RIGHT - nos.LEFT,
+        "each line of the guard's statement: the first lead and all, as _guard_lines measures it, and its rest after "
+        "the lead, as _guard_block draws it; it wraps at spaces and the card grows", "wrap",
+        ("GUARD ARMED: SESSION 95%, WEEKLY 90%", "GUARD HOLDING: SESSION 96% (CAP 95%).",
+         "GUARD HOLDING: WEEKLY 91% (CAP 90%).", " SESSION 95%, WEEKLY 90%", " SESSION 96% (CAP 95%).",
+         " WEEKLY 91% (CAP 90%).", "RESUMES 10:26 PM (IN 2H 14M).", "RESUMES FRI 11:12 PM (IN 2D 3H)."),
+        kinds=("percent", "clock", "duration"), keys=_NOS_GUARD_KEYS, compose=_guard_statements),
+    # ── Nostromo: the taskbar strip (_render_strip, _strip_tag) and the tray (_tray_text) ──
+    Box("nostromo.strip.window_tag", Measure("nostromo_fit", (SEMI, _NOS_TAG_STEPS, _NOS_TAG_ROOM, "strip")),
+        _NOS_TAG_ROOM, "from the group's start to its bar (STRIP_GROUPS), at the size it shrinks to "
+        "(nostromo.STRIP_TAG_SIZES: 11 px down to 9 px), left out where 9 px does not fit", "drop", ("5H", "7D"),
+        keys=_nos_keys("window.session", "window.weekly"),
+        note=f"{_NOS_TAG_ROOM:g} px at 11 px (nostromo.strip.window_tag, drop): a longer tag shrinks to 9 px, then is "
+             "left out; two characters fit"),
     _nos("nostromo.strip.value_5h", VT, 18, 0, _NOS_STRIP_ROOM[0], "from the 5H bar's last cell to the next group",
-         kinds=("percent",), canvas="strip", english=("--", "13%", "38%", "41%", "78%", "100%"), tight=True),
+         kinds=("percent",), canvas="strip", english=("--", "13%", "38%", "41%", "78%", "100%"), tight=True,
+         words=False),
     _nos("nostromo.strip.value_5h_chip", VT, 18, 0, _NOS_STRIP_ROOM[0] - 4,
          "the 5H value in its critical chip (4 px of padding): at 90 % and up, or at any cap the guard holds on "
          "(_row_emphasis)", kinds=("percent",), canvas="strip", english=("60%", "90%", "93%", "96%", "99%", "100%"),
-         tight=True),
+         tight=True, words=False),
     _nos("nostromo.strip.value_7d", VT, 18, 0, _NOS_STRIP_ROOM[1], "from the 7D bar's last cell to the strip's end",
-         kinds=("percent",), canvas="strip", english=("--", "2%", "21%", "52%", "58%", "100%"), tight=True),
+         kinds=("percent",), canvas="strip", english=("--", "2%", "21%", "52%", "58%", "100%"), tight=True,
+         words=False),
     _nos("nostromo.strip.value_7d_chip", VT, 18, 0, _NOS_STRIP_ROOM[1] - 4,
          "the 7D value in its critical chip, as the 5H one", kinds=("percent",), canvas="strip",
-         english=("60%", "90%", "91%", "100%"), tight=True),
+         english=("60%", "90%", "91%", "100%"), tight=True, words=False),
     Box("nostromo.tray.readout", Measure("nostromo_tray"), 2 * (_TRAY[0] - _TRAY[1]),
-        "the ring's hole on a 32 px icon, in device px (_tray_geometry)", "none", ("--", "0", "13", "100")),
+        "the ring's hole on a 32 px icon, in device px (_tray_geometry)", "none", ("--", "0", "13", "100"),
+        words=False),
 
     # ── Night City: the header (_draw_header) ──
     _nc("night_city.floating.brand", "BRAND", nc.RIGHT - _NC_HEAD - (W_nc("HOLD 20H 48M", "CHIP") + 17),
@@ -752,14 +894,20 @@ BOX: dict[str, Box] = {box.id: box for box in BOXES}
 
 LINES: tuple[Line, ...] = (
     Line("nostromo.floating.header_line", HEADER, "the pill (and its age) from the dot, the word or chip right-aligned "
-         "at RIGHT", "none",
+         "at RIGHT, QUALIFIER_GAP apart; while over, it gives way in Q2's order (nostromo.HEADER_GIVE_WAY)", "none",
          (("nostromo.floating.status_pill",), ("nostromo.floating.age",),
-          ("nostromo.floating.state_word", "nostromo.floating.state_chip")),
-         (("nostromo.floating.status_pill", 10), ("nostromo.floating.age", 6), ("nostromo.floating.state_chip", 8)),
+          ("nostromo.floating.state_word", "nostromo.floating.state_chip", "nostromo.floating.hold_chip",
+           "nostromo.floating.hold_word")),
+         (("nostromo.floating.status_pill", 10), ("nostromo.floating.age", 6), ("nostromo.floating.state_word", _GAP),
+          ("nostromo.floating.state_chip", 8 + _GAP), ("nostromo.floating.hold_chip", 8 + _GAP),
+          ("nostromo.floating.hold_word", 8 + _GAP)),
          (("LIVE", "12 S", "NOMINAL"), ("LIVE", "12 S", "ADVISORY"), ("LIVE", "12 S", "CRITICAL"),
           ("LIVE", "12 S", "HOLD 2H 14M"), ("LIVE", "12 S", "HOLD 2D 3H"), ("STALE", "41 M", "LAST KNOWN"),
           ("OFFLINE", "", "NO CARRIER"), ("PAUSED", "", "HOLD"), ("RATE LIMITED", "6 M", "THROTTLED"),
-          ("NO LOGIN", "", "AUTH REQUIRED"), ("LOADING", "", "ACQUIRING"), ("RATE LIMITED", "59 M", "HOLD 23H 59M"))),
+          ("NO LOGIN", "", "AUTH REQUIRED"), ("LOADING", "", "ACQUIRING"), ("RATE LIMITED", "59 M", "HOLD 23H 59M")),
+         (("nostromo.floating.state_word", "cut"), ("nostromo.floating.state_chip", "cut"),
+          ("nostromo.floating.age", "drop"), ("nostromo.floating.status_pill", "cut"),
+          ("nostromo.floating.hold_chip", "nostromo.floating.hold_word"))),
     Line("nostromo.floating.row_name_line", nos.RIGHT - nos.LEFT - nos.VALUE_CLEARANCE - nos.VALUE_CHIP_PAD - _NOS_VALUE,
          "the name and its qualifier, left of the chipped value", "ellipsis",
          (("nostromo.floating.row_name",), ("nostromo.floating.row_qualifier",)),
@@ -769,10 +917,13 @@ LINES: tuple[Line, ...] = (
          "the name and its qualifier, left of the exact value", "ellipsis",
          (("nostromo.tooltip.row_name",), ("nostromo.tooltip.row_qualifier",)), (("nostromo.tooltip.row_qualifier", 6),),
          (("SESSION", "5H"), ("WEEKLY", "7D"), ("FABLE WEEKLY", "OF 50% SHARE"), ("WEEKLY SCOPED", "OF 100% SHARE"))),
-    Line("nostromo.tooltip.info_line", nos.RIGHT - nos.LEFT, "the reset from LEFT and the pace right-aligned at RIGHT, with "
-         "no gap between", "none", (("nostromo.tooltip.resets",), ("nostromo.tooltip.pace",)), (),
+    Line("nostromo.tooltip.info_line", nos.RIGHT - nos.LEFT, "the reset from LEFT and the pace right-aligned at RIGHT, "
+         "QUALIFIER_GAP apart; while over, the pace takes its short form, then is left out (nostromo.INFO_GIVE_WAY)",
+         "none", (("nostromo.tooltip.resets",), ("nostromo.tooltip.pace", "nostromo.tooltip.pace_short")),
+         (("nostromo.tooltip.pace", _GAP), ("nostromo.tooltip.pace_short", _GAP)),
          (("RESETS 11:39 PM", "BEHIND -18 PTS"), ("RESETS SAT 8:12 PM", "BEHIND -55 PTS"), ("RESETS FRI 11:12 PM", "AHEAD +21 PTS"),
-          ("RESETS SAT 8:12 PM", "ON PACE"), ("RESETS --", "PACE --"), ("RESETS WED 12:59 PM", "BEHIND -100 PTS"))),
+          ("RESETS SAT 8:12 PM", "ON PACE"), ("RESETS --", "PACE --"), ("RESETS WED 12:59 PM", "BEHIND -100 PTS")),
+         (("nostromo.tooltip.pace", "nostromo.tooltip.pace_short"), ("nostromo.tooltip.pace_short", "drop"))),
     Line("night_city.floating.header_line", nc.RIGHT - _NC_HEAD, "the brand from the pip, a tag or chip right-aligned at "
          "RIGHT", "none",
          (("night_city.floating.brand",),
@@ -877,9 +1028,9 @@ def tight(figure: str) -> str:
 
 
 def _drawn_as(box: Box, figure: str, language: str) -> str:
-    """A figure as the box's skin draws it: in capitals by the language's rule in Nostromo and Night City (casing,
-    which #94 and #95 bring to the skins' own .upper()), and glued in a box that wraps (the guard's statement glues a
-    time, a cap or a countdown: engine.glue), so it is measured whole."""
+    """A figure as the box's skin draws it: in capitals by the language's rule in Nostromo and Night City (casing, as
+    Nostromo's own case calls are since #94 and Night City's will be with #95), and glued in a box that wraps (the
+    guard's statement glues a time, a cap or a countdown: engine.glue), so it is measured whole."""
     if box.id.split(".")[0] in CAPITALS:
         figure = casing.upper(figure, language)
     return engine.glue(figure) if box.fit == "wrap" else figure
@@ -895,16 +1046,80 @@ def _figures(box: Box, kind: str, template: str, language: str) -> tuple[str, ..
     return FIGURES.get(kind, {}).get(language, ())
 
 
+def fill_values(box: Box, kind: str, language: str) -> tuple[str, ...]:
+    """What a placeholder of ``kind`` (FILLS) takes in ``box`` in ``language``, as the skin fills it: the language's
+    longest figures (a clock box its day clocks too; tight where the box is), cased as its skin draws them; English and
+    the pseudo-locale English's widest shapes, the pseudo-locale's percent as it writes it ("100 %", a U+00A0 before
+    the sign); the signed points; the name, Claude Code's name in the language's capitals, the command as typed."""
+    if kind == "count":
+        return _POINTS
+    if kind == "name":
+        return (casing.upper(_NAME, language),)
+    if kind == "product":
+        return (casing.upper(PRODUCT, language),)
+    if kind == "command":
+        return (LOGIN_COMMAND,)
+    if language == i18n.PSEUDO and kind == "percent":
+        return (formats.percent("100", _pseudo_locale(), tight=box.tight),)
+    if language in (i18n.DEFAULT, i18n.PSEUDO):
+        return ENGLISH_FILLS[kind]
+    figures = FIGURES[kind].get(language, ()) + (FIGURES["day_clock"].get(language, ()) if kind == "clock" else ())
+    if box.tight and kind == "percent":
+        figures = tuple(tight(figure) for figure in figures)
+    return tuple(dict.fromkeys(_drawn_as(box, figure, language) for figure in figures))
+
+
+def _filled(box: Box, template: str, language: str) -> list[str]:
+    """A key's text with each placeholder filled with every value its fill takes; a placeholder with no fill stays as
+    written (test_budgets.py fails that)."""
+    names = sorted(i18n._placeholders(template))
+    kinds = dict(box.fills)
+    values = [fill_values(box, kinds[name], language) if name in kinds else ("{" + name + "}",) for name in names]
+    return [i18n.fill(template, dict(zip(names, chosen))) for chosen in itertools.product(*values)]
+
+
+def key_pattern(template: str) -> re.Pattern[str]:
+    """A key's English as a pattern its filled texts match: each placeholder stands for any text."""
+    parts = re.split(r"\{[A-Za-z_][A-Za-z0-9_]*\}", template)
+    return re.compile("(.+)".join(re.escape(part) for part in parts))
+
+
+def _keyed(box: Box, text: str) -> bool:
+    """Whether an English text of ``box`` is one of its keys' English, filled."""
+    english = i18n.app_catalog(i18n.DEFAULT)
+    return any(key_pattern(str(english.lookup(key).value)).fullmatch(text) for key in box.keys
+               if english.lookup(key) is not None)
+
+
+def _pseudo_figures(text: str, box: Box) -> str:
+    """``text``'s percents as the pseudo-locale writes them (a U+00A0 before the sign, but tight); the rest as it is:
+    its numbers and ages are English's, and a name is data."""
+    return re.sub(r"(\d+(?:\.\d+)?)%", lambda m: formats.percent(m.group(1), _pseudo_locale(), tight=box.tight), text)
+
+
+@lru_cache(maxsize=None)
+def _pseudo_locale() -> i18n.Locale:
+    return i18n.dev_locale(i18n.PSEUDO)
+
+
 def texts(box: Box, language: str) -> list[str]:
     """What ``language`` puts in ``box``: English as drawn today, for the pseudo-locale that English made pseudo,
-    the language's longest figures set in the box's text as its skin draws them, and the text of the box's keys. A
-    composing box takes its whole texts as the code words them in the language (English's listed ones too)."""
+    the language's longest figures set in the box's text as its skin draws them, and the text of the box's keys, filled
+    (Box.fills). A composing box takes its whole texts as the code words them in the language (English's listed ones
+    too). In the pseudo-locale a box of figures alone (Box.words False) takes its English as the pseudo-locale writes
+    the figures, and a box of a WORDED skin's keys takes those keys made pseudo and filled, and what of its English is
+    no key's (a name, a figure alone) as the pseudo-locale draws it."""
     found: list[str] = []
     if box.compose is not None:
         found += [*(box.english if language == i18n.DEFAULT else ()), *box.compose(language)]
         return list(dict.fromkeys(found))
+    worded = bool(box.keys) and box.id.split(".")[0] in WORDED
     if language == i18n.DEFAULT:
         found += box.english
+    elif language == i18n.PSEUDO and not box.words:
+        found += [_pseudo_figures(text, box) for text in box.english]
+    elif language == i18n.PSEUDO and worded:
+        found += [_pseudo_figures(text, box) for text in box.english if not _keyed(box, text)]
     elif language == i18n.PSEUDO:
         found += [i18n.pseudo_text(text) for text in box.english]
     if language != i18n.PSEUDO:
@@ -919,7 +1134,7 @@ def texts(box: Box, language: str) -> list[str]:
         for key in box.keys:
             entry = catalog.lookup(key)
             if entry is not None and isinstance(entry.value, str):
-                found.append(str(catalog.text(key)))
+                found += _filled(box, entry.value, language)
     return list(dict.fromkeys(found))
 
 
@@ -947,6 +1162,25 @@ def _shown(runs: Sequence[str]) -> str:
     return " | ".join(run.strip() for run in runs if run.strip())
 
 
+def widest_text(box: Box, language: str, scale: float) -> str:
+    """``language``'s widest text in ``box`` at ``scale`` ("" when it has none)."""
+    return max(texts(box, language), key=lambda text: box.width(text, scale), default="")
+
+
+def worst_runs(line: Line, language: str, scale: float) -> list[tuple[str, str]]:
+    """The widest run ``language`` can put in each of the line's slots at ``scale``: (box id, text), the box the
+    widest text (with the line's padding beside it) is drawn from, as no one state may draw them together."""
+    runs = []
+    for slot in line.slots:
+        best = (0.0, slot[0], "")
+        for box_id in slot:
+            text = widest_text(BOX[box_id], language, scale)
+            if text and BOX[box_id].width(text, scale) + line.added(box_id) > best[0]:
+                best = (BOX[box_id].width(text, scale) + line.added(box_id), box_id, text)
+        runs.append(best[1:])
+    return runs
+
+
 def line_budget(line: Line, scale: float = 1.0) -> float:
     """A line keeps its limit: English that runs past it is listed in KNOWN_ENGLISH_OVERRUNS."""
     return line.limit
@@ -971,17 +1205,11 @@ def over(language: str, boxes: Sequence[Box | Line] | None = None) -> list[Over]
             choice: list[str] = []
 
             def widest(scale: float, line: Line = box) -> float:
-                total = 0.0
-                choice.clear()
-                for slot in line.slots:
-                    best, best_text = 0.0, ""
-                    for box_id in slot:
-                        for text in texts(BOX[box_id], language):
-                            w = BOX[box_id].width(text, scale) + line.added(box_id)
-                            if w > best:
-                                best, best_text = w, text
-                    total += best
-                    choice.append(best_text)
+                runs, choice[:] = worst_runs(line, language, scale), []
+                _taken, total, after = line.give_way(runs, scale, {
+                    then: widest_text(BOX[then], language, scale) for _box, then in line.gives_way
+                    if then in BOX})
+                choice.extend(text for _box, text in after)
                 return total
 
             hit = _worst(box, language, "", widest, lambda s, line=box: line_budget(line, s))
