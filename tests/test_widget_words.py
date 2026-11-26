@@ -126,7 +126,8 @@ def test_the_english_catalog_is_todays_english(recorded):
                                                           "other": "Resume waiting sessions ({count})"}
     assert text("tray.menu.update", {"version": "2.1.0"}) == menu[7] == "Update to v2.1.0"
     english = en.english()
-    assert {key for key in english if key.startswith(("widget.", "tray."))} == {
+    skins = tuple(f"widget.{theme_id}." for theme_id in dump.load_theme_objects())    # each skin's own words (#94)
+    assert {key for key in english if key.startswith(("widget.", "tray.")) and not key.startswith(skins)} == {
         *(f"widget.status.{code}" for code in STATUS_STATES), "widget.stale.expired", "widget.stale.no_login",
         "widget.stale.refused", "widget.limit.session", "widget.limit.weekly", "widget.limit.scoped",
         "widget.limit.scoped_unnamed", "widget.share", "widget.guard.session", "widget.guard.weekly",
