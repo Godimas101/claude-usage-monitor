@@ -4,6 +4,7 @@ All notable changes to Claude Usage Monitor. Format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
+- Localization: widget formats follow the dashboard in six regions ([#111](https://github.com/Godimas101/claude-usage-monitor/issues/111)) — closed 2026-11-26 by @Godimas101
 - Localization: widgets: the view model, the tray tooltip and the tray menu ([#93](https://github.com/Godimas101/claude-usage-monitor/issues/93)) — closed 2026-11-26 by @Godimas101
 - Localization: fonts and the widget text engine ([#92](https://github.com/Godimas101/claude-usage-monitor/issues/92)) — closed 2026-11-26 by @Godimas101
 - Localization: stop reading English text as data ([#90](https://github.com/Godimas101/claude-usage-monitor/issues/90)) — closed 2026-11-26 by @Godimas101
