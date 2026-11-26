@@ -512,8 +512,8 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   month, a day period or the zone (the agent modes' English `Mon 09:00` in `agent/status.py` is the one listed
   exception). The widgets, the tray tooltip and the alerts write their numbers, percents, clocks and weekdays this
   way. The view model's, the tray tooltip's and the tray menu's words come from the catalog since #93, Nostromo's own
-  words since #94, Night City's since #95, Gates' since #96; the toasts' stay English until #97. The alerts read the
-  app's locale on each evaluation
+  words since #94, Night City's since #95, Gates' since #96, the toasts' and the alerts' since #97 ("Toast and alert
+  words", below). The alerts read the app's locale on each evaluation
   (`AlertEngine(settings, locale_provider=)`, English without one or when it fails); English alerts keep their trailing
   `USD`, other languages write each amount with the plain `$` (US dollars) or the currency's code. The dashboard has its
   own: `webui/formats.js` (`window.MonitorFormats`: `make(locale)`, and `active()` from the `monitor-locale` meta),
@@ -789,6 +789,32 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
     as before #96, on any plate whose rows are 14 px apart (under 36 px, the 34 px plate too).
   - `tests/test_budgets.py` holds the budgets' give-way to the skin's; the frame check (`tests/frame_layout.py`,
     below) holds every frame clear.
+- **Toast and alert words (#97).** The tray's toasts read `toast.*` (18 keys, a top-level group: `tray.*` holds the
+  tooltip's and the menu's words), worded in the app's language when each is shown, so a language change reaches the
+  next one. `app.py` words the release toast (`update_toast_title`, `update_toast_body`: `{app}` is `app.APP_NAME`, the
+  monitor's name as written, `{version}` a plain version) and the note after a silent update (`update_note_title`,
+  `update_note_words`, `update_note_text`; see "Updates"), reading the locale through `toast_locale(self.locale)`
+  (English when it cannot be read). `data/alerts.py` words the alerts from `toast.alert.*` (`_title`, `_name`,
+  `_reset_text`, `_credits_text`). English keeps its own case of a limit's name byte for byte: `_name`'s
+  `text[:1].upper() + text[1:].lower()` over the catalog's English, the scope in capitals first ("Claude opus 5
+  weekly"; `tests/test_casing_sites.py` lists the four calls). Every other language, the pseudo-locale too, takes the
+  catalog's words as written and puts a name in as written, its first letter in capitals by the locale's rule only
+  where it starts the title (`_starts`); the template's words are never cased. The `gates` skin's row differs: it keeps
+  English's case wherever its own template is English's (#96 Q4), so until a language has both keys a row and an
+  alert can name one limit differently ("Claude design weekly", "Claude Design weekly"), as the name keys' notes say. A
+  kind no catalog has words for is named from its code (identity text), a limit with no label by its kind, else by its
+  model.
+  A reset announced as its window ends is named then, in that moment's locale, from the kind, label, model and surface
+  kept from the limit's last reading. English's credits keep the code after the last amount (`{limit}` is
+  `10,000.00 USD`). `app.UPDATE_TOAST_BODY` and `UPDATE_NOTE_TITLE` stay as English's records, held to `en.json`; no
+  `MonitorApp` method names them. Each toast's budget box composes every toast the code words in the language
+  (`tests/toast_words.toast_sweep`: every format tag and clock, three release versions, every count pair of the note,
+  the alerts of every name shape, a week of reset times, credits with and without a limit and a currency) and carries
+  its keys: English keeps within Windows' 48 characters of title and 200 of text (47 and 180 at worst), and no
+  language passes the tray's 63 and 255 or the note's 250; the pseudo-locale's longest note (one session and 9999
+  waits) sits exactly at 250 (`test_budgets.LONGEST_NOTES`). `tests/fixtures/toast_words_english.json`, recorded before
+  #97 moved a word, holds every English toast and alert byte for byte (`tests/test_toast_words.py`, worked out in a
+  fresh Python with the time zone pinned).
 - **Test tools (#89).** The pseudo-locale (`i18n.PSEUDO`, `pseudo`) is `en.json` made longer (about 40%), accented
   (`İ ı ğ ş é ñ` among the look-alikes) and bracketed (`i18n.pseudo_text`), so English left over, a missing glyph
   and a cut end all show. A dev instance shows it with `USAGE_MONITOR_LANG=pseudo`, and the dev server with
@@ -811,7 +837,8 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   dashboard's money boxes take the page's own widest figures (`PAGE_MONEY`), tight as the page draws them. A box's
   catalog keys (`Box.keys`) are measured in each language too; since #93 the boxes that draw the view model's status
   word carry its key, and each key's `_budget.<key>` note in `en.json` names every box it sits in. The tray tooltip is
-  a composing box: it measures the worst-case tooltips `app.tray_tooltip` words in the language, after the drop rule
+  a composing box (so is each toast's since #97, "Toast and alert words"): it measures the worst-case tooltips
+  `app.tray_tooltip` words in the language, after the drop rule
   (`tests/widget_words.tooltip_sweep`). Those are two limits at 100 % in each status, in every format tag and clock,
   as a dev instance, with the guard holding at a resume clock and a countdown of every length they take: the clock
   alone (a resume the same day) and with its weekday (another day), on every weekday at hours of one and two digits
@@ -866,7 +893,10 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   that has no fallback or only shrinks; `python tests/budgets.py --lang <id>` reports any language. The "no English
   left" scan (`tests/english_left.py`) lists the English the frame dump, the tray tooltip, the tray menu and the
   dashboard show under the pseudo-locale. Since #93 the widget half draws in the pseudo-locale a dev instance shows,
-  reads each sample state's tooltip plain and with the dev mark, and the menu with every row. The dashboard runs on a
+  reads each sample state's tooltip plain and with the dev mark, and the menu with every row; since #97 it also reads
+  every toast and alert of the toast sweep, with the data a toast holds taken out (`toast_names`,
+  `toast_format_words`: the limits' names it words, and as whole words the commands, the currency codes and the
+  release versions). The dashboard runs on a
   small DOM (`tests/mini_dom.js`, `tests/english_scan.js`) through every
   dev-server scenario, as an installed monitor and as a dev instance, and in some scenarios with its actions, its
   update banner, Settings during an update in each state of its run (the `update-run:*` passes, #58; a lost link and the
@@ -1171,7 +1201,8 @@ monitor restarts). The record is this copy of `update_check.py`'s own; the other
 The monitor looks for a release at start and every six hours (`app.UPDATE_RECHECK_S`, one UI-host timer that is always armed
 and gated on `check_updates` when it fires; a check that fails is a debug line, nothing more, and the next one tries again). A
 release that was found, is not skipped, is newer than the setting `notified_version` and arrives while `check_updates` is on is
-announced once with a tray toast, "Claude Usage Monitor vX.Y is available" (a click opens the dashboard), by
+announced once with a tray toast, "Claude Usage Monitor vX.Y is available" (`toast.update.*`, in the app's language; a
+click opens the dashboard), by
 `MonitorApp._announce_update` on the UI thread. The toast is held back while nobody would see it (session locked, a screensaver, a
 fullscreen app in front, the user's quiet hours, `app.in_quiet_hours`), and the release stays untold, so the next state, an
 unlock or the next check tries again. A shell that refuses the toast is retried too; a bug showing it is logged once and counts
@@ -1180,10 +1211,19 @@ do. `notified_version` is only ever raised (under a lock) and is an unknown key 
 nor write it. The same release is offered in the tray menu (*Update to vX*, unless skipped) for as long as it is on offer.
 
 To replace the files, Setup ends the monitor's MCP tool in open Claude Code sessions and their waits on the usage guard
-(installer.iss, `EndedNote`). Run by hand, it says so on its last page. After a silent update, which is how the app updates
-itself, nobody saw Setup, so it leaves the same text in `update-note.txt` in the app data folder (`app.UPDATE_NOTE_FILE`).
-`MonitorApp._announce_update_note` shows it once as a toast, "Claude Usage Monitor updated", at the first state or unlock,
-held back like the update toast and kept when the shell refuses it, and then deletes the file.
+(installer.iss counts them: `EndedTools`, `EndedWaits`). Run by hand, it says so on its last page (`EndedNote`). After a
+silent update, which is how the app updates itself, nobody saw Setup, so it leaves the counts in `update-note.txt` in the
+app data folder (`app.UPDATE_NOTE_FILE`, `WriteUpdateNote`): `{"tools": 1, "waits": 0}`, one ASCII line, written only
+when a count is above 0. Counts, not sentences, since #97: `SaveStringToFile` writes the system's ANSI code page, which
+would garble a translated sentence, and the monitor words them in its own language (`app.update_note_text`:
+`toast.updated.tools`, then `toast.updated.waits`, a space between, as `EndedNote` joins them; cut at
+`app.UPDATE_NOTE_MAX`, 250). A note that does not start with `{` is an older Setup's English sentences, said as they
+are on one line; one that starts with `{` and is not the counts (whole numbers from 0 to 9999) says nothing and goes,
+logged without its text. `MonitorApp._announce_update_note` shows it once as a toast, "Claude Usage Monitor updated",
+at the first state or unlock, held back like the update toast and kept when the shell refuses it, and then deletes the
+file. `EndedNote`'s four English forms are `en.json`'s `toast.updated.*`
+(`test_update_check.py::test_the_finish_page_and_the_toast_say_the_same_english`); #103 moves them into
+`[CustomMessages]` and keeps the counts line ASCII.
 
 ## Dashboard process
 

@@ -8,6 +8,7 @@ tests/toast_words.py works them out in a fresh Python with the time zone pinned,
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 import pytest
@@ -117,6 +118,29 @@ def test_the_note_is_worded_in_the_apps_language():
     title, body = said["toasts"][0]
     assert english_left.english([title, body], english_left.widget_names(), ["/mcp"]) == set()
     assert english_left.english([body], english_left.widget_names()) == {english_left.entry(body)}  # /mcp is data
+
+
+# ── The sweep (steps a7 and a8) ───────────────────────────────────────────────
+
+def _shapes(text: str) -> re.Pattern[str]:
+    """A catalog text as a pattern its filled texts hold: each placeholder stands for any text."""
+    return re.compile("(.+?)".join(re.escape(part) for part in re.split(r"\{[A-Za-z_][A-Za-z0-9_]*\}", text)))
+
+
+def test_every_toast_key_is_swept():
+    """Every toast key, each of its plural forms, shows in some toast of the sweep in the pseudo-locale, so the budgets
+    and the English scan see every text the toasts can say; and the sweep holds nothing but the toasts' texts."""
+    pseudo = i18n.app_catalog(i18n.PSEUDO)
+    swept = [text for texts in toast_words.toast_sweep(i18n.PSEUDO).values() for text in texts]
+    english = i18n.load_catalog("en").english()
+    missing = []
+    for key in (key for key in english if key.startswith("toast.")):
+        value = pseudo.lookup(key).value
+        for form in (value.values() if isinstance(value, dict) else [value]):
+            if not any(_shapes(form).search(text) for text in swept):
+                missing.append((key, form))
+    assert missing == []
+    assert set(toast_words.toast_sweep(i18n.PSEUDO)) == set(toast_words.TOAST_BOXES)
 
 
 def test_the_toasts_fixed_words_are_the_catalogs():

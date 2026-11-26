@@ -331,7 +331,7 @@ def _name(limit: Limit | _Track, locale: Locale, *, starts: bool = True) -> str:
 def _other_name(limit: Limit | _Track, words: i18n.Catalog, language: str, starts: bool) -> str:
     """_name in a language other than English: the catalog's words as written, a name in as written, its first letter in
     capitals by ``language``'s rule where it starts the title. A kind no catalog has words for is named from its code
-    (identity text, as Gates names it, #93 D4)."""
+    (identity text, as the gates skin names it, #93 D4)."""
     if limit.kind in _FALLBACK_NAMES:
         return words.text(_FALLBACK_NAMES[limit.kind])
     labelled = bool((limit.label or "").strip()) and bool(limit.kind)

@@ -37,8 +37,12 @@ product, the command), or its box composes its whole texts; a box of WORDED keys
 filled with the pseudo-locale's own figures, not its English made pseudo, and a box of figures alone, or of a brand
 mark drawn as written (``Box.words`` False), measures them as the pseudo-locale writes them ("13 %" with its U+00A0,
 "12 S", "CLAUDE//USAGE", "Claude usage"), never bracketed. Each skin's guard statement composes through the skin's own _guard_statement.
-The toasts' keys come from #97. Counts (the pace points) get no figure: a whole number under 1000 is written alike in
-all four languages, so a box of the points alone (Night City's pace's short form) takes its English in every language.
+Since #97 the toasts' boxes compose too: each measures every toast the code words in the language, as a dev instance
+shows it (tests/toast_words.toast_sweep: every format tag and clock, the release toast for three versions, the note for
+every count pair, whole, the alerts the engine raises for every name shape, a week of reset times, the credits alert
+with and without a limit and a currency), and carries its keys for their budget notes. Counts (the pace points) get no
+figure: a whole number under 1000 is written alike in all four languages, so a box of the points alone (Night City's
+pace's short form) takes its English in every language.
 
 A line gives way as its skin does (``Line.gives_way``): while it is over, each step's box leaves its slot in turn (cut
 to its floor, one letter and the skin's cut mark; left out; or replaced by another box's text), and the line is
@@ -1577,6 +1581,44 @@ def _tooltips(language: str) -> list[str]:
     return list(tooltip_sweep(language))
 
 
+# The toasts' keys (#97), by the box that measures them: the alerts' names sit in both alert titles.
+_TOAST_NAMES: tuple[str, ...] = tuple(f"toast.alert.name.{name}" for name in (
+    "session", "weekly", "scoped", "scoped_unnamed", "unlabelled"))
+TOAST_KEYS: dict[str, tuple[str, ...]] = {
+    "app.toast.alert_threshold.title": ("toast.alert.threshold", *_TOAST_NAMES),
+    "app.toast.alert_resets.body": ("toast.alert.resets",),
+    "app.toast.alert_reset.title": ("toast.alert.reset", "toast.alert.reset_unnamed", *_TOAST_NAMES),
+    "app.toast.alert_reset_ended.body": ("toast.alert.back_to_zero",),
+    "app.toast.alert_credits.title": ("toast.alert.credits.title",),
+    "app.toast.alert_credits.body": ("toast.alert.credits.used", "toast.alert.credits.used_of"),
+    "app.toast.update.title": ("toast.update.title",),
+    "app.toast.update.body": ("toast.update.body",),
+    "app.toast.update_note.title": ("toast.updated.title",),
+    "app.toast.update_note.body": ("toast.updated.tools", "toast.updated.waits"),
+}
+TOAST_ENGLISH = {"title": 48, "text": 200}       # Windows' guidance for a toast's English, to leave room for languages
+
+
+def _toasts(box_id: str) -> Callable[[str], list[str]]:
+    """A toast box's texts in a language, as the code words them (tests/toast_words.toast_sweep)."""
+    def compose(language: str) -> list[str]:
+        from toast_words import toast_sweep
+
+        return list(toast_sweep(language)[box_id])
+    return compose
+
+
+def _toast(id_: str, limit: int, why: str, fit: str, *, english: tuple[str, ...], kinds: tuple[str, ...] = (),
+           templates: tuple[str, ...] = ("{}",)) -> Box:
+    """A toast's box: it composes its texts and carries its keys, each key's note naming the whole title or text."""
+    part = "title" if id_.endswith(".title") else "text"
+    note = (f"the whole {part}: {limit} UTF-16 units ({id_}, {fit}), English within {TOAST_ENGLISH[part]}"
+            if id_ != "app.toast.update_note.body" else
+            f"both sentences together: {limit} UTF-16 units ({id_}, {fit}), English within {TOAST_ENGLISH[part]}")
+    return _chars(id_, limit, why, fit, english=english, kinds=kinds, templates=templates, keys=TOAST_KEYS[id_],
+                  compose=_toasts(id_), note=note)
+
+
 BOXES: tuple[Box, ...] = (
     # ── Nostromo: the floating widget's header (nostromo._header_plan, _pill, _state_word): its rooms follow Q2's order
     # (nostromo.HEADER_GIVE_WAY, _header_room): a box is never cut or left out while a box that gives way before it can
@@ -1873,29 +1915,30 @@ BOXES: tuple[Box, ...] = (
                     "(in 23h 59m)",
                     "Claude usage - session 100% - weekly 100% - rate limited - guard holding, resumes Sun 12:00 AM "
                     "(in 23h 59m) (dev)")),
-    _chars("app.toast.alert_threshold.title", tray.TITLE_LIMIT, "TITLE_LIMIT", "ellipsis", kinds=("percent",),
+    _toast("app.toast.alert_threshold.title", tray.TITLE_LIMIT, "TITLE_LIMIT", "ellipsis", kinds=("percent",),
            templates=("Weekly scoped limit at {}",),
            english=("Session limit at 100%", "Weekly limit at 100%", "Weekly scoped limit at 100%",
                     "Fable weekly limit at 100%")),
-    _chars("app.toast.alert_resets.body", tray.BODY_LIMIT, "BODY_LIMIT", "ellipsis", kinds=("clock",),
+    _toast("app.toast.alert_resets.body", tray.BODY_LIMIT, "BODY_LIMIT", "ellipsis", kinds=("clock",),
            templates=("Resets {}", "Resets Wed {}"), english=("Resets 12:59 PM", "Resets Wed 12:59 PM")),
-    _chars("app.toast.alert_reset.title", tray.TITLE_LIMIT, "TITLE_LIMIT", "ellipsis",
+    _toast("app.toast.alert_reset.title", tray.TITLE_LIMIT, "TITLE_LIMIT", "ellipsis",
            english=("Session limit reset", "Weekly limit reset", "Weekly scoped limit reset", "Fable weekly limit reset")),
-    _chars("app.toast.alert_reset_ended.body", tray.BODY_LIMIT, "BODY_LIMIT", "ellipsis", kinds=("percent",),
+    _toast("app.toast.alert_reset_ended.body", tray.BODY_LIMIT, "BODY_LIMIT", "ellipsis", kinds=("percent",),
            templates=("Usage is back to {}",), english=("Usage is back to 0%.",)),
-    _chars("app.toast.alert_credits.title", tray.TITLE_LIMIT, "TITLE_LIMIT", "ellipsis", english=("Usage credits in use",)),
-    _chars("app.toast.alert_credits.body", tray.BODY_LIMIT, "BODY_LIMIT", "ellipsis", kinds=("money",),
+    _toast("app.toast.alert_credits.title", tray.TITLE_LIMIT, "TITLE_LIMIT", "ellipsis", english=("Usage credits in use",)),
+    _toast("app.toast.alert_credits.body", tray.BODY_LIMIT, "BODY_LIMIT", "ellipsis", kinds=("money",),
            templates=("Used {} of 10,000.00 USD",),
            english=("Used 1,234.56 of 10,000.00 USD", "Used 1,234.56 of 10,000.00", "Used 1,234.56 USD", "Used 1,234.56")),
-    _chars("app.toast.update.title", tray.TITLE_LIMIT, "TITLE_LIMIT", "ellipsis",
+    _toast("app.toast.update.title", tray.TITLE_LIMIT, "TITLE_LIMIT", "ellipsis",
            english=("Claude Usage Monitor v2.3.0 is available", "Claude Usage Monitor v3.0.0-rc.1 is available")),
-    _chars("app.toast.update.body", tray.BODY_LIMIT, "BODY_LIMIT", "ellipsis",
+    _toast("app.toast.update.body", tray.BODY_LIMIT, "BODY_LIMIT", "ellipsis",
            english=("Open the tray menu or the dashboard to update",)),
-    _chars("app.toast.update_note.title", tray.TITLE_LIMIT, "TITLE_LIMIT", "ellipsis",
+    _toast("app.toast.update_note.title", tray.TITLE_LIMIT, "TITLE_LIMIT", "ellipsis",
            english=("Claude Usage Monitor updated",)),
-    _chars("app.toast.update_note.body", 250, "app.py cuts the note at 250 characters (the balloon holds BODY_LIMIT)",
-           "clip", english=(_TOOL_1, _TOOL_N, _WAIT_1, _WAIT_N, f"{_TOOL_1} {_WAIT_1}", f"{_TOOL_1} {_WAIT_N}",
-                            f"{_TOOL_N} {_WAIT_1}", f"{_TOOL_N} {_WAIT_N}")),
+    _toast("app.toast.update_note.body", 250, "app.py cuts the note at 250 characters (UPDATE_NOTE_MAX), the counts it "
+           "words too; the balloon holds BODY_LIMIT", "clip",
+           english=(_TOOL_1, _TOOL_N, _WAIT_1, _WAIT_N, f"{_TOOL_1} {_WAIT_1}", f"{_TOOL_1} {_WAIT_N}",
+                    f"{_TOOL_N} {_WAIT_1}", f"{_TOOL_N} {_WAIT_N}")),
 )
 BOX: dict[str, Box] = {box.id: box for box in BOXES}
 

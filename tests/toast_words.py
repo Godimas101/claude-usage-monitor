@@ -16,12 +16,16 @@ What is recorded, all of it in English, through the code that shows it:
 - alerts._name for every shape, alerts._reset_text for the session and the other limits at RESET_HOURS and
   RESET_MINUTES on every weekday (local time), alerts._credits_text for every SPENDS shape.
 
+Also here: ``toast_sweep``, every toast a language can show, by the budget box that measures it, for the width budgets
+(tests/budgets.py) and the English scan (tests/english_left.py).
+
     python tests/toast_words.py --print       the words of the code this Python imports, as JSON
     python tests/toast_words.py --record      write the record, worked out in a fresh Python; refused when it exists
                                               (English must not change)
 """
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -216,10 +220,11 @@ PROSE_NOTES: dict[str, bytes] = {
 
 # ── The alerts ────────────────────────────────────────────────────────────────
 
-def limit(shape: str, percent: float, resets_at: datetime) -> Any:
+def limit(shape: str | tuple[str, str, str | None, str | None], percent: float, resets_at: datetime) -> Any:
+    """A limit of ``shape``: a SHAPES name, or (kind, label, scope model, scope surface)."""
     from usage_monitor.data.models import Limit
 
-    kind, label, model, surface = SHAPES[shape]
+    kind, label, model, surface = SHAPES[shape] if isinstance(shape, str) else shape
     group = "session" if kind == "session" else "weekly"
     return Limit(kind=kind, group=group, percent=percent, severity=None, resets_at=resets_at, is_active=True,
                  label=label, scope_model=model, scope_surface=surface)
@@ -229,7 +234,8 @@ def _said(alerts: list[Any]) -> list[list[str]]:
     return [[alert.kind, alert.severity, alert.key, alert.title, alert.message] for alert in alerts]
 
 
-def alert_steps(shape: str, locale: Any, settings: dict[str, Any] | None = None) -> list[list[list[str]]]:
+def alert_steps(shape: str | tuple[str, str, str | None, str | None], locale: Any,
+                settings: dict[str, Any] | None = None) -> list[list[list[str]]]:
     """The alerts an engine reading ``locale`` raises for one limit of ``shape``, reading by reading (UTC): a baseline
     at 10 %, the ladder to 80, 90 and 100 %, a new window at 20 % (its reset), 85 % in it, and that window run out
     by the clock (its reset). ``settings`` are the alert settings (the defaults when None)."""
@@ -311,6 +317,90 @@ def words() -> dict[str, Any]:
             found[f"reset_text/{kind}/{moment.isoformat()}"] = alerts._reset_text(limit(kind, 10.0, local), None,
                                                                                     english)
     return found
+
+
+# ── The toast sweep (#97) ─────────────────────────────────────────────────────
+
+SWEEP_VERSIONS = ("2.1.0", "3.0.0-rc.1", "3.10.12-rc.1")     # a plain release, a release candidate, the longest shape
+# The budget boxes the toasts stand in (tests/budgets.py), each with what the sweep puts there.
+TOAST_BOXES: dict[str, str] = {
+    "app.toast.update.title": "the release toast's title, for each SWEEP_VERSIONS",
+    "app.toast.update.body": "the release toast's text",
+    "app.toast.update_note.title": "the note toast's title",
+    "app.toast.update_note.body": "the note toast's text, whole, for every count pair of NOTE_COUNTS but 0 and 0",
+    "app.toast.alert_threshold.title": "every threshold alert's title (the ladder of each name shape)",
+    "app.toast.alert_resets.body": "every reset time: the alerts', and the session's and a weekly limit's at every "
+                                   "RESET_HOURS and RESET_MINUTES on every weekday",
+    "app.toast.alert_reset.title": "every reset alert's title, by a change of window and at a window's end",
+    "app.toast.alert_reset_ended.body": "the text of a reset at a window's end",
+    "app.toast.alert_credits.title": "the credits alert's title",
+    "app.toast.alert_credits.body": "the credits alert's text for every SPENDS shape",
+}
+
+
+def sweep_shapes() -> dict[str, tuple[str, str, str | None, str | None]]:
+    """The name shapes the sweep words: SHAPES, and a scoped limit named for each model of the dump's states."""
+    from usage_monitor.data.identity import legacy_label
+    from usage_monitor.render import dump
+
+    shapes = dict(SHAPES)
+    for name in dump.DUMP_STATE_NAMES:
+        state = dump.sample_state(name)
+        for item in (state.usage.limits if state is not None and state.usage is not None else ()):
+            if item.scope_model:
+                shapes.setdefault(f"dump/{item.scope_model}", ("weekly_scoped", legacy_label(
+                    "weekly_scoped", item.scope_model, item.scope_surface), item.scope_model, item.scope_surface))
+    return shapes
+
+
+@functools.lru_cache(maxsize=None)
+def toast_sweep(language: str) -> dict[str, tuple[str, ...]]:
+    """Every toast ``language`` (a DEV_LANGUAGES id) can show, by the budget box that measures it (TOAST_BOXES), as
+    the code words it: in each of the language's locales (widget_words.sweep_locales: every format tag, on each
+    clock), the release toast for each version, the note for every count pair, whole (app.update_note_words: the
+    budget is the text before app.py's cut), the alerts the engine raises for each sweep shape (its ladder, a reset by a
+    change of window and at a window's end), every reset time of the grid, and the credits alert for each SPENDS shape.
+    Pure: the reset times are UTC wall clocks, so the process's time zone does not matter."""
+    from usage_monitor import app
+    from usage_monitor.data import alerts
+    from widget_words import sweep_locales
+
+    found: dict[str, dict[str, None]] = {box: {} for box in TOAST_BOXES}
+
+    def add(box: str, *texts: str) -> None:
+        for text in texts:
+            found[box][str(text)] = None
+
+    shapes = list(sweep_shapes().values())
+    moments = [moment.replace(tzinfo=timezone.utc) for moment in reset_moments()]
+    for locale in sweep_locales(language):
+        add("app.toast.update.title", *(app.update_toast_title(version, locale) for version in SWEEP_VERSIONS))
+        add("app.toast.update.body", app.update_toast_body(locale))
+        add("app.toast.update_note.title", app.update_note_title(locale))
+        add("app.toast.update_note.body", *(app.update_note_words(tools, waits, locale) for tools in NOTE_COUNTS
+                                            for waits in NOTE_COUNTS if tools or waits))
+        for shape in shapes:
+            steps = alert_steps(shape, locale)
+            for index, step in enumerate(steps):
+                for kind, _severity, _key, title, message in step:
+                    if kind == "threshold":
+                        add("app.toast.alert_threshold.title", title)
+                        add("app.toast.alert_resets.body", message)
+                    elif index == len(steps) - 1:            # the window ran out by the clock
+                        add("app.toast.alert_reset.title", title)
+                        add("app.toast.alert_reset_ended.body", message)
+                    else:                                    # the next window showed
+                        add("app.toast.alert_reset.title", title)
+                        add("app.toast.alert_resets.body", message)
+        for moment in moments:
+            for kind in ("session", "weekly"):
+                add("app.toast.alert_resets.body", alerts._reset_text(limit(kind, 10.0, moment), timezone.utc, locale))
+        for shape in SPENDS:
+            for step in credits_steps(shape, locale):
+                for _kind, _severity, _key, title, message in step:
+                    add("app.toast.alert_credits.title", title)
+                    add("app.toast.alert_credits.body", message)
+    return {box: tuple(texts) for box, texts in found.items()}
 
 
 # ── Running ───────────────────────────────────────────────────────────────────

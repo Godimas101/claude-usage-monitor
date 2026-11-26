@@ -545,7 +545,8 @@ class Alert:
     title: str        # "Session limit at 90%"
     message: str      # "Resets 4:40 PM"
 class AlertEngine:
-    def __init__(self, settings: Settings, *, tz: tzinfo | None = None): ...
+    def __init__(self, settings: Settings, *, tz: tzinfo | None = None,
+                 locale_provider: Callable[[], Locale] | None = None): ...
     def evaluate(self, state: MonitorState, *, suppressed: bool = False) -> list[Alert]
 ```
 New settings (in `DEFAULTS`, with value rules): `alerts_enabled` (True), `alert_thresholds`
@@ -559,6 +560,10 @@ in local time; may wrap midnight).
   in settings does not toast for a level already passed).
 - Alert titles are worded from each limit's kind and scope ("Fable weekly", "Session"), not from its label (#90);
   the words are the same as before. A limit's window identity still uses the label.
+- The words are the catalog's `toast.alert.*` in the language of `locale_provider`'s locale (#97), read on every
+  evaluation (English without one, or when it fails); English reads exactly as before, its own case of a limit's name
+  and the code after the last credit amount included. A reset announced when a window ends is named then, in that
+  evaluation's locale, from the kind, label, model and surface kept from the limit's last reading.
 - The first evaluation with usage records a baseline and returns nothing (no toasts for
   levels already reached at startup).
 - Threshold: the first time percent ≥ T in a window → one alert for the highest T crossed;

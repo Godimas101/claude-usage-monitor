@@ -4190,6 +4190,51 @@ def test_the_toasts_read_the_apps_locale_each_time(monkeypatch, settings):
     assert title == "Session : limite à 80\u00a0%" and body.startswith("Fin ")
 
 
+def test_every_notice_in_the_pseudo_locale_shows_no_english(monkeypatch, settings):
+    """On the wired app in the pseudo-locale, every notice the tray shows is the pseudo-locale's, title and text (#97):
+    the release toast, the note after a silent update, and an alert of each kind (a threshold, a reset by a change of
+    window, a reset when the window ran out, usage credits). Only the data a toast holds is not: names, versions,
+    commands, currency codes (english_left.toast_names and toast_format_words)."""
+    import english_left
+
+    monkeypatch.setenv("USAGE_MONITOR_LANG", "pseudo")                 # the fixture makes this a dev instance
+    update_note().write_text('{"tools": 2, "waits": 3}', encoding="ascii")
+    built = build_app(monkeypatch, settings, update_check_fn=FakeChecker(INFO))
+    assert built.app.locale().language == i18n.PSEUDO
+    shown = {"release": built.tray.notices[-1]}
+    shown["note"], = publish(built, usage_state(13, resets_in_hours=1))
+    shown["threshold"], = publish(built, usage_state(85, resets_in_hours=1))
+    reset, = publish(built, usage_state(4, resets_in_hours=5))                    # the next window: a reset by change
+    shown["reset by change"] = reset
+    publish(built, usage_state(90, resets_in_hours=5))
+    later = NOW + timedelta(hours=5, minutes=2)
+    ended = publish(built, usage_state(90, now=later, resets_in_hours=-2 / 60))      # that window ran out by the clock
+    shown["reset at the end"] = ended[-1]
+    publish(built, usage_state(5, now=later, spend=m.Spend(enabled=True, used=1.0, limit=50.0, currency="USD")))
+    shown["credits"], = publish(built, usage_state(5, now=later, spend=m.Spend(enabled=True, used=2.5, limit=50.0,
+                                                                                currency="USD")))
+    names, words = english_left.toast_names(), english_left.toast_format_words()
+    for what, (title, body) in shown.items():
+        assert title.startswith("[") and body.startswith("["), (what, title, body)
+        assert english_left.english([title, body], names, words) == set(), (what, title, body)
+    assert len({body for _title, body in shown.values()}) == len(shown)              # six notices, six texts
+    assert "/mcp" in shown["note"][1] and "Claude Code" in shown["note"][1] and "2.1.0" in shown["release"][0]
+
+
+def test_no_toast_of_the_app_names_englishs_fixed_texts():
+    """The toasts word themselves from the catalog: no MonitorApp method names the English records UPDATE_TOAST_BODY or
+    UPDATE_NOTE_TITLE, which stay for the tests that name them."""
+    import ast
+    import inspect
+
+    tree = ast.parse(inspect.getsource(app_mod))
+    cls = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "MonitorApp")
+    named = {node.id for node in ast.walk(cls) if isinstance(node, ast.Name)}
+    named |= {node.attr for node in ast.walk(cls) if isinstance(node, ast.Attribute)}
+    assert not named & {"UPDATE_TOAST_BODY", "UPDATE_NOTE_TITLE"}
+    assert {"update_toast_title", "update_toast_body", "update_note_title", "update_note_text"} <= named
+
+
 def test_a_regional_format_change_reads_the_formats_again(settings):
     windows = _Windows(["en-US"], "en-CA")
     app = MonitorApp(settings=settings, language_reader=windows)

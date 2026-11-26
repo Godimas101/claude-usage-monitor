@@ -12,6 +12,7 @@ import re
 import subprocess
 import sys
 from collections import defaultdict
+from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -590,8 +591,8 @@ def test_a_wrapping_box_is_measured_by_its_longest_run_without_a_space() -> None
 def test_each_languages_longest_figures_are_set_in_the_boxs_text() -> None:
     """Each figure in each of the box's templates, as the skin draws it: the language's whole day clock where English
     writes WED before the time, capitals in Nostromo and Night City, glued in the guard's statement; English as #89 set
-    it."""
-    body = budgets.BOX["app.toast.alert_resets.body"]
+    it. (A toast's box composes its texts since #97: the templates are tried here on its shape without that.)"""
+    body = replace(budgets.BOX["app.toast.alert_resets.body"], compose=None, keys=())
     assert budgets.texts(body, "en") == ["Resets 12:59 PM", "Resets Wed 12:59 PM", "Resets 4:12 PM",
                                          "Resets Wed 4:12 PM"]
     spanish = budgets.texts(body, "es")
@@ -619,7 +620,7 @@ def test_each_languages_longest_figures_are_set_in_the_boxs_text() -> None:
     tile = budgets.BOX["dashboard.nostromo.cost_tile"]                      # the page's own figures, tight (#91)
     assert budgets.texts(tile, "fr") == ["99,9\u00a0k$"] and budgets.texts(tile, "tr") == ["99,9\u00a0Mn$"]
     assert budgets.texts(tile, "es") == ["99,9\u00a0mil$"] and budgets.texts(tile, "en") == list(tile.english)
-    toast = budgets.BOX["app.toast.alert_credits.body"]                     # the alerts keep the formats' money
+    toast = replace(budgets.BOX["app.toast.alert_credits.body"], compose=None, keys=())  # the formats' money
     assert budgets.texts(toast, "es") == ["Used $5.96 of 10,000.00 USD", "Used 5,96\u00a0$ of 10,000.00 USD",
                                           "Used 1,234.5 of 10,000.00 USD"]
 
@@ -841,6 +842,58 @@ def test_the_longest_tooltips_are_the_recorded_ones(capsys: pytest.CaptureFixtur
     here until it is recorded again (python tests/budgets.py --tooltips)."""
     assert budgets.main(["--tooltips"]) == 0
     assert ast.literal_eval("{" + capsys.readouterr().out + "}") == TOOLTIPS
+
+
+# ── The toasts (#97) ──────────────────────────────────────────────────────────────────────────────────────────────
+
+TOAST_BOXES = tuple(box_id for box_id in budgets.BOX if box_id.startswith("app.toast."))
+# Each language's longest note after a silent update, whole, in UTF-16 units: one tool and 9999 waits (English "Setup
+# closed the monitor's tool in a Claude Code session. ... 9999 sessions waiting on the usage guard were let go early.").
+# The pseudo-locale sits exactly at app.py's cut (UPDATE_NOTE_MAX, 250): a longer English note, or a draft of fr, es or
+# tr that runs past it, fails here (#104 to #106 record their own figure).
+LONGEST_NOTES: dict[str, int] = {"en": 180, "fr": 180, "es": 180, "tr": 180, "pseudo": 250}
+
+
+def test_the_toast_boxes_compose_the_toasts_the_code_words() -> None:
+    """Each toast's box measures every toast the code words in a language (toast_words.toast_sweep), English's listed
+    texts too in English, and carries the keys those texts are worded from."""
+    import toast_words
+
+    assert set(TOAST_BOXES) == set(toast_words.TOAST_BOXES) == set(budgets.TOAST_KEYS)
+    raw = json.loads((i18n.CATALOG_DIR / "en.json").read_text(encoding="utf-8"))
+    assert {key for box_id in TOAST_BOXES for key in budgets.BOX[box_id].keys} == {
+        key for key in raw if key.startswith("toast.")}
+    for language in i18n.DEV_LANGUAGES:
+        sweep = toast_words.toast_sweep(language)
+        for box_id in TOAST_BOXES:
+            box = budgets.BOX[box_id]
+            english = list(box.english) if language == i18n.DEFAULT else []
+            assert sweep[box_id] and budgets.texts(box, language) == list(dict.fromkeys([*english, *sweep[box_id]]))
+
+
+def test_english_toasts_keep_within_48_and_200() -> None:
+    """Windows asks a toast's English for 48 characters of title and 200 of text at most, to leave room for languages
+    (#97): every English toast keeps to it, with the longest version (3.10.12-rc.1), a 24-character name and 9999 sessions."""
+    for box_id in TOAST_BOXES:
+        box = budgets.BOX[box_id]
+        room = budgets.TOAST_ENGLISH["title" if box_id.endswith(".title") else "text"]
+        longest = max(budgets.texts(box, i18n.DEFAULT), key=box.width)
+        assert box.width(longest) <= room, (box_id, longest)
+
+
+def test_no_language_passes_the_trays_cuts() -> None:
+    """No toast of any language, the pseudo-locale among them, runs past what the tray keeps (63 UTF-16 units of title,
+    255 of text, ui/tray.py) or the note past app.py's own cut (250): every count pair of the note, every format tag."""
+    assert {budgets.BOX[box_id].limit for box_id in TOAST_BOXES} == {tray.TITLE_LIMIT, tray.BODY_LIMIT, 250}
+    longest_notes = {}
+    for language in i18n.DEV_LANGUAGES:
+        for box_id in TOAST_BOXES:
+            box = budgets.BOX[box_id]
+            over = [text for text in budgets.texts(box, language) if box.width(text) > box.limit]
+            assert over == [], (language, box_id, over[:3])
+        note = budgets.BOX["app.toast.update_note.body"]
+        longest_notes[language] = int(max(note.width(text) for text in budgets.texts(note, language)))
+    assert longest_notes == LONGEST_NOTES
 
 
 def test_the_pseudo_tooltip_fits(monkeypatch: pytest.MonkeyPatch) -> None:

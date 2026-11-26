@@ -192,6 +192,39 @@ def test_names_are_taken_out_before_a_run_is_judged() -> None:
         "Send Claude Code a message.", "FABLE WEEKLY"}
 
 
+def test_a_toast_is_judged_with_its_data_taken_out_and_english_beside_it_is_found() -> None:
+    """A toast holds data the scan must not take for English (#97): the names of the limits the sweep words, a command
+    (/mcp), a currency code, a release version. Each is taken out, the codes, commands and versions as whole words
+    only; an English word beside any of them is still found."""
+    names, words = english_left.toast_names(), english_left.toast_format_words()
+    assert {"USD", "EUR", "usd", "/mcp", "/login", "3.0.0-rc.1", "v3.0.0-rc.1", "v3.10.12-rc.1"} <= set(words)
+    assert {"Fable", "Claude Instant", "Claude_code", "Istanbul", "Design weekly", "Claude Opus 4.5 Thinking"} <= set(names)
+    credits = P("Used {used} of {limit}").replace("{used}", "1\u202f234.56").replace("{limit}", "10\u202f000.00 USD")
+    note = P("type {command} there").replace("{command}", "/mcp")
+    title = P("{app} v{version} is available").replace("{app}", PRODUCT).replace("{version}", "3.0.0-rc.1")
+    alert = P("{name} limit at {percent}").replace("{name}", "Design weekly").replace("{percent}", "80\u00a0%")
+    assert english([credits, note, title, alert, P("Used {used}").replace("{used}", "5.96 EUR")], names, words) == set()
+    beside = ["Used 1\u202f234.56 USD", P("type") + " /mcp now", PRODUCT + " v3.0.0-rc.1 available",
+              "Design weekly limit at 80%", P("used") + " 2.50 usd left"]
+    assert english(beside, names, words) == {entry(text) for text in beside}
+    assert english([credits], english_left.widget_names(), english_left.pseudo_format_words()) == {entry(credits)}
+    assert english(["USDT", "/mcpx", "rc"], names, words) == {"USDT", "/mcpx", "rc"}      # whole words only
+
+
+def test_the_widget_half_reads_every_toast_in_the_pseudo_locale(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every toast of the sweep in the pseudo-locale is read by the widget half, judged with the toasts' data taken
+    out; an English one would be on record (it holds none)."""
+    import toast_words
+
+    seen = english_left._toasts()
+    swept = toast_words.toast_sweep(i18n.PSEUDO)
+    assert set(seen) == {text for texts in swept.values() for text in texts}
+    assert all(where.startswith("toast app.toast.") for where in seen.values())
+    monkeypatch.setattr(english_left, "_drawn", lambda: {})
+    monkeypatch.setattr(english_left, "_toasts", lambda: {**seen, "Usage credits in use": "toast here"})
+    assert english_left._widgets_english() == {"Usage credits in use": "toast here"}
+
+
 def test_the_pseudo_locales_format_words_and_the_dev_mark_are_no_english_on_the_widgets() -> None:
     """#91 gives the pseudo-locale English's formats, so its weekday names and AM/PM are English's, and Gates' age
     unit "min" (#96): the widget half treats them as formats, as it treats numbers, and takes them out as whole words

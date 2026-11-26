@@ -22,7 +22,10 @@ every theme, variant, state, strip height and tray size, with nothing saved; the
 an installed monitor and as a dev instance show it; and the tray menu with every row shown (#93). Other scales draw the
 same words. Text drawn on the dump's contact sheet (a developer's overview, not the widgets) is left out. Besides the
 names, the widget half takes out the dev instance's "(dev)" mark and, as whole words, the pseudo-locale's format words
-(its weekday names and AM/PM, English's since #91): they are formats, as numbers are.
+(its weekday names and AM/PM, English's since #91): they are formats, as numbers are. The widget half also reads every
+toast and usage alert the tray can show in the pseudo-locale (#97: tests/toast_words.toast_sweep), each judged with the
+data a toast holds taken out too (toast_names, toast_format_words): the names of the limits it words, the commands, the
+currency codes and the release versions.
 
 The dashboard: tests/english_scan.js runs the page (index.html, formats.js, the catalog, charts.js and app.js, from the
 dev server) on a small DOM, for every scenario of the dev server under the pseudo-locale, in the passes PASSES lists:
@@ -371,6 +374,48 @@ def pseudo_format_words() -> tuple[str, ...]:
     return tuple(dict.fromkeys([*words, *(casing.upper(word, locale.language) for word in words), *units]))
 
 
+def toast_names() -> tuple[str, ...]:
+    """What the widget half takes out of a toast before judging it, wherever it stands: the widget names, and the names
+    the sweep puts in an alert's title, each as written and with its first letter in capitals (as the pseudo-locale
+    writes one that starts a title): every model's and surface's name of tests/toast_words.sweep_shapes(), and the name
+    of a kind no catalog has words for, from its code (identity text, #93 D4)."""
+    from usage_monitor import casing
+    from usage_monitor.data.identity import scope_name
+
+    import toast_words
+
+    found: list[str] = []
+    for kind, label, model, surface in toast_words.sweep_shapes().values():
+        for name in (model, scope_name(model, surface), kind.replace("_", " ") if label.strip() and kind not in (
+                "session", "weekly_all", "weekly_scoped") else None):
+            name = " ".join(str(name or "").split())
+            if name:
+                found += [name, casing.cased("{name}", "sentence", i18n.PSEUDO, name=name)]
+    return tuple(dict.fromkeys([*widget_names(), *found]))
+
+
+def toast_format_words() -> tuple[str, ...]:
+    """What the widget half takes out of a toast as whole words: the pseudo-locale's format words, every command the
+    app shows (i18n.COMMANDS: the note's /mcp), the currency codes the sweep's credits carry (written as the code is
+    given, English's shapes put it after the amount), and the sweep's release versions, bare and after a "v"."""
+    import toast_words
+
+    codes = {currency for _used, _limit, currency in toast_words.SPENDS.values() if currency}
+    versions = [text for version in toast_words.SWEEP_VERSIONS for text in (version, "v" + version)]
+    return tuple(dict.fromkeys([*pseudo_format_words(), *i18n.COMMANDS, *sorted(codes), *versions]))
+
+
+def _toasts() -> dict[str, str]:
+    """Every toast the tray can show in the pseudo-locale (tests/toast_words.toast_sweep), each with its box."""
+    import toast_words
+
+    seen: dict[str, str] = {}
+    for box, texts in toast_words.toast_sweep(i18n.PSEUDO).items():
+        for text in texts:
+            seen.setdefault(text, f"toast {box}")
+    return seen
+
+
 def _menu_labels(locale: i18n.Locale) -> list[str]:
     """The tray menu's labels in ``locale`` with every row shown: sessions waiting (one, then two) and an update on
     offer."""
@@ -465,6 +510,10 @@ def _widgets_english() -> dict[str, str]:
     names, format_words = widget_names(), pseudo_format_words()
     found: dict[str, str] = {}
     for text, where in _drawn().items():
+        for hit in english([text], names, format_words):
+            found.setdefault(hit, where)
+    names, format_words = toast_names(), toast_format_words()
+    for text, where in _toasts().items():
         for hit in english([text], names, format_words):
             found.setdefault(hit, where)
     return dict(sorted(found.items()))
