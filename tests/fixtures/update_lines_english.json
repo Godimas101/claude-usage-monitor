@@ -1,0 +1,209 @@
+{
+ "_about": "Every line Settings and the update banner showed under the update buttons before #97, as app.js said it for each answer the monitor gives (webui_checks.js's updateSaid, run on the code before the move), in capitals; what the Gates theme showed of it (gates.js re-cased it); and the catalog key that holds it since #97, with its values. The catalog's English is the Gates text, and Nostromo and Night City set it in capitals by CSS: today's line. Made once from the code before #97 (step b1), never re-recorded.",
+ "lines": [
+  {
+   "said": "check:checking",
+   "key": "settings.update.status.checking",
+   "values": {},
+   "today": "CHECKING…",
+   "gates": "Checking…"
+  },
+  {
+   "said": "check:found",
+   "key": "settings.update.status.found",
+   "values": {},
+   "today": "AN UPDATE IS AVAILABLE.",
+   "gates": "An update is available."
+  },
+  {
+   "said": "check:up_to_date",
+   "key": "settings.update.status.up_to_date",
+   "values": {},
+   "today": "YOU ARE UP TO DATE.",
+   "gates": "You are up to date."
+  },
+  {
+   "said": "check:unreached",
+   "key": "settings.update.status.unreached",
+   "values": {},
+   "today": "COULD NOT REACH GITHUB; TRY AGAIN LATER.",
+   "gates": "Could not reach GitHub; try again later."
+  },
+  {
+   "said": "install:installing",
+   "key": "settings.update.status.installing",
+   "values": {},
+   "today": "INSTALLING…",
+   "gates": "Installing…"
+  },
+  {
+   "said": "install:browser",
+   "key": "settings.update.status.browser",
+   "values": {},
+   "today": "OPENED THE RELEASE PAGE IN YOUR BROWSER.",
+   "gates": "Opened the release page in your browser."
+  },
+  {
+   "said": "install:installer",
+   "key": "settings.update.status.installer",
+   "values": {},
+   "today": "DOWNLOADING AND CHECKING THE UPDATE; IF IT CHECKS OUT, THE MONITOR CLOSES AND RESTARTS BY ITSELF.",
+   "gates": "Downloading and checking the update; if it checks out, the monitor closes and restarts by itself."
+  },
+  {
+   "said": "install:not_started",
+   "key": "settings.update.status.not_started",
+   "values": {},
+   "today": "NO UPDATE WAS STARTED.",
+   "gates": "No update was started."
+  },
+  {
+   "said": "skip:skipping",
+   "key": "settings.update.status.skipping",
+   "values": {},
+   "today": "THIS VERSION WILL BE SKIPPED.",
+   "gates": "This version will be skipped."
+  },
+  {
+   "said": "check:error",
+   "key": "settings.update.failed.check.error",
+   "values": {},
+   "today": "CHECK FAILED: UPDATE CHECK FAILED",
+   "gates": "Check failed: update check failed"
+  },
+  {
+   "said": "check:internal",
+   "key": "settings.update.failed.check.internal",
+   "values": {},
+   "today": "CHECK FAILED: INTERNAL ERROR",
+   "gates": "Check failed: internal error"
+  },
+  {
+   "said": "check:unavailable",
+   "key": "settings.update.failed.check.unavailable",
+   "values": {},
+   "today": "CHECK FAILED: UPDATE CHECK IS NOT AVAILABLE",
+   "gates": "Check failed: update check is not available"
+  },
+  {
+   "said": "check:token",
+   "key": "settings.update.failed.check.token",
+   "values": {},
+   "today": "CHECK FAILED: MISSING OR WRONG TOKEN",
+   "gates": "Check failed: missing or wrong token"
+  },
+  {
+   "said": "check:http",
+   "key": "settings.update.failed.check.http",
+   "values": {
+    "status": "502"
+   },
+   "today": "CHECK FAILED: HTTP 502",
+   "gates": "Check failed: HTTP 502"
+  },
+  {
+   "said": "check:lost",
+   "key": "settings.update.failed.check.lost",
+   "values": {},
+   "today": "CHECK FAILED: THE DASHBOARD LOST ITS LINK",
+   "gates": "Check failed: the dashboard lost its link"
+  },
+  {
+   "said": "install:error",
+   "key": "settings.update.failed.install.error",
+   "values": {},
+   "today": "UPDATE FAILED: UPDATE APPLY FAILED",
+   "gates": "Update failed: update apply failed"
+  },
+  {
+   "said": "install:internal",
+   "key": "settings.update.failed.install.internal",
+   "values": {},
+   "today": "UPDATE FAILED: INTERNAL ERROR",
+   "gates": "Update failed: internal error"
+  },
+  {
+   "said": "install:unavailable",
+   "key": "settings.update.failed.install.unavailable",
+   "values": {},
+   "today": "UPDATE FAILED: UPDATE APPLY IS NOT AVAILABLE",
+   "gates": "Update failed: update apply is not available"
+  },
+  {
+   "said": "install:token",
+   "key": "settings.update.failed.install.token",
+   "values": {},
+   "today": "UPDATE FAILED: MISSING OR WRONG TOKEN",
+   "gates": "Update failed: missing or wrong token"
+  },
+  {
+   "said": "install:http",
+   "key": "settings.update.failed.install.http",
+   "values": {
+    "status": "502"
+   },
+   "today": "UPDATE FAILED: HTTP 502",
+   "gates": "Update failed: HTTP 502"
+  },
+  {
+   "said": "install:lost",
+   "key": "settings.update.failed.install.lost",
+   "values": {},
+   "today": "UPDATE FAILED: THE DASHBOARD LOST ITS LINK",
+   "gates": "Update failed: the dashboard lost its link"
+  },
+  {
+   "said": "skip:error",
+   "key": "settings.update.failed.skip.error",
+   "values": {},
+   "today": "COULD NOT SKIP: UPDATE SKIP FAILED",
+   "gates": "Could not skip: update skip failed"
+  },
+  {
+   "said": "skip:internal",
+   "key": "settings.update.failed.skip.internal",
+   "values": {},
+   "today": "COULD NOT SKIP: INTERNAL ERROR",
+   "gates": "Could not skip: internal error"
+  },
+  {
+   "said": "skip:unavailable",
+   "key": "settings.update.failed.skip.unavailable",
+   "values": {},
+   "today": "COULD NOT SKIP: UPDATE SKIP IS NOT AVAILABLE",
+   "gates": "Could not skip: update skip is not available"
+  },
+  {
+   "said": "skip:token",
+   "key": "settings.update.failed.skip.token",
+   "values": {},
+   "today": "COULD NOT SKIP: MISSING OR WRONG TOKEN",
+   "gates": "Could not skip: missing or wrong token"
+  },
+  {
+   "said": "skip:http",
+   "key": "settings.update.failed.skip.http",
+   "values": {
+    "status": "502"
+   },
+   "today": "COULD NOT SKIP: HTTP 502",
+   "gates": "Could not skip: HTTP 502"
+  },
+  {
+   "said": "skip:lost",
+   "key": "settings.update.failed.skip.lost",
+   "values": {},
+   "today": "COULD NOT SKIP: THE DASHBOARD LOST ITS LINK",
+   "gates": "Could not skip: the dashboard lost its link"
+  },
+  {
+   "said": "offered",
+   "key": "settings.update.offered",
+   "values": {
+    "version": "2.4.0"
+   },
+   "today": "Version 2.4.0 is available.",
+   "gates": "Version 2.4.0 is available."
+  }
+ ]
+}

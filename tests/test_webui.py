@@ -2250,6 +2250,40 @@ def test_every_failure_status_line_goes_through_failed_text() -> None:
         assert f'failedText("{prefix}", res)' in code, prefix
 
 
+# ── The update lines (#97) ────────────────────────────────────────────────────────
+
+# Every line under the update buttons (Settings' and the banner's), as app.js said it before #97 and as the Gates theme
+# showed it, with the catalog key that holds it since: tests/fixtures/update_lines_english.json, made in step b1 of #97
+# from the code before the move.
+UPDATE_LINES: list[dict[str, Any]] = json.loads(
+    (Path(__file__).resolve().parent / "fixtures" / "update_lines_english.json").read_text(encoding="utf-8"))["lines"]
+
+
+def test_the_update_lines_record_is_whole() -> None:
+    """Each answer of each update button once: the check's three results, the install's three modes, the skip, the two
+    waits, the offered line, and for each button every refusal the monitor gives (500, its rare internal error, 501, 401,
+    another status, a lost link). The lines were in capitals, the offered one in natural case."""
+    said = [line["said"] for line in UPDATE_LINES]
+    reasons = ("error", "internal", "unavailable", "token", "http", "lost")
+    assert sorted(said) == sorted(["check:checking", "check:found", "check:up_to_date", "check:unreached", "install:installing",
+                                   "install:browser", "install:installer", "install:not_started", "skip:skipping", "offered",
+                                   *(f"{op}:{reason}" for op in ("check", "install", "skip") for reason in reasons)])
+    assert len({line["key"] for line in UPDATE_LINES}) == len(UPDATE_LINES)
+    for line in UPDATE_LINES:
+        name = line["said"]
+        assert line["today"] == (line["gates"] if name == "offered" else line["today"].upper()), name
+        assert line["gates"] and line["gates"].upper() == line["today"].upper(), name
+
+
+@ui_only
+def test_the_update_lines_render_todays_english(checks: dict[str, Any]) -> None:
+    """Each update button's answer, through the page's real click paths, says what it said before #97."""
+    said = checks["updateSaid"]
+    assert set(said) == {line["said"] for line in UPDATE_LINES}
+    for line in UPDATE_LINES:
+        assert said[line["said"]]["text"] == line["today"], line["said"]
+
+
 # ── A running update on Settings (#58) ────────────────────────────────────────────
 
 # The status line of each failure code (update_check.REASONS), as en.json words it.

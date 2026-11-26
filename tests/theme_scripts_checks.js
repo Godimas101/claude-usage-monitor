@@ -288,6 +288,16 @@ for (const theme of ["nostromo", "night_city", "gates"]) {
     out.gatesCase[text] = figure.textContent;
   }
   out.gatesCase.thrown = w.thrown.slice();
+  // the update lines (#97): what Gates shows for each line as app.js wrote it before #97 (in capitals, which it re-cases) and
+  // for the natural-case English the catalog holds since (which it leaves alone), tests/fixtures/update_lines_english.json
+  const lines = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "update_lines_english.json"), "utf8")).lines;
+  const shown = (text) => {
+    const figure = new Figure(text);
+    watching.forEach((o) => attempt(w, o.cb, [{ type: "characterData", target: figure.firstChild }]));
+    return figure.textContent;
+  };
+  out.gatesUpdateLines = { lines: lines.map((line) => ({ said: line.said, today: shown(line.today), stored: line.gates === null ? null : shown(line.gates) })) };
+  out.gatesUpdateLines.thrown = w.thrown.slice();
 }
 
 console.log(JSON.stringify(out));

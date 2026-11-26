@@ -1159,6 +1159,78 @@ async function failures() {
   reset();
 }
 
+// ── what each update button says, for every answer the monitor can give (#97) ───────────────────────────────────────────
+// Through the page's real click paths: Check for updates now (settingsClick), Install update and the banner's Update now
+// (installUpdate), Skip this version (skipUpdate), and the line under the buttons while a release is on offer (updateLine).
+// test_webui.py holds each line to tests/fixtures/update_lines_english.json. The answers are ui/server.py's for these routes.
+const UPDATE_ROUTE = { check: "/api/update/check", install: "/api/update/apply", skip: "/api/update/skip" };
+const UPDATE_REFUSALS = {
+  error: (op) => answer(500, { error: "update " + (op === "install" ? "apply" : op) + " failed" }),
+  internal: () => answer(500, { error: "internal error" }),
+  unavailable: (op) => answer(501, { error: "update " + (op === "install" ? "apply" : op) + " is not available" }),
+  token: () => answer(401, { error: "missing or wrong token" }),
+  http: () => answer(502),
+  lost: () => () => Promise.reject(new Error("link lost")),
+};
+const UPDATE_OFFER = { available: true, version: "2.4.0", url: RELEASE, can_self_update: true, skipped: false, skip_version: "",
+  info: { version: "2.4.0", can_self_update: true } };
+
+async function updateSaid() {
+  const saved = { fetch: box.fetch, clear: box.clearTimeout, query: box.document.querySelector };
+  box.document.querySelector = (selector) => (selector === "#main" ? mainElement : null);
+  box.clearTimeout = () => {};
+  const said = {};
+  const press = async (op, reply) => {
+    reset();
+    S.skipped = "";
+    S.update = { text: "" };
+    S.data = { state: { status: "live" }, model_names: {}, update: UPDATE_OFFER };
+    box.fetch = (url) => {
+      const where = String(url);
+      if (where.indexOf(UPDATE_ROUTE[op]) >= 0) { return reply(); }
+      if (where.indexOf("/api/state") >= 0) { return answer(200, S.data)(); }
+      return answer(404, { error: "not in this test" })();
+    };
+    if (op === "check") {
+      api.settingsClick(click("check-update"));
+    } else if (op === "install") {
+      api.installUpdate();
+    } else {
+      api.skipUpdate();
+    }
+    await settle();
+    return { text: S.update.text, lang: S.update.lang === undefined ? null : S.update.lang };
+  };
+  const hang = () => () => new Promise(() => {});
+  const result = (body) => () => answer(200, { ok: true, result: body })();
+  said["check:checking"] = await press("check", hang());
+  said["check:found"] = await press("check", result({ available: true, version: "2.4.0", checked: true }));
+  said["check:up_to_date"] = await press("check", result({ available: false, version: null, checked: true }));
+  said["check:unreached"] = await press("check", result({ available: false, version: null, checked: false }));
+  said["install:installing"] = await press("install", hang());
+  said["install:browser"] = await press("install", result({ started: true, mode: "browser" }));
+  said["install:installer"] = await press("install", result({ started: true, mode: "installer" }));
+  said["install:not_started"] = await press("install", result({ started: false, mode: "none" }));
+  said["skip:skipping"] = await press("skip", () => answer(200, { ok: true })());
+  for (const op of ["check", "install", "skip"]) {
+    for (const reason of Object.keys(UPDATE_REFUSALS)) {
+      said[op + ":" + reason] = await press(op, UPDATE_REFUSALS[reason](op));
+    }
+  }
+  reset();
+  S.update = { text: "" };
+  S.data = { state: { status: "live" }, model_names: {}, update: UPDATE_OFFER };
+  said.offered = { text: api.updateLine(), lang: null };
+  out.updateSaid = said;
+  box.fetch = saved.fetch;
+  box.clearTimeout = saved.clear;
+  box.document.querySelector = saved.query;
+  S.progress = api.updateProgressState();
+  S.update = { text: "" };
+  S.skipped = "";
+  reset();
+}
+
 // ── the usage guard card: its markup, the status block in every state, the setup block, the fields and the clicks ──────────────
 // Every input is made up. The page asks /api/guard, which answers { guard, told, waiting, watching, setup }.
 const GUARD_T = Date.UTC(2026, 9, 21, 16, 12);
@@ -2308,4 +2380,4 @@ async function updateProgress() {
   };
 }
 
-failures().then(guardPolling).then(guardActions).then(signInActions).then(colourSaves).then(planHint).then(staleTexts).then(updateProgress).then(() => console.log(JSON.stringify(out)), (error) => { console.error(error && error.stack ? error.stack : String(error)); process.exit(1); });
+failures().then(updateSaid).then(guardPolling).then(guardActions).then(signInActions).then(colourSaves).then(planHint).then(staleTexts).then(updateProgress).then(() => console.log(JSON.stringify(out)), (error) => { console.error(error && error.stack ? error.stack : String(error)); process.exit(1); });

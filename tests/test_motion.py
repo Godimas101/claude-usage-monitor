@@ -1362,6 +1362,21 @@ def test_gates_keeps_a_magnitudes_capital_after_the_no_break_space_of_a_localize
 
 
 @ui_only
+def test_gates_shows_each_update_line_as_it_did_before_97(theme_scripts: dict[str, Any]) -> None:
+    """#97 moved the update lines to the catalog in natural case. gates.js re-cased the capitals app.js wrote before (the
+    Gates column of tests/fixtures/update_lines_english.json is what it showed of them) and leaves the catalog's English
+    alone, so Gates shows each line as it did. (When #101 ends the re-casing, the first half goes.)"""
+    found = theme_scripts["gatesUpdateLines"]
+    assert found["thrown"] == []
+    lines = json.loads((Path(__file__).resolve().parent / "fixtures" / "update_lines_english.json").read_text(
+        encoding="utf-8"))["lines"]
+    assert [shown["said"] for shown in found["lines"]] == [line["said"] for line in lines]
+    for line, shown in zip(lines, found["lines"]):
+        assert shown["today"] == line["gates"], line["said"]
+        assert shown["stored"] == line["gates"], line["said"]
+
+
+@ui_only
 def test_gates_sets_a_big_percents_sign_smaller_on_the_side_its_language_writes_it(theme_scripts: dict[str, Any]) -> None:
     """#91 step 2.6: Gates' small percent sign (splitPercent) stays where the page's language writes it, with its space:
     13% in English, 34 % in French (U+00A0, grouped digits too), %34 in Turkish. Anything else is left as it is."""
