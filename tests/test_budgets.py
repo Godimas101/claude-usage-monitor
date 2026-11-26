@@ -44,7 +44,7 @@ LIMITS: dict[str, float] = {
     "nostromo.strip.value_5h": 24.0, "nostromo.strip.value_5h_chip": 20.0, "nostromo.strip.value_7d": 32.0,
     "nostromo.strip.value_7d_chip": 28.0, "nostromo.tray.readout": 20.0, "night_city.floating.brand": 179.746,
     "night_city.floating.live_tag": 102.417, "night_city.floating.status_chip": 98.417,
-    "night_city.floating.guard_chip": 38.235, "night_city.floating.hold_chip": 93.417,
+    "night_city.floating.guard_chip": 39.056, "night_city.floating.hold_chip": 93.417,
     "night_city.floating.hold_word": 93.417, "night_city.floating.band_text": 220.0,
     "night_city.floating.band_text_no_age": 220, "night_city.floating.band_age": 62.359,
     "night_city.floating.band_hold_text": 168.921, "night_city.floating.band_hold_chip": 175.866,
@@ -1225,8 +1225,9 @@ def test_night_citys_guard_chip_has_the_room_its_header_leaves_beside_the_langua
     box = budgets.BOX["night_city.floating.guard_chip"]
     pairs = budgets.nc_guard_pairs()
     assert budgets.nc_guard_room(i18n.DEFAULT) == pytest.approx(box.limit) and box.fit == "drop"
-    assert {("LIVE", "blackwall"), ("PAUSED", "blackwall"), ("OFFLINE", "relic"), ("NO_CREDENTIALS", "edgerun")} <= set(
-        pairs) and not any(status in ("RATE_LIMITED", "LOADING") for status, _variant in pairs)
+    # Only LIVE's and PAUSED's headers are drawn with a reading: the band takes the header's place in its statuses.
+    assert {status for status, _variant in pairs} == {"LIVE", "PAUSED"} and len(pairs) == 6
+    assert not any(nc.ApiStatus[status] in nc.BAND_STATUSES for status, _variant in pairs)
     assert budgets.over("fr", [box]) == []                  # French has no words of its own here yet: English's room
     words = {"widget.status.paused": "EN PAUSE", "widget.night_city.guard.mark": "GARDE"}
     _nc_catalog(monkeypatch, words)
@@ -1235,7 +1236,7 @@ def test_night_citys_guard_chip_has_the_room_its_header_leaves_beside_the_langua
     rows = budgets.over("fr", [box])
     assert [(row.box.id, row.text) for row in rows] == [(box.id, "GARDE")] and not rows[0].box.enforced
     assert rows[0].budget == pytest.approx(budgets.nc_guard_room("fr")) and budgets.nc_guard_room("fr") < box.limit
-    words["widget.status.stale"] = "W" * 30                 # wider than the header's right-hand room: cut there
+    words["widget.status.paused"] = "W" * 30                # wider than the header's right-hand room: cut there
     _nc_catalog(monkeypatch, words)
     rooms = budgets._nc_guard_rooms(i18n.app_catalog("fr"))
     theme = dump.load_theme_objects()["night_city"]
@@ -1261,7 +1262,7 @@ def test_night_citys_guard_chip_has_the_room_its_header_leaves_beside_the_langua
         assert (most == 0 or budgets.W_nc("W" * most, "CHIP") <= room + 0.01) and room < budgets.W_nc(
             "W" * (most + 1), "CHIP"), (status_name, variant_id, most, room)
         _nc_catalog(monkeypatch, words)
-    assert rooms["STALE", "blackwall"] < 0 and min(rooms[pair] for pair in pairs) == pytest.approx(
+    assert rooms["PAUSED", "blackwall"] < 0 and min(rooms[pair] for pair in pairs) == pytest.approx(
         budgets.nc_guard_room("fr"))
 
 

@@ -677,9 +677,11 @@ def _nc_plan_box(id_: str, fit: str, **kwargs: Any) -> Box:
 # ── Night City's GUARD chip (night_city._header_plan): chosen last, in the room the header's right-hand word leaves, so
 # it stays out of NC_HEADER (it never takes room from the LIVE tag, the status chip or the hold chips) ──
 _NC_GUARD = _NCF + "guard_chip"
-# The statuses the guard can be armed in: every one with a reading (render/model._guard_mark gives no mark while loading,
-# which has none).
-_NC_ARMED = tuple(status for status in nc.ApiStatus if status is not nc.ApiStatus.LOADING)
+# The statuses whose header can show the armed guard's GUARD chip: every one with a reading (render/model._guard_mark
+# gives no mark while loading, which has none) but the band's, where the stale band takes the header's place
+# (night_city.BAND_STATUSES, _draw_surface): LIVE and PAUSED.
+_NC_ARMED = tuple(status for status in nc.ApiStatus
+                  if status is not nc.ApiStatus.LOADING and status not in nc.BAND_STATUSES)
 
 
 @lru_cache(maxsize=None)
@@ -1016,8 +1018,9 @@ BOXES: tuple[Box, ...] = (
     _nc(_NC_GUARD, "CHIP", nc_guard_room(i18n.DEFAULT), _nc_guard_why(), "drop", english=("GUARD",),
         keys=_nc_keys("guard.mark"),
         note=f"{nc_guard_room(i18n.DEFAULT):g} px in English ({_NC_GUARD}, drop): what the header leaves beside the "
-             "language's own LIVE tag (widget.night_city.state.live) and status chip (widget.status.*) words where "
-             "English draws it, so a longer status word leaves it less; left out where it does not fit"),
+             "language's own LIVE tag (widget.night_city.state.live) and paused chip (widget.status.paused) words, "
+             "the headers English draws it in (the stale band takes the header's place in the other statuses), so a "
+             "longer word there leaves it less; left out where it does not fit"),
     _nc_plan_box(_NC_HOLD, "drop", kinds=("duration",), templates=("HOLD {}",), keys=_nc_keys("guard.hold_for"),
                  fills=(("countdown", "duration"),)),
     _nc_plan_box(_NC_HOLD_ALONE, "ellipsis", keys=_nc_keys("guard.hold")),

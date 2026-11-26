@@ -216,7 +216,7 @@
   "_budget.widget.night_city.guard.hold_for": "175.866 px (night_city.floating.band_hold_chip, drop); 93.417 px (night_city.floating.hold_chip, drop)",
   "_note.widget.night_city.guard.mark": "Night City's widget header, a quiet outlined chip while the usage guard is armed, drawn only where it fits. In capitals.",
   "widget.night_city.guard.mark": "GUARD",
-  "_budget.widget.night_city.guard.mark": "38.2349 px in English (night_city.floating.guard_chip, drop): what the header leaves beside the language's own LIVE tag (widget.night_city.state.live) and status chip (widget.status.*) words where English draws it, so a longer status word leaves it less; left out where it does not fit",
+  "_budget.widget.night_city.guard.mark": "39.0561 px in English (night_city.floating.guard_chip, drop): what the header leaves beside the language's own LIVE tag (widget.night_city.state.live) and paused chip (widget.status.paused) words, the headers English draws it in (the stale band takes the header's place in the other statuses), so a longer word there leaves it less; left out where it does not fit",
   "_note.widget.night_city.guard.armed": "Night City's hover card, the guard line while the guard is armed and watches no cap: the lead alone. In capitals.",
   "widget.night_city.guard.armed": "GUARD // ARMED",
   "_budget.widget.night_city.guard.armed": "236 px (night_city.tooltip.guard_lead, none); 236 px (night_city.tooltip.guard_lines, wrap)",

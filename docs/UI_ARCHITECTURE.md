@@ -767,8 +767,9 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   hover line take their give-way and their boxes' rooms from the skin's tuples the same way (`NC_PLANS`, `_nc_room`; a
   box that gives way by becoming another, the hold chip HOLD alone and the pace its points, has that box's room), and
   in a language its own (`nc_room`, beside each format tag's own ages, hold chips and resets, `nc_tags`). Its GUARD
-  chip, chosen last in the room the header's word leaves, is held to the least of the headers English draws it in,
-  beside the language's own LIVE tag and status words (`nc_guard_room`). Its strip
+  chip, chosen last in the room the header's word leaves, is held to the least of the headers English draws it in
+  (LIVE's and PAUSED's: the stale band takes the header's place in the other statuses), beside the language's own
+  LIVE tag and paused word (`nc_guard_room`). Its strip
   labels are measured at the size they shrink to (`night_city_label`), and the pace's points, which have no key, as
   English writes them in every language. `ACCEPTED_CUTS` in `test_budgets.py` holds,
   apart from `FOR_91`, the cuts a CLDR format causes: the ages Nostromo's header leaves out beside a tag's own hold chip
