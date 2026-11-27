@@ -3401,10 +3401,13 @@ def test_the_install_update_button_reports_what_the_monitor_actually_did() -> No
     assert answered == {"none", "installer", "browser"}
     for mode in ("browser", "installer"):
         assert f'mode === "{mode}"' in handler, mode
-    assert "THE UPDATE WILL INSTALL WHEN THE MONITOR RESTARTS" not in script
+    promise = "will install when the monitor restarts"
+    assert promise not in script.lower()
     # The lines are catalog keys since #97 (en.json holds their English): one for each mode, and the installer's is followed
-    # by watchUpdateRun(), which shows the run (#58).
+    # by watchUpdateRun(), which shows the run (#58). The promise must not come back there either, in any case.
     english = json.loads((ROOT / "usage_monitor" / "webui" / "i18n" / "en.json").read_text(encoding="utf-8"))
+    assert not [key for key, text in english.items() if key.startswith(("settings.update.", "banner.update."))
+                and promise in str(text).lower()]
     keys = dict(re.findall(r'mode === "(\w+)"\)\s*\{\s*line = tLine\("(settings\.update\.status\.\w+)"\);', handler))
     assert set(keys) == {"browser", "installer"}, keys
     assert "release page" in english[keys["browser"]]

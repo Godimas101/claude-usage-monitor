@@ -390,7 +390,7 @@ def update_note_counts(raw: str) -> tuple[int, int] | None:
     UPDATE_NOTE_COUNT_MAX (true and false are not counts)."""
     try:
         data = json.loads(raw)
-    except ValueError:
+    except (ValueError, RecursionError):  # nesting too deep to parse counts as a broken note
         return None
     if not isinstance(data, dict):
         return None

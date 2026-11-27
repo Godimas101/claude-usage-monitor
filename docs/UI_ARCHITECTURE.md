@@ -602,7 +602,9 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   said is a line,
   `tLine(key, values)`: its text and the language it came from, so the element showing it (`#set-update-status`,
   `syncUpdate`; the banner's `.nm-status`, in its markup) carries `lang="en"` when it is English on another language's
-  page. `labelFor`'s saved-setting words and the card's title and meta stay #100's.
+  page. The banner's `aria-label` (`banner.update.label`), like #58's progress bar's, is an attribute and stays unmarked
+  (as below), until the language's catalog has the key. `labelFor`'s saved-setting words and the card's title and meta
+  stay #100's.
 - **The page.** `_send_index` writes `<html lang>`, the `monitor-locale` meta (the locale as JSON) and the catalog's
   `<script src="/static/i18n/<lang>.js">` before `charts.js`, and fills the shell's own words, all before the theme,
   which can give up on a page it cannot resolve. A marked element holds text only: `data-i18n="<key>"` replaces its

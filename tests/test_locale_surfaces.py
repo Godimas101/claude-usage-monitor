@@ -626,7 +626,8 @@ def test_the_pseudo_title_is_not_cased_again(settings):
 def test_a_name_is_capitalised_only_where_it_starts_the_title(monkeypatch):
     """Outside English a model's name goes in as written, its first letter in capitals by the locale's rule only where
     it starts the alert's title (#96 Q4's rule for the alerts, #97): a French title that puts the name after its own
-    words keeps "claude_code" as written, and the template's words are never cased."""
+    words keeps "claude_code" as written, so does one whose scoped name puts its own words first ("hebdo {name}"), and
+    the template's words are never cased."""
     english = i18n.load_catalog("en").english()
     french = i18n.Catalog("fr", {"toast.alert.threshold": "Limite {name} à {percent}",
                                    "toast.alert.reset": "{name} : limite REMISE",
@@ -638,6 +639,11 @@ def test_a_name_is_capitalised_only_where_it_starts_the_title(monkeypatch):
     assert alerts._title("toast.alert.threshold", item, fr, percent="80\u00a0%") == "Limite claude_code hebdo à 80\u00a0%"
     assert alerts._title("toast.alert.reset", item, fr) == "Claude_code hebdo : limite REMISE"
     assert alerts._title("toast.alert.reset", scoped("istanbul"), loc("tr-TR")) == "İstanbul weekly limit reset"
+    # The title starts with {name}, but the scoped name's own template puts its words first: still as written.
+    before = i18n.Catalog("fr", {"toast.alert.reset": "{name} : limite REMISE", "toast.alert.name.scoped": "hebdo {name}"},
+                          english)
+    monkeypatch.setattr(i18n, "app_catalog", lambda language: before if language == "fr" else shipped(language))
+    assert alerts._title("toast.alert.reset", item, fr) == "hebdo claude_code : limite REMISE"
 
 
 @pytest.mark.parametrize("locale", LOCALES, ids=ids)

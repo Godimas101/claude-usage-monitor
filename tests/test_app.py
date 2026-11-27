@@ -2866,15 +2866,17 @@ def test_an_empty_update_note_says_nothing_and_goes(wired, text):
 
 
 @pytest.mark.parametrize("text", ['{"tools": 1', '{"tools": "1"}', '{"tools": true}', '{"waits": -1}',
-                                  '{"waits": 10000}', '{"tools": 1.0}', '{"tools": null}', "{private words}"])
+                                  '{"waits": 10000}', '{"tools": 1.0}', '{"tools": null}', "{private words}",
+                                  pytest.param('{"a": ' + "[" * 100000, id="nested-too-deep")])
 def test_a_broken_counts_note_says_nothing_and_goes(wired, caplog, text):
     """A note that starts with "{" and is not the counts Setup writes (whole numbers from 0 to 9999) says nothing, is
-    deleted, and is logged once without its text."""
+    deleted, and is logged once without its text. One nested too deep for json to parse (RecursionError) too: it must not
+    escape and come back at every state."""
     note = update_note()
     note.write_text(text, encoding="ascii")
     with caplog.at_level(logging.WARNING, logger="usage_monitor.app"):
         assert app_mod.UPDATE_NOTE_TITLE not in [title for title, _ in publish(wired, usage_state(10))]
-    assert not note.exists()
+    assert not note.exists() and wired.app._update_note_done
     said = [record.getMessage() for record in caplog.records if "update note" in record.getMessage()]
     assert len(said) == 1 and text not in said[0] and "private" not in said[0]
 
