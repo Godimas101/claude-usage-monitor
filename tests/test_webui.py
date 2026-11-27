@@ -515,10 +515,13 @@ def test_night_city_shows_its_navigation_decoration_in_the_default_window() -> N
 
 
 def test_only_edgerun_draws_the_time_left_bar() -> None:
+    """Night City draws the bar in Edgerun only. Outside Edgerun a rule may set only its label's capitals (#98: the label is
+    the catalog's natural-case words, and the hidden bar keeps the capitals it always had), which draws nothing."""
     css = THEME_CSS["night_city"]
-    rules = re.findall(r"^([^{}\n]*\.nm-remain[^{}\n]*)\{", css, re.M)
-    selectors = [part.strip() for rule in rules for part in rule.split(",")]
-    assert selectors and all(part.startswith(':root[data-variant="edgerun"] ') for part in selectors), selectors
+    rules = re.findall(r"^([^{}\n]*\.nm-remain[^{}\n]*)\{([^}]*)\}", css, re.M)
+    selectors = [(part.strip(), body.strip()) for rule, body in rules for part in rule.split(",")]
+    assert selectors and all(part.startswith(':root[data-variant="edgerun"] ') or (part == ".nm-remain .l" and body == "text-transform: uppercase;")
+                             for part, body in selectors), selectors
     for theme_id in ("nostromo", "gates"):                                      # these read the reset in the facts
         assert re.search(r"^\.nm-remain \{ display: none; \}", THEME_CSS[theme_id], re.M), theme_id
     assert '".nm-remain{display:none}"' in APP_CODE                            # and so does a theme that says nothing
@@ -771,17 +774,17 @@ def test_the_pace_band_in_the_script_is_the_one_in_the_data_layer() -> None:
 def test_real_money_is_shown_in_the_currency_the_account_is_billed_in(checks: dict[str, Any]) -> None:
     def amounts(html: str) -> tuple[str, str]:
         page = Markup(html)
-        big = next(text for text in page.text if re.search(r"\d", text) and "USED" not in text and not text.startswith("OF"))
-        of = next(text for text in page.text if text.startswith("OF "))
+        big = next(text for text in page.text if re.search(r"\d", text) and "used" not in text and not text.startswith("Of"))
+        of = next(text for text in page.text if text.startswith("Of "))       # limits.credits.of, in natural case (#98)
         return big, of
 
-    assert amounts(checks["spend"]["EUR"]) == ("\u20ac12.50", "OF \u20ac50.00")      # the toast says "Used 12.50 of 50.00 EUR"
-    assert amounts(checks["spend"]["GBP"]) == ("\u00a312.50", "OF \u00a350.00")
-    assert amounts(checks["spend"]["USD"]) == ("$12.50", "OF $50.00")
-    assert amounts(checks["spend"]["none"]) == ("$12.50", "OF $50.00")            # no currency reported: read as USD
-    assert amounts(checks["spend"]["lower"]) == ("\u20ac12.50", "OF \u20ac50.00")
-    assert amounts(checks["spend"]["bad"]) == ("12.50 EURO", "OF 50.00 EURO")      # a code the browser cannot use
-    assert amounts(checks["spend"]["jpy"]) == ("\u00a513", "OF \u00a550")          # whole units where the currency has none
+    assert amounts(checks["spend"]["EUR"]) == ("\u20ac12.50", "Of \u20ac50.00")      # the toast says "Used 12.50 of 50.00 EUR"
+    assert amounts(checks["spend"]["GBP"]) == ("\u00a312.50", "Of \u00a350.00")
+    assert amounts(checks["spend"]["USD"]) == ("$12.50", "Of $50.00")
+    assert amounts(checks["spend"]["none"]) == ("$12.50", "Of $50.00")            # no currency reported: read as USD
+    assert amounts(checks["spend"]["lower"]) == ("\u20ac12.50", "Of \u20ac50.00")
+    assert amounts(checks["spend"]["bad"]) == ("12.50 EURO", "Of 50.00 EURO")      # a code the browser cannot use
+    assert amounts(checks["spend"]["jpy"]) == ("\u00a513", "Of \u00a550")          # whole units where the currency has none
     assert checks["fmtMoney"] == ["\u20ac1,234.50", "--", "$0.00"]
     assert checks["fmtUsdUnchanged"] == ["$12.50", "$1,235"]                       # API-equivalent cost stays dollars
 
@@ -921,7 +924,7 @@ def test_the_time_left_in_a_window_is_a_bar_the_themes_may_draw(checks: dict[str
     div, text = bar(remain["mid"])
     assert div["style"] == "--r:75.0%" and div["role"] == "img"                      # the share of the window that is left
     assert div["aria-label"].startswith("Time remaining 3 H 45 M, resets ") and div["title"] == div["aria-label"]
-    assert text == ["TIME REMAINING", "3 H 45 M"]
+    assert text == [ENGLISH_CATALOG["limit.remain.title"], "3 H 45 M"]               # the label in natural case (#98), the time a badge
     assert bar(remain["fresh"])[0]["style"] == "--r:100.0%" and bar(remain["fresh"])[1][1] == "5 H 0 M"
     assert bar(remain["week"])[0]["style"] == "--r:50.0%" and bar(remain["week"])[1][1] == "3 D 12 H"
     done, text = bar(remain["done"])
@@ -929,7 +932,7 @@ def test_the_time_left_in_a_window_is_a_bar_the_themes_may_draw(checks: dict[str
     assert remain["none"] == ""                                                       # no reset time, nothing to draw
     card = remain["card"]
     assert card.index('class="nm-row2"') < card.index('class="nm-remain"') < card.index('class="nm-pace"')
-    assert "RESETS <b>" in card and "IN " in card                                     # the other themes read the facts
+    assert "<span>Resets <b>" in card and re.search(r"<span>In \d+ h \d+ m</span>", card)   # the other themes read the facts
 
 
 # ── The Efficiency page, under its old name too ───────────────────────────────────
@@ -1085,11 +1088,11 @@ def literal_names(text: str) -> set[str] | None:
 
 
 def i18n_calls(code: str) -> list[tuple[str, str, set[str] | None]]:
-    """Every t, tHtml, tLang, tPlural, tLine and tUpper call with a literal key: (function, key, the placeholders it fills). The
-    placeholders are None when the scan cannot read them: a key built from parts, values not written in the call as an
-    object literal, or arguments the function does not take."""
+    """Every t, tHtml, tHtmlLine, tLang, tPlural, tLine and tUpper call with a literal key: (function, key, the placeholders
+    it fills). The placeholders are None when the scan cannot read them: a key built from parts, values not written in the
+    call as an object literal, or arguments the function does not take."""
     calls = []
-    for m in re.finditer(r'(?<![\w.$])(t|tHtml|tLang|tPlural|tLine|tUpper)\("([^"]+)"', code):
+    for m in re.finditer(r'(?<![\w.$])(t|tHtml|tHtmlLine|tLang|tPlural|tLine|tUpper)\("([^"]+)"', code):
         name, key = m.group(1), m.group(2)
         first, *rest = split_top(call_tail(code, m.end()))
         given: set[str] | None
@@ -1119,6 +1122,7 @@ def test_the_key_scan_reads_every_shape_of_call() -> None:
         ('tLine("k", { status: status })', ("tLine", "k", {"status"})),
         ('tLine("k")', ("tLine", "k", set())),
         ('tUpper("k", { amount: fmtUsd(a) })', ("tUpper", "k", {"amount"})),
+        ('tHtmlLine("k", { time: markup(b) })', ("tHtmlLine", "k", {"time"})),
         ('t("x.fn", pick(a, b))', ("t", "x.fn", None)),
         ('t("x.v", values)', ("t", "x.v", None)),
         ('t("x." + part)', ("t", "x.", None)),
@@ -1134,7 +1138,7 @@ def test_every_key_the_page_and_the_shell_use_is_in_english_with_its_placeholder
     this scan (and a translator's tools) can read them."""
     english = json.loads((WEBUI / "i18n" / "en.json").read_text(encoding="utf-8"))
     code = strip_comments(APP_CODE)
-    assert not re.findall(r'(?<![\w.$])(?<!function )(?:t|tHtml|tLang|tPlural|tLine|tUpper)\((?!")', code), "a key that is not a literal"
+    assert not re.findall(r'(?<![\w.$])(?<!function )(?:t|tHtml|tHtmlLine|tLang|tPlural|tLine|tUpper)\((?!")', code), "a key that is not a literal"
     calls = i18n_calls(code)
     shell = re.findall(r'\sdata-i18n(?:-[a-z-]+)?="([^"]+)"', INDEX)
     assert calls and shell
@@ -1185,8 +1189,19 @@ def test_the_pages_english_formats_record_is_whole() -> None:
 
 
 # The entries whose words moved into the catalog in natural case (#98), held to the record through the capitals a theme
-# shows them in: the health box's, which Nostromo and Night City set in capitals by CSS (Gates through gates.js before).
-SHOWN_IN_CAPITALS = {"health"}
+# shows them in: the health box's and the limit cards' forecast lines and the daily chart's meta, which Nostromo and Night
+# City set in capitals by CSS (Gates through gates.js before). Markup is compared as a browser shows it: the tags as they are,
+# the text between them in English's capitals with its entities read ("&middot;" is the "·" the catalog writes).
+SHOWN_IN_CAPITALS = {"health", "weeklyForecast", "dailyChart"}
+
+
+def in_capitals(value: Any) -> Any:
+    """A recorded value as Nostromo shows it: the text outside tags in English's capitals, entities read."""
+    if isinstance(value, list):
+        return [in_capitals(item) for item in value]
+    if not isinstance(value, str):
+        return value
+    return "".join(part if part.startswith("<") else casing.upper(part, "en") for part in re.split(r"(<[^>]*>)", unescape(value)))
 
 
 @ui_only
@@ -1200,11 +1215,11 @@ def test_the_pages_english_formats_are_the_recorded_ones() -> None:
     assert run.returncode == 0, run.stderr[-800:]
     found, english = json.loads(run.stdout), english_formats()
     assert list(found) == list(english)
-    shown = (lambda name, value: json.loads(casing.upper(json.dumps(value, ensure_ascii=False), "en"))
-             if name in SHOWN_IN_CAPITALS else value)
+    shown = (lambda name, value: in_capitals(value) if name in SHOWN_IN_CAPITALS else value)
     for name, cases in english.items():
         if isinstance(cases, dict):
-            changed = [(key, cases[key], found[name].get(key)) for key in cases if shown(name, found[name].get(key)) != cases[key]]
+            changed = [(key, cases[key], found[name].get(key)) for key in cases
+                       if shown(name, found[name].get(key)) != shown(name, cases[key])]
             assert not changed and list(found[name]) == list(cases), (name, changed[:5])
         else:
             assert found[name] == cases, name
@@ -1313,8 +1328,8 @@ def test_the_pages_figures_follow_the_format_tag(checks: dict[str, Any]) -> None
     assert ca["count"][3] == f"1{NB}234"
     assert fr["money"] == [f"5,96{NB}$", f"5,96{NB}EUR", f"5,96{NB}EURO"] and mx["money"][1] == f"EUR{NB}5.96"
     assert fr["prose"] == ["You are using this window 12,3 points faster than an even pace.",
-                           f"<b>ENDS ~33{NB}%</b> &middot; BUDGET 14{NB}%/DAY", f"33,5{NB}%", "1,2"]
-    assert tr["prose"][1] == "<b>ENDS ~%33</b> &middot; BUDGET %14/DAY"
+                           f"<b>Ends ~33{NB}%</b> · budget 14{NB}%/day", f"33,5{NB}%", "1,2"]     # #98: the catalog's words
+    assert tr["prose"][1] == "<b>Ends ~%33</b> · budget %14/day"
     assert tr["ticks"] == ["%0", "%25", "%50", "%75", "%100", "%140"] and fr["ticks"][4] == f"100{NB}%"
     assert fr["odometer"] == [[f"1{NNB}234{NNB}567 tokens, all time", f"1{NNB}234{NNB}567", 2],
                               ["-- tokens, all time", f"0{NNB}000{NNB}000{NNB}000", 3]]
@@ -1369,9 +1384,9 @@ def test_a_pending_money_note_takes_the_locales_shape(checks: dict[str, Any]) ->
     the locale's money with zeros for digits, so the note keeps its shape when the figure lands (English as it was)."""
     pending = checks["review"]["pending"]
     note = "the last 7 days, {} api-equivalent at list prices"
-    assert pending["en-US"] == ["TOP $00.00", note.format("$000.00"), note.format("$123.45")]
-    assert pending["fr-FR"] == [f"TOP 00,00{NB}$", note.format(f"000,00{NB}$"), note.format(f"123,45{NB}$")]
-    assert pending["tr-TR"] == ["TOP $00,00", note.format("$000,00"), note.format("$123,45")]
+    assert pending["en-US"] == ["Top $00.00", note.format("$000.00"), note.format("$123.45")]   # overview.daily.top (#98)
+    assert pending["fr-FR"] == [f"Top 00,00{NB}$", note.format(f"000,00{NB}$"), note.format(f"123,45{NB}$")]
+    assert pending["tr-TR"] == ["Top $00,00", note.format("$000,00"), note.format("$123,45")]
     assert pending["es-MX"] == pending["en-US"]
 
 
@@ -1989,7 +2004,7 @@ def test_a_chip_takes_its_tone_from_its_status_id_not_from_its_words(checks: dic
     assert checks["tones"]["session"] == ["alert", "warn", "ok", "neutral", "neutral", "neutral"]     # LIMITED, AT_RISK, SAFE, IDLE, UNKNOWN, unknown
     assert checks["tones"]["weekly"] == ["warn", "ok", "ok", "neutral", "neutral"]                   # AHEAD, ON_PACE, BEHIND, UNKNOWN, unknown
     assert checks["burnTone"] == {"IDLE": "neutral", "SLOW": "neutral", "NORMAL": "ok", "FAST": "acc", "VERY FAST": "warn", "constructor": "neutral"}
-    assert checks["paceWords"] == ["AHEAD OF PACE", "UNDER PACE", "NO DRAW"]                         # the words themselves are unchanged
+    assert checks["paceWords"] == ["Ahead of pace", "Under pace", "No draw"]                         # the catalog's (#98), natural case
     guard = checks["guard"]["live"]
     assert (tone_in(guard["off"]), tone_in(guard["armed"]), tone_in(guard["holding"])) == ("neutral", "ok", "alert")
 
@@ -2190,7 +2205,7 @@ def test_the_overview_says_so_when_the_cost_report_failed_and_nothing_stands_in(
         shown = cost[name]
         assert shown["states"] == ["cost:error", "efficiency:error", "models:error"], name
         assert shown["errorLines"] == 3 and shown["stillPending"] is False, name      # one line each, and no placeholder left
-        assert "STATISTICS UNAVAILABLE" in shown["problem"], name
+        assert "<b>Statistics unavailable</b>" in shown["problem"], name                 # banner.stats.unavailable_title (#98)
     assert "not available in this build" in cost["failed501"]["problem"]              # the same sentence the other pages give
     assert "HTTP 500" in cost["failedBilling"]["problem"]
     # a report that is only on its way is still a placeholder, and the monitor's own month still stands in when there is one
@@ -3764,7 +3779,7 @@ def test_the_overviews_record_cards_say_so_and_the_others_stay(checks: dict[str,
         html = cards[key]["html"]
         assert cards[key]["state"] == "ready" and "data-needs" not in html, key
         assert f'<h2 class="nm-ttl">{title}</h2>' in html, key                          # the frame and the title stay
-        assert html.endswith(f'<p class="nm-empty">{NO_ACTIVITY}.</p></div></section>'), key
+        assert html.endswith('<p class="nm-empty">No <span translate="no">Claude Code</span> activity on this PC.</p></div></section>'), key
         assert not re.search(r"nm-big|nm-mrow|nm-kpi|nm-tile|nm-chart|nm-cost|nm-cells", html), key
     for key in ("limit-session", "limit-weekly", "limit-scoped", "surfaces", "burn"):
         assert "No Claude Code activity" not in cards[key]["html"], key
@@ -3888,6 +3903,163 @@ def test_gates_takes_its_own_words_and_the_others_never_do(checks: dict[str, Any
         before = words[look]["none"]
         assert (before["uplink"], before["age"], before["link"]) == (
             en["page.gates.link.loading" if gates else "header.link.loading"], en["page.gates.age_none" if gates else "header.age_none"], "--")
+
+
+@ui_only
+def test_gates_says_the_burn_rates_cost_an_hour_its_own_way_before_there_is_a_rate(checks: dict[str, Any]) -> None:
+    """#98: with no burn rate the card's cost an hour is "-- / hour"; gates.js made "-- / Hour" of today's capitals (its
+    sentence case raises the first word after the dashes), so Gates has its own words for it. With a rate it is the same
+    line in every look."""
+    en, words = ENGLISH_CATALOG, checks["gatesWords"]
+    for look in ("gates", "frenchGates", "nostromo", "nightCity", "frenchNostromo"):
+        mark = ' lang="en"' if look.startswith("french") else None
+        none = en["page.gates.burn.per_hour_none"] if look.lower().endswith("gates") else en["overview.burn.per_hour"].replace("{amount}", "--")
+        assert words[look]["none"]["hour"] == [mark, none], look
+        assert words[look]["live"]["hour"][0] == mark and words[look]["live"]["hour"][1].endswith(" / hour"), look
+    assert en["page.gates.burn.per_hour_none"] == "-- / Hour"
+
+
+# ── The banners', Overview's and Limits' words (#98) ─────────────────────────────────────────────────────────────
+
+# What ui/server.py answers the statistics routes with: each text the page compares to tell two reasons of one status apart
+SERVER_CODE = (Path(__file__).resolve().parent.parent / "usage_monitor" / "ui" / "server.py").read_text(encoding="utf-8")
+
+
+def test_the_reason_texts_the_page_compares_are_the_servers() -> None:
+    """#98: statReason tells a report's reasons apart by the answer's status and, within a status, by the monitor's text,
+    compared whole. Each text in app.js's table, with its status, is one ui/server.py answers: a change on either side fails
+    here, not silently on the page (where the reason would read "HTTP 503")."""
+    table = re.search(r"var STAT_ERRORS = \{(.*?)\};", APP_CODE, re.S).group(1)
+    texts = dict(re.findall(r'(\w+): "([^"]+)"', table))
+    statuses = {code: int(status) for code, status in re.findall(r"(\w+): (\d{3})", re.search(
+        r"var STAT_ERROR_STATUS = \{(.*?)\};", APP_CODE, re.S).group(1))}
+    assert set(texts) == set(statuses) == {"unavailable", "busy", "closed", "internal", "token"}
+    for code, text in texts.items():
+        status = statuses[code]
+        raised = f'_HttpError({status}, "{text}")' in SERVER_CODE
+        sent = f'self._send_json(req, {status}, {{"error": "{text}"}})' in SERVER_CODE
+        assert raised or sent, (code, status, text)
+    # and they are the catalog's English for those reasons (#97's rule: every answer the monitor gives reads as before)
+    assert all(ENGLISH_CATALOG["stats.reason." + code] == text for code, text in texts.items())
+
+
+@ui_only
+def test_each_stats_answer_is_worded_by_its_status(checks: dict[str, Any]) -> None:
+    """#98: a failed report's reason in the banners and the problem lines is the catalog's, chosen by the answer's status
+    (and the monitor's text where a status has two reasons), never the text as the monitor sent it. Every answer the page can
+    get reads in English as it did; one it cannot (a 400, a 503 with another text) is named by its status. On a French page
+    the reason is French where the catalog has it, else English's marked lang="en", inside the French sentence."""
+    reasons = checks["stageB"]["reasons"]
+    codes = {name: found["code"] for name, found in reasons.items()}
+    assert codes == {"lost": "lost", "token": "token", "token_blank": "http", "unavailable": "unavailable", "internal": "internal",
+                     "internal_other": "http", "busy": "busy", "closed": "closed", "busy_other": "http", "bad_gateway": "http",
+                     "query": "http", "wrong_status": "http"}
+    said = {"lost": "the dashboard lost its link", "token": "missing or wrong token", "token_blank": "HTTP 401",
+            "unavailable": "statistics are not available", "internal": "internal error", "internal_other": "HTTP 500",
+            "busy": "statistics are not available right now", "closed": "the statistics database could not be opened",
+            "busy_other": "HTTP 503", "bad_gateway": "HTTP 502", "query": "HTTP 400", "wrong_status": "HTTP 503"}
+    for name, found in reasons.items():
+        assert found["stale"] == ('<div class="nm-msg" role="status"><b>Statistics old</b>The latest refresh failed ('
+                                  f"{said[name]}). These figures are from 3 m ago.</div>"), name
+        problem = re.sub(r"^.*</b>", "", found["problem"])[:-len("</div>")]
+        status = {"unavailable": 501, "busy": 503, "closed": 503, "busy_other": 503, "wrong_status": 503}.get(name)
+        assert problem == {501: ENGLISH_CATALOG["stats.problem.unavailable"], 503: ENGLISH_CATALOG["stats.problem.not_ready"]}.get(
+            status, f"Statistics could not be loaded ({said[name]}). Trying again shortly."), name
+        french = found["frenchStale"]
+        assert french.startswith('<div class="nm-msg" role="status"><b lang="en">Statistics old</b>OLD-FR ('), name
+        assert ("(BUSY-FR)" in french) == (name == "busy") and (f'(<span lang="en">{said[name]}</span>)' in french) == (name != "busy"), name
+    assert reasons["internal"]["frenchProblem"].endswith('FAILED-FR (<span lang="en">internal error</span>)</div>')
+
+
+@ui_only
+def test_a_time_left_inside_a_sentence_is_in_lower_case(checks: dict[str, Any]) -> None:
+    """#98: inside a sentence ("In {time}") the time left is written as a sentence writes it (English "3 h 27 m", CLDR's
+    units as they are elsewhere), so Nostromo and Night City set it in capitals with the words around it and Gates shows it
+    as written; alone (a badge, the facts' value) it keeps today's form, which gates.js still re-cases there. Under a minute
+    it is format.now: "now" and "NOW"."""
+    remain = checks["stageB"]["remain"]
+    assert remain["en"] == {"sentence": ["3 h 27 m", "2 d 3 h", "59 m", "now", "now"], "badge": ["3 H 27 M", "2 D 3 H", "59 M", "NOW", "NOW"]}
+    fr = remain["fr"]
+    assert fr["sentence"][1] == "maintenant" and fr["badge"][1] == "MAINTENANT"
+    assert fr["badge"][0] == casing.upper(fr["sentence"][0], "fr") != fr["sentence"][0]
+    assert "<span>In 3 h 27 m</span>" in remain["card"]                                # the card's fact takes the sentence's form
+
+
+@ui_only
+def test_the_daily_tips_count_requests_with_the_languages_plural(checks: dict[str, Any]) -> None:
+    """#98: a column's tip counts its requests with the plural form of the language the tip's words came from (the page's
+    CLDR rules): French counts 0 and 1 as one, Spanish only 1, English only 1."""
+    tips = checks["stageB"]["tips"]                                   # the last three days, whatever today is
+    assert all(re.match(r"[A-Z]{3}, [A-Z]{3} \d{1,2}: ", tip) for tip in tips["en"]), tips["en"]
+    assert [tip.split(": ", 1)[1] for tip in tips["en"]] == ["$1.50 API-equivalent, 0 requests", "$1.50 API-equivalent, 1 request",
+                                                            "$1.50 API-equivalent, 2 requests"]
+    assert [tip.split()[-1] for tip in tips["fr"]] == ["R-ONE", "R-ONE", "R-OTHER"]
+    assert [tip.split()[-1] for tip in tips["es"]] == ["R-OTHER", "R-ONE", "R-OTHER"]
+
+
+@ui_only
+def test_english_limit_tags_are_the_limits_own_and_other_languages_name_the_kind(checks: dict[str, Any]) -> None:
+    """#98: in English a limit's tag is its own label, the identity string the data layer gives (#90), as a name, and the
+    pacing card's aria-label keeps it, capitals and all. Another language names the limit from its kind and scope (the
+    widgets' rule, #93): "{name} weekly" with the scope as the usage API names it, the scoped placeholder "Scoped", and a
+    kind it has no words for keeps the label. A name's element is marked translate="no" there; English keeps its markup."""
+    tags = checks["stageB"]["tags"]
+    en = {name: (tag["text"], tag["lang"], tag.get("name", False)) for name, tag in tags["en"].items()}
+    assert en == {"scoped": ("FABLE WEEKLY", "", True), "surface": ("CLAUDE_CODE WEEKLY", "", True), "unnamed": ("WEEKLY SCOPED", "", True),
+                  "pending": ("SCOPED", "", True), "session": ("SESSION", "", True), "unlabelled": ("Session", "en", False),
+                  "weekly": ("WEEKLY", "", True), "other": ("MONTHLY THING", "", True), "otherBare": ("MONTHLY THING", "", True)}
+    fr = {name: (tag["text"], tag["lang"], tag.get("name", False)) for name, tag in tags["fr"].items()}
+    assert fr == {"scoped": ("Fable HEBDO-FR", "fr", False), "surface": ("claude_code HEBDO-FR", "fr", False),
+                  "unnamed": ("Weekly scoped", "en", False), "pending": ("Scoped", "en", False), "session": ("SESSION-FR", "fr", False),
+                  "unlabelled": ("SESSION-FR", "fr", False), "weekly": ("Weekly", "en", False), "other": ("MONTHLY THING", "", True),
+                  "otherBare": ("MONTHLY THING", "", True)}
+    markup = checks["stageB"]["tagMarkup"]
+    assert '<span class="nm-tag">FABLE WEEKLY</span><span class="nm-meta-t">7-day window</span>' in markup["en"]
+    assert '<span class="nm-tag">Fable HEBDO-FR</span><span class="nm-meta-t" lang="en">7-day window</span>' in markup["fr"]
+    assert '<span class="nm-tag" lang="en">Weekly</span>' in markup["frWeekly"]
+    assert 'aria-label="SESSION"' in markup["pacingEn"] and '<span class="nm-tag">SESSION</span>' in markup["pacingEn"]
+    assert 'aria-label="SESSION-FR"' in markup["pacingFr"]
+    assert "translate=" not in markup["en"] + markup["pacingEn"]
+
+
+@ui_only
+def test_an_unknown_plan_is_worded_by_the_page(checks: dict[str, Any]) -> None:
+    """#90's hand-off, done here: a plan whose sign-in names no subscription keeps "Unknown plan" in the data layer's name;
+    the page shows plan.unknown in its place (English as before, another language its own words). A plan with a
+    subscription keeps its name, and a plan with no name the cost card's fallback."""
+    plan = checks["stageB"]["plan"]
+    assert plan["words"] == ["Unknown plan", "Forfait inconnu", "Max 5x", None, "", "Team"]
+    assert '<span><span translate="no">UNKNOWN PLAN</span> · $50 / month</span>' in plan["en"]
+    assert '<span translate="no">FORFAIT INCONNU</span>' in plan["fr"] and "Unknown plan" not in plan["fr"]
+    assert "1 cell = 1 month of Forfait inconnu plan" in plan["fr"]          # ratio.note, plain text (the Cost page escapes it)
+
+
+@ui_only
+def test_the_pacing_cards_hidden_texts_are_in_the_pages_words_and_formats(checks: dict[str, Any]) -> None:
+    """#98's critic 14: until the pacing report answers, a card holds a hidden sentence as long as the one it waits for. It is
+    the catalog's sentence in the page's formats: the clock of noon (English 12:00 PM, French 12:00) and the language's 00.0."""
+    pending = checks["stageB"]["pending"]
+    en = ENGLISH_CATALOG
+    assert [s["text"] for s in pending["en"]] == [en["limits.story.session.pending"].replace("{time}", "12:00 PM"),
+                                                  en["limits.story.weekly.behind"]["other"].replace("{count}", "00.0")]
+    assert [s["text"] for s in pending["fr"]] == [en["limits.story.session.pending"].replace("{time}", "12:00"),
+                                                  en["limits.story.weekly.behind"]["other"].replace("{count}", "00,0")]
+    assert {s["chip"] for s in pending["en"]} == {"Unknown"} and all(s["toneId"] == "neutral" for s in pending["en"])
+
+
+@ui_only
+def test_a_pacing_charts_label_is_one_sentence_with_both_parts(checks: dict[str, Any]) -> None:
+    """#98's critic 25: what a screen reader reads for a limit's chart is one key, limits.chart.label, with the readings and
+    the forecast as its two parts, so a translator sees the whole and may change their order."""
+    label = checks["stageB"]["chartLabel"]
+    assert label["en"].startswith("Weekly usage readings, 2 points. Reaches 100% about ") and label["en"].endswith(" at this rate")
+    assert label["fr"].startswith(f"Reaches 100{NB}% about ") and label["fr"].endswith(" at this rate // Weekly usage readings, 2 points")
+
+
+@ui_only
+def test_a_limits_severity_is_worded_from_its_code(checks: dict[str, Any]) -> None:
+    severity = checks["stageB"]["severity"]
+    assert "Severity</span><b>nominal</b>" in severity["en"] and "<b>normal-fr</b>" in severity["fr"]
 
 
 @ui_only
@@ -4097,6 +4269,23 @@ def test_each_themes_entrance_moves_every_word_of_what_it_animates(page_words: d
         overview, limits = checked[f"nostromo|{lang}|live|overview"], checked[f"nostromo|{lang}|live|limits"]
         assert overview[".nm-mrow .k"] >= 7 and overview[".nm-meta-t"] >= 8 and limits[".nm-kv-grid .nm-kv b"] >= 20
         assert checked[f"night_city|{lang}|live|limits"][".nm-mrow .v, .nm-kv-grid .nm-kv b"] >= 30
+
+
+@ui_only
+def test_english_on_a_french_page_is_marked_on_overview_and_limits(page_words: dict[str, Any]) -> None:
+    """#98: on a French page whose catalog has none of these words yet, every English word of Overview and Limits sits in
+    an element marked lang="en" (a name in one marked translate="no"), live and before the first state, in Nostromo and
+    Night City; what has no mark is the page's own French figures, dates and durations. Charts' SVG labels are cased by
+    their own language (tUpper) and are left out."""
+    unmarked = page_words["entrance"]["unmarked"]
+    assert set(unmarked) == {f"{look}|fr|{case}|{page}" for look in ("nostromo", "night_city") for case in ("live", "before-state")
+                             for page in ("overview", "limits")}
+    texts = [value for value in ENGLISH_CATALOG.values() for value in (value.values() if isinstance(value, dict) else [value])]
+    english = {word.lower() for text in texts for word in re.findall(r"[A-Za-z]{4,}", text)}
+    for key, found in unmarked.items():
+        assert found, key                                                   # the figures are there to read
+        words = [text for text in found if {word.lower() for word in re.findall(r"[A-Za-z]{4,}", text)} & english]
+        assert not words, (key, words)
 
 
 MINI_DOM_JS = Path(__file__).resolve().parent / "mini_dom.js"

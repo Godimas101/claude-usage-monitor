@@ -18,7 +18,12 @@
  * the odometer's digit strips, segmented bars (.nm-cells, .nm-ratio), the time-left bar (.nm-remain, hidden), the
  * chart hosts, and the invisible text of a value that has not arrived (see Pending). Everything
  * else, and all of the look, is the theme's. Text is natural case wherever a theme may want a different
- * one (use text-transform); the overview cards keep their approved upper case.
+ * one (use text-transform). The words of the overview and limits cards and of the banners are the catalog's (#98), in natural
+ * case: Nostromo and Night City set the cards' approved capitals with text-transform. What stays in capitals in the markup is
+ * data and figures: English's limit labels (identity strings), names (FMT.upper, #91), dates and the badges' durations. An
+ * element a theme's entrance moves (.nm-tag .nm-ttl .nm-meta-t .nm-mrow .k, .nm-kv-grid b) holds its words as its own text.
+ * On another language's page the element itself carries lang="en" for English's words and translate="no" for a name, never a
+ * span inside it; an English page's markup has neither.
  *
  * Shell       .nm-screen > .nm-content > header.nm-bar (.nm-brand .nm-bar-r .nm-uplink .nm-alive
  *             .nm-refresh) + .nm-app > nav.nm-nav (.nm-kick .nm-menu a.on .nm-health .nm-kv .nm-phos
@@ -190,6 +195,7 @@
   // daily chart's "TOP $00.00" in English.
   var COST_NOTE_PLACEHOLDER = FMT.usd("123.45").replace(/\d/g, "0");
   var TOP_PLACEHOLDER = FMT.usd("12.34").replace(/\d/g, "0");
+  var DAILY_DAYS = 30;                    // the days the Overview's daily chart shows
   var LOCALE_RELOAD_MARK = "usage-monitor-locale-reload:";
   // A reload that brought the page into the locale it was for is done: its mark goes (reloadForLocale).
   if (LOCALE_KNOWN && window.name === localeMark(LOCALE)) {
@@ -271,6 +277,7 @@
   var COPY_MS = 3000;
   var COPY_SELECT_MS = 8000;
   // The pages that count Claude Code's records, on a PC that has none (#28): someone who uses Claude on the web or in the app.
+  var CLAUDE_CODE = "Claude Code";               // a name, as written: never translated (tName)
   var NO_ACTIVITY = "No Claude Code activity on this PC";
   var NO_ACTIVITY_WHY = "These pages count the work Claude Code records on this PC. Claude on the web and in the Claude app keeps no records here, so there is nothing to count. Your limits, pace and alerts work as usual.";
   var BASIS = "API-equivalent at list prices";
@@ -546,6 +553,22 @@
     return fillText(cased, values);
   }
 
+  /* Escaped HTML for key as tHtml makes it, and the language it came from: { html, lang }, for an element that holds the
+   * line as its own text. English on another language's page is marked on that element (lineLangAttr), never by a span
+   * inside it: a theme's entrance types and decodes an element's own text (#98's critic 2). */
+  function tHtmlLine(key, values) {
+    var found = lookupText(key);
+    var text = found && typeof found.value === "string" ? found.value : key;
+    var html = esc(text).replace(/\{([A-Za-z_][A-Za-z0-9_]*)\}/g, function (whole, name) {
+      if (!values || !Object.prototype.hasOwnProperty.call(values, name)) {
+        return whole;
+      }
+      var value = values[name];
+      return isMarkup(value) ? value.html : esc(value);
+    });
+    return { html: html, lang: found ? found.lang : "en" };
+  }
+
   function esc(value) {
     return String(value === null || value === undefined ? "" : value).replace(/[&<>"']/g, function (c) {
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
@@ -701,13 +724,17 @@
     return n === null ? "--" : FMT.number(Math.round(n));
   }
 
-  function fmtRemain(ms) {
+  /* The time left in a window: "3 H 27 M" on its own (a badge, which a theme may show as it is), or inside a sentence
+   * (inSentence) "3 h 27 m", which a theme sets in capitals with the words around it (#98: "In {time}"). Under a minute it is
+   * format.now: "NOW" and "now". */
+  function fmtRemain(ms, inSentence) {
     if (ms === null || !isFinite(ms)) {
       return "--";
     }
     var minutes = Math.floor(ms / 60000);
     if (minutes <= 0) {
-      return "NOW";
+      var now = tLine("format.now");
+      return inSentence ? now.text : FMT.upper(now.text, now.lang);
     }
     var days = Math.floor(minutes / 1440);
     var hours = Math.floor((minutes % 1440) / 60);
@@ -715,15 +742,17 @@
     if (!FMT.english) {
       // CLDR's narrow units in capitals (#91: "2J 3H" in French), with the widgets' parts: no zero tail (countdown_units).
       var parts = days >= 1 ? [[days, "d"], [hours, "h"]] : hours >= 1 ? [[hours, "h"], [mins, "m"]] : [[mins, "m"]];
-      return FMT.upper(FMT.duration(parts[1] && parts[1][0] === 0 ? parts.slice(0, 1) : parts));
+      var words = FMT.duration(parts[1] && parts[1][0] === 0 ? parts.slice(0, 1) : parts);
+      return inSentence ? words : FMT.upper(words);
     }
+    var unit = inSentence ? AGE_UNIT_IN_SENTENCE : AGE_UNIT;
     if (days >= 1) {
-      return days + " D " + hours + " H";
+      return days + " " + unit.D + " " + hours + " " + unit.H;
     }
     if (hours >= 1) {
-      return hours + " H " + mins + " M";
+      return hours + " " + unit.H + " " + mins + " " + unit.M;
     }
-    return mins + " M";
+    return mins + " " + unit.M;
   }
 
   /* An age as a number and a unit code (S, M, H or D), or null when there is none. ageWords writes it. */
@@ -948,6 +977,27 @@
     return { text: text, lang: "" };
   }
 
+  /* A name that stands alone in an element (a model, a surface, a limit's own label): its text as given, with no language of
+   * its own, and translate="no" on the element on another language's page. An English page keeps the markup it had. */
+  function nameLine(text) {
+    return { text: text, lang: "", name: true };
+  }
+
+  /* The attributes of an element that shows a line (from tLine, tHtmlLine, bareLine or nameLine): lang="en" while the line is
+   * English on another language's page, and translate="no" there for a name. On the element itself, never on a span inside
+   * it: a theme's entrance moves an element's own text (#98's critic 2). A plain string has none. */
+  function lineAttrs(line) {
+    if (!line || typeof line !== "object") {
+      return "";
+    }
+    return lineLangAttr(line.lang) + (line.name && I18N.language !== "en" ? ' translate="no"' : "");
+  }
+
+  /* The text of a line, or a plain string as it is. */
+  function lineText(line) {
+    return line && typeof line === "object" ? line.text : line;
+  }
+
   /* Whether the page is in the Gates look: the server writes data-theme into the first paint, applyTheme on a change. */
   function gatesLook() {
     return document.documentElement.getAttribute("data-theme") === "gates";
@@ -999,6 +1049,14 @@
   /* The burn rate's unit beside its figure. */
   function burnUnitLine() {
     return gatesLook() ? tLine("page.gates.burn.unit") : tLine("overview.burn.unit");
+  }
+
+  /* The burn rate's cost an hour, under its unit: "$1.10 / hour", "-- / hour" before there is a rate (Gates: "-- / Hour"). */
+  function burnHourLine(burn) {
+    if (!burn) {
+      return gatesLook() ? tLine("page.gates.burn.per_hour_none") : tLine("overview.burn.per_hour", { amount: "--" });
+    }
+    return tLine("overview.burn.per_hour", { amount: fmtUsd(burn.usd_per_hour) });
   }
 
   // Each page's heading and the sentence beside it.
@@ -1248,19 +1306,64 @@
     ensureStats();
   }
 
+  // ── Why a report failed (#98) ───────────────────────────────────────────────────
+  // A failed report's reason is worded by the page, never shown as the monitor sent it: the reason's code comes from the
+  // answer's HTTP status and, where a status has more than one reason, from the monitor's own text, compared whole. These are
+  // the texts ui/server.py answers the statistics routes with (a test holds each to its literal there). #102 may give the
+  // answers codes: it changes statReason only.
+  var STAT_ERRORS = {
+    unavailable: "statistics are not available",                     // 501: this build has no statistics
+    busy: "statistics are not available right now",                  // 503: a report failed on the database twice
+    closed: "the statistics database could not be opened",           // 503: the database could not be opened
+    internal: "internal error",                                      // 500: a handler raised
+    token: "missing or wrong token"                                  // 401: the dashboard's token
+  };
+  var STAT_ERROR_STATUS = { unavailable: 501, busy: 503, closed: 503, internal: 500, token: 401 };
+
+  // The words of each reason, one literal key a line.
+  var STAT_REASONS = {
+    lost: function () { return tHtml("stats.reason.lost"); },
+    unavailable: function () { return tHtml("stats.reason.unavailable"); },
+    busy: function () { return tHtml("stats.reason.busy"); },
+    closed: function () { return tHtml("stats.reason.closed"); },
+    internal: function () { return tHtml("stats.reason.internal"); },
+    token: function () { return tHtml("stats.reason.token"); },
+    http: function (status) { return tHtml("stats.reason.http", { status: status }); }
+  };
+
+  /* The reason a report failed, as a code: "lost" when the monitor did not answer (the request itself failed), the reason of
+   * a known text with its own status, else "http" (named by its status). Every answer the monitor gives the page reads as
+   * it did; an answer with a text the page does not know is named by its status. */
+  function statReason(e) {
+    if (!e.status) {
+      return "lost";
+    }
+    var found = Object.keys(STAT_ERRORS).filter(function (code) {
+      return STAT_ERROR_STATUS[code] === e.status && STAT_ERRORS[code] === e.error;
+    })[0];
+    return found || "http";
+  }
+
+  /* The reason in words, as markup for a sentence's {reason}. */
+  function statReasonHtml(e) {
+    return markup(STAT_REASONS[statReason(e)](String(e.status)));
+  }
+
+  /* The whole sentence of a failed report, as markup: for the banner and for a Limits card's chart. */
   function statProblem(e) {
     if (e.status === 503) {
-      return "The usage database is not ready yet. The monitor creates it when it first reads your transcripts; this page tries again every few seconds.";
+      return markup(tHtml("stats.problem.not_ready"));
     }
     if (e.status === 501) {
-      return "Statistics are not available in this build.";
+      return markup(tHtml("stats.problem.unavailable"));
     }
-    return "Statistics could not be loaded (" + e.error + "). Trying again shortly.";
+    return markup(tHtml("stats.problem.failed", { reason: statReasonHtml(e) }));
   }
 
   /* The one line a card shows in place of its numbers when its report failed (the whole sentence is in the banner). */
   function statProblemShort(e) {
-    return e.status === 503 ? "Not ready yet. Trying again shortly." : e.status === 501 ? "Not available in this build." : "Could not be loaded. Trying again shortly.";
+    return markup(e.status === 503 ? tHtml("stats.short.not_ready") : e.status === 501 ? tHtml("stats.short.unavailable") :
+      tHtml("stats.short.failed"));
   }
 
   /* How a card that draws from these reports is doing: "ready" (every report is in, possibly an older one that is being
@@ -1323,7 +1426,9 @@
     if (!bad.length) {
       return "";
     }
-    return '<div class="nm-msg" role="status"><b>STATISTICS OLD</b>' + esc("The latest refresh failed (" + bad[0].error + "). These figures are from " + ageWords(fmtAge(Date.now() - bad[0].at), AGE_UNIT_IN_SENTENCE) + " ago.") + "</div>";
+    var title = tLine("banner.stats.old_title");
+    return '<div class="nm-msg" role="status"><b' + lineLangAttr(title.lang) + ">" + esc(title.text) + "</b>" +
+      tHtml("banner.stats.old_line", { reason: statReasonHtml(bad[0]), age: ageWords(fmtAge(Date.now() - bad[0].at), AGE_UNIT_IN_SENTENCE) }) + "</div>";
   }
 
   /* A banner with the whole sentence when a report failed and there is no older one to show: each card it feeds says only
@@ -1333,7 +1438,8 @@
     if (!bad.length) {
       return "";
     }
-    return '<div class="nm-msg" role="status"><b>STATISTICS UNAVAILABLE</b>' + esc(statProblem(bad[0])) + "</div>";
+    var title = tLine("banner.stats.unavailable_title");
+    return '<div class="nm-msg" role="status"><b' + lineLangAttr(title.lang) + ">" + esc(title.text) + "</b>" + htmlOf(statProblem(bad[0])) + "</div>";
   }
 
   // ── State accessors ─────────────────────────────────────────────────────────────
@@ -1419,7 +1525,12 @@
     return pct >= 75 ? "warning" : "normal";
   }
 
-  var SEVERITY_WORD = { normal: "NOMINAL", warning: "ADVISORY", critical: "CRITICAL" };
+  // A limit's severity in words (the Limits page's facts), by severityOf's code.
+  var SEVERITY_WORDS = {
+    normal: function () { return tLine("limits.severity.normal"); },
+    warning: function () { return tLine("limits.severity.warning"); },
+    critical: function () { return tLine("limits.severity.critical"); }
+  };
 
   function worstSeverity(list) {
     var rank = { normal: 0, warning: 1, critical: 2 };
@@ -1446,22 +1557,33 @@
     return { elapsed: elapsed, diff: diff, kind: kind, reset: reset, remain: reset - now };
   }
 
-  /* The chip of a limit: its words, its class and its tone (data-tone: the status, which Gates colours). */
+  // A limit's pace chip in words, by its code (paceChip), and the card's pace line that says how far off pace it is. A chip
+  // with no clock has no reset time, so its line is limit.diff.no_reset (limitCard).
+  var PACE_WORDS = {
+    unused: function () { return tLine("limit.pace.unused"); },
+    no_draw: function () { return tLine("limit.pace.no_draw"); },
+    ahead: function () { return tLine("limit.pace.ahead"); },
+    under: function () { return tLine("limit.pace.under"); },
+    on: function () { return tLine("limit.pace.on"); },
+    no_clock: function () { return tLine("limit.pace.no_clock"); }
+  };
+  var PACE_DIFF = {
+    unused: function (points) { return tLine("limit.diff.unused", { points: points }); },
+    no_draw: function (points) { return tLine("limit.diff.no_draw", { points: points }); },
+    ahead: function (points) { return tLine("limit.diff.ahead", { points: points }); },
+    under: function (points) { return tLine("limit.diff.under", { points: points }); },
+    on: function (points) { return tLine("limit.diff.on", { points: points }); }
+  };
+
+  /* The chip of a limit: its code, its words (text, lang), its class and its tone (data-tone: the status, which Gates
+   * colours). */
   function paceChip(limit, p, scoped) {
     var pct = num(limit.percent) || 0;
-    if (pct <= 0) {
-      return { text: scoped ? "NO DRAW" : "UNUSED", cls: "", tone: "neutral" };
-    }
-    if (p.kind === "ahead") {
-      return { text: "AHEAD OF PACE", cls: " solid", tone: "warn" };
-    }
-    if (p.kind === "behind") {
-      return { text: "UNDER PACE", cls: "", tone: "ok" };
-    }
-    if (p.kind === "on_pace") {
-      return { text: "ON PACE", cls: "", tone: "ok" };
-    }
-    return { text: "NO CLOCK", cls: "", tone: "neutral" };
+    var code = pct <= 0 ? (scoped ? "no_draw" : "unused") : p.kind === "ahead" ? "ahead" : p.kind === "behind" ? "under" :
+      p.kind === "on_pace" ? "on" : "no_clock";
+    var line = PACE_WORDS[code]();
+    return { code: code, text: line.text, lang: line.lang, cls: code === "ahead" ? " solid" : "",
+      tone: code === "ahead" ? "warn" : code === "under" || code === "on" ? "ok" : "neutral" };
   }
 
   function cellsHTML(n, value) {
@@ -1482,8 +1604,8 @@
   }
 
   function railHTML(p) {
-    var t = p.elapsed === null ? 0 : p.elapsed * 100;
-    return '<div class="nm-rail" style="--t:' + t.toFixed(1) + '%" title="Time elapsed in this window"><i></i><b></b></div>';
+    var gone = p.elapsed === null ? 0 : p.elapsed * 100;
+    return '<div class="nm-rail" style="--t:' + gone.toFixed(1) + '%" title="' + esc(t("limit.rail.title")) + '"><i></i><b></b></div>';
   }
 
   /* The time left in a window as a bar: filled by the share of the window that remains, labelled with the time. Every
@@ -1493,9 +1615,10 @@
       return "";
     }
     var left = fmtRemain(p.remain);
-    var text = "Time remaining " + left + ", resets " + clockText(p.reset);
+    var text = t("limit.remain.label", { time: left, reset: clockText(p.reset) });   // the bar's own forms: 3 H 45 M
+    var label = tLine("limit.remain.title");
     return '<div class="nm-remain" style="--r:' + ((1 - p.elapsed) * 100).toFixed(1) + '%" role="img" aria-label="' + esc(text) + '" title="' + esc(text) +
-      '"><span class="l">TIME REMAINING</span><span class="v">' + esc(left) + "</span></div>";
+      '"><span class="l"' + lineAttrs(label) + ">" + esc(label.text) + '</span><span class="v">' + esc(left) + "</span></div>";
   }
 
   function sevClass(limit) {
@@ -1510,16 +1633,21 @@
     }
     switch (blk.verdict) {
       case "LIMITED":
-        return "<b>LIMIT REACHED</b>";
+        return "<b>" + tHtml("limit.forecast.limited") + "</b>";
       case "AT_RISK":
-        return "<b>LIMIT ~" + esc(clockText(parseTime(blk.projected_limit_at))) + "</b> BEFORE RESET";
+        return tHtml("limit.forecast.at_risk", { lead: boldLead(tHtml("limit.forecast.at_risk_lead", { time: clockText(parseTime(blk.projected_limit_at)) })) });
       case "SAFE":
-        return "<b>SAFE</b> UNTIL RESET";
+        return tHtml("limit.forecast.safe", { lead: boldLead(tHtml("limit.forecast.safe_lead")) });
       case "IDLE":
-        return "<b>IDLE</b> NO RECENT DRAW";
+        return tHtml("limit.forecast.idle", { lead: boldLead(tHtml("limit.forecast.idle_lead")) });
       default:
-        return "FORECAST NEEDS MORE READINGS";
+        return tHtml("limit.forecast.more_readings");
     }
+  }
+
+  /* The bold words that lead a forecast line, for its {lead} or {end}. */
+  function boldLead(html) {
+    return markup("<b>" + html + "</b>");
   }
 
   function weeklyForecast(blk) {
@@ -1528,11 +1656,8 @@
     }
     var end = num(blk.projected_end_pct);
     var budget = num(blk.daily_budget_pct);
-    var parts = [end === null ? "PROJECTION NEEDS MORE TIME" : "<b>ENDS ~" + FMT.percent(String(Math.round(end))) + "</b>"];
-    if (budget !== null) {
-      parts.push("BUDGET " + FMT.percent(String(Math.round(budget))) + "/DAY");
-    }
-    return parts.join(" &middot; ");
+    var lead = end === null ? markup(tHtml("limit.forecast.more_time")) : boldLead(tHtml("limit.forecast.ends_lead", { percent: FMT.percent(String(Math.round(end))) }));
+    return budget === null ? lead.html : tHtml("limit.forecast.weekly", { end: lead, budget: FMT.percent(String(Math.round(budget))) });
   }
 
   /* The pacing row of a scoped limit: the one of the same kind and scope, its model and its surface (the labels of two limits
@@ -1545,41 +1670,76 @@
     return found || (list || [])[index] || null;
   }
 
+  /* The tag of a limit's card (a line). English shows the limit's own label, the identity string the data layer gives (#90:
+   * "SESSION", "FABLE WEEKLY"), as a name. Another language names the limit from its kind and scope, as the widgets do (#93),
+   * the scope as the usage API names it; a kind it has no words for keeps the limit's label. The scoped limit of a page that
+   * waits for its first reading is "Scoped". */
+  function limitTag(limit) {
+    if (limit.label && I18N.language === "en") {
+      return nameLine(limit.label);
+    }
+    if (limit.kind === "session") {
+      return tLine("limit.name.session");
+    }
+    if (limit.kind === "weekly_all") {
+      return tLine("limit.name.weekly");
+    }
+    if (limit.kind === "weekly_scoped") {
+      var scope = limit.scope_model || limit.scope_surface || "";
+      return limit.placeholder ? tLine("limit.name.scoped_pending") : scope ? tLine("limit.name.scoped", { name: scope }) :
+        tLine("limit.name.scoped_unnamed");
+    }
+    return nameLine(limit.label || FMT.upper(String(limit.kind || "").replace(/_/g, " "), "en"));
+  }
+
+  /* The sign and the whole points of a pace difference: "+12", "-30". */
+  function pacePoints(diff) {
+    return (diff >= 0 ? "+" : "") + FMT.number(String(Math.round(diff)), NO_GROUP);
+  }
+
   function limitCard(limit, opts) {
     opts = opts || {};
     var now = Date.now();
     var p = paceOf(limit, now);
     var pct = num(limit.percent) || 0;
     var chip = paceChip(limit, p, !!opts.share);
-    var tag = limit.label || (limit.kind === "session" ? "SESSION" : "WEEKLY");
+    var tag = limitTag(limit);
     var facts = [];
     if (opts.share) {
-      facts.push("<span>OF " + esc(fmtPct(opts.share)) + " SHARE</span>");
+      var share = tLine("limit.fact.share", { percent: fmtPct(opts.share) });
+      facts.push("<span" + lineAttrs(share) + ">" + esc(share.text) + "</span>");
     }
     if (p.reset !== null) {
-      facts.push("<span>RESETS <b>" + esc(clockText(p.reset)) + "</b></span>");
+      var resets = tHtmlLine("limit.fact.resets", { time: markup("<b>" + esc(clockText(p.reset)) + "</b>") });
+      facts.push("<span" + lineAttrs(resets) + ">" + resets.html + "</span>");
       if (!opts.share) {
-        facts.push("<span>IN " + esc(fmtRemain(p.remain)) + "</span>");
+        var left = tLine("limit.fact.in", { time: fmtRemain(p.remain, true) });
+        facts.push("<span" + lineAttrs(left) + ">" + esc(left.text) + "</span>");
       }
     }
-    facts.push('<span class="nm-chip' + chip.cls + '" data-tone="' + chip.tone + '">' + esc(chip.text) + "</span>");
-    var diffText = p.diff === null ? "NO RESET TIME" : (p.diff >= 0 ? "+" : "") + Math.round(p.diff) + " PTS, " + chip.text;
+    facts.push('<span class="nm-chip' + chip.cls + '" data-tone="' + chip.tone + '"' + lineAttrs(chip) + ">" + esc(chip.text) + "</span>");
+    var diff = p.diff === null ? tLine("limit.diff.no_reset") : PACE_DIFF[chip.code](pacePoints(p.diff));
+    var pace = tLine("limit.pace.line", { used: fmtPct(pct), elapsed: p.elapsed === null ? "--" : fmtPct(p.elapsed * 100) });
+    var pending = tLine("limit.forecast.more_readings");
     return '<section class="nm-card' + (opts.wide ? " wide" : "") + sevClass(limit) + '" data-limit="' + esc(limit.kind) + '">' +
       '<div class="nm-card-in">' +
-      '<div class="nm-card-t"><span class="nm-tag">' + esc(tag) + '</span><span class="nm-meta-t">' + esc(opts.meta || "") + "</span></div>" +
+      '<div class="nm-card-t"><span class="nm-tag"' + lineAttrs(tag) + ">" + esc(tag.text) + '</span><span class="nm-meta-t"' + lineAttrs(opts.meta) + ">" +
+      esc(lineText(opts.meta) || "") + "</span></div>" +
       '<div class="nm-row2"><div class="nm-big">' + esc(fmtPct(pct)) + '</div><div class="nm-facts">' + facts.join("") + "</div></div>" +
       remainHTML(p) +
-      '<div class="nm-pace"><span>USAGE ' + esc(fmtPct(pct)) + " / TIME " + esc(p.elapsed === null ? "--" : fmtPct(p.elapsed * 100)) +
-      "</span><b>" + esc(diffText) + "</b>" +
-      (opts.fcPending ? '<span class="fc" data-pending="">FORECAST NEEDS MORE READINGS</span>' : opts.fc ? '<span class="fc">' + opts.fc + "</span>" : "") + "</div>" +
+      '<div class="nm-pace"><span' + lineAttrs(pace) + ">" + esc(pace.text) + "</span><b" + lineAttrs(diff) + ">" + esc(diff.text) + "</b>" +
+      (opts.fcPending ? '<span class="fc" data-pending=""' + lineAttrs(pending) + ">" + esc(pending.text) + "</span>" : opts.fc ? '<span class="fc">' + opts.fc + "</span>" : "") + "</div>" +
       '<div class="nm-cells" aria-hidden="true">' + cellsHTML(32, pct) + "</div>" +
       railHTML(p) +
       "</div></section>";
   }
 
+  /* A limit's card before its first reading, or with no limit to show: tag and meta are lines. */
   function emptyLimitCard(tag, meta) {
-    return '<section class="nm-card"><div class="nm-card-in"><div class="nm-card-t"><span class="nm-tag">' + esc(tag) +
-      '</span><span class="nm-meta-t">' + esc(meta) + '</span></div><p class="nm-empty">Waiting for the first reading.</p></div></section>';
+    var waiting = tLine("overview.limit.waiting");
+    return '<section class="nm-card"><div class="nm-card-in"><div class="nm-card-t"><span class="nm-tag"' + lineAttrs(tag) + ">" + esc(tag.text) +
+      '</span><span class="nm-meta-t"' + lineAttrs(meta) + ">" + esc(meta.text) + '</span></div><p class="nm-empty"' + lineAttrs(waiting) + ">" +
+      esc(waiting.text) + "</p></div></section>";
   }
 
   // ── Building blocks shared by the pages ─────────────────────────────────────────
@@ -1587,12 +1747,13 @@
   /* A card. o: {key, title | tag, meta (text) or metaHtml (markup, for controls), cls, id, body, label}. key is the card's id
    * (data-card): what the Gates icons and the scripts name it by. The title is its words, for people, and never a key. */
   function card(o) {
-    var meta = o.metaHtml !== undefined ? o.metaHtml : '<span class="nm-meta-t">' + esc(o.meta || "") + "</span>";
+    // title, tag, meta and label may be lines (tLine): an English one on another language's page marks its element itself
+    var meta = o.metaHtml !== undefined ? o.metaHtml : '<span class="nm-meta-t"' + lineAttrs(o.meta) + ">" + esc(lineText(o.meta) || "") + "</span>";
     var head = o.tag
-      ? '<div class="nm-card-t"><span class="nm-tag">' + esc(o.tag) + "</span>" + meta + "</div>"
-      : '<div class="nm-card-t"><h2 class="nm-ttl">' + esc(o.title) + "</h2>" + meta + "</div>";
+      ? '<div class="nm-card-t"><span class="nm-tag"' + lineAttrs(o.tag) + ">" + esc(lineText(o.tag)) + "</span>" + meta + "</div>"
+      : '<div class="nm-card-t"><h2 class="nm-ttl"' + lineAttrs(o.title) + ">" + esc(lineText(o.title)) + "</h2>" + meta + "</div>";
     return '<section class="nm-card' + (o.cls ? " " + o.cls : "") + '"' + (o.id ? ' id="' + o.id + '"' : "") +
-      ' aria-label="' + esc(o.label || o.title || o.tag || "") + '" data-card="' + esc(o.key) + '"><div class="nm-card-in">' + head + o.body +
+      ' aria-label="' + esc(lineText(o.label) || lineText(o.title) || lineText(o.tag) || "") + '" data-card="' + esc(o.key) + '"><div class="nm-card-in">' + head + o.body +
       "</div></section>";
   }
 
@@ -1660,7 +1821,7 @@
       try {
         host.innerHTML = spec.build(width);
       } catch (e) {
-        host.innerHTML = '<p class="nm-error" role="status">This chart could not be drawn.</p>';
+        host.innerHTML = '<p class="nm-error" role="status">' + tHtml("stats.chart_failed") + "</p>";
         if (window.console && console.error) {
           console.error("chart failed", e);
         }
@@ -1695,10 +1856,18 @@
     return r === null || r <= RATIO_CELLS_MAX ? 1 : Math.ceil(r / RATIO_CELLS_MAX);
   }
 
-  /* The caption under the bar: what one cell is. */
-  function ratioNote(ratio, planName) {
+  /* The caption under the bar: what one cell is, as plain text (the Cost & value page escapes it) and the language it came
+   * from: { text, lang }. The plan's name goes in as written. */
+  function ratioNoteLine(ratio, planName) {
     var step = ratioScale(ratio);
-    return "1 cell = " + step + (step === 1 ? " month" : " months") + " of " + (planName ? planName + " plan" : "the plan");
+    var count = FMT.number(String(step), NO_GROUP);
+    return planName
+      ? { text: tPlural("ratio.note", step, { count: count, plan: planName }), lang: tLang("ratio.note") }
+      : { text: tPlural("ratio.note_unnamed", step, { count: count }), lang: tLang("ratio.note_unnamed") };
+  }
+
+  function ratioNote(ratio, planName) {
+    return ratioNoteLine(ratio, planName).text;
   }
 
   /* cells: a length for the row when the multiple is not known yet (an empty track of that many cells). */
@@ -1718,14 +1887,15 @@
         out += "<i></i>";
       }
     }
-    var named = step > 1 ? label + ", 1 cell = " + step + " months" : label;
+    var named = step > 1 ? tPlural("ratio.scaled", step, { label: label, count: FMT.number(String(step), NO_GROUP) }) : label;
     return '<div class="nm-ratio" role="img" aria-label="' + esc(named) + '">' + out + "</div>";
   }
 
-  /* A row of cells with a label and a value: the model mix and the pace meter use it. */
+  /* A row of cells with a label and a value: the model mix and the pace meter use it. The label may be a line (tLine, nameLine):
+   * it is the label's own text, which Nostromo's entrance types. */
   function mixRow(label, percent, valueText, title) {
-    return '<div class="nm-mrow"><span class="k"' + (title ? ' title="' + esc(title) + '"' : "") + ">" + esc(label) + '</span><div class="nm-cells" aria-hidden="true">' +
-      cellsHTML(20, percent) + '</div><span class="v">' + esc(valueText) + "</span></div>";
+    return '<div class="nm-mrow"><span class="k"' + (title ? ' title="' + esc(title) + '"' : "") + lineAttrs(label) + ">" + esc(lineText(label)) +
+      '</span><div class="nm-cells" aria-hidden="true">' + cellsHTML(20, percent) + '</div><span class="v">' + esc(valueText) + "</span></div>";
   }
 
   // ── Placeholders: the shape of what has not arrived yet ─────────────────────────
@@ -1749,14 +1919,16 @@
     return now - now % 60000;
   }
 
-  /* The limits, the surface split and the credits as the monitor will send them. */
+  /* The limits, the surface split and the credits as the monitor will send them. Their labels are the identity strings the
+   * data layer gives (identity.py), which English shows; placeholder marks them, so another language names the scoped one
+   * "Scoped" (limitTag) and not after its stand-in scope. */
   function skelUsage() {
     var now = stillNow();
     function limit(kind, label, seconds, scope) {
       return {
         kind: kind, label: label, percent: 0, severity: "normal", window_seconds: seconds,
         resets_at: new Date(now + seconds * 500).toISOString(), scope_model: scope || null,
-        allowance_pct: scope ? 50 : null, used_pct_of_weekly: scope ? 0 : null
+        allowance_pct: scope ? 50 : null, used_pct_of_weekly: scope ? 0 : null, placeholder: true
       };
     }
     return {
@@ -1891,7 +2063,7 @@
     var html = build();
     if (state === "error") {
       var failed = needs.filter(function (e) { return !e.data && e.error; })[0];
-      html = errorSwap(html, failed ? statProblemShort(failed) : "Could not be loaded.");
+      html = errorSwap(html, failed ? statProblemShort(failed) : markup(tHtml("stats.short.none")));
     } else if (none) {
       html = emptySwap(html, none);
     }
@@ -1920,14 +2092,14 @@
     return open[0] + '<div class="nm-card-in">' + head[0] + line + "</div></section>";
   }
 
-  /* ... with the problem, when the card's report failed. */
+  /* ... with the problem, when the card's report failed. message: plain text, or markup this file built (a catalog line). */
   function errorSwap(html, message) {
-    return cardSwap(html, '<p class="nm-error" role="status">' + esc(message) + "</p>");
+    return cardSwap(html, '<p class="nm-error" role="status">' + htmlOf(message) + "</p>");
   }
 
-  /* ... with what it would have counted, when there is nothing to count. */
+  /* ... with what it would have counted, when there is nothing to count. message: as errorSwap's. */
   function emptySwap(html, message) {
-    return cardSwap(html, '<p class="nm-empty">' + esc(message) + "</p>");
+    return cardSwap(html, '<p class="nm-empty">' + htmlOf(message) + "</p>");
   }
 
   var FIGURES = ".nm-big, .nm-stat-v, .nm-stat-s, .nm-mrow .v, .nm-kv b, .nm-facts > span, .nm-pace > span, .nm-pace > b, .nm-pace > .fc, " +
@@ -2284,6 +2456,12 @@
     });
   }
 
+  /* A plan's name for people: the catalog's "Unknown plan" for a plan whose sign-in names no subscription (#90: the data layer
+   * keeps that English text in its name, and a cost report copies it), else the plan's own name, as written. */
+  function planWords(plan) {
+    return plan && plan.name && plan.subscription_type === null ? t("plan.unknown") : plan ? plan.name : "";
+  }
+
   /* The cost figures the overview shows: from the cost report once it is in, from the data service's own
    * windows until then (the same windows, so the numbers do not jump when the report arrives). */
   function costNumbers() {
@@ -2302,17 +2480,17 @@
       out.thinking = tk.output > 0 ? tk.thinking / tk.output : null;
       out.multiplier = num(d.value.multiplier);
       out.projected = num(d.value.projected_cycle_cost_usd);
-      out.planName = d.plan.name;
+      out.planName = planWords(d.plan);
       out.price = num(d.plan.price_usd);
       out.cycleStart = d.value.cycle_start;
       out.cycleEnd = d.value.cycle_end;
       out.models = d.breakdowns.by_model.slice(0, 4).map(function (m) { return { id: m.model, name: m.name, share: m.share * 100 }; });
       return out;
     }
-    var plan = planFromState();
+    var s = st();
     var month = windowOf("month"), today = windowOf("today"), week = windowOf("week");
     var calendarCycle = S.settings.billing_day === null || S.settings.billing_day === undefined;
-    out.planName = plan.name;
+    out.planName = s && s.plan ? planWords(s.plan) : "";
     out.price = effectivePlanPrice();
     if (month && calendarCycle) {
       out.cycle = num(month.totals.cost_usd);
@@ -2353,40 +2531,43 @@
   function dailyChart(cycleStart) {
     var he = statEntry("history");
     var d = he.data;
+    var title = { text: tPlural("overview.daily.title", DAILY_DAYS, { count: fmtInt(DAILY_DAYS) }), lang: tLang("overview.daily.title") };
     if (!d && he.error) {
-      return '<div class="nm-card-t nm-chart-t"><span class="nm-ttl">DAILY &middot; LAST 30 DAYS</span><span class="nm-meta-t">&nbsp;</span></div>' +
-        '<div class="nm-chart"><p class="nm-pending">Daily history is not available yet.</p></div>';
+      return '<div class="nm-card-t nm-chart-t"><span class="nm-ttl"' + lineAttrs(title) + ">" + esc(title.text) + '</span><span class="nm-meta-t">&nbsp;</span></div>' +
+        '<div class="nm-chart"><p class="nm-pending">' + tHtml("overview.daily.unavailable") + "</p></div>";
     }
     var waiting = !d;
     if (waiting) {
       d = skelHistory();
     }
-    var days = d.days.slice(-30);
+    var days = d.days.slice(-DAILY_DAYS);
     var costs = days.map(function (x) { return num(x.cost_usd) || 0; });
     var max = Math.max.apply(null, costs.concat([0]));
     var avg = costs.length ? costs.reduce(function (a, v) { return a + v; }, 0) / costs.length : 0;
     var step = CHARTS.niceStep(max / 14);
     var pipsOn = CHARTS.refresh();
-    var meta = max <= 0 ? "NO USE YET" : pipsOn ? "1 PIP = " + fmtPlanPrice(step) : "TOP " + fmtUsdShort(max);
-    var labels = [{ i: days.length - 1, text: "TODAY" }];
+    var meta = waiting ? tLine("overview.daily.top", { amount: TOP_PLACEHOLDER }) : max <= 0 ? tLine("overview.daily.no_use") :
+      pipsOn ? tLine("overview.daily.pip", { amount: fmtPlanPrice(step) }) : tLine("overview.daily.top", { amount: fmtUsdShort(max) });
+    var labels = [{ i: days.length - 1, text: tUpper("overview.daily.today") }];
     if (cycleStart) {
       var cs = ymdOf(new Date(parseTime(cycleStart)));
       days.forEach(function (x, i) { if (x.date === cs && i > 0) { labels.push({ i: i, text: dayLabel(x.date) }); } });
     }
     labels.push({ i: 0, text: dayLabel(days[0] && days[0].date) });
     var tips = days.map(function (x) {
-      return dayText(x.date) + ": " + fmtUsd(x.cost_usd) + " API-equivalent, " + plural(x.requests, "request");
+      return tPlural("overview.daily.tip", Math.round(num(x.requests) || 0), { day: dayText(x.date), cost: fmtUsd(x.cost_usd), count: fmtInt(x.requests) });
     });
     var avgText = avg >= 1000 ? fmtUsdShort(avg) : avg < 10 ? fmtUsd(avg) :
       FMT.english ? "$" + Math.round(avg) : FMT.usd(String(Math.round(avg)));
     var host = chartHost(function (w) {
       return CHARTS.columns(costs, {
         width: w, height: 132, gutterRight: 68, step: step, labels: labels, tips: tips, current: days.length - 1,
-        avg: { value: avg, label: "AVG " + avgText },
-        label: "Daily API-equivalent cost, last 30 days, average " + fmtUsd(avg) + " a day"
+        avg: { value: avg, label: tUpper("overview.daily.avg", { amount: avgText }) },
+        label: tPlural("overview.daily.label", DAILY_DAYS, { count: fmtInt(DAILY_DAYS), amount: fmtUsd(avg) })
       });
     }, [he.digest, pipsOn, cycleStart], "nm-daily", waiting);
-    return '<div class="nm-card-t nm-chart-t"><span class="nm-ttl">DAILY &middot; LAST 30 DAYS</span><span class="nm-meta-t"' + (waiting ? ' data-pending=""' : "") + ">" + esc(waiting ? "TOP " + TOP_PLACEHOLDER : meta) + "</span></div>" +
+    return '<div class="nm-card-t nm-chart-t"><span class="nm-ttl"' + lineAttrs(title) + ">" + esc(title.text) + '</span><span class="nm-meta-t"' + (waiting ? ' data-pending=""' : "") +
+      lineAttrs(meta) + ">" + esc(meta.text) + "</span></div>" +
       '<div class="nm-chart">' + host + "</div>";
   }
 
@@ -2399,26 +2580,28 @@
     var heroText = fmtUsdHero(n.cycle);
     var planBlock;
     if (n.price === null) {
-      planBlock = '<div class="nm-plan"><div class="nm-big m">--</div><div class="nm-facts"><span>PLAN PRICE UNKNOWN</span><span>SET IT IN SETTINGS</span></div></div>';
+      planBlock = '<div class="nm-plan"><div class="nm-big m">--</div><div class="nm-facts"><span>' + tHtml("overview.cost.price_unknown") + "</span><span>" +
+        tHtml("overview.cost.set_price") + "</span></div></div>";
     } else {
-      var proj = n.projected !== null ? "At this pace the cycle ends near " + fmtUsd(n.projected) + " (" + fmtMult(n.projected / n.price) + ")." : "";
-      planBlock = '<div class="nm-plan"><div class="nm-big m"' + (proj ? ' title="' + esc(proj) + '"' : "") + ">" + esc(fmtMult(n.multiplier)) + '</div><div class="nm-facts"><span>YOUR PLAN</span><span>' +
-        esc(FMT.upper(n.planName || "PLAN")) + " &middot; " + esc(fmtPlanPrice(n.price)) + " / MONTH</span></div></div>";
+      var proj = n.projected !== null ? t("overview.cost.projection", { amount: fmtUsd(n.projected), multiple: fmtMult(n.projected / n.price) }) : "";
+      // the plan's name in the page's capitals, as written (#91); a plan with no name is the catalog's
+      var plan = n.planName ? tName(FMT.upper(n.planName)) : markup(tHtml("overview.cost.plan_fallback"));
+      planBlock = '<div class="nm-plan"><div class="nm-big m"' + (proj ? ' title="' + esc(proj) + '"' : "") + ">" + esc(fmtMult(n.multiplier)) + '</div><div class="nm-facts"><span>' +
+        tHtml("overview.cost.your_plan") + "</span><span>" + tHtml("overview.cost.plan_price", { plan: plan, price: fmtPlanPrice(n.price) }) + "</span></div></div>";
     }
     var ratio = n.multiplier;
-    var note = n.price === null
-      ? "Set the plan price in Settings to see the multiple."
-      : esc(ratioNote(ratio, n.planName));
-    var title = "API-equivalent cost, this cycle";
-    var meta = (n.cycleStart ? rangeText(n.cycleStart, n.cycleEnd) + " &middot; " : "") + "AT LIST PRICES";
-    return '<section class="nm-card wide" id="cost" aria-label="' + esc(title) + '" data-card="cost"><div class="nm-card-in">' +
-      '<div class="nm-card-t"><h2 class="nm-ttl">' + esc(title) + '</h2><span class="nm-meta-t">' + meta + "</span></div>" +
+    var note = n.price === null ? tLine("overview.cost.no_multiple") : ratioNoteLine(ratio, n.planName);
+    var title = tLine("overview.cost.title");
+    var meta = n.cycleStart ? tLine("overview.cost.meta_range", { range: rangeText(n.cycleStart, n.cycleEnd) }) : tLine("overview.cost.meta");
+    var today = tLine("overview.cost.today"), week = tLine("overview.cost.week");
+    return '<section class="nm-card wide" id="cost" aria-label="' + esc(title.text) + '" data-card="cost"><div class="nm-card-in">' +
+      '<div class="nm-card-t"><h2 class="nm-ttl"' + lineAttrs(title) + ">" + esc(title.text) + '</h2><span class="nm-meta-t"' + lineAttrs(meta) + ">" + esc(meta.text) + "</span></div>" +
       '<div class="nm-cost"><div class="nm-cost-l"><div class="nm-hero"><div class="nm-big h" style="--n:' + heroText.length + '">' + esc(heroText) + "</div>" + planBlock + "</div>" +
-      (ratio === null || n.price === null ? "" : ratioCells(ratio, fmtMult(ratio) + " months of the plan", n.pending ? 12 : 0)) +
-      '<div class="nm-note">' + note + "</div>" +
-      '<div class="nm-note nm-disc">' + BASIS + ", not amounts billed to your plan.</div>" +
-      '<div class="nm-tiles"><div class="nm-tile"><small>Today</small><div class="nm-big m">' + esc(fmtUsdTile(n.today)) +
-      '</div></div><div class="nm-tile"><small>7 days</small><div class="nm-big m">' + esc(fmtUsdTile(n.week)) + "</div></div></div></div>" +
+      (ratio === null || n.price === null ? "" : ratioCells(ratio, t("overview.cost.ratio_label", { multiple: fmtMult(ratio) }), n.pending ? 12 : 0)) +
+      '<div class="nm-note"' + lineAttrs(note) + ">" + esc(note.text) + "</div>" +
+      '<div class="nm-note nm-disc">' + tHtml("overview.cost.basis") + "</div>" +
+      '<div class="nm-tiles"><div class="nm-tile"><small' + lineAttrs(today) + ">" + esc(today.text) + '</small><div class="nm-big m">' + esc(fmtUsdTile(n.today)) +
+      '</div></div><div class="nm-tile"><small' + lineAttrs(week) + ">" + esc(week.text) + '</small><div class="nm-big m">' + esc(fmtUsdTile(n.week)) + "</div></div></div></div>" +
       '<div class="nm-cost-r">' + dailyChart(n.cycleStart) + "</div>" +
       "</div></div></section>";
   }
@@ -2426,13 +2609,16 @@
   function efficiencyCard(n) {
     var hit = n.hit === null ? null : n.hit * 100;
     var thinking = n.thinking === null ? null : n.thinking * 100;
-    return '<section class="nm-card" id="efficiency" aria-label="Cache and thinking" data-card="efficiency"><div class="nm-card-in">' +
-      '<div class="nm-card-t"><h2 class="nm-ttl">Cache &amp; thinking</h2><span class="nm-meta-t">' + (n.loaded ? "this cycle" : "this month") + "</span></div>" +
-      '<div class="nm-kpi"><div class="nm-kl">Cache hit rate</div><div class="nm-big m">' + esc(hit === null ? "--" : FMT.percent(hit.toFixed(1))) +
+    var title = tLine("overview.efficiency.title");
+    var meta = n.loaded ? tLine("overview.efficiency.cycle") : tLine("overview.efficiency.month");
+    return '<section class="nm-card" id="efficiency" aria-label="' + esc(t("overview.efficiency.label")) + '" data-card="efficiency"><div class="nm-card-in">' +
+      '<div class="nm-card-t"><h2 class="nm-ttl"' + lineAttrs(title) + ">" + esc(title.text) + '</h2><span class="nm-meta-t"' + lineAttrs(meta) + ">" + esc(meta.text) + "</span></div>" +
+      '<div class="nm-kpi"><div class="nm-kl">' + tHtml("overview.efficiency.hit") + '</div><div class="nm-big m">' + esc(hit === null ? "--" : FMT.percent(hit.toFixed(1))) +
       '</div><div class="nm-cells" aria-hidden="true">' + cellsHTML(20, hit || 0) + "</div></div>" +
-      '<div class="nm-kpi"><div class="nm-kl">Thinking share of output</div><div class="nm-big m">' + esc(thinking === null ? "--" : fmtPct(thinking)) +
+      '<div class="nm-kpi"><div class="nm-kl">' + tHtml("overview.efficiency.thinking") + '</div><div class="nm-big m">' + esc(thinking === null ? "--" : fmtPct(thinking)) +
       '</div><div class="nm-cells" aria-hidden="true">' + cellsHTML(20, thinking || 0) + "</div></div>" +
-      '<div class="nm-kpi is-row"><div class="nm-kl">Caching saved</div><div class="nm-big s" title="What the same tokens would cost with no caching, minus what they cost">' + esc(fmtUsdShort(n.saved)) + "</div></div>" +
+      '<div class="nm-kpi is-row"><div class="nm-kl">' + tHtml("overview.efficiency.saved") + '</div><div class="nm-big s" title="' + esc(t("overview.efficiency.saved_title")) + '">' +
+      esc(fmtUsdShort(n.saved)) + "</div></div>" +
       "</div></section>";
   }
 
@@ -2440,11 +2626,15 @@
     var rows = n.models;
     var body = rows.length
       ? rows.map(function (r) {
-        return '<div class="nm-mrow"><span class="k" title="' + esc(r.id) + '">' + esc(FMT.upper(r.name)) + '</span><div class="nm-cells" aria-hidden="true">' +
+        var name = nameLine(FMT.upper(r.name));
+        return '<div class="nm-mrow"><span class="k" title="' + esc(r.id) + '"' + lineAttrs(name) + ">" + esc(name.text) + '</span><div class="nm-cells" aria-hidden="true">' +
           cellsHTML(20, r.share) + '</div><span class="v">' + esc(fmtPct(r.share)) + "</span></div>";
       }).join("")
-      : '<p class="nm-empty">No model mix yet.</p>';
-    return '<section class="nm-card" id="models" aria-label="Model mix" data-card="models"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Model mix</h2><span class="nm-meta-t">share of cost, ' + (n.loaded ? "cycle" : "month") + "</span></div>" +
+      : '<p class="nm-empty">' + tHtml("overview.models.none") + "</p>";
+    var title = tLine("overview.models.title");
+    var meta = n.loaded ? tLine("overview.models.cycle") : tLine("overview.models.month");
+    return '<section class="nm-card" id="models" aria-label="' + esc(title.text) + '" data-card="models"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl"' + lineAttrs(title) + ">" +
+      esc(title.text) + '</h2><span class="nm-meta-t"' + lineAttrs(meta) + ">" + esc(meta.text) + "</span></div>" +
       '<div class="nm-mix">' + body + "</div></div></section>";
   }
 
@@ -2452,28 +2642,44 @@
     var rows = u && u.breakdown ? u.breakdown : [];
     var body = rows.length
       ? rows.map(function (r) {
-        return '<div class="nm-mrow"><span class="k">' + esc(FMT.upper(String(r.name || r.key || ""))) + '</span><div class="nm-cells" aria-hidden="true">' +
+        var name = nameLine(FMT.upper(String(r.name || r.key || "")));
+        return '<div class="nm-mrow"><span class="k"' + lineAttrs(name) + ">" + esc(name.text) + '</span><div class="nm-cells" aria-hidden="true">' +
           cellsHTML(20, r.percent) + '</div><span class="v">' + esc(fmtPct(r.percent)) + "</span></div>";
       }).join("")
-      : '<p class="nm-empty">No surface split reported yet.</p>';
-    return '<section class="nm-card" aria-label="Where the week went" data-card="surfaces"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Where the week went</h2><span class="nm-meta-t">share, 7 days</span></div>' +
+      : '<p class="nm-empty">' + tHtml("overview.surfaces.none") + "</p>";
+    var title = tLine("overview.surfaces.title");
+    var meta = tLine("overview.surfaces.meta");
+    return '<section class="nm-card" aria-label="' + esc(title.text) + '" data-card="surfaces"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl"' + lineAttrs(title) + ">" +
+      esc(title.text) + '</h2><span class="nm-meta-t"' + lineAttrs(meta) + ">" + esc(meta.text) + "</span></div>" +
       '<div class="nm-mix">' + body + "</div></div></section>";
   }
 
   // The tone of a burn velocity, by the code the monitor sends (IDLE, SLOW, NORMAL, FAST or VERY FAST); the others are neutral.
   var VELOCITY_TONE = { NORMAL: "ok", FAST: "acc", "VERY FAST": "warn" };
+  // Its words, by the same code. A code the table does not name is shown as it came, as a name.
+  var VELOCITY_WORDS = {
+    IDLE: function () { return tLine("overview.burn.velocity.idle"); },
+    SLOW: function () { return tLine("overview.burn.velocity.slow"); },
+    NORMAL: function () { return tLine("overview.burn.velocity.normal"); },
+    FAST: function () { return tLine("overview.burn.velocity.fast"); },
+    "VERY FAST": function () { return tLine("overview.burn.velocity.very_fast"); }
+  };
 
   function burnCard(s) {
     var burn = s && s.burn ? s.burn : null;
     var velocity = burn ? String(burn.velocity || "IDLE") : "IDLE";
     var unit = burnUnitLine();
+    var title = tLine("overview.burn.title");
+    var chip = Object.prototype.hasOwnProperty.call(VELOCITY_WORDS, velocity) ? VELOCITY_WORDS[velocity]() : nameLine(velocity);
+    var hour = burnHourLine(burn);
     // Until two samples are in (one every poll), the trace is its frame alone.
     var spark = S.samples.length > 1
-      ? CHARTS.sparkline(S.samples, { width: 300, height: 58, label: "Burn rate, recent samples" })
-      : CHARTS.sparkline([], { width: 300, height: 58, label: "Burn rate, sampling" }).replace("<svg ", '<svg data-pending="" ');
-    return '<section class="nm-card" id="burn" aria-label="Burn rate" data-card="burn"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Burn rate</h2><span class="nm-chip" data-tone="' + toneOf(VELOCITY_TONE, velocity) + '">' + esc(velocity) + "</span></div>" +
+      ? CHARTS.sparkline(S.samples, { width: 300, height: 58, label: t("overview.burn.spark") })
+      : CHARTS.sparkline([], { width: 300, height: 58, label: t("overview.burn.sampling") }).replace("<svg ", '<svg data-pending="" ');
+    return '<section class="nm-card" id="burn" aria-label="' + esc(title.text) + '" data-card="burn"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl"' + lineAttrs(title) + ">" +
+      esc(title.text) + '</h2><span class="nm-chip" data-tone="' + toneOf(VELOCITY_TONE, velocity) + '"' + lineAttrs(chip) + ">" + esc(chip.text) + "</span></div>" +
       '<div class="nm-row2 is-base"><div class="nm-big m">' + esc(burn ? fmtInt(burn.tokens_per_min) : "--") +
-      '</div><div class="nm-facts"><span' + lineLangAttr(unit.lang) + ">" + esc(unit.text) + "</span><span>" + esc(burn ? fmtUsd(burn.usd_per_hour) : "--") + " / HOUR</span></div></div>" +
+      '</div><div class="nm-facts"><span' + lineLangAttr(unit.lang) + ">" + esc(unit.text) + "</span><span" + lineAttrs(hour) + ">" + esc(hour.text) + "</span></div></div>" +
       spark + "</div></section>";
   }
 
@@ -2502,23 +2708,26 @@
     var scoped = scopedLimits();
     var cards = [];
     cards.push(cardPart("limit-session", waiting, [pe], function () {
-      return session ? limitCard(session, { meta: "5-hour window", fc: pd ? sessionForecast(pd.session) : "", fcPending: forecast }) : emptyLimitCard("SESSION", "5-hour window");
+      return session ? limitCard(session, { meta: tLine("limit.meta.session"), fc: pd ? sessionForecast(pd.session) : "", fcPending: forecast }) :
+        emptyLimitCard(tLine("limit.name.session"), tLine("limit.meta.session"));
     }));
     cards.push(cardPart("limit-weekly", waiting, [pe], function () {
-      return weekly ? limitCard(weekly, { meta: "7-day window", fc: pd ? weeklyForecast(pd.weekly) : "", fcPending: forecast }) : emptyLimitCard("WEEKLY", "7-day window");
+      return weekly ? limitCard(weekly, { meta: tLine("limit.meta.weekly"), fc: pd ? weeklyForecast(pd.weekly) : "", fcPending: forecast }) :
+        emptyLimitCard(tLine("limit.name.weekly"), tLine("limit.meta.weekly"));
     }));
     cards.push(cardPart("limit-scoped", waiting, [pe], function () {
       if (!scoped.length) {
-        return emptyLimitCard("SCOPED", "No scoped limit reported");
+        return emptyLimitCard(tLine("limit.name.scoped_pending"), tLine("overview.limit.no_scoped"));
       }
       var first = scoped[0];
-      return limitCard(first, { meta: "7-day window", share: num(first.allowance_pct), fc: pd ? weeklyForecast(matchScoped(pd.scoped, first, 0)) : "", fcPending: forecast });
+      return limitCard(first, { meta: tLine("limit.meta.weekly"), share: num(first.allowance_pct), fc: pd ? weeklyForecast(matchScoped(pd.scoped, first, 0)) : "",
+        fcPending: forecast });
     }));
     var n = costNumbers();
     var he = statEntry("history");
     // No Claude Code activity on this PC (limitsOnly): the three cards that count records say so in place of their figures, and
     // they ask for no report, so they are ready, with no problem to report.
-    var none = limitsOnly() ? NO_ACTIVITY + "." : "";
+    var none = limitsOnly() ? markup(tHtml("overview.no_activity", { product: tName(CLAUDE_CODE) })) : "";
     // Nothing to show yet (n.pending): the cost report is on its way, or it failed and the monitor has no month of its own to
     // stand in (a billing day is set). The three cards that draw from it say which, as they do on the Cost page.
     var costState = n.pending && !none ? entryState([n.entry]) : "ready";
@@ -2535,17 +2744,31 @@
 
   // ── Limits: pacing ──────────────────────────────────────────────────────────────
 
-  var SESSION_VERDICT = { LIMITED: "LIMITED", AT_RISK: "AT RISK", SAFE: "SAFE", IDLE: "IDLE", UNKNOWN: "UNKNOWN" };
-  var WEEKLY_VERDICT = { AHEAD: "AHEAD", ON_PACE: "ON PACE", BEHIND: "BEHIND", UNKNOWN: "UNKNOWN" };
+  // The verdicts of the pacing report, by its codes, in words; a code not named here reads as UNKNOWN.
+  var SESSION_VERDICT = {
+    LIMITED: function () { return tLine("limits.verdict.session.limited"); },
+    AT_RISK: function () { return tLine("limits.verdict.session.at_risk"); },
+    SAFE: function () { return tLine("limits.verdict.session.safe"); },
+    IDLE: function () { return tLine("limits.verdict.session.idle"); },
+    UNKNOWN: function () { return tLine("limits.verdict.session.unknown"); }
+  };
+  var WEEKLY_VERDICT = {
+    AHEAD: function () { return tLine("limits.verdict.weekly.ahead"); },
+    ON_PACE: function () { return tLine("limits.verdict.weekly.on_pace"); },
+    BEHIND: function () { return tLine("limits.verdict.weekly.behind"); },
+    UNKNOWN: function () { return tLine("limits.verdict.weekly.unknown"); }
+  };
   // The tone of each verdict (data-tone); a verdict not named here is neutral.
   var SESSION_TONE = { LIMITED: "alert", AT_RISK: "warn", SAFE: "ok" };
   var WEEKLY_TONE = { AHEAD: "warn", ON_PACE: "ok", BEHIND: "ok" };
 
   /* Rows of a label and a value: [[label, value, pending, title]]. A row marked pending shows a placeholder where its value will
-   * be; a title is the label's tooltip (the full text of a name that is shown short). */
+   * be; a title is the label's tooltip (the full text of a name that is shown short). The label and the value may be lines
+   * (tLine): the value is its element's own text, which a theme's entrance types. */
   function kvGrid(pairs, cls) {
     return '<div class="nm-kv-grid' + (cls ? " " + cls : "") + '">' + pairs.map(function (row) {
-      return '<div class="nm-kv"><span' + (row[3] ? ' title="' + esc(row[3]) + '"' : "") + ">" + esc(row[0]) + "</span><b" + (row[2] ? ' data-pending="" aria-hidden="true"' : "") + ">" + esc(row[1]) + "</b></div>";
+      return '<div class="nm-kv"><span' + (row[3] ? ' title="' + esc(row[3]) + '"' : "") + lineAttrs(row[0]) + ">" + esc(lineText(row[0])) + "</span><b" +
+        (row[2] ? ' data-pending="" aria-hidden="true"' : "") + lineAttrs(row[1]) + ">" + esc(lineText(row[1])) + "</b></div>";
     }).join("") + "</div>";
   }
 
@@ -2557,47 +2780,69 @@
     return (v > 0 ? "+" : v < 0 ? "-" : "") + FMT.number(Math.abs(v).toFixed(digits === undefined ? 1 : digits), NO_GROUP);
   }
 
+  /* A pacing card's verdict and the sentence under it: { chip, chipLang, tone, toneId, text, lang }. */
+  function story(chip, tone, toneId, line) {
+    return { chip: chip.text, chipLang: chip.lang, tone: tone, toneId: toneId, text: line.text, lang: line.lang };
+  }
+
   function sessionStory(blk) {
-    var v = blk && SESSION_VERDICT[blk.verdict] ? blk.verdict : "UNKNOWN";
+    var v = blk && Object.prototype.hasOwnProperty.call(SESSION_VERDICT, blk.verdict) ? blk.verdict : "UNKNOWN";
     var reset = blk ? parseTime(blk.resets_at) : null;
-    var text;
+    var line;
     if (v === "LIMITED") {
-      text = "The whole 5-hour allowance is used. It resets " + clockText(reset) + ".";
+      line = tLine("limits.story.session.limited", { time: clockText(reset) });
     } else if (v === "AT_RISK") {
-      var hit = parseTime(blk.projected_limit_at);
-      text = "At the current rate you reach the limit around " + clockText(hit) + ", before the window resets at " + clockText(reset) + ".";
+      line = tLine("limits.story.session.at_risk", { time: clockText(parseTime(blk.projected_limit_at)), reset: clockText(reset) });
     } else if (v === "SAFE") {
-      text = "At the current rate you stay under the limit until the window resets at " + clockText(reset) + ".";
+      line = tLine("limits.story.session.safe", { time: clockText(reset) });
     } else if (v === "IDLE") {
-      text = "Almost no draw in the last 90 minutes, so the limit is not in reach.";
+      line = tLine("limits.story.session.idle");
     } else {
-      text = "A forecast needs two readings at least 10 minutes apart. It appears as soon as there are two.";
+      line = tLine("limits.story.session.unknown");
     }
-    return { chip: SESSION_VERDICT[v], tone: v === "LIMITED" ? " is-crit" : v === "AT_RISK" ? " is-warn" : "",
-      toneId: toneOf(SESSION_TONE, v), text: text };
+    return story(SESSION_VERDICT[v](), v === "LIMITED" ? " is-crit" : v === "AT_RISK" ? " is-warn" : "", toneOf(SESSION_TONE, v), line);
+  }
+
+  /* A weekly figure of points for a sentence: one decimal ("12.3"), and the number its plural form is chosen by. */
+  function storyPoints(delta) {
+    var shown = Math.abs(num(delta) || 0).toFixed(1);
+    return { text: FMT.number(shown, NO_GROUP), count: Number(shown) };
   }
 
   function weeklyStory(blk) {
-    var v = blk && WEEKLY_VERDICT[blk.verdict] ? blk.verdict : "UNKNOWN";
-    var delta = blk ? num(blk.pace_delta_pp) : null;
-    var text;
+    var v = blk && Object.prototype.hasOwnProperty.call(WEEKLY_VERDICT, blk.verdict) ? blk.verdict : "UNKNOWN";
+    var points = storyPoints(blk ? blk.pace_delta_pp : null);
+    var line;
     if (v === "AHEAD") {
-      text = "You are using this window " + FMT.number(Math.abs(delta).toFixed(1), NO_GROUP) + " points faster than an even pace.";
+      line = { text: tPlural("limits.story.weekly.ahead", points.count, { count: points.text }), lang: tLang("limits.story.weekly.ahead") };
     } else if (v === "BEHIND") {
-      text = "You are " + FMT.number(Math.abs(delta).toFixed(1), NO_GROUP) + " points under an even pace, so there is room to spare.";
+      line = { text: tPlural("limits.story.weekly.behind", points.count, { count: points.text }), lang: tLang("limits.story.weekly.behind") };
     } else if (v === "ON_PACE") {
-      text = "You are keeping step with the clock.";
+      line = tLine("limits.story.weekly.on_pace");
     } else {
-      text = "No window reported for this limit yet.";
+      line = tLine("limits.story.weekly.unknown");
     }
-    return { chip: WEEKLY_VERDICT[v], tone: v === "AHEAD" ? " is-warn" : "", toneId: toneOf(WEEKLY_TONE, v), text: text };
+    return story(WEEKLY_VERDICT[v](), v === "AHEAD" ? " is-warn" : "", toneOf(WEEKLY_TONE, v), line);
+  }
+
+  /* The hidden sentence a pacing card holds until its pacing report answers, as long as the one it waits for, in the page's
+   * own words and formats (#98's critic 14): the session's with the clock of noon, a weekly one with the language's 00.0. */
+  function pendingStory(kind) {
+    if (kind === "session") {
+      var noon = new Date(stillNow());
+      noon.setHours(12, 0, 0, 0);
+      return story(SESSION_VERDICT.UNKNOWN(), "", "neutral", tLine("limits.story.session.pending", { time: clockText(noon.getTime()) }));
+    }
+    var zeros = FMT.number("12.3", NO_GROUP).replace(/\d/g, "0");
+    return story(WEEKLY_VERDICT.UNKNOWN(), "", "neutral",
+      { text: tPlural("limits.story.weekly.behind", 12.3, { count: zeros }), lang: tLang("limits.story.weekly.behind") });
   }
 
   /* Time elapsed against usage: the gap between the two bars is the pace. */
   function meterHTML(elapsedPct, usedPct) {
-    var label = "Time elapsed " + fmtPct(elapsedPct, 1) + ", used " + fmtPct(usedPct, 1);
+    var label = t("limits.meter.label", { elapsed: fmtPct(elapsedPct, 1), used: fmtPct(usedPct, 1) });
     return '<div class="nm-meter" role="img" aria-label="' + esc(label) + '">' +
-      mixRow("Time elapsed", elapsedPct, fmtPct(elapsedPct)) + mixRow("Used", usedPct, fmtPct(usedPct)) + "</div>";
+      mixRow(tLine("limits.meter.elapsed"), elapsedPct, fmtPct(elapsedPct)) + mixRow(tLine("limits.meter.used"), usedPct, fmtPct(usedPct)) + "</div>";
   }
 
   function hourTicks(t0, t1) {
@@ -2676,7 +2921,7 @@
     var forecastText = "";
     if (forecast) {
       var at = forecast.reaches === null ? "" : clockText(forecast.reaches);
-      forecastText = forecast.reaches === null ? "" : "Reaches 100% about " + at + " at this rate";
+      forecastText = forecast.reaches === null ? "" : t("limits.chart.reaches", { percent: FMT.percent("100"), time: at });
       series.push({
         kind: "forecast", points: forecast.points,
         endLabel: forecast.reaches === null ? "" : "100% ~ " + at, endTip: forecastText
@@ -2686,16 +2931,18 @@
     var marks = [];
     pts.forEach(function (p, i) {
       if (i % every === 0 || i === pts.length - 1) {
-        marks.push({ i: i, tip: clockText(p[0]) + ": " + fmtPct(p[1], 1) + " used" });
+        marks.push({ i: i, tip: t("limits.chart.reading", { time: clockText(p[0]), percent: fmtPct(p[1], 1) }) });
       }
     });
     series.push({ kind: "actual", points: pts, marks: marks });
     var ticks = kind === "session" ? hourTicks(t0, t1) : dayTicks(t0, t1);
-    var label = (kind === "session" ? "Session" : "Weekly") + " usage readings, " + pts.length + " points" + (forecastText ? ". " + forecastText : "");
+    var count = FMT.number(String(pts.length), NO_GROUP);
+    var readings = kind === "session" ? tPlural("limits.chart.session", pts.length, { count: count }) : tPlural("limits.chart.weekly", pts.length, { count: count });
+    var label = forecastText ? t("limits.chart.label", { readings: readings, forecast: forecastText }) : readings;
     return chartHost(function (w) {
       return CHARTS.line({
         width: w, height: 176, xMin: t0, xMax: t1, yMin: 0, yMax: yMax, yTicks: yTicks, xTicks: ticks,
-        marks: nowMs >= t0 && nowMs <= t1 ? [{ t: nowMs, label: "NOW" }] : [], series: series, label: label
+        marks: nowMs >= t0 && nowMs <= t1 ? [{ t: nowMs, label: tUpper("limits.chart.now") }] : [], series: series, label: label
       });
     }, [digest, kind, nowMs - nowMs % 60000, t0, t1, !!pending], "nm-line", pending);
   }
@@ -2704,38 +2951,48 @@
   function limitFacts(limit, blk, kind, p, pend) {
     var span = windowSeconds(limit);
     var start = p.reset !== null ? p.reset - span * 1000 : null;
+    var none = bareLine("--");
+    var days = Math.round(span / 86400), hours = Math.round(span / 3600);
     var rows = [
-      ["Resets", p.reset === null ? "--" : stampText(p.reset)],
-      ["Resets in", p.reset === null ? "--" : fmtRemain(p.remain)],
-      ["Window started", start === null ? "--" : stampText(start)],
-      ["Window", span >= 86400 ? Math.round(span / 86400) + " days" : Math.round(span / 3600) + " hours"]
+      [tLine("limits.fact.label.resets"), p.reset === null ? "--" : stampText(p.reset)],
+      [tLine("limits.fact.label.resets_in"), p.reset === null ? "--" : fmtRemain(p.remain)],
+      [tLine("limits.fact.label.started"), start === null ? "--" : stampText(start)],
+      [tLine("limits.fact.label.window"), span >= 86400
+        ? { text: tPlural("limits.fact.value.days", days, { count: fmtInt(days) }), lang: tLang("limits.fact.value.days") }
+        : { text: tPlural("limits.fact.value.hours", hours, { count: fmtInt(hours) }), lang: tLang("limits.fact.value.hours") }]
     ];
     if (kind === "session" && blk) {
-      rows.push(["Rate", num(blk.slope_pct_per_hour) === null ? "--" : signed(blk.slope_pct_per_hour) + " pts / hour", pend]);
+      rows.push([tLine("limits.fact.label.rate"), num(blk.slope_pct_per_hour) === null ? none :
+        tLine("limits.fact.value.rate", { points: signed(blk.slope_pct_per_hour) }), pend]);
       if (blk.projected_limit_at) {
-        rows.push(["Limit reached", clockText(parseTime(blk.projected_limit_at))]);
+        rows.push([tLine("limits.fact.label.limit_at"), clockText(parseTime(blk.projected_limit_at))]);
       }
     }
     if (kind !== "session" && blk) {
-      rows.push(["Budget left", num(blk.daily_budget_pct) === null ? "--" : fmtPct(blk.daily_budget_pct, 1) + " / day", pend]);
-      rows.push(["Even pace", num(blk.even_daily_pct) === null ? "--" : fmtPct(blk.even_daily_pct, 1) + " / day", pend]);
-      rows.push(["Projected end", num(blk.projected_end_pct) === null ? "needs more time" : fmtPct(blk.projected_end_pct, 1), pend]);
-      rows.push(["Against the clock", num(blk.pace_delta_pp) === null ? "--" : signed(blk.pace_delta_pp) + " pts", pend]);
+      rows.push([tLine("limits.fact.label.budget"), num(blk.daily_budget_pct) === null ? none :
+        tLine("limits.fact.value.per_day", { percent: fmtPct(blk.daily_budget_pct, 1) }), pend]);
+      rows.push([tLine("limits.fact.label.even"), num(blk.even_daily_pct) === null ? none :
+        tLine("limits.fact.value.per_day", { percent: fmtPct(blk.even_daily_pct, 1) }), pend]);
+      rows.push([tLine("limits.fact.label.end"), num(blk.projected_end_pct) === null ? tLine("limits.fact.value.needs_time") :
+        fmtPct(blk.projected_end_pct, 1), pend]);
+      rows.push([tLine("limits.fact.label.clock"), num(blk.pace_delta_pp) === null ? none :
+        tLine("limits.fact.value.points", { points: signed(blk.pace_delta_pp) }), pend]);
       var forecast = !pend && p.reset !== null ? averageRateForecast(blk, p.reset - p.remain) : null;
       if (forecast && forecast.reaches !== null) {
-        rows.push(["Limit reached", clockText(forecast.reaches)]);
+        rows.push([tLine("limits.fact.label.limit_at"), clockText(forecast.reaches)]);
       }
     }
     if (kind === "scoped") {
-      rows.push(["Allowance", num(limit.allowance_pct) === null ? "--" : fmtPct(limit.allowance_pct) + " of weekly"]);
-      rows.push(["Used of weekly", num(limit.used_pct_of_weekly) === null ? "--" : fmtPct(limit.used_pct_of_weekly, 1)]);
+      rows.push([tLine("limits.fact.label.allowance"), num(limit.allowance_pct) === null ? none :
+        tLine("limits.fact.value.of_weekly", { percent: fmtPct(limit.allowance_pct) })]);
+      rows.push([tLine("limits.fact.label.of_weekly"), num(limit.used_pct_of_weekly) === null ? "--" : fmtPct(limit.used_pct_of_weekly, 1)]);
     }
-    rows.push(["Severity", FMT.lower(SEVERITY_WORD[severityOf(limit)], "en")]);
+    rows.push([tLine("limits.fact.label.severity"), SEVERITY_WORDS[severityOf(limit)]()]);
     if (limit.locked_reason) {
-      rows.push(["Locked", limit.locked_reason]);
+      rows.push([tLine("limits.fact.label.locked"), limit.locked_reason]);       // the usage API's own text
     }
     if (limit.dollars) {
-      rows.push(["Used", fmtUsd(limit.dollars.used)], ["Limit", fmtUsd(limit.dollars.limit)]);
+      rows.push([tLine("limits.fact.label.used"), fmtUsd(limit.dollars.used)], [tLine("limits.fact.label.limit"), fmtUsd(limit.dollars.limit)]);
     }
     return kvGrid(rows);
   }
@@ -2747,47 +3004,47 @@
     if (waiting) {
       blk = skelPacingBlock(limit);
     }
-    var story = waiting
-      ? { chip: "UNKNOWN", tone: "", toneId: "neutral", text: kind === "session"
-        ? "At the current rate you stay under the limit until the window resets at 12:00 PM, and a little more."
-        : "You are 00.0 points under an even pace, so there is room to spare." }
+    var said = waiting
+      ? pendingStory(kind)
       : !blk && !entry.data
-        ? { chip: "", tone: "", text: "The forecast is not available right now." }
+        ? story(bareLine(""), "", "", tLine("limits.story.unavailable"))
         : kind === "session" ? sessionStory(blk) : weeklyStory(blk);
     var elapsed = !waiting && blk && num(blk.elapsed_pct) !== null ? blk.elapsed_pct : (p.elapsed === null ? null : p.elapsed * 100);
-    var tag = limit.label || (kind === "session" ? "SESSION" : "WEEKLY");
-    var meta = limit.scope_model ? "scoped to " + limit.scope_model : kind === "session" ? "5-hour window" : "7-day window";
+    var tag = limitTag(limit);
+    var meta = limit.scope_model ? tLine("limits.meta.scoped", { name: limit.scope_model }) : kind === "session" ? tLine("limit.meta.session") : tLine("limit.meta.weekly");
     var chart;
     if (blk) {
-      chart = pacingChart(blk, kind, nowMs, entry.digest + "|" + tag, waiting) || '<p class="nm-empty">This limit has no window to chart yet.</p>';
+      chart = pacingChart(blk, kind, nowMs, entry.digest + "|" + tag.text, waiting) || '<p class="nm-empty">' + tHtml("limits.chart.none") + "</p>";
     } else if (entry.error && !entry.data) {
-      chart = '<p class="nm-error" role="status">' + esc(statProblem(entry)) + "</p>";
+      chart = '<p class="nm-error" role="status">' + htmlOf(statProblem(entry)) + "</p>";
     } else {
-      chart = '<p class="nm-empty">No pacing data for this limit yet.</p>';
+      chart = '<p class="nm-empty">' + tHtml("limits.chart.no_data") + "</p>";
     }
     var hold = waiting ? ' data-pending=""' : "";
     var body = '<div class="nm-big-row"><div class="nm-big">' + esc(fmtPct(pct)) + '</div><div class="nm-verdict">' +
-      (story.chip ? '<span class="nm-chip solid' + story.tone + '" data-tone="' + story.toneId + '"' + hold + ">" + esc(story.chip) + "</span>" : "") + "</div></div>" +
-      '<p class="nm-story"' + hold + ">" + esc(story.text) + "</p>" +
+      (said.chip ? '<span class="nm-chip solid' + said.tone + '" data-tone="' + said.toneId + '"' + hold + lineLangAttr(said.chipLang) + ">" + esc(said.chip) + "</span>" : "") + "</div></div>" +
+      '<p class="nm-story"' + hold + lineLangAttr(said.lang) + ">" + esc(said.text) + "</p>" +
       (elapsed === null ? "" : meterHTML(elapsed, pct)) + chart + limitFacts(limit, blk, kind, p, waiting);
-    return '<section class="nm-card span-6' + sevClass(limit) + '" data-limit="' + esc(limit.kind) + '" aria-label="' + esc(tag) + '"><div class="nm-card-in">' +
-      '<div class="nm-card-t"><span class="nm-tag">' + esc(tag) + '</span><span class="nm-meta-t">' + esc(meta) + "</span></div>" + body + "</div></section>";
+    return '<section class="nm-card span-6' + sevClass(limit) + '" data-limit="' + esc(limit.kind) + '" aria-label="' + esc(tag.text) + '"><div class="nm-card-in">' +
+      '<div class="nm-card-t"><span class="nm-tag"' + lineAttrs(tag) + ">" + esc(tag.text) + '</span><span class="nm-meta-t"' + lineAttrs(meta) + ">" + esc(meta.text) + "</span></div>" +
+      body + "</div></section>";
   }
 
   /* The credits card's body. pending is the placeholder, the shape of the common case (credits off). */
   function spendCardBody(spend, pending) {
     if (pending) {
-      return '<p class="nm-empty" data-pending="">Usage credits are off for this account.</p>' +
-        '<p class="nm-note nm-disc" data-pending="">When they are on, this is the one figure that is real money.</p>';
+      return '<p class="nm-empty" data-pending="">' + tHtml("limits.credits.off") + "</p>" +
+        '<p class="nm-note nm-disc" data-pending="">' + tHtml("limits.credits.when_on") + "</p>";
     }
     if (spend && spend.enabled) {
-      return '<div class="nm-big-row"><div class="nm-big m">' + esc(fmtMoney(spend.used, spend.currency)) + '</div><div class="nm-facts"><span>OF ' + esc(fmtMoney(spend.limit, spend.currency)) + "</span><span>" +
-        esc(fmtPct(spend.percent)) + " USED</span></div></div>" +
+      return '<div class="nm-big-row"><div class="nm-big m">' + esc(fmtMoney(spend.used, spend.currency)) + '</div><div class="nm-facts"><span>' +
+        tHtml("limits.credits.of", { limit: fmtMoney(spend.limit, spend.currency) }) + "</span><span>" + tHtml("limits.credits.used", { percent: fmtPct(spend.percent) }) +
+        "</span></div></div>" +
         '<div class="nm-cells" aria-hidden="true">' + cellsHTML(24, num(spend.percent) || 0) + "</div>" +
-        '<p class="nm-note nm-disc">Real money: usage credits reported by the usage API, billed by Anthropic.</p>';
+        '<p class="nm-note nm-disc">' + tHtml("limits.credits.real") + "</p>";
     }
-    return '<p class="nm-empty">Usage credits are off for this account.</p>' +
-      '<p class="nm-note nm-disc">When they are on, this is the one figure that is real money.</p>';
+    return '<p class="nm-empty">' + tHtml("limits.credits.off") + "</p>" +
+      '<p class="nm-note nm-disc">' + tHtml("limits.credits.when_on") + "</p>";
   }
 
   function limitsPage() {
@@ -2811,21 +3068,22 @@
       }));
     });
     if (!cards.length) {
-      cards.push(cardPart("limit-none", "ready", [], function () { return emptyLimitCard("LIMITS", "No reading yet"); }));
+      cards.push(cardPart("limit-none", "ready", [], function () { return emptyLimitCard(tLine("limits.none.tag"), tLine("limits.none.meta")); }));
     }
-    var spendCard = card({ key: "credits", title: "Usage credits", meta: "real money", cls: "is-real", body: spendCardBody(u && u.spend, !!(u && u.skeleton)) });
+    var spendCard = card({ key: "credits", title: tLine("limits.credits.title"), meta: tLine("limits.credits.meta"), cls: "is-real",
+      body: spendCardBody(u && u.spend, !!(u && u.skeleton)) });
     var breakdown = u && u.breakdown ? u.breakdown : [];
     var colours = ["main", "alt", "dim"];
     var stack = breakdown.length
       ? CHARTS.stackedBar(breakdown.map(function (r, i) {
         return { value: r.percent, cls: colours[i % 3], tip: String(r.name || r.key || "") + ": " + fmtPct(r.percent) };
-      }), { width: 520, height: 16, label: "Share by surface" })
-      : '<p class="nm-empty">No surface split yet.</p>';
+      }), { width: 520, height: 16, label: t("limits.surfaces.label") })
+      : '<p class="nm-empty">' + tHtml("limits.surfaces.none") + "</p>";
     var legend = breakdown.map(function (r) {
-      return mixRow(FMT.upper(String(r.name || r.key || "")), r.percent, fmtPct(r.percent));
+      return mixRow(nameLine(FMT.upper(String(r.name || r.key || ""))), r.percent, fmtPct(r.percent));
     }).join("");
     var surfaceCard = card({
-      key: "surfaces", title: "Seven-day surface breakdown", meta: "share of the weekly window",
+      key: "surfaces", title: tLine("limits.surfaces.title"), meta: tLine("limits.surfaces.meta"),
       body: '<div class="nm-stack-wrap">' + stack + '</div><div class="nm-legend">' + legend + "</div>"
     });
     var odd = (cards.length % 2) === 1;
@@ -6177,6 +6435,11 @@
       renderChrome: renderChrome, renderAge: renderAge, renderFirstChrome: renderFirstChrome, linkLine: linkLine,
       healthLinkLine: healthLinkLine, ageLine: ageLine, gatesLook: gatesLook, pageHead: pageHead, accentTip: accentTip,
       accentShort: accentShort, tUpper: tUpper, burnUnitLine: burnUnitLine, writeLine: writeLine,
+      // the banners', Overview's and Limits' words (#98)
+      statReason: statReason, statProblem: statProblem, statProblemShort: statProblemShort, problemBanner: problemBanner,
+      STAT_ERRORS: STAT_ERRORS, STAT_ERROR_STATUS: STAT_ERROR_STATUS, limitTag: limitTag, planWords: planWords, costCard: costCard,
+      pacingCard: pacingCard, pendingStory: pendingStory, burnHourLine: burnHourLine, ratioNoteLine: ratioNoteLine,
+      tHtmlLine: tHtmlLine, lineAttrs: lineAttrs, nameLine: nameLine,
       // The formatters and the sites tests/webui_formats.js holds to today's English (#91).
       fmtUsdExact: fmtUsdExact, fmtPlanPrice: fmtPlanPrice, fmtUsdShort: fmtUsdShort, fmtUsdTile: fmtUsdTile,
       fmtUsdHero: fmtUsdHero, fmtCount: fmtCount, fmtInt: fmtInt, fmtRemain: fmtRemain, fmtCompare: fmtCompare,

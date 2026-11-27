@@ -32,7 +32,10 @@ dev server) on a small DOM, for every scenario of the dev server under the pseud
 every page and segment as an installed monitor and as a dev instance shows them, and in some scenarios every action
 and control, the update banner, Settings during an update in each state of its run (#58), what each update button says
 for every answer the monitor gives (#97), the reports' loading and failed states, and every change failing. The theme scripts'
-boot texts and the words in the stylesheets are not in it (#101 moves them).
+boot texts and the words in the stylesheets are not in it (#101 moves them). Besides the names, the dashboard half takes out
+the page's format words, as whole words (its weekday and month names and AM/PM, English's in the pseudo-locale since #91),
+and the dev server's data names that the catalog's sentences hold (#98: a plan's name, a limit's scope), which a sentence
+holds as plain text (a theme's entrance moves an element's own text).
 
 Both halves run in a fresh Python with the time zone pinned (the dev server's clock and the page's are pinned too), so
 a record made here matches one made on CI.
@@ -322,9 +325,9 @@ def html_texts(markup: str, page_lang: str | None = None) -> list[str]:
     return [run for block in html_blocks(markup, page_lang) for run in block]
 
 
-def html_english(markup: str, page_lang: str | None, names: Iterable[str]) -> set[str]:
-    names = tuple(names)
-    return {entry(run) for block in html_blocks(markup, page_lang) for run in _english_runs(block, names)}
+def html_english(markup: str, page_lang: str | None, names: Iterable[str], format_words: Iterable[str] = ()) -> set[str]:
+    names, format_words = tuple(names), tuple(format_words)
+    return {entry(run) for block in html_blocks(markup, page_lang) for run in _english_runs(block, names, format_words)}
 
 
 def page_language(shell: str) -> str | None:
@@ -332,19 +335,58 @@ def page_language(shell: str) -> str | None:
     return found.group(1) if found else None
 
 
-def scan_english(run: dict[str, Any], names: Iterable[str] = (PRODUCT, *DASHBOARD_MARKS)) -> dict[str, str]:
+def scan_english(run: dict[str, Any], names: Iterable[str] | None = None,
+                 format_words: Iterable[str] | None = None) -> dict[str, str]:
     """The English of one run of tests/english_scan.js (the page as the server sent it, then each snapshot's title and
-    body), each entry with the pass and step it was first seen at."""
-    names = tuple(names)
+    body), each entry with the pass and step it was first seen at. By default the product, #86's marks and the dev
+    server's data names are taken out (dashboard_names), and the page's format words as whole words
+    (dashboard_format_words)."""
+    names = tuple((PRODUCT, *DASHBOARD_MARKS, *dashboard_names()) if names is None else names)
+    format_words = tuple(dashboard_format_words() if format_words is None else format_words)
     lang = page_language(run["shell"])
     found: dict[str, str] = {}
-    for text in html_english(run["shell"], lang, names):
+    for text in html_english(run["shell"], lang, names, format_words):
         found.setdefault(text, "as served")
     for shot in run["snapshots"]:
         where = f"{shot['pass']}/{shot['step']}"
-        for text in english([shot["title"]], names) | html_english(shot["body"], lang, names):
+        for text in english([shot["title"]], names, format_words) | html_english(shot["body"], lang, names, format_words):
             found.setdefault(text, where)
     return found
+
+
+def dashboard_format_words() -> tuple[str, ...]:
+    """The page's format words in the pseudo-locale: the weekday and month names webui/formats.js writes for English (#91
+    gives the pseudo-locale English's formats), in capitals as the page shows them and as written, and AM and PM."""
+    source = (WEBUI / "formats.js").read_text(encoding="utf-8")
+    names: list[str] = []
+    for table, count in (("WEEKDAYS", 7), ("MONTHS", 12)):
+        found = re.search(rf"var {table} = \[([^\]]*)\];", source)
+        words = re.findall(r'"([A-Z]{3})"', found.group(1)) if found else []
+        if len(words) != count:
+            raise RuntimeError(f"webui/formats.js's {table} is not the {count} names the scan expects: {words}")
+        names += words
+    return tuple(dict.fromkeys([*names, *(name.title() for name in names), "AM", "PM"]))
+
+
+def dashboard_names() -> tuple[str, ...]:
+    """The dev server's data names that the page puts beside the catalog's words (#98), as given and in capitals: each
+    scenario's plan name (ratio.note), where the sign-in names a subscription ("Unknown plan" is English the page words
+    itself), each scoped limit's model or surface (limit.name.scoped, limits.meta.scoped), and the surfaces of the week's
+    split (the Limits page's bar names them in its tips, "Chats: 12%")."""
+    from usage_monitor.data.identity import scope_name
+    from usage_monitor.ui import devserver
+
+    found: list[str] = []
+    for scenario in devserver.SCENARIOS:
+        state = devserver.fake_state(scenario, SCAN_NOW)
+        if state.plan is not None and state.plan.subscription_type is not None and state.plan.name:
+            found.append(state.plan.name)
+        for limit in state.usage.limits if state.usage is not None else []:
+            name = scope_name(limit.scope_model, limit.scope_surface)
+            if limit.kind == "weekly_scoped" and name:
+                found.append(name)
+        found += [row.name for row in state.usage.breakdown if row.name] if state.usage is not None else []
+    return tuple(dict.fromkeys([*found, *(name.upper() for name in found)]))
 
 
 # ── The widgets ──────────────────────────────────────────────────────────────────────────────────────────────────

@@ -287,6 +287,23 @@ def test_the_shipped_catalogs_are_plain_text_and_english_holds_every_key() -> No
                 assert all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) for name in re.findall(r"\{([^}]*)\}", text))
 
 
+def test_each_catalog_key_is_written_once_and_none_starts_another() -> None:
+    """#98's critic 6: a key is one text. No catalog names a key twice (json keeps the last silently), and no key of en.json
+    is the start of another (``a.b`` and ``a.b.c`` never both), so a key cannot be at once a text and a group of texts, a
+    label and its value (limits.fact.label.rate, limits.fact.value.rate)."""
+    def pairs_once(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        keys = [key for key, _value in pairs]
+        twice = sorted({key for key in keys if keys.count(key) > 1})
+        assert not twice, twice
+        return dict(pairs)
+
+    for language in i18n.LANGUAGES:
+        json.loads((i18n.CATALOG_DIR / f"{language}.json").read_text(encoding="utf-8"), object_pairs_hook=pairs_once)
+    english = [key for key in json.loads((i18n.CATALOG_DIR / "en.json").read_text(encoding="utf-8")) if not key.startswith("_")]
+    starts = {key[:i] for key in english for i, ch in enumerate(key) if ch == "."}
+    assert not starts & set(english), sorted(starts & set(english))
+
+
 # ── The pseudo-locale (#89) ───────────────────────────────────────────────────
 
 def test_the_pseudo_locale_shows_left_over_english_missing_glyphs_and_cut_ends() -> None:

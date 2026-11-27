@@ -699,7 +699,7 @@ S.linkOk = null;
 const AGES = [0, 999, 59000, 60000, 3599000, 3600000, 47 * 3600000, 48 * 3600000, 4 * 86400000];
 out.age = AGES.map((ms) => ({ badge: api.ageWords(api.fmtAge(ms), api.AGE_UNIT), sentence: api.ageWords(api.fmtAge(ms), api.AGE_UNIT_IN_SENTENCE) }));
 out.ageNone = api.ageWords(api.fmtAge(null), api.AGE_UNIT);
-out.staleBanner = api.staleBanner([{ data: { x: 1 }, error: "HTTP 500", at: Date.now() - 180000 }]);
+out.staleBanner = api.staleBanner([{ data: { x: 1 }, error: "HTTP 500", status: 500, at: Date.now() - 180000 }]);
 
 // scoped limits: the row is matched by kind and model, so two limits with one label keep their own rows
 const scopedRows = [
@@ -2541,6 +2541,7 @@ function gatesWords(page, theme) {
       age: els["data-age"].textContent, ageLang: els["data-age"].getAttribute("lang"),
       link: row[2] === undefined ? null : row[2], linkLang: row[1] ? row[1].slice(7, -1) : null,
       banner: P.statusBanner(), unit: (burn.match(/<div class="nm-facts"><span( lang="[^"]*")?>([^<]*)<\/span>/) || []).slice(1),
+      hour: (burn.match(/<div class="nm-facts"><span[^>]*>[^<]*<\/span><span( lang="[^"]*")?>([^<]*)<\/span>/) || []).slice(1),
     };
   }
   root.removeAttribute("data-theme");
@@ -2556,6 +2557,113 @@ function gatesWords(page, theme) {
     gates: gatesWords(page, "gates"), nostromo: gatesWords(page, "nostromo"), nightCity: gatesWords(page, "night_city"),
     frenchGates: gatesWords(fr, "gates"), frenchNostromo: gatesWords(fr, "nostromo"),
   };
+  reset();
+}
+
+// ── The banners', Overview's and Limits' words (#98) ───────────────────────────────────────────────────────────────────
+// English, and a French page (fr-FR, a 24-hour clock) whose catalog has a few of these words (made up here), the rest English's.
+{
+  const french = { setting: "fr", language: "fr", system: "fr", format: "fr-FR", clock: 24, offered: ["en", "fr"] };
+  const meta = (sel) => (sel === 'meta[name="monitor-locale"]' ? { getAttribute: (k) => (k === "content" ? JSON.stringify(french) : null) } : null);
+  const strings = {
+    "stats.reason.busy": "BUSY-FR", "banner.stats.old_line": "OLD-FR ({reason}) {age}", "stats.problem.failed": "FAILED-FR ({reason})",
+    "format.now": "maintenant", "limit.name.session": "SESSION-FR", "limit.name.scoped": "{name} HEBDO-FR",
+    "plan.unknown": "Forfait inconnu", "limits.severity.normal": "normal-fr", "limits.chart.label": "{forecast} // {readings}",
+    "overview.daily.tip": { one: "{day} {cost} {count} R-ONE", many: "{day} {cost} {count} R-MANY", other: "{day} {cost} {count} R-OTHER" },
+  };
+  const fr = load(meta, { MonitorI18n: { language: "fr", strings, fallback: EN_CATALOG.fallback } }).api;
+  const spanish = { setting: "es", language: "es", system: "es", format: "es-ES", clock: 24, offered: ["en", "es"] };
+  const esMeta = (sel) => (sel === 'meta[name="monitor-locale"]' ? { getAttribute: (k) => (k === "content" ? JSON.stringify(spanish) : null) } : null);
+  const es = load(esMeta, { MonitorI18n: { language: "es", strings: { "overview.daily.tip": strings["overview.daily.tip"] },
+    fallback: EN_CATALOG.fallback } }).api;
+  const B = {};
+  // why a report failed: each answer the page can get, and some it cannot
+  const answers = {
+    lost: [0, "the dashboard lost its link"], token: [401, "missing or wrong token"], token_blank: [401, "HTTP 401"],
+    unavailable: [501, "statistics are not available"], internal: [500, "internal error"], internal_other: [500, "HTTP 500"],
+    busy: [503, "statistics are not available right now"], closed: [503, "the statistics database could not be opened"],
+    busy_other: [503, "the disk is on fire"], bad_gateway: [502, "HTTP 502"], query: [400, "unknown parameter: x"],
+    wrong_status: [503, "internal error"],
+  };
+  B.reasons = {};
+  for (const [name, [status, error]] of Object.entries(answers)) {
+    const stale = { data: { x: 1 }, error, status, at: Date.now() - 180000 };
+    const failed = { data: null, error, status, at: 0 };
+    B.reasons[name] = {
+      code: api.statReason(failed), problem: api.problemBanner([failed]), stale: api.staleBanner([stale]),
+      frenchStale: fr.staleBanner([stale]), frenchProblem: fr.problemBanner([failed]),
+    };
+  }
+  B.statErrors = { texts: api.STAT_ERRORS, statuses: api.STAT_ERROR_STATUS };
+  // the time left: a badge, and inside a sentence
+  const H = 3600000, M = 60000;
+  B.remain = {
+    en: { sentence: [3 * H + 27 * M, 2 * 24 * H + 3 * H, 59 * M, 30000, -1].map((ms) => api.fmtRemain(ms, true)),
+      badge: [3 * H + 27 * M, 2 * 24 * H + 3 * H, 59 * M, 30000, -1].map((ms) => api.fmtRemain(ms)) },
+    fr: { sentence: [3 * H + 27 * M, 30000].map((ms) => fr.fmtRemain(ms, true)), badge: [3 * H + 27 * M, 30000].map((ms) => fr.fmtRemain(ms)) },
+    card: api.limitCard({ kind: "session", percent: 13, resets_at: new Date(Date.now() + 3 * H + 27 * M + 30000).toISOString(), window_seconds: 18000 }, {}),
+  };
+  // the daily chart's tips: a column's requests with the plural form of the page's language
+  const tipsOf = (P) => {
+    P.S.stats = {};
+    const e = P.statEntry("history");
+    e.data = P.skelHistory();
+    e.data.days.slice(-3).forEach((x, i) => { x.cost_usd = 1.5; x.requests = i; });
+    P.S.nextCharts = {};
+    P.dailyChart(null);
+    const spec = Object.values(P.S.nextCharts)[0];
+    const tips = [...spec.build(600).matchAll(/mon-item" tabindex="-?\d" role="img" aria-label="([^"]*)"/g)].map((m) => m[1]);
+    P.S.stats = {};
+    return tips.slice(-3);
+  };
+  B.tips = { en: tipsOf(api), fr: tipsOf(fr), es: tipsOf(es) };
+  // a limit's tag: English shows the limit's own label, another language names it from its kind
+  const limits = {
+    scoped: { kind: "weekly_scoped", label: "FABLE WEEKLY", scope_model: "Fable", percent: 10 },
+    surface: { kind: "weekly_scoped", label: "CLAUDE_CODE WEEKLY", scope_surface: "claude_code", percent: 10 },
+    unnamed: { kind: "weekly_scoped", label: "WEEKLY SCOPED", percent: 10 },
+    pending: { kind: "weekly_scoped", label: "SCOPED", scope_model: "-", placeholder: true, percent: 0 },
+    session: { kind: "session", label: "SESSION", percent: 10 }, unlabelled: { kind: "session", percent: 10 },
+    weekly: { kind: "weekly_all", label: "WEEKLY", percent: 10 }, other: { kind: "monthly_thing", label: "MONTHLY THING", percent: 10 },
+    otherBare: { kind: "monthly_thing", percent: 10 },
+  };
+  B.tags = { en: {}, fr: {} };
+  for (const [name, limit] of Object.entries(limits)) {
+    B.tags.en[name] = api.limitTag(limit);
+    B.tags.fr[name] = fr.limitTag(limit);
+  }
+  const reset7 = new Date(Date.now() + 2 * 24 * H).toISOString();
+  const entry = { data: null, error: "", digest: "d", key: "pacing" };
+  B.tagMarkup = {
+    en: api.limitCard(limits.scoped, { meta: api.tLine("limit.meta.weekly") }), fr: fr.limitCard(limits.scoped, { meta: fr.tLine("limit.meta.weekly") }),
+    frWeekly: fr.limitCard(limits.weekly, { meta: fr.tLine("limit.meta.weekly") }),
+    pacingEn: api.pacingCard(Object.assign({ resets_at: reset7, window_seconds: 604800 }, limits.session), null, "session", entry, Date.now()),
+    pacingFr: fr.pacingCard(Object.assign({ resets_at: reset7, window_seconds: 604800 }, limits.session), null, "session", entry, Date.now()),
+  };
+  // an unknown plan: the sign-in names no subscription, and the data layer's name for it is English
+  const n = { cycle: 10, today: 1, week: 5, multiplier: 0.2, projected: null, price: 50, cycleStart: null, cycleEnd: null, pending: false };
+  const unknown = { name: "Unknown plan", subscription_type: null };
+  B.plan = {
+    words: [api.planWords(unknown), fr.planWords(unknown), fr.planWords({ name: "Max 5x", subscription_type: "max" }),
+      api.planWords({ name: null, subscription_type: null }), api.planWords(null), api.planWords({ name: "Team", subscription_type: undefined })],
+    en: api.costCard(Object.assign({ planName: api.planWords(unknown) }, n)), fr: fr.costCard(Object.assign({ planName: fr.planWords(unknown) }, n)),
+  };
+  // the pacing cards' hidden sizing texts, in the page's words and formats
+  B.pending = { en: [api.pendingStory("session"), api.pendingStory("weekly")], fr: [fr.pendingStory("session"), fr.pendingStory("weekly")] };
+  // a pacing chart's label: one key holds both parts, the readings and the forecast
+  const crossing = { window_start: new Date(Date.now() - 4 * 24 * H).toISOString(), resets_at: reset7, percent: 60, verdict: "AHEAD",
+    points: [[new Date(Date.now() - 2 * 24 * H).toISOString(), 30], [new Date(Date.now() - H).toISOString(), 60]], projected_end_pct: 120.4 };
+  const labelOf = (P) => {
+    P.S.nextCharts = {};
+    P.pacingChart(crossing, "weekly", Date.now(), "d", false);
+    const svg = Object.values(P.S.nextCharts)[0].build(480);
+    return (/<svg[^>]*aria-label="([^"]*)"/.exec(svg) || [])[1] || null;
+  };
+  B.chartLabel = { en: labelOf(api), fr: labelOf(fr) };
+  // the severity in a limit's facts
+  B.severity = { en: api.limitFacts(limits.session, null, "session", api.paceOf(limits.session, Date.now()), false),
+    fr: fr.limitFacts(limits.session, null, "session", fr.paceOf(limits.session, Date.now()), false) };
+  out.stageB = B;
   reset();
 }
 

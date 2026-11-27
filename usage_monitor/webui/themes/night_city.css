@@ -807,6 +807,7 @@ html[data-reduce-motion="1"] *, html[data-reduce-motion="1"] *::before, html[dat
    tooltip). The other variants hide it. The label and the time left span the whole bar, each clipped to its own text and
    painted from one hard-stop gradient: dark ink where the fill is behind a letter, the signal colour where the track is,
    so both stay readable whether 100 % or 5 % of the window remains (the approved still only shows the middle). */
+.nm-remain .l { text-transform: uppercase; }     /* the bar's label in every variant, as it always was (only Edgerun shows it) */
 :root[data-variant="edgerun"] .nm-grid > [data-limit] .nm-remain {
   display: block; position: relative; order: 2; flex: none; height: 16px; margin-top: 6px; background: var(--nc-track); box-shadow: inset 0 0 0 1px var(--nc-hair);
 }

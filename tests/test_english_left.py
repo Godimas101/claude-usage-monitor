@@ -305,8 +305,7 @@ def test_the_widget_half_reads_every_toast_in_the_pseudo_locale(monkeypatch: pyt
 def test_the_pseudo_locales_format_words_and_the_dev_mark_are_no_english_on_the_widgets() -> None:
     """#91 gives the pseudo-locale English's formats, so its weekday names and AM/PM are English's, and Gates' age
     unit "min" (#96): the widget half treats them as formats, as it treats numbers, and takes them out as whole words
-    only. The dev instance's "(dev)" is a developer's mark (#93). The dashboard half's record keeps the date names the
-    page shows."""
+    only. The dev instance's "(dev)" is a developer's mark (#93). The dashboard half takes out its own (#98, below)."""
     from usage_monitor import app
 
     days = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
@@ -327,8 +326,49 @@ def test_the_pseudo_locales_format_words_and_the_dev_mark_are_no_english_on_the_
     assert english(["AMP", "Monk", "SUNK", "Friday", P("weekly") + " Monday"], names, words) == {
         "AMP", "Monk", "SUNK", "Friday", entry(P("weekly") + " Monday")}    # whole words only
     page = {"shell": '<html lang="pseudo"><body></body></html>',
-            "snapshots": [{"pass": "dev", "step": "cost", "title": "", "body": "<body><p>FRI</p></body>"}]}
-    assert scan_english(page) == {"FRI": "dev/cost"}                        # the dashboard half is as it was
+            "snapshots": [{"pass": "dev", "step": "cost", "title": "", "body": "<body><p>FRI</p><p>Friday</p></body>"}]}
+    assert scan_english(page) == {"Friday": "dev/cost"}                     # the page's own format words, as whole words (#98)
+
+
+def test_the_dashboard_half_takes_out_the_pages_format_words_and_the_names_its_sentences_hold() -> None:
+    """#98: the catalog's sentences on the dashboard hold dates in English's shapes (the pseudo-locale's formats, #91:
+    "SAT 3:12 PM", "NOV 1 - DEC 1") and data names as plain text (a theme's entrance moves an element's own text): a
+    plan's name in the ratio note, a limit's scope in its tag and meta, a surface beside its share. The dashboard half
+    takes out the page's weekday and month names and AM/PM as whole words, and the dev server's plan, scope and surface
+    names, as given and in capitals. It keeps "Unknown plan", English the page words itself, and English beside a name."""
+    days, months = ("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"), ("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL",
+                                                                       "AUG", "SEP", "OCT", "NOV", "DEC")
+    assert set(english_left.dashboard_format_words()) == {*days, *months, *(w.title() for w in days + months), "AM", "PM"}
+    names = english_left.dashboard_names()
+    assert set(names) == {"Max 5x", "MAX 5X", "Fable", "FABLE", "Claude Code", "CLAUDE CODE", "Chats", "CHATS", "Cowork", "COWORK"}
+    words = english_left.dashboard_format_words()
+    every = (PRODUCT, *DASHBOARD_MARKS, *names)
+    tip = P("{day}: {cost} API-equivalent, {count} requests").replace("{day}", "FRI, NOV 3").replace("{cost}", "$1.20")
+    meta = P("{range} · at list prices").replace("{range}", "NOV 1 - DEC 1")
+    note = P("1 cell = {count} month of {plan} plan").replace("{plan}", "Max 5x")
+    tag, scoped = P("{name} weekly").replace("{name}", "Fable"), P("scoped to {name}").replace("{name}", "FABLE")
+    assert english([tip, meta, note, tag, scoped], every, words) == set()
+    assert english([tip, meta], every) == {entry(tip), entry(meta)}                # the format words are what goes
+    assert english([note, tag], (PRODUCT,), words) == {entry(note), entry(tag)}     # and the names
+    assert english(["Unknown plan", P("1 cell = {count} month of {plan} plan").replace("{plan}", "Unknown plan"), "Maybe",
+                    "Max 5x plan", note + " (detected)"], every, words) == {
+        "Unknown plan", entry(P("1 cell = {count} month of {plan} plan").replace("{plan}", "Unknown plan")), "Maybe", "Max #x plan",
+        entry(note + " (detected)")}
+    page = {"shell": '<html lang="pseudo"><body></body></html>',
+            "snapshots": [{"pass": "installed", "step": "load", "title": "", "body": f"<body><p>{html.escape(note)}</p></body>"}]}
+    assert scan_english(page) == {}
+
+
+def test_the_cost_pages_plan_note_keeps_only_its_own_english() -> None:
+    """#98 moved the ratio note's words (ratio.note) into the catalog. On the Cost & value page the note shares its line with
+    that page's own English (its price's "a month, detected", #99's), so the record holds those lines with the note in the
+    pseudo-locale: the English in them is the Cost page's alone."""
+    lines = [line for line in english_left.recorded()["dashboard"] if "a month, detected)" in line or "a month, your override)" in line]
+    assert lines
+    for line in lines:
+        note, _, rest = line.partition("] (")
+        names = (PRODUCT, *(entry(name) for name in english_left.dashboard_names()))     # a record's entry folds its digits
+        assert note.startswith("[") and english([note + "]"], names) == set(), line
 
 
 def test_the_widget_half_draws_in_the_pseudo_locale_and_reads_the_menu(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -586,10 +586,10 @@ const norm = (text) => String(text || "").replace(/\s+/g, " ").trim();
  * from the theme script itself), on Overview and Limits (live and before the first state) and on every page's heading, in
  * English and on a French page with English's words. Nostromo's typer types an element's first text node
  * (FX.text.firstText), Night City's decoder its own text nodes (FX.text.directText): words that sit in a child instead (a span
- * for a name or a language) show at once while the rest moves. Gives what was checked, and each element whose animated text
- * is not all of its text. */
+ * for a name or a language) show at once while the rest moves. Gives what was checked, each element whose animated text
+ * is not all of its text, and on the French page's Overview and Limits the text that carries no mark (unmarkedText). */
 async function entrance(problems) {
-  const out = { checked: {}, untyped: [] };
+  const out = { checked: {}, untyped: [], unmarked: {} };
   const runs = [];
   for (const lang of ["en", "fr"]) {
     ALL_PAGES.forEach((page) => runs.push({ lang, caseName: "live", page }));
@@ -624,9 +624,31 @@ async function entrance(problems) {
         }
         out.checked[key][group.sel] = count;
       }
+      if (r.lang === "fr" && STAT_PAGES.indexOf(r.page) >= 0) {
+        out.unmarked[key] = unmarkedText(main);
+      }
     }
   }
   return out;
+}
+
+/* The text of root that carries no mark: neither inside an element with a lang of its own (English on the French page) nor
+ * in one marked translate="no" (a name), outside charts' SVG (whose labels are cased by their own language, tUpper). */
+function unmarkedText(root) {
+  const found = [];
+  const walk = (node, marked) => {
+    if (node.nodeType === 3) {
+      if (!marked && norm(node.data)) { found.push(norm(node.data)); }
+      return;
+    }
+    if (node.nodeType !== 1 || ["svg", "script", "style"].indexOf(node.localName) >= 0) {
+      return;
+    }
+    const own = node.hasAttribute("lang") || node.getAttribute("translate") === "no";
+    node.childNodes.forEach((child) => walk(child, marked || own));
+  };
+  walk(root, false);
+  return found;
 }
 
 run().then(async ({ views, problems }) => {
