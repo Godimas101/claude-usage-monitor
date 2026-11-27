@@ -697,7 +697,12 @@ function parseInto(parent, html, doc, ns, raw) {
       continue;                                                    // <path/>: an element with no contents
     }
     if (space === HTML_NS && (RAW_TEXT.has(name) || ESCAPABLE_RAW.has(name))) {
-      const end = html.toLowerCase().indexOf("</" + name, at);
+      // The closing tag is looked for in the markup itself: a lowercased copy can be longer than it (İ lowercases to two
+      // code units), so its indexes are not the markup's.
+      const closing = new RegExp("</" + name, "ig");
+      closing.lastIndex = at;
+      const found = closing.exec(html);
+      const end = found ? found.index : -1;
       const body = html.slice(at, end < 0 ? html.length : end);
       if (body) { el.appendChild(doc.createTextNode(RAW_TEXT.has(name) ? body : decode(body))); }
       const close = end < 0 ? html.length : html.indexOf(">", end);

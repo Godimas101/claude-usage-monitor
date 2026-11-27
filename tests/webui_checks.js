@@ -556,18 +556,18 @@ for (const status of statuses) {
   elements.health = element("health");
   S.data = { state: { status, ingest: { running: false, files_done: 1, files_total: 1 }, unpriced_models: [] } };
   api.renderHealth();
-  out.link[status] = (elements.health.innerHTML.match(/<span>LINK<\/span><b class="([^"]*)">/) || [])[1] || null;
+  out.link[status] = (elements.health.innerHTML.match(/<span>Link<\/span><b class="([^"]*)"/) || [])[1] || null;
 }
 reset();
 elements.health = element("health");
 S.data = { state: { status: "live", ingest: null, unpriced_models: [] } };
 S.linkOk = false;
 api.renderHealth();
-out.link.nolink = (elements.health.innerHTML.match(/<span>LINK<\/span><b class="([^"]*)">/) || [])[1] || null;
+out.link.nolink = (elements.health.innerHTML.match(/<span>Link<\/span><b class="([^"]*)"/) || [])[1] || null;
 reset();
 elements.health = element("health");
 api.renderHealth();
-out.link.nostate = (elements.health.innerHTML.match(/<span>LINK<\/span><b class="([^"]*)">/) || [])[1] || null;
+out.link.nostate = (elements.health.innerHTML.match(/<span>Link<\/span><b class="([^"]*)"/) || [])[1] || null;
 
 // ── the plan price: the override wins where a price is used, the detected price is still known ───────────
 reset();
@@ -685,14 +685,14 @@ for (const status of ["live", "loading", "stale", "offline", "rate_limited", "no
   elements.health = element("health");
   S.data = { state: { status, ingest: { running: false, files_done: 1, files_total: 1 }, unpriced_models: [] } };
   api.renderHealth();
-  out.uplinkWords[status] = (elements.health.innerHTML.match(/<span>LINK<\/span><b class="[^"]*"><i[^>]*><\/i>([^<]*)<\/b>/) || [])[1] || null;
+  out.uplinkWords[status] = (elements.health.innerHTML.match(/<span>Link<\/span><b class="[^"]*"><i[^>]*><\/i>([^<]*)<\/b>/) || [])[1] || null;
 }
 reset();
 elements.health = element("health");
 S.data = { state: { status: "live", ingest: null, unpriced_models: [] } };
 S.linkOk = false;
 api.renderHealth();
-out.uplinkWords.nolink = (elements.health.innerHTML.match(/<span>LINK<\/span><b class="[^"]*"><i[^>]*><\/i>([^<]*)<\/b>/) || [])[1] || null;
+out.uplinkWords.nolink = (elements.health.innerHTML.match(/<span>Link<\/span><b class="[^"]*"><i[^>]*><\/i>([^<]*)<\/b>/) || [])[1] || null;
 S.linkOk = null;
 
 // the age: a number and a unit code, written as the badges write it and inside the stale sentence
@@ -2511,6 +2511,62 @@ async function updateProgress() {
   S.skipped = "";
   reset();
   out.updateProgress = U;
+}
+
+// ── Gates' own words (#98): the header, the health box, the status line and the burn rate's unit, in Gates and elsewhere ──
+// The look is the page's data-theme. Gates writes page.gates.* where gates.js used to turn the capitals into other words, every
+// other look the header's words; a French page with no translation shows either look's English marked lang="en".
+function gatesWords(page, theme) {
+  const P = page.api;
+  const els = page.elements;
+  const result = {};
+  const root = page.box.document.documentElement;
+  root.setAttribute("data-theme", theme);
+  const when = (ms) => new Date(Date.now() - ms).toISOString();
+  for (const status of ["live", "loading", "stale", "offline", "rate_limited", "no_credentials", "paused", "lost", "none"]) {
+    P.S.data = null; P.S.stats = {}; P.S.settings = {}; P.S.linkOk = null;
+    for (const id of ["uplink", "uplink-dot", "uplink-text", "screen", "data-age", "refresh", "health"]) { els[id] = element(id); }
+    if (status !== "none") {
+      P.S.data = { state: { status: status === "lost" ? "live" : status, status_detail: "detail of " + status, updated_at: when(12000),
+        usage: { fetched_at: when(12000), limits: [], breakdown: [], spend: null }, ingest: { running: false, files_done: 1, files_total: 1 },
+        unpriced_models: [], windows: {}, burn: { velocity: "NORMAL", tokens_per_min: 900, usd_per_hour: 1.1 } }, model_names: {} };
+    }
+    if (status === "lost") { P.S.linkOk = false; }
+    P.renderChrome();
+    const health = els.health.innerHTML;
+    const row = /<b class="(?:ok|is-down)"( lang="[^"]*")?><i[^>]*><\/i>([^<]*)<\/b>/.exec(health) || [];     // the link row
+    const burn = ((P.buildModel("overview").cards.filter((c) => c.key === "burn")[0] || {}).html || "");
+    result[status] = {
+      uplink: els["uplink-text"].textContent, uplinkLang: els["uplink-text"].getAttribute("lang"),
+      age: els["data-age"].textContent, ageLang: els["data-age"].getAttribute("lang"),
+      link: row[2] === undefined ? null : row[2], linkLang: row[1] ? row[1].slice(7, -1) : null,
+      banner: P.statusBanner(), unit: (burn.match(/<div class="nm-facts"><span( lang="[^"]*")?>([^<]*)<\/span>/) || []).slice(1),
+    };
+  }
+  root.removeAttribute("data-theme");
+  P.S.data = null; P.S.linkOk = null;
+  return result;
+}
+{
+  const french = { setting: "fr", language: "fr", system: "fr", format: "fr-FR", clock: 24, offered: ["en", "fr"] };
+  const meta = (sel) => (sel === 'meta[name="monitor-locale"]' ? { getAttribute: (k) => (k === "content" ? JSON.stringify(french) : null) } : null);
+  const page = { api, elements, box };
+  const fr = load(meta, { MonitorI18n: { language: "fr", strings: {}, fallback: EN_CATALOG.fallback } });
+  out.gatesWords = {
+    gates: gatesWords(page, "gates"), nostromo: gatesWords(page, "nostromo"), nightCity: gatesWords(page, "night_city"),
+    frenchGates: gatesWords(fr, "gates"), frenchNostromo: gatesWords(fr, "nostromo"),
+  };
+  reset();
+}
+
+// ── tUpper (#98): a chart label in its language's capitals, its values as they are ─────────────────────────────────────
+{
+  const catalog = { language: "tr", strings: { "k.avg": "ort. {amount} gün", "k.plain": "bugün" }, fallback: { "k.avg": "avg {amount}", "k.en": "today {n}" } };
+  const tr = load(null, { MonitorI18n: catalog }).api;
+  out.tUpper = {
+    own: tr.tUpper("k.avg", { amount: "1,2 k$" }), plain: tr.tUpper("k.plain"), english: tr.tUpper("k.en", { n: "i" }),
+    missing: tr.tUpper("no.such.key"), unfilled: tr.tUpper("k.avg"),
+  };
 }
 
 // The sizes in another language: a French page (fr-FR) whose catalog has no update text yet shows English's, marked lang="en",

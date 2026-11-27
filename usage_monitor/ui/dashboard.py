@@ -16,6 +16,11 @@ opener and save_export, which writes a daily-rollup download through the native 
 registered one by one with window.expose(), never as a js_api object, because pywebview resolves a
 js_api call by plain getattr over a dotted name, private names and the whole object graph behind them
 included.
+
+WebView2 takes its language from the monitor's (#88, #98): before the window is made, the child puts
+``--lang=<the format tag of /api/state's locale>`` into WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS (webview2_arguments), so the
+page's time and number fields write the monitor's formats. The language is fixed when WebView2 starts: a change of the
+Language setting reloads the page in its new language, and the fields follow the next time the dashboard opens.
 """
 from __future__ import annotations
 
@@ -54,6 +59,15 @@ DEFAULT_SIZE = (1200, 780)
 MIN_SIZE = (720, 480)
 # What the window shows until the page has painted, when the active theme's own page colour is not known (Nostromo's black).
 DEFAULT_BACKGROUND = "#090909"
+
+# WebView2 reads extra browser switches from this variable when it starts (Microsoft's documented name). pywebview passes its
+# own switch in the environment's options (webview/platforms/edgechromium.py; a test holds it to this text), and the
+# variable may take the place of those, so the dashboard repeats it.
+WEBVIEW2_ARGS_ENV = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"
+PYWEBVIEW_BROWSER_ARGUMENTS = "--disable-features=ElasticOverscroll"
+# A BCP 47 tag as the monitor's locale writes its format ("en-US", "fr-CA", "zh-Hant-TW"): letters, digits and hyphens only,
+# so a value can never add a switch of its own.
+_LANGUAGE_TAG = re.compile(r"[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,3}")
 
 # Exit codes of the child. 0 is a window that was shown and closed. The two fallbacks differ on
 # purpose: a missing web view is the machine's doing, a failing window call is ours (a test must
@@ -620,6 +634,33 @@ def _read_state(base: str, token: str) -> dict[str, Any] | None:
     return state if isinstance(state, dict) else None
 
 
+def webview2_arguments(state: Any, existing: str | None) -> str | None:
+    """WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS for a window in the monitor's language: ``--lang=<tag>`` with pywebview's own
+    ``--disable-features=ElasticOverscroll``, the tag being ``state["locale"]["format"]`` (English: en-US). ``existing`` is
+    the variable as the developer set it, if they did: its switches are kept, a ``--lang`` of its own wins, and its
+    ``--disable-features`` lists become one switch with ElasticOverscroll in it (two such switches would not add up). None,
+    with a warning, when the state has no format tag that reads as a language tag: the variable is left as it is."""
+    locale = state.get("locale") if isinstance(state, dict) else None
+    tag = locale.get("format") if isinstance(locale, dict) else None
+    if not isinstance(tag, str) or not _LANGUAGE_TAG.fullmatch(tag):
+        log.warning("dashboard: no language tag in the monitor's state; WebView2 keeps its own language")
+        return None
+    own_feature = PYWEBVIEW_BROWSER_ARGUMENTS.split("=", 1)[1]
+    features: list[str] = []
+    others: list[str] = []
+    has_lang = False
+    for switch in (existing or "").split():
+        name, _, value = switch.partition("=")
+        if name == "--disable-features":
+            features += [feature for feature in value.split(",") if feature and feature not in features]
+        else:
+            has_lang = has_lang or name == "--lang"
+            others.append(switch)
+    if own_feature not in features:
+        features.append(own_feature)
+    return " ".join(["--disable-features=" + ",".join(features), *others, *([] if has_lang else [f"--lang={tag}"])])
+
+
 def _saved_bounds(state: Any) -> dict[str, int] | None:
     settings = state.get("settings") if isinstance(state, dict) else None
     bounds = settings.get("dashboard_bounds") if isinstance(settings, dict) else None
@@ -841,6 +882,10 @@ def dashboard_main(argv: list[str] | None = None) -> int:
     url = f"{base}/?{KEY_PARAM}={urllib.parse.quote(token, safe='')}"     # the page is served to whoever has the key
     state = _read_state(base, token)
     saved = _saved_bounds(state)
+    arguments = webview2_arguments(state, os.environ.get(WEBVIEW2_ARGS_ENV))
+    if arguments is not None:                 # this process's own environment, read when WebView2 starts (webview.start)
+        os.environ[WEBVIEW2_ARGS_ENV] = arguments
+        log.info("dashboard: WebView2 starts in %s", state["locale"]["format"])
 
     try:
         import webview  # noqa: PLC0415  (pywebview is optional at import time)

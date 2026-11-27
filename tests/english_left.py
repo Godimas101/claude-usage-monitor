@@ -6,9 +6,9 @@ no longer English and refuses to add anything unless told to (``--allow-new``).
 How English is told from the pseudo-locale. ``i18n.pseudo_text`` changes every a, c, e, g, i, n, o, s, u and y (and
 their capitals) into a look-alike, pads the string and brackets it. So a word that still holds one of those letters as
 plain ASCII was never made pseudo: it is English ("usage", "Café", "OFF"). A word with a look-alike letter and none of
-those plain ones is pseudo. A word with neither ("PM", "MB") could be either: it counts as English only outside a
-bracketed pseudo string, which the scan follows across the runs of text one block of the page holds (markup can split a
-string). Numbers are no words (a word has two ASCII letters in a row). Names are taken out of a run before it is judged:
+those plain ones is pseudo; so is one whose only plain one is a capital I, the dotless ı in capitals (#98). A word
+with neither ("PM", "MB") could be either: it counts as English only outside a bracketed pseudo string, which the scan
+follows across the runs of text one block of the page holds (markup can split a string). Numbers are no words (a word has two ASCII letters in a row). Names are taken out of a run before it is judged:
 the product name and #86's brand marks on both halves, and on the widgets the names the skins draw (SKIN_NAMES), since
 a frame has no markup to mark them. On the dashboard, an element marked ``translate="no"``, or with a ``lang`` other
 than the page's, is skipped with all inside it (``tName``, ``tPath`` and ``tCode`` in app.js mark names, paths and
@@ -112,10 +112,14 @@ PASSES: dict[str, tuple[str, ...]] = {
 
 def _kind(word: str) -> str | None:
     """"pseudo", "english", "either" (no letter pseudo_text changes, so it reads the same both ways) or None (no word:
-    fewer than two ASCII letters in a row)."""
-    if any(ch in MAPPED_LETTERS for ch in word):
+    fewer than two ASCII letters in a row). A plain capital I in a word with a look-alike is pseudo_text's dotless ı set
+    in capitals (the page's FMT.upper and tUpper, #98: "[ÜPLIÑK LIVÉ …]"), which has no capital of its own outside
+    Turkish: such a word is pseudo when I is its only plain letter of those pseudo_text changes."""
+    plain = {ch for ch in word if ch in MAPPED_LETTERS}
+    looks_alike = any(ch in PSEUDO_LETTERS for ch in word)
+    if plain and not (looks_alike and plain == {"I"}):
         return "english" if re.search(r"[A-Za-z]{2}", word) else None
-    if any(ch in PSEUDO_LETTERS for ch in word):
+    if looks_alike:
         return "pseudo"
     return "either" if re.search(r"[A-Za-z]{2}", word) else None
 

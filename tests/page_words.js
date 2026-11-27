@@ -294,9 +294,18 @@ function answer(w, url, method, headers) {
   return Promise.resolve(response(404, { error: "not found" }));
 }
 
-/* A fresh page for one case in one look. */
-function load(w, look, problems) {
-  const doc = D.createDocument(shell(w, look), { width: WIDTH, report: (e) => problems.push("a listener threw: " + describe(e)) });
+// A French page whose catalog has none of the page's words yet: every one of them is English's, marked lang="en".
+const FRENCH = { setting: "fr", language: "fr", system: "fr", format: "fr-FR", clock: 24, offered: ["en", "fr"] };
+const FRENCH_CATALOG = { language: "fr", strings: {}, fallback: EN_CATALOG.fallback };
+
+/* A fresh page for one case in one look. opts.lang "fr": the French page above. opts.motion: motion.js and every theme script
+ * run too, and each theme's entrance (its FX.director settings) is kept in box.__directors, by theme. */
+function load(w, look, problems, opts) {
+  opts = opts || {};
+  if (opts.lang === "fr") { w.state.locale = clone(FRENCH); }
+  let html = shell(w, look);
+  if (opts.lang === "fr") { html = html.replace('<html lang="en"', '<html lang="fr"'); }
+  const doc = D.createDocument(html, { width: WIDTH, report: (e) => problems.push("a listener threw: " + describe(e)) });
   const clock = { now: NOW };
   const timers = [];
   let timerId = 0;
@@ -312,7 +321,11 @@ function load(w, look, problems) {
       search: "", hash: "#overview", reload: () => problems.push("the page reloaded"), assign() {}, replace() {} },
     history: { replaceState: (_s, _t, url) => { if (typeof url === "string" && url[0] === "#") { box.location.hash = url; } }, pushState() {} },
     navigator: { userAgent: "node (tests/page_words.js)", language: "en-US", clipboard: { writeText: () => Promise.resolve() } },
-    matchMedia: (media) => ({ media, matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }),
+    // with the motion layer, motion is reduced: the clock stands still, so a boot or an entrance would never end; the
+    // directors are made either way
+    matchMedia: (media) => ({ media, matches: !!opts.motion && /prefers-reduced-motion:\s*reduce/.test(media), addEventListener() {},
+      removeEventListener() {}, addListener() {}, removeListener() {} }),
+    performance: { now: () => clock.now - NOW },
     getComputedStyle: () => ({ getPropertyValue: (name) => (name === "--chart-pips" ? PIPS[doc.documentElement.getAttribute("data-theme")] || "" : "") }),
     requestAnimationFrame: (fn) => { timers.push({ id: ++timerId, at: clock.now, fn, frame: true }); return timerId; },
     cancelAnimationFrame: (id) => { drop(id); },
@@ -346,7 +359,8 @@ function load(w, look, problems) {
       Promise.resolve().then(() => {
         const src = String(node.src || node.getAttribute("src") || "");         // app.js sets script.src
         try {
-          if (/\/themes\/gates\.js$/.test(src)) { script("themes/gates.js").runInContext(box); }
+          const theme = /\/themes\/([a-z_]+)\.js$/.exec(src);
+          if (theme && (theme[1] === "gates" || opts.motion)) { script("themes/" + theme[1] + ".js").runInContext(box); }
           if (typeof node.onload === "function") { node.onload(); }
         } catch (e) {
           problems.push(src + " threw: " + describe(e));
@@ -355,8 +369,16 @@ function load(w, look, problems) {
     }
     return added;
   };
-  box.MonitorI18n = EN_CATALOG;
-  for (const name of ["formats.js", "charts.js", "app.js"]) {
+  box.MonitorI18n = opts.lang === "fr" ? FRENCH_CATALOG : EN_CATALOG;
+  script("formats.js").runInContext(box);
+  if (opts.motion) {
+    script("motion.js").runInContext(box);
+    const FX = box.USAGE_MONITOR_FX;
+    const director = FX.director;
+    box.__directors = {};
+    FX.director = (config) => { box.__directors[config.id] = config; return director(config); };
+  }
+  for (const name of ["charts.js", "app.js"]) {
     script(name).runInContext(box);
   }
   return { doc, box, clock, timers, world: w, look };
@@ -529,7 +551,85 @@ function format(record) {
     ' "views": {\n' + list(Object.keys(record.views).map((k) => JSON.stringify(k) + ": " + JSON.stringify(record.views[k]))) + "\n }\n}\n";
 }
 
-run().then(({ views, problems }) => {
+// ── the header before the first state, and the themes' entrances (beside the record, not in it) ─────────────────────
+
+/* The header and the health box before the monitor has answered (#98's critic 10, 11 and 17), in each look: as the page
+ * opens, after its first 1 s tick, and after a first poll that failed; and the shell's own words, in index.html. */
+async function firstChrome(problems) {
+  const words = (doc) => ({
+    uplink: doc.getElementById("uplink-text").textContent, uplinkLang: doc.getElementById("uplink-text").getAttribute("lang"),
+    uplinkClass: doc.getElementById("uplink").className, dotClass: doc.getElementById("uplink-dot").className,
+    age: doc.getElementById("data-age").textContent, ageLang: doc.getElementById("data-age").getAttribute("lang"),
+    health: doc.getElementById("health").textContent,
+  });
+  const out = { shell: words(D.createDocument(read("index.html"))), looks: {} };
+  for (const look of LOOKS) {
+    const moments = {};
+    for (const [moment, state, tick] of [["opened", "hang", 0], ["tick", "hang", 1000], ["failed", "fail", 0]]) {
+      const w = world();
+      w.state.theme = themeView(w, look);
+      w.stateAnswer = state;
+      allReports(w, "hang");
+      const view = load(w, look, problems);
+      await settle(view);
+      if (tick) { await advance(view, tick); }
+      moments[moment] = words(view.doc);
+    }
+    out.looks[look.name] = moments;
+  }
+  return out;
+}
+
+const norm = (text) => String(text || "").replace(/\s+/g, " ").trim();
+
+/* What each theme's entrance animates (#98's critic 2): every element its director names (its head and card groups, read
+ * from the theme script itself), on Overview and Limits (live and before the first state) and on every page's heading, in
+ * English and on a French page with English's words. Nostromo's typer types an element's first text node
+ * (FX.text.firstText), Night City's decoder its own text nodes (FX.text.directText): words that sit in a child instead (a span
+ * for a name or a language) show at once while the rest moves. Gives what was checked, and each element whose animated text
+ * is not all of its text. */
+async function entrance(problems) {
+  const out = { checked: {}, untyped: [] };
+  const runs = [];
+  for (const lang of ["en", "fr"]) {
+    ALL_PAGES.forEach((page) => runs.push({ lang, caseName: "live", page }));
+    STAT_PAGES.forEach((page) => runs.push({ lang, caseName: "before-state", page }));
+  }
+  for (const look of LOOKS.filter((l) => l.name === "nostromo" || l.name === "night_city")) {
+    for (const r of runs) {
+      const w = world();
+      w.state.theme = themeView(w, look);
+      Object.assign(w.state.settings, { theme_id: look.theme, theme_variant: look.variant });
+      if (r.caseName === "before-state") { w.stateAnswer = "hang"; allReports(w, "hang"); }
+      const view = load(w, look, problems, { lang: r.lang, motion: true });
+      await settle(view);
+      await open(view, r.page);
+      if (!view.box.__directors[look.theme]) {
+        script("themes/" + look.theme + ".js").runInContext(view.box);      // before the first state the theme script waits
+      }
+      const FX = view.box.USAGE_MONITOR_FX;
+      const director = view.box.__directors[look.theme];
+      const key = look.name + "|" + r.lang + "|" + r.caseName + "|" + r.page;
+      out.checked[key] = {};
+      const main = view.doc.getElementById("main");
+      for (const group of (director.head || []).concat(director.card || [])) {
+        let count = 0;
+        for (const el of main.querySelectorAll(group.sel)) {
+          const all = norm(el.textContent);
+          if (!all) { continue; }
+          count += 1;
+          const first = look.theme === "nostromo" ? FX.text.firstText(el) : null;
+          const moved = look.theme === "nostromo" ? norm(first ? first.nodeValue : "") : norm(FX.text.directText(el));
+          if (moved !== all) { out.untyped.push({ view: key, sel: group.sel, text: all, moved }); }
+        }
+        out.checked[key][group.sel] = count;
+      }
+    }
+  }
+  return out;
+}
+
+run().then(async ({ views, problems }) => {
   const record = {
     _about: ["The dashboard's English before #98 moved its words into the catalog: tests/page_words.js on the code at c05f45d, " +
       "with TZ=UTC. Each view is case|look|page; each region [text, attributes] (and, in Gates before the first state, the text " +
@@ -547,7 +647,9 @@ run().then(({ views, problems }) => {
     process.stdout.write(JSON.stringify({ recorded: FIXTURE, views: Object.keys(views).length, strings: record.strings.length }) + "\n");
     return;
   }
-  process.stdout.write(JSON.stringify({ ...record, problems }));
+  const first = await firstChrome(problems);
+  const moving = await entrance(problems);
+  process.stdout.write(JSON.stringify({ ...record, problems, first, entrance: moving }));
 }).catch((e) => {
   console.error(e && e.stack ? e.stack : e);
   process.exit(1);

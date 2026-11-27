@@ -23,30 +23,30 @@
     <header class="nm-bar">
       <div class="nm-brand">
         <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5"/><circle cx="8" cy="8" r="3.5" stroke-dasharray="2 2"/><path d="M8 8 13 4.5"/><path d="M1.5 8h2M12.5 8h2M8 1.5v2M8 12.5v2"/></svg>
-        CLAUDE USAGE MONITOR<em>// ONBOARD COMPUTER</em>
+        CLAUDE USAGE MONITOR<em data-i18n="shell.brand.mark">// ONBOARD COMPUTER</em>
       </div>
       <div class="nm-bar-r">
-        <span class="nm-uplink" id="uplink"><i class="nm-alive" id="uplink-dot"></i><span id="uplink-text">ACQUIRING</span></span>
-        <span id="data-age">DATA AGE --</span>
-        <button class="nm-refresh" id="refresh" type="button" title="Fetch the latest usage now">REFRESH</button>
+        <span class="nm-uplink" id="uplink"><i class="nm-alive" id="uplink-dot"></i><span id="uplink-text" data-i18n="header.link.loading">Acquiring</span></span>
+        <span id="data-age" data-i18n="header.age_none">Data age --</span>
+        <button class="nm-refresh" id="refresh" type="button" title="Fetch the latest usage now" data-i18n-title="shell.refresh.title" data-i18n="shell.refresh.button">Refresh</button>
       </div>
     </header>
 
     <div class="nm-app">
-      <nav class="nm-nav" aria-label="Modules">
-        <div class="nm-kick">MODULES</div>
+      <nav class="nm-nav" aria-label="Modules" data-i18n-aria-label="shell.nav.label">
+        <div class="nm-kick" data-i18n="shell.nav.kicker">Modules</div>
         <ol class="nm-menu" id="menu">
-          <li><a href="#overview" data-page="overview"><i>01</i>OVERVIEW</a></li>
-          <li><a href="#limits" data-page="limits"><i>02</i>LIMITS</a></li>
-          <li><a href="#cost" data-page="cost"><i>03</i>COST &amp; VALUE</a></li>
-          <li><a href="#efficiency" data-page="efficiency"><i>04</i>EFFICIENCY</a></li>
-          <li><a href="#history" data-page="history"><i>05</i>HISTORY</a></li>
-          <li><a href="#settings" data-page="settings"><i>06</i>SETTINGS</a></li>
-          <li><a href="#about" data-page="about"><i>07</i>ABOUT</a></li>
+          <li><a href="#overview" data-page="overview"><i>01</i><span data-i18n="shell.nav.overview">Overview</span></a></li>
+          <li><a href="#limits" data-page="limits"><i>02</i><span data-i18n="shell.nav.limits">Limits</span></a></li>
+          <li><a href="#cost" data-page="cost"><i>03</i><span data-i18n="shell.nav.cost">Cost &amp; value</span></a></li>
+          <li><a href="#efficiency" data-page="efficiency"><i>04</i><span data-i18n="shell.nav.efficiency">Efficiency</span></a></li>
+          <li><a href="#history" data-page="history"><i>05</i><span data-i18n="shell.nav.history">History</span></a></li>
+          <li><a href="#settings" data-page="settings"><i>06</i><span data-i18n="shell.nav.settings">Settings</span></a></li>
+          <li><a href="#about" data-page="about"><i>07</i><span data-i18n="shell.nav.about">About</span></a></li>
         </ol>
         <div class="nm-health" id="health" aria-live="polite"></div>
         <div class="nm-phos">
-          <div class="nm-kick" id="phos-label">PHOSPHOR</div>
+          <div class="nm-kick" id="phos-label" data-i18n="nav.colour.label.phosphor">Phosphor</div>
           <div class="nm-sw" id="variants"></div>
         </div>
       </nav>

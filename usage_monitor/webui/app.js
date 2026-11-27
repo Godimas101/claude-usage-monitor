@@ -23,7 +23,12 @@
  * Shell       .nm-screen > .nm-content > header.nm-bar (.nm-brand .nm-bar-r .nm-uplink .nm-alive
  *             .nm-refresh) + .nm-app > nav.nm-nav (.nm-kick .nm-menu a.on .nm-health .nm-kv .nm-phos
  *             .nm-sw) + main.nm-main; overlays .nm-boot .nm-scan .nm-vig; #tip.nm-tip is the one tooltip.
- * Page        .nm-head > h1.nm-h1 (+ .nm-cur) + p.nm-sub; .nm-msg is a status banner (role=status);
+ *             Its words, the header's and the sidebar's are the catalog's (#98: shell.*, header.*, nav.*), in natural case: a
+ *             theme sets them in capitals with text-transform. Gates has words of its own (page.gates.*) where it says
+ *             something else ("Connecting" for ACQUIRING). The product's name is written in the shell and kept as it is.
+ * Page        .nm-head > h1.nm-h1 (+ .nm-cur) + p.nm-sub, the catalog's heading.<page>.*, each the element's own text (a
+ *             theme's entrance types it), lang="en" on the element while it is English on another language's page;
+ *             .nm-msg is a status banner (role=status);
  *             .nm-hazard the critical stripe. The overview body is .nm-grid (3 columns, 3 rows); every
  *             other page is .nm-pgrid (12 columns) whose children take .span-3 .span-4 .span-5 .span-6
  *             .span-7 .span-8 or .wide (all 12); below 1000 px everything is one column.
@@ -195,36 +200,18 @@
   // Each language named in itself, as the Language setting lists them (the same names as i18n.NAMES).
   var LANGUAGE_NAMES = { en: "English", fr: "Français", es: "Español", tr: "Türkçe" };
   var CHARTS = window.MonitorCharts;
+  // The pages, in the menu's order. Their headings are the catalog's (HEADINGS, #98).
   var PAGES = [
-    { key: "overview", label: "OVERVIEW", title: "OVERVIEW", sub: "Session telemetry for the current window. Pace is usage against elapsed time." },
-    { key: "limits", label: "LIMITS", title: "LIMITS", sub: "Every limit window, its reset and where it is heading." },
-    { key: "cost", label: "COST & VALUE", title: "COST & VALUE", sub: "API-equivalent at list prices. Not what your plan bills." },
-    { key: "efficiency", label: "EFFICIENCY", title: "EFFICIENCY", sub: "Efficiency counters from your own transcripts. Hover or focus a figure to see what it means." },
-    { key: "history", label: "HISTORY", title: "HISTORY", sub: "A year of use, hour by hour, and the all-time odometer." },
-    { key: "settings", label: "SETTINGS", title: "SETTINGS", sub: "Every change applies at once. Nothing needs a restart." },
-    { key: "about", label: "ABOUT", title: "ABOUT", sub: "Claude Usage Monitor, the people behind it, and where to report problems." }
+    { key: "overview" }, { key: "limits" }, { key: "cost" }, { key: "efficiency" }, { key: "history" }, { key: "settings" }, { key: "about" }
   ];
   var PAGE_KEYS = PAGES.map(function (p) { return p.key; });
   // Old names of pages, so a saved link or a bookmark (#nerds, from before the page was called Efficiency) still opens it.
   var PAGE_ALIASES = { nerds: "efficiency" };
+  // The link's states, by the status code the monitor sends: whether the link is up (the alive mark lit). Their words are
+  // the catalog's (#98, linkLine).
   var STATUS = {
-    live: { text: "UPLINK LIVE", ok: true },
-    loading: { text: "ACQUIRING", ok: false },
-    stale: { text: "AUTH LOST", ok: false },
-    offline: { text: "NO CARRIER", ok: false },
-    rate_limited: { text: "RATE LIMITED", ok: false },
-    no_credentials: { text: "NO LOGIN", ok: false },
-    paused: { text: "PAUSED", ok: false }
-  };
-  // The words of the health box's LINK row for each status code; the header and the pipeline's LINK row show the STATUS text.
-  var LINK_WORD = {
-    live: "LIVE", loading: "ACQUIRING", stale: "AUTH LOST", offline: "NO CARRIER", rate_limited: "RATE LIMITED",
-    no_credentials: "NO LOGIN", paused: "PAUSED"
-  };
-  // The sidebar's short names for the Gates accents. Nostromo's sidebar names its phosphors in full (accentLabel), and
-  // any other id shows its first three letters.
-  var ACCENT_ABBR = {
-    system: "SYS", blue: "BLU", teal: "TEA", purple: "PUR", rose: "ROS", orange: "ORG", green: "GRN"
+    live: { ok: true }, loading: { ok: false }, stale: { ok: false }, offline: { ok: false }, rate_limited: { ok: false },
+    no_credentials: { ok: false }, paused: { ok: false }
   };
   var WINDOW_ORDER = ["session", "today", "week", "month", "cycle", "all"];
   var WINDOW_LABEL = {
@@ -543,6 +530,20 @@
       all[name] = values[name];
     });
     return fillText(found.value[category] || found.value.other || "", all);
+  }
+
+  /* The text for key in its language's capitals, its placeholders filled after, so a value keeps its own case ("1,2 k$"): for
+   * a chart's SVG label, which a theme cannot set in capitals with text-transform everywhere (#98). The key itself when no
+   * catalog has it. */
+  function tUpper(key, values) {
+    var found = lookupText(key);
+    if (!found || typeof found.value !== "string") {
+      return key;
+    }
+    var cased = found.value.split(/(\{[A-Za-z_][A-Za-z0-9_]*\})/).map(function (part, i) {
+      return i % 2 ? part : FMT.upper(part, found.lang);
+    }).join("");
+    return fillText(cased, values);
   }
 
   function esc(value) {
@@ -927,6 +928,121 @@
   /* The same in markup (the banner's line): ' lang="en"' or nothing. */
   function lineLangAttr(lang) {
     return lang && lang !== I18N.language ? ' lang="' + esc(lang) + '"' : "";
+  }
+
+  // ── The header's, the sidebar's and the headings' words (#98) ─────────────────────
+  // In natural case: Nostromo and Night City set them in capitals by CSS. Gates says some of them in words of its own
+  // (page.gates.*), which gates.js used to make of the capitals: app.js writes them while the look is Gates, from the first
+  // frame. Each table holds one literal key a line (the UPDATE_REFUSED pattern), so the catalog check reads them all.
+
+  /* Shows a line in an element: its text, and lang="en" while it is English on another language's page. */
+  function writeLine(el, line) {
+    if (el) {
+      el.textContent = line.text;
+      markLineLang(el, line.lang);
+    }
+  }
+
+  /* A value that is not a sentence ("--"): no language of its own. */
+  function bareLine(text) {
+    return { text: text, lang: "" };
+  }
+
+  /* Whether the page is in the Gates look: the server writes data-theme into the first paint, applyTheme on a change. */
+  function gatesLook() {
+    return document.documentElement.getAttribute("data-theme") === "gates";
+  }
+
+  // The link's words for each status code, and for "lost": the dashboard gets no answer from the monitor.
+  var LINK_WORDS = {
+    live: function () { return tLine("header.link.live"); },
+    loading: function () { return tLine("header.link.loading"); },
+    stale: function () { return tLine("header.link.stale"); },
+    offline: function () { return tLine("header.link.offline"); },
+    rate_limited: function () { return tLine("header.link.rate_limited"); },
+    no_credentials: function () { return tLine("header.link.no_credentials"); },
+    paused: function () { return tLine("header.link.paused"); },
+    lost: function () { return tLine("header.link.lost"); }
+  };
+  var GATES_LINK_WORDS = {
+    live: function () { return tLine("page.gates.link.live"); },
+    loading: function () { return tLine("page.gates.link.loading"); },
+    stale: function () { return tLine("page.gates.link.stale"); },
+    offline: function () { return tLine("page.gates.link.offline"); },
+    rate_limited: function () { return tLine("page.gates.link.rate_limited"); },
+    no_credentials: function () { return tLine("page.gates.link.no_credentials"); },
+    paused: function () { return tLine("page.gates.link.paused"); },
+    lost: function () { return tLine("page.gates.link.lost"); }
+  };
+
+  /* The words of a link state in the look's words: the header's line, the status line's heading, the health box's row. A
+   * code the table does not name reads as loading. */
+  function linkLine(code) {
+    return entryOf(gatesLook() ? GATES_LINK_WORDS : LINK_WORDS, code, "loading")();
+  }
+
+  /* The health box's link row: "Live" for a live link (Gates' own word is the header's), else the header's words. */
+  function healthLinkLine(code) {
+    return code === "live" && !gatesLook() ? tLine("nav.health.live") : linkLine(code);
+  }
+
+  /* The header's data age (an age from fmtAge, or null): "Data age 12 s", or in Gates "Updated 12 s ago". The unit is the
+   * sentence's (#91: CLDR's in other languages); the capitals are the theme's. */
+  function ageLine(age) {
+    if (age === null) {
+      return gatesLook() ? tLine("page.gates.age_none") : tLine("header.age_none");
+    }
+    var words = ageWords(age, AGE_UNIT_IN_SENTENCE);
+    return gatesLook() ? tLine("page.gates.age", { age: words }) : tLine("header.age", { age: words });
+  }
+
+  /* The burn rate's unit beside its figure. */
+  function burnUnitLine() {
+    return gatesLook() ? tLine("page.gates.burn.unit") : tLine("overview.burn.unit");
+  }
+
+  // Each page's heading and the sentence beside it.
+  var HEADINGS = {
+    overview: function () { return { title: tLine("heading.overview.title"), sub: tLine("heading.overview.sub") }; },
+    limits: function () { return { title: tLine("heading.limits.title"), sub: tLine("heading.limits.sub") }; },
+    cost: function () { return { title: tLine("heading.cost.title"), sub: tLine("heading.cost.sub") }; },
+    efficiency: function () { return { title: tLine("heading.efficiency.title"), sub: tLine("heading.efficiency.sub") }; },
+    history: function () { return { title: tLine("heading.history.title"), sub: tLine("heading.history.sub") }; },
+    settings: function () { return { title: tLine("heading.settings.title"), sub: tLine("heading.settings.sub") }; },
+    about: function () { return { title: tLine("heading.about.title"), sub: tLine("heading.about.sub", { app: APP_NAME }) }; }
+  };
+
+  // The sidebar's colour buttons. Their tooltips name the colour by its id's words; a name (Night City's variants) or an id
+  // the table does not know is shown as written. Gates' accents have short names of three letters; any other id shows its
+  // first three (Night City's names). Nostromo names its phosphors in full (accentLabel, the theme's own names).
+  var ACCENT_TIPS = {
+    amber: function () { return t("nav.colour.title.amber"); },
+    green: function () { return t("nav.colour.title.green"); },
+    white: function () { return t("nav.colour.title.white"); },
+    red: function () { return t("nav.colour.title.red"); },
+    blue: function () { return t("nav.colour.title.blue"); },
+    purple: function () { return t("nav.colour.title.purple"); },
+    teal: function () { return t("nav.colour.title.teal"); },
+    rose: function () { return t("nav.colour.title.rose"); },
+    orange: function () { return t("nav.colour.title.orange"); },
+    system: function () { return t("nav.colour.title.system"); }
+  };
+  var ACCENT_SHORT = {
+    system: function () { return t("nav.colour.short.system"); },
+    blue: function () { return t("nav.colour.short.blue"); },
+    teal: function () { return t("nav.colour.short.teal"); },
+    purple: function () { return t("nav.colour.short.purple"); },
+    rose: function () { return t("nav.colour.short.rose"); },
+    orange: function () { return t("nav.colour.short.orange"); },
+    green: function () { return t("nav.colour.short.green"); }
+  };
+
+  function accentTip(accent) {
+    return Object.prototype.hasOwnProperty.call(ACCENT_TIPS, accent) ? ACCENT_TIPS[accent]() : accent;
+  }
+
+  function accentShort(accent) {
+    return Object.prototype.hasOwnProperty.call(ACCENT_SHORT, accent) ? ACCENT_SHORT[accent]() : accent.slice(0, 3).toUpperCase();
   }
 
   /* The line after "Check for updates now". `checked` is false when the monitor could not look (offline, GitHub's rate
@@ -1480,10 +1596,13 @@
       "</div></section>";
   }
 
-  /* The heading of a page. */
+  /* The heading of a page. Its words are the heading's and the sentence's own text, never in a span of their own: the themes'
+   * entrances type and decode .nm-h1 and .nm-sub by their own text (nostromo.js, night_city.js). English on another
+   * language's page is marked on the element itself. */
   function pageHead(key) {
-    var page = PAGES.filter(function (p) { return p.key === key; })[0];
-    return '<div class="nm-head"><h1 class="nm-h1">' + esc(page.title) + '<span class="nm-cur" aria-hidden="true"></span></h1><p class="nm-sub">' + esc(page.sub) + "</p></div>";
+    var head = entryOf(HEADINGS, key, "overview")();
+    return '<div class="nm-head"><h1 class="nm-h1"' + lineLangAttr(head.title.lang) + ">" + esc(head.title.text) +
+      '<span class="nm-cur" aria-hidden="true"></span></h1><p class="nm-sub"' + lineLangAttr(head.sub.lang) + ">" + esc(head.sub.text) + "</p></div>";
   }
 
   /* A segmented control: options [[value, label]]. Clicks are handled by the page's one listener. */
@@ -1556,11 +1675,11 @@
     if (!s || s.status === "live") {
       return "";
     }
-    var info = STATUS[s.status] || STATUS.loading;
+    var line = linkLine(s.status);
     if (needsSignIn(s)) {
-      return signInHelp(s, info);
+      return signInHelp(s, line);
     }
-    return '<div class="nm-msg" role="status"><b>' + esc(info.text) + "</b>" + esc(s.status_detail || "") + "</div>";
+    return '<div class="nm-msg" role="status"><b' + lineLangAttr(line.lang) + ">" + esc(line.text) + "</b>" + esc(s.status_detail || "") + "</div>";
   }
 
   function hazardBand(sev) {
@@ -2347,13 +2466,14 @@
   function burnCard(s) {
     var burn = s && s.burn ? s.burn : null;
     var velocity = burn ? String(burn.velocity || "IDLE") : "IDLE";
+    var unit = burnUnitLine();
     // Until two samples are in (one every poll), the trace is its frame alone.
     var spark = S.samples.length > 1
       ? CHARTS.sparkline(S.samples, { width: 300, height: 58, label: "Burn rate, recent samples" })
       : CHARTS.sparkline([], { width: 300, height: 58, label: "Burn rate, sampling" }).replace("<svg ", '<svg data-pending="" ');
     return '<section class="nm-card" id="burn" aria-label="Burn rate" data-card="burn"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl">Burn rate</h2><span class="nm-chip" data-tone="' + toneOf(VELOCITY_TONE, velocity) + '">' + esc(velocity) + "</span></div>" +
       '<div class="nm-row2 is-base"><div class="nm-big m">' + esc(burn ? fmtInt(burn.tokens_per_min) : "--") +
-      '</div><div class="nm-facts"><span>TOK / MIN</span><span>' + esc(burn ? fmtUsd(burn.usd_per_hour) : "--") + " / HOUR</span></div></div>" +
+      '</div><div class="nm-facts"><span' + lineLangAttr(unit.lang) + ">" + esc(unit.text) + "</span><span>" + esc(burn ? fmtUsd(burn.usd_per_hour) : "--") + " / HOUR</span></div></div>" +
       spark + "</div></section>";
   }
 
@@ -3102,6 +3222,11 @@
     return cards;
   }
 
+  /* A line in its language's capitals. */
+  function upperLine(line) {
+    return FMT.upper(line.text, line.lang);
+  }
+
   /* The pipeline card: how the monitor's own data is doing. The plan is named by its plan name ("Max 5x"), never by the
    * internal tier id the usage API reports. */
   function pipelineCard(s) {
@@ -3110,7 +3235,7 @@
       ? (ingest.running ? "RUNNING " + fmtInt(ingest.files_done) + " / " + fmtInt(ingest.files_total) : "IDLE, " + fmtInt(ingest.files_total) + " FILES")
       : "--";
     var kv = [
-      ["LINK", s ? (STATUS[s.status] || STATUS.loading).text : "--"],
+      ["LINK", s ? upperLine(entryOf(LINK_WORDS, s.status, "loading")()) : "--"],
       ["FETCHED", s && s.usage_fetched_at ? stampText(parseTime(s.usage_fetched_at)) : "--"],
       ["UPDATED", s && s.updated_at ? stampText(parseTime(s.updated_at)) : "--"],
       ["INGEST", ingestText],
@@ -4210,8 +4335,8 @@
    * sign-in the steps start from nothing (installing Claude Code, which also gives the plan's limits to someone who uses Claude on
    * the web or in the app) and start Claude Code by its folder, since the installer leaves the PATH alone (#42); with an expired
    * one the monitor's own reason stays and the one thing to do is added, with the same command for a PC where claude is not
-   * found, or opens an older Claude app that took the name. info is the status's entry in STATUS (its heading). */
-  function signInHelp(s, info) {
+   * found, or opens an older Claude app that took the name. line is the status's words (linkLine), the expired one's heading. */
+  function signInHelp(s, line) {
     var missing = s.status === "no_credentials";
     var busy = S.check.busy;
     var found = S.check.failed ? CHECK_FAILED : S.check.still ? (missing ? CHECK_NONE : CHECK_STALE) : "";
@@ -4237,7 +4362,8 @@
         "</p><p>" + esc("If PowerShell says ") + codeText("claude") +
         esc(" is not recognized, or the Claude app opens instead, run this:") + "</p>" + commandRow("start");
     }
-    return '<div class="nm-msg nm-help" role="region" aria-label="Claude sign-in"><b>' + esc(missing ? SIGNIN_HEAD : info.text) + "</b>" + body +
+    return '<div class="nm-msg nm-help" role="region" aria-label="Claude sign-in"><b' + (missing ? "" : lineLangAttr(line.lang)) + ">" +
+      esc(missing ? SIGNIN_HEAD : line.text) + "</b>" + body +
       '<div class="nm-actions"><button class="nm-btn solid" type="button" data-action="check-again" data-fid="check-again"' + (busy ? ' aria-disabled="true"' : "") + ">" +
       (busy ? "Checking…" : "Check again") + "</button>" +
       (missing ? '<span class="nm-links"><a href="' + esc(LINKS.readme) + '" data-external="1">More in the README</a></span>' : "") + "</div>" +
@@ -5490,15 +5616,11 @@
   function renderChrome() {
     var s = st();
     var stale = !!(s && s.status !== "live");
-    var info = s ? (STATUS[s.status] || STATUS.loading) : STATUS.loading;
+    var info = s ? entryOf(STATUS, s.status, "loading") : STATUS.loading;
     var linkDown = S.linkOk === false;
-    var text = linkDown ? "NO LINK" : info.text;
     var up = document.getElementById("uplink");
     var dot = document.getElementById("uplink-dot");
-    var upText = document.getElementById("uplink-text");
-    if (upText) {
-      upText.textContent = text;
-    }
+    writeLine(document.getElementById("uplink-text"), linkLine(linkDown ? "lost" : s ? s.status : "loading"));
     if (up) {
       up.className = "nm-uplink" + (linkDown || !info.ok ? " is-down" : "");
     }
@@ -5524,16 +5646,19 @@
   }
 
   function renderAge() {
-    var a = ageMs();
-    var text = ageWords(fmtAge(a), AGE_UNIT);
-    var el = document.getElementById("data-age");
-    if (el) {
-      el.textContent = "DATA AGE " + text;
-    }
+    var age = fmtAge(ageMs());
+    writeLine(document.getElementById("data-age"), ageLine(age));
     var updated = document.querySelector("#health [data-updated]");
     if (updated) {
-      updated.textContent = a === null ? "--" : text + " AGO";
+      writeLine(updated, age === null ? bareLine("--") : tLine("nav.health.ago", { age: ageWords(age, AGE_UNIT_IN_SENTENCE) }));
     }
+  }
+
+  /* The header before the monitor has answered: the shell's own words, in the look's (Gates' from the first frame). Only the
+   * words: the link's mark stays as the shell has it until a state or a failed poll says how the link is. */
+  function renderFirstChrome() {
+    writeLine(document.getElementById("uplink-text"), linkLine("loading"));
+    renderAge();
   }
 
   /* Rebuilt only when its content changes, so the alive dot keeps its blink across the 1 s ticks. */
@@ -5545,20 +5670,22 @@
     var s = st();
     var ingest = s && s.ingest;
     var sources = ingest
-      ? (ingest.running ? "INGEST " + FMT.percent(String(Math.floor(100 * (ingest.files_done || 0) / Math.max(1, ingest.files_total || 1))))
-        : fmtInt(ingest.files_total) + " OK")
-      : "--";
+      ? (ingest.running
+        ? tLine("nav.health.ingest", { percent: FMT.percent(String(Math.floor(100 * (ingest.files_done || 0) / Math.max(1, ingest.files_total || 1)))) })
+        : tLine("nav.health.files", { count: fmtInt(ingest.files_total) }))
+      : bareLine("--");
     var unpriced = s && s.unpriced_models ? s.unpriced_models.length : 0;
-    var link = S.linkOk === false ? "NO LINK" : (s ? entryOf(LINK_WORD, s.status, "loading") : "--");
+    var link = S.linkOk === false ? linkLine("lost") : (s ? healthLinkLine(s.status) : bareLine("--"));
     var live = S.linkOk !== false && !!(s && s.status === "live");
-    var signature = [link, sources, unpriced, live].join("|");
+    var signature = [link.text, link.lang, sources.text, sources.lang, unpriced, live, gatesLook()].join("|");   // the look picks words too
     if (box.getAttribute("data-sig") !== signature) {
       box.setAttribute("data-sig", signature);
-      box.innerHTML = '<div class="nm-kick">DATA HEALTH</div>' +
-        '<div class="nm-kv"><span>LINK</span><b class="' + (live ? "ok" : "is-down") + '"><i class="nm-alive' + (live ? "" : " is-off") + '"></i>' + esc(link) + "</b></div>" +
-        '<div class="nm-kv"><span>UPDATED</span><b data-updated="1">--</b></div>' +
-        '<div class="nm-kv"><span>SOURCES</span><b>' + esc(sources) + "</b></div>" +
-        '<div class="nm-kv"><span>UNPRICED</span><b>' + esc(String(unpriced)) + "</b></div>";
+      box.innerHTML = '<div class="nm-kick">' + tHtml("nav.health.title") + "</div>" +
+        '<div class="nm-kv"><span>' + tHtml("nav.health.link") + '</span><b class="' + (live ? "ok" : "is-down") + '"' + lineLangAttr(link.lang) + '><i class="nm-alive' +
+        (live ? "" : " is-off") + '"></i>' + esc(link.text) + "</b></div>" +
+        '<div class="nm-kv"><span>' + tHtml("nav.health.updated") + '</span><b data-updated="1">--</b></div>' +
+        '<div class="nm-kv"><span>' + tHtml("nav.health.sources") + "</span><b" + lineLangAttr(sources.lang) + ">" + esc(sources.text) + "</b></div>" +
+        '<div class="nm-kv"><span>' + tHtml("nav.health.unpriced") + "</span><b>" + esc(String(unpriced)) + "</b></div>";
     }
     renderAge();
   }
@@ -5572,7 +5699,7 @@
     var theme = currentTheme();
     var meta = theme ? findTheme(theme.id) : null;
     if (label) {
-      label.textContent = theme && theme.id === "nostromo" ? "PHOSPHOR" : "ACCENT";
+      writeLine(label, theme && theme.id === "nostromo" ? tLine("nav.colour.label.phosphor") : tLine("nav.colour.label.accent"));
     }
     if (!meta) {
       box.innerHTML = "";
@@ -5591,7 +5718,7 @@
     var full = theme && theme.id === "nostromo";          // Nostromo's six phosphors fit by name, two to a row
     var html = accents.slice(0, 8).map(function (a) {
       return '<button type="button" data-accent="' + esc(a) + '" class="' + (a === active ? "on" : "") + '" aria-pressed="' + (a === active ? "true" : "false") +
-        '" title="' + esc(a) + '">' + esc(full ? accentLabel(meta, a) : ACCENT_ABBR[a] || a.slice(0, 3).toUpperCase()) + "</button>";
+        '" title="' + esc(accentTip(a)) + '">' + esc(full ? accentLabel(meta, a) : accentShort(a)) + "</button>";
     }).join("");
     if (box.getAttribute("data-sig") !== html) {
       box.setAttribute("data-sig", html);
@@ -6009,6 +6136,7 @@
       }
     }
     window.setInterval(tick, 1000);
+    renderFirstChrome();                               // the shell's words in the look's (the 1 s tick and a failed poll follow it)
     renderPage();                                      // the page opens at once as placeholders; the first state fills it in
     poll();
   }
@@ -6026,7 +6154,7 @@
       limitCard: limitCard, remainHTML: remainHTML, buildModel: buildModel, matchScoped: matchScoped, paceChip: paceChip,
       sessionStory: sessionStory, weeklyStory: weeklyStory, fmtAge: fmtAge, ageWords: ageWords, AGE_UNIT: AGE_UNIT,
       AGE_UNIT_IN_SENTENCE: AGE_UNIT_IN_SENTENCE, staleBanner: staleBanner, renderHealth: renderHealth, accentName: accentName,
-      accentTitled: accentTitled, LINK_WORD: LINK_WORD, entryOf: entryOf, statEntry: statEntry, entryState: entryState,
+      accentTitled: accentTitled, entryOf: entryOf, statEntry: statEntry, entryState: entryState,
       averageRateForecast: averageRateForecast, pacingChart: pacingChart, limitFacts: limitFacts, pendingUpdate: pendingUpdate,
       updateBanner: updateBanner, themeSwatches: themeSwatches, accentLabel: accentLabel, renderVariants: renderVariants,
       syncThemePicker: syncThemePicker, chooseAccent: chooseAccent, currentPage: currentPage, skelCost: skelCost,
@@ -6045,6 +6173,10 @@
       pollGuard: pollGuard, guardTick: guardTick, statusBanner: statusBanner, limitsOnly: limitsOnly, pageStats: pageStats,
       checkAgain: checkAgain, syncCheck: syncCheck, copyCommand: copyCommand, helpAction: helpAction, renderPage: renderPage, poll: poll,
       loadStat: loadStat,
+      // the header's, the sidebar's and the headings' words (#98)
+      renderChrome: renderChrome, renderAge: renderAge, renderFirstChrome: renderFirstChrome, linkLine: linkLine,
+      healthLinkLine: healthLinkLine, ageLine: ageLine, gatesLook: gatesLook, pageHead: pageHead, accentTip: accentTip,
+      accentShort: accentShort, tUpper: tUpper, burnUnitLine: burnUnitLine, writeLine: writeLine,
       // The formatters and the sites tests/webui_formats.js holds to today's English (#91).
       fmtUsdExact: fmtUsdExact, fmtPlanPrice: fmtPlanPrice, fmtUsdShort: fmtUsdShort, fmtUsdTile: fmtUsdTile,
       fmtUsdHero: fmtUsdHero, fmtCount: fmtCount, fmtInt: fmtInt, fmtRemain: fmtRemain, fmtCompare: fmtCompare,

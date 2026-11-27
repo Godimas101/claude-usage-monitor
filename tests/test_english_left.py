@@ -22,7 +22,7 @@ import pytest
 import english_left
 from english_left import (DASHBOARD_MARKS, PRODUCT, WIDGET_MARKS, english, entry, html_blocks, html_english, html_texts,
                           scan_english)
-from usage_monitor import i18n
+from usage_monitor import casing, i18n
 
 UI_TESTS = os.environ.get("USAGE_MONITOR_UI_TESTS") == "1"
 ui_only = pytest.mark.skipif(not UI_TESTS, reason="needs USAGE_MONITOR_UI_TESTS=1 (starts node and the dev server)")
@@ -174,6 +174,17 @@ def test_a_word_the_pseudo_locale_made_is_not_english_and_a_plain_one_is() -> No
         "RESETS #:## PM"}
     assert english_left.MAPPED_LETTERS == frozenset("aceginosuyACEGINOSUY")
     assert set("ıİğşéñ") <= english_left.PSEUDO_LETTERS and not english_left.PSEUDO_LETTERS & set("[] abcXYZ")
+
+
+def test_a_pseudo_string_in_capitals_is_not_english_and_english_in_capitals_is() -> None:
+    """#98: the page sets some catalog text in capitals itself (FMT.upper, tUpper). pseudo_text's dotless ı has no capital
+    of its own outside Turkish, so its capital is a plain I: beside a look-alike it is the pseudo-locale's, while an
+    English word in capitals keeps a plain letter that pseudo_text would have changed."""
+    shouted = casing.upper(P("Uplink live"), "en")
+    assert "I" in shouted and english([shouted]) == set()
+    inside = P("Session").replace("]", " IT]")                   # English in capitals inside a pseudo string
+    assert english(["UPLINK LIVE", "LINK " + shouted, "IT", inside]) == {"UPLINK LIVE", entry("LINK " + shouted), "IT",
+                                                                          entry(inside)}
 
 
 def test_english_with_accents_and_english_beside_a_pseudo_string_are_found() -> None:

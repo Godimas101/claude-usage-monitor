@@ -120,7 +120,7 @@ def test_no_placeholder_pages_remain() -> None:
 
 
 def test_the_router_and_the_nav_name_the_same_pages() -> None:
-    routed = re.findall(r'\{ key: "([a-z]+)", label:', APP)
+    routed = re.findall(r'\{ key: "([a-z]+)" \}', APP)
     nav = re.findall(r'data-page="([a-z]+)"', INDEX)
     assert routed == PAGES
     assert nav == PAGES
@@ -480,7 +480,7 @@ def test_nostromo_keeps_refresh_on_screen_in_a_720_px_window() -> None:
     still says whether the data is live). Measured in a browser: REFRESH ends at 708 of 720 px, and at 789 of 801 px
     with everything shown."""
     assert re.search(r"@media \(max-width: 800px\) \{\s*\.nm-brand em, #data-age \{ display: none; \}\s*\}", CSS)
-    assert "<em>" in INDEX and 'id="data-age"' in INDEX and 'id="uplink"' in INDEX     # the rule names real elements
+    assert re.search(r"<em\b", INDEX) and 'id="data-age"' in INDEX and 'id="uplink"' in INDEX     # the rule names real elements
 
 
 # ── Night City ────────────────────────────────────────────────────────────────────
@@ -935,8 +935,10 @@ def test_the_time_left_in_a_window_is_a_bar_the_themes_may_draw(checks: dict[str
 # ── The Efficiency page, under its old name too ───────────────────────────────────
 
 def test_the_efficiency_page_is_called_efficiency_wherever_a_user_reads_it() -> None:
-    assert 'key: "efficiency", label: "EFFICIENCY", title: "EFFICIENCY"' in APP_CODE
-    assert '<a href="#efficiency" data-page="efficiency"><i>04</i>EFFICIENCY</a>' in INDEX
+    assert '{ key: "efficiency" }' in APP_CODE and 'tLine("heading.efficiency.title")' in APP_CODE
+    english = json.loads((WEBUI / "i18n" / "en.json").read_text(encoding="utf-8"))
+    assert english["heading.efficiency.title"] == english["shell.nav.efficiency"] == "Efficiency"         # #98: the catalog's
+    assert '<a href="#efficiency" data-page="efficiency"><i>04</i><span data-i18n="shell.nav.efficiency">Efficiency</span></a>' in INDEX
     visible = strip_comments(APP + INDEX + "".join(THEME_CSS.values()))
     assert "nerds only" not in visible.lower() and "NERDS ONLY" not in visible
     assert 'PAGE_ALIASES = { nerds: "efficiency" }' in APP_CODE            # an old link or bookmark still opens it
@@ -1083,11 +1085,11 @@ def literal_names(text: str) -> set[str] | None:
 
 
 def i18n_calls(code: str) -> list[tuple[str, str, set[str] | None]]:
-    """Every t, tHtml, tLang, tPlural and tLine call with a literal key: (function, key, the placeholders it fills). The
+    """Every t, tHtml, tLang, tPlural, tLine and tUpper call with a literal key: (function, key, the placeholders it fills). The
     placeholders are None when the scan cannot read them: a key built from parts, values not written in the call as an
     object literal, or arguments the function does not take."""
     calls = []
-    for m in re.finditer(r'(?<![\w.$])(t|tHtml|tLang|tPlural|tLine)\("([^"]+)"', code):
+    for m in re.finditer(r'(?<![\w.$])(t|tHtml|tLang|tPlural|tLine|tUpper)\("([^"]+)"', code):
         name, key = m.group(1), m.group(2)
         first, *rest = split_top(call_tail(code, m.end()))
         given: set[str] | None
@@ -1116,6 +1118,7 @@ def test_the_key_scan_reads_every_shape_of_call() -> None:
         ('tLang("k")', ("tLang", "k", set())),
         ('tLine("k", { status: status })', ("tLine", "k", {"status"})),
         ('tLine("k")', ("tLine", "k", set())),
+        ('tUpper("k", { amount: fmtUsd(a) })', ("tUpper", "k", {"amount"})),
         ('t("x.fn", pick(a, b))', ("t", "x.fn", None)),
         ('t("x.v", values)', ("t", "x.v", None)),
         ('t("x." + part)', ("t", "x.", None)),
@@ -1131,7 +1134,7 @@ def test_every_key_the_page_and_the_shell_use_is_in_english_with_its_placeholder
     this scan (and a translator's tools) can read them."""
     english = json.loads((WEBUI / "i18n" / "en.json").read_text(encoding="utf-8"))
     code = strip_comments(APP_CODE)
-    assert not re.findall(r'(?<![\w.$])(?<!function )(?:t|tHtml|tLang|tPlural|tLine)\((?!")', code), "a key that is not a literal"
+    assert not re.findall(r'(?<![\w.$])(?<!function )(?:t|tHtml|tLang|tPlural|tLine|tUpper)\((?!")', code), "a key that is not a literal"
     calls = i18n_calls(code)
     shell = re.findall(r'\sdata-i18n(?:-[a-z-]+)?="([^"]+)"', INDEX)
     assert calls and shell
@@ -1181,18 +1184,27 @@ def test_the_pages_english_formats_record_is_whole() -> None:
     assert english["odometerHTML"]["(null, true)"] == ["-- tokens, all time", "0,000,000,000"]
 
 
+# The entries whose words moved into the catalog in natural case (#98), held to the record through the capitals a theme
+# shows them in: the health box's, which Nostromo and Night City set in capitals by CSS (Gates through gates.js before).
+SHOWN_IN_CAPITALS = {"health"}
+
+
 @ui_only
 def test_the_pages_english_formats_are_the_recorded_ones() -> None:
     """Every formatter of the page, run under node on the record's grid (tests/webui_formats.js, TZ=UTC, the page's clock
-    still), writes exactly what it wrote before #91 changed the page: English must not change by a byte."""
+    still), writes exactly what it wrote before #91 changed the page: English must not change by a byte. The entries in
+    SHOWN_IN_CAPITALS are compared through English's capitals, as Nostromo shows them (#98: the words are the catalog's,
+    in natural case, and the record held their capitals)."""
     run = subprocess.run([node_binary(), str(FORMATS_JS), str(WEBUI)], capture_output=True, text=True, timeout=60,
                          check=False, encoding="utf-8", env={**os.environ, "TZ": "UTC"}, creationflags=NO_WINDOW)
     assert run.returncode == 0, run.stderr[-800:]
     found, english = json.loads(run.stdout), english_formats()
     assert list(found) == list(english)
+    shown = (lambda name, value: json.loads(casing.upper(json.dumps(value, ensure_ascii=False), "en"))
+             if name in SHOWN_IN_CAPITALS else value)
     for name, cases in english.items():
         if isinstance(cases, dict):
-            changed = [(key, cases[key], found[name].get(key)) for key in cases if found[name].get(key) != cases[key]]
+            changed = [(key, cases[key], found[name].get(key)) for key in cases if shown(name, found[name].get(key)) != cases[key]]
             assert not changed and list(found[name]) == list(cases), (name, changed[:5])
         else:
             assert found[name] == cases, name
@@ -1547,7 +1559,7 @@ APP_BARE_CASE_CALLS = {
     'String(limit.severity || "").toLowerCase()': "severityOf: a severity id",
     "name.toLowerCase() !== accent.toLowerCase()": "accentTitled: a colour's name against its id",
     "var label = fmt.toUpperCase();": "exportData: the export format's id (CSV, JSON)",
-    "a.slice(0, 3).toUpperCase()": "renderVariants: an accent id's first letters",
+    "accent.slice(0, 3).toUpperCase()": "accentShort: an accent id's first letters (a name's: Night City's)",
 }
 CASE_CALL = re.compile(r"\.to(?:Locale)?(?:Upper|Lower)Case\b")
 
@@ -1984,9 +1996,9 @@ def test_a_chip_takes_its_tone_from_its_status_id_not_from_its_words(checks: dic
 
 @ui_only
 def test_the_uplink_line_and_the_age_are_written_from_codes_and_units(checks: dict[str, Any]) -> None:
-    assert checks["uplinkWords"] == {
-        "live": "LIVE", "loading": "ACQUIRING", "stale": "AUTH LOST", "offline": "NO CARRIER", "rate_limited": "RATE LIMITED",
-        "no_credentials": "NO LOGIN", "paused": "PAUSED", "unknown": "ACQUIRING", "nolink": "NO LINK"}
+    assert checks["uplinkWords"] == {                                                 # #98: the catalog's, in natural case
+        "live": "Live", "loading": "Acquiring", "stale": "Auth lost", "offline": "No carrier", "rate_limited": "Rate limited",
+        "no_credentials": "No login", "paused": "Paused", "unknown": "Acquiring", "nolink": "No link"}
     assert [(row["badge"], row["sentence"]) for row in checks["age"]] == [
         ("0 S", "0 s"), ("0 S", "0 s"), ("59 S", "59 s"), ("1 M", "1 m"), ("59 M", "59 m"),
         ("1 H", "1 h"), ("47 H", "47 h"), ("2 D", "2 d"), ("4 D", "4 d")]
@@ -2876,11 +2888,11 @@ def test_the_sidebar_names_nostromos_phosphors_and_keeps_the_short_labels_elsewh
     sidebar = checks["sidebar"]
     nostromo = Markup(sidebar["nostromo"]["html"])
     buttons = nostromo.find("button")
-    assert sidebar["nostromo"]["label"] == "PHOSPHOR"
+    assert sidebar["nostromo"]["label"] == "Phosphor"                                 # #98: Nostromo sets it in capitals
     assert nostromo.text == NOSTROMO_NAMES
     assert [b["data-accent"] for b in buttons] == NOSTROMO_PHOSPHORS == [b["title"] for b in buttons]   # the tooltip says the colour
     assert [b["aria-pressed"] for b in buttons] == ["false", "false", "false", "false", "true", "false"]
-    assert sidebar["nightCity"]["label"] == "ACCENT" and Markup(sidebar["nightCity"]["html"]).text == ["BLA", "REL", "EDG", "MOX"]
+    assert sidebar["nightCity"]["label"] == "Accent" and Markup(sidebar["nightCity"]["html"]).text == ["BLA", "REL", "EDG", "MOX"]
     assert Markup(sidebar["gates"]["html"]).text == ["SYS", "BLU", "TEA", "PUR", "ROS", "ORG", "GRN"]
 
 
@@ -3546,7 +3558,7 @@ def test_the_help_is_the_status_banner_for_a_missing_or_an_expired_sign_in_only(
     for status in ("stale", "no_credentials"):
         assert Markup(banner[status]).find("div")[0]["class"] == "nm-msg nm-help", status
     # every other state stays the plain line it was: the heading and the monitor's reason
-    for status, heading in (("loading", "ACQUIRING"), ("offline", "NO CARRIER"), ("rate_limited", "RATE LIMITED"), ("paused", "PAUSED")):
+    for status, heading in (("loading", "Acquiring"), ("offline", "No carrier"), ("rate_limited", "Rate limited"), ("paused", "Paused")):
         assert banner[status] == f'<div class="nm-msg" role="status"><b>{heading}</b>detail of {status}</div>', status
 
 
@@ -3591,7 +3603,7 @@ def test_with_no_sign_in_the_help_says_what_to_do_in_the_words_it_was_given(chec
 @ui_only
 def test_an_expired_sign_in_keeps_the_monitors_reason_and_adds_the_one_thing_to_do(checks: dict[str, Any]) -> None:
     html = checks["signIn"]["expired"]
-    assert html.startswith('<div class="nm-msg nm-help" role="region" aria-label="Claude sign-in"><b>AUTH LOST</b>')       # the banner's own heading
+    assert html.startswith('<div class="nm-msg nm-help" role="region" aria-label="Claude sign-in"><b>Auth lost</b>')       # the banner's own heading
     assert paragraphs(html) == ["The Claude sign-in has expired; send Claude Code a message to renew it", SIGNIN_EXPIRED, SIGNIN_NOT_FOUND]
     page = Markup(html)
     assert page.find("ol") == [] and page.find("a") == []                              # no steps to start from nothing, no manual to read
@@ -3835,6 +3847,57 @@ def test_the_test_hook_is_inert_unless_a_test_sets_it() -> None:
     hook = code[code.index("if (window.__USAGE_MONITOR_TEST__)"):]
     assert hook.index("return;") < hook.index("init();")                           # the page is not started under test
 
+# ── Gates' own words (#98) ────────────────────────────────────────────────────────────────────────────────────────
+
+LINK_CODES = ["live", "loading", "stale", "offline", "rate_limited", "no_credentials", "paused", "lost"]
+ENGLISH_CATALOG: dict[str, Any] = json.loads((WEBUI / "i18n" / "en.json").read_text(encoding="utf-8"))
+
+
+@ui_only
+def test_gates_takes_its_own_words_and_the_others_never_do(checks: dict[str, Any]) -> None:
+    """#98 (G2): where gates.js turned the capitals into other words (the link's states, DATA AGE, TOK / MIN), Gates now
+    gets them from page.gates.*: in the header, the health box's link row, the status line under the heading and the burn
+    rate's unit. Nostromo and Night City get the header's words and never one of Gates'. A French page with no
+    translation shows the English of its look, marked lang="en"."""
+    en = ENGLISH_CATALOG
+    words = checks["gatesWords"]
+    gates_only = {en[k] for k in en if k.startswith("page.gates.") and en[k] not in
+                  {en[j] for j in en if j.startswith(("header.", "nav.", "overview.burn."))}}
+    assert gates_only >= {"Connecting", "Sign-in needed", "Offline", "Not signed in", "No connection", "Tokens / min"}
+    for look in ("gates", "frenchGates", "nostromo", "nightCity", "frenchNostromo"):
+        gates = look.endswith(("gates", "Gates"))
+        mark = "en" if look.startswith("french") else None
+        for code in LINK_CODES:
+            shown = words[look][code]
+            header = en["page.gates.link." + code] if gates else en["header.link." + code]
+            health = header if gates or code != "live" else en["nav.health.live"]
+            assert (shown["uplink"], shown["uplinkLang"], shown["link"], shown["linkLang"]) == (header, mark, health, mark), (look, code)
+            template = en["page.gates.age"] if gates else en["header.age"]
+            if mark:                                                     # French writes the unit its own way
+                lead, tail = template.split("{age}")
+                assert shown["age"].startswith(lead) and shown["age"].endswith(tail), (look, code, shown["age"])
+            else:
+                assert shown["age"] == template.replace("{age}", "12 s"), (look, code, shown["age"])
+            assert shown["ageLang"] == mark and shown["unit"] == [' lang="en"' if mark else None,
+                                                                   en["page.gates.burn.unit" if gates else "overview.burn.unit"]]
+            if code in ("loading", "offline", "rate_limited", "paused", "stale"):
+                heading = re.search(r'<b( lang="en")?>([^<]*)</b>', shown["banner"])
+                assert heading and heading.group(2) == header and (heading.group(1) or None) == (' lang="en"' if mark else None), (look, code)
+            if not gates:
+                assert not any(text in json.dumps(shown, ensure_ascii=False) for text in gates_only), (look, code)
+        before = words[look]["none"]
+        assert (before["uplink"], before["age"], before["link"]) == (
+            en["page.gates.link.loading" if gates else "header.link.loading"], en["page.gates.age_none" if gates else "header.age_none"], "--")
+
+
+@ui_only
+def test_a_chart_label_is_in_capitals_but_its_values_keep_their_case(checks: dict[str, Any]) -> None:
+    """tUpper (#98): an SVG label's words in the capitals of the language they come from (Turkish's dotted İ, English's own
+    rule for an English fallback), its values filled in afterwards as they are ("1,2 k$" keeps its k)."""
+    assert checks["tUpper"] == {"own": "ORT. 1,2 k$ GÜN", "plain": "BUGÜN", "english": "TODAY i", "missing": "no.such.key",
+                                "unfilled": "ORT. {amount} GÜN"}
+
+
 # ── The page's English in every look (#98) ────────────────────────────────────────
 
 # The dashboard's English before #98 moved its words into the catalog, as a person sees it in each of the five looks:
@@ -3949,12 +4012,23 @@ def test_the_page_words_record_is_whole() -> None:
     assert "IS AVAILABLE" in words_in("about", "top:about-update")
 
 
+def gates_first_frame(key: str) -> bool:
+    """A Gates view before the first state: gates.js has not come yet (it comes with the state's theme)."""
+    case, look, _ = key.split("|")
+    return case in BEFORE_STATE and look.startswith("gates")
+
+
 @ui_only
 def test_the_page_shows_todays_english_in_every_look(page_words: dict[str, Any]) -> None:
     """#98: the shell, the header, the sidebar, the page headings and banners, Overview and Limits (and the cards elsewhere
     that share their code) read as they did before their words moved into the catalog, byte for byte, in every look: each
     region's text as drawn (the look's CSS capitals, and in Gates what gates.js makes of it) and every attribute people read.
-    The page met no error on the way."""
+    The page met no error on the way.
+
+    One difference is recorded (#98's critic 11): before its first state, Gates showed the shell's own capitals until
+    gates.js came with the theme ("ACQUIRING", "REFRESH", "OVERVIEW"); now its words are Gates' from the first frame. What
+    it shows once gates.js runs is still the record's, byte for byte, and the header's and the sidebar's words are already
+    the ones gates.js would make of them."""
     assert page_words["problems"] == []
     now = page_views(page_words)
     assert list(now) == list(THEN)
@@ -3962,10 +4036,67 @@ def test_the_page_shows_todays_english_in_every_look(page_words: dict[str, Any])
     for key, regions in THEN.items():
         for name in sorted(set(regions) | set(now[key])):
             then, shown = regions.get(name), now[key].get(name)
-            if then != shown:
+            if gates_first_frame(key) and then and shown:
+                same = then["attrs"] == shown["attrs"] and then["gates"] == shown["gates"]
+                if name.startswith("chrome:") and name != "chrome:brand":       # the product's name is kept as written
+                    same = same and shown["text"] == shown["gates"]
+            else:
+                same = then == shown
+            if not same:
                 differences.append(f"{key} {name}:\n  then {json.dumps(then, ensure_ascii=False)[:600]}\n"
                                    f"  now  {json.dumps(shown, ensure_ascii=False)[:600]}")
     assert not differences, f"{len(differences)} regions differ:\n" + "\n".join(differences[:12])
+
+
+@ui_only
+def test_the_shell_and_app_js_agree_before_the_first_state(page_words: dict[str, Any]) -> None:
+    """#98's critic 10, 11 and 17: before the monitor has answered, the header shows index.html's own text (which the server
+    fills from the same keys) in Nostromo and Night City, as the page opens and at its first 1 s tick, and the health box
+    its words once that tick has drawn it; a first poll that fails says No link. Gates shows its own words from the first
+    frame. Only the words: the link's mark stays as the shell has it until a state or a failed poll says how the link is."""
+    en = ENGLISH_CATALOG
+    first = page_words["first"]
+    shell = first["shell"]
+    assert (shell["uplink"], shell["age"], shell["health"]) == (en["header.link.loading"], en["header.age_none"], "")
+    health = (en["nav.health.title"] + en["nav.health.link"] + "{link}" + en["nav.health.updated"] + "--" + en["nav.health.sources"]
+              + "--" + en["nav.health.unpriced"] + "0")
+    assert set(first["looks"]) == {look["name"] for look in PAGE_LOOKS}
+    for look in PAGE_LOOKS:
+        gates = look["theme"] == "gates"
+        moments = first["looks"][look["name"]]
+        loading = en["page.gates.link.loading"] if gates else shell["uplink"]
+        none = en["page.gates.age_none"] if gates else shell["age"]
+        lost = en["page.gates.link.lost" if gates else "header.link.lost"]
+        for moment in ("opened", "tick"):
+            shown = moments[moment]
+            assert (shown["uplink"], shown["age"], shown["uplinkLang"], shown["ageLang"]) == (loading, none, None, None), (look, moment)
+            assert (shown["uplinkClass"], shown["dotClass"]) == (shell["uplinkClass"], shell["dotClass"]), (look, moment)
+        assert moments["opened"]["health"] == "" and moments["tick"]["health"] == health.replace("{link}", "--"), look
+        failed = moments["failed"]
+        assert (failed["uplink"], failed["age"], failed["health"]) == (lost, none, health.replace("{link}", lost)), look
+        assert (failed["uplinkClass"], failed["dotClass"]) == ("nm-uplink is-down", "nm-alive is-off"), look
+
+
+@ui_only
+def test_each_themes_entrance_moves_every_word_of_what_it_animates(page_words: dict[str, Any]) -> None:
+    """#98's critic 2: Nostromo's entrance types an element's first text node (FX.text.firstText) and Night City's decodes
+    its own text nodes (FX.text.directText), so a word in a span of its own inside an animated element (a name, or English
+    marked on another language's page) would show at once while the rest moves. Every element the two themes' directors
+    name (read from their scripts) holds all its words in the text they animate: on Overview and Limits, live and before the
+    first state, and on every page's heading, in English and on a French page showing English's words."""
+    moving = page_words["entrance"]
+    assert moving["untyped"] == []
+    checked = moving["checked"]
+    assert len(checked) == 2 * 2 * (len(PAGES) + 2)
+    for key, counts in checked.items():
+        look, _, case, page = key.split("|")
+        assert counts[".nm-h1"] == 1 and (look != "nostromo" or counts[".nm-sub"] == 1), key
+        if page in ("overview", "limits"):
+            assert counts[".nm-tag, .nm-ttl"] >= 5, key
+    for lang in ("en", "fr"):
+        overview, limits = checked[f"nostromo|{lang}|live|overview"], checked[f"nostromo|{lang}|live|limits"]
+        assert overview[".nm-mrow .k"] >= 7 and overview[".nm-meta-t"] >= 8 and limits[".nm-kv-grid .nm-kv b"] >= 20
+        assert checked[f"night_city|{lang}|live|limits"][".nm-mrow .v, .nm-kv-grid .nm-kv b"] >= 30
 
 
 MINI_DOM_JS = Path(__file__).resolve().parent / "mini_dom.js"
@@ -4020,6 +4151,26 @@ def test_the_small_dom_hears_changes_and_walks_text_as_a_browser_does() -> None:
     assert out["attrs"] == [["data-theme=null"]]                                        # data-variant is not in the filter
     assert out["texts"] == ["Uno ", "three", "y"]
     assert out["connected"] == [True, False, True]
+
+
+MINI_DOM_RAW_AFTER_DOTTED_I = r"""
+const D = require(process.argv[1]);
+const doc = D.createDocument('<html><body><p>' + "İ".repeat(12) + '</p><script src="a.js"></script><SCRIPT src="b.js">x<\/b' +
+  '</Script><style>p{}</style><p id="after">z</p></body></html>');
+console.log(JSON.stringify({ scripts: doc.querySelectorAll("script").map((s) => [s.getAttribute("src"), s.textContent]),
+  style: doc.querySelector("style").textContent, after: doc.getElementById("after").textContent }));
+"""
+
+
+@ui_only
+def test_the_small_dom_ends_a_script_where_its_closing_tag_is_after_a_dotted_capital_i() -> None:
+    """tests/mini_dom.js (#98): a script's or a style's text ends at its own closing tag in any case, also after text whose
+    lowercase is longer than it (Turkish's İ lowercases to two code units). The pseudo-locale's shell holds many, and the
+    parser once found the end in a lowercased copy and lost the next script (charts.js, for the English-left scan)."""
+    run = subprocess.run([node_binary(), "-e", MINI_DOM_RAW_AFTER_DOTTED_I, str(MINI_DOM_JS)], capture_output=True,
+                         encoding="utf-8", timeout=60, check=False, creationflags=NO_WINDOW)
+    assert run.returncode == 0, run.stderr[-2000:]
+    assert json.loads(run.stdout) == {"scripts": [["a.js", ""], ["b.js", "x</b"]], "style": "p{}", "after": "z"}
 
 
 CASE_RESET_JS = r"""

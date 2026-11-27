@@ -86,10 +86,11 @@ h1, h2, h3, p, figure, dl, dd { margin: 0; }
 .nm-brand em { font: 400 11px/1 var(--f-body); font-style: normal; letter-spacing: .12em; color: var(--label); }
 .nm-brand svg { width: 16px; height: 16px; flex: none; fill: none; stroke: var(--main); stroke-width: 1; }
 .nm-bar-r { display: flex; align-items: center; gap: 18px; white-space: nowrap; }
-.nm-uplink { display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--bright); }
+.nm-uplink { display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--bright); text-transform: uppercase; }
+#data-age { text-transform: uppercase; }
 .nm-uplink.is-down { color: var(--label); }
 .nm-refresh { height: 20px; padding: 0 8px; cursor: pointer; background: transparent; color: var(--label);
-  border: 1px solid var(--edge); font: 400 11px/1 var(--f-body); letter-spacing: .12em; }
+  border: 1px solid var(--edge); font: 400 11px/1 var(--f-body); letter-spacing: .12em; text-transform: uppercase; }
 .nm-refresh:hover { color: var(--main); border-color: var(--main); }
 .nm-alive { display: block; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--bright);
   box-shadow: 0 0 4px var(--glow); animation: nm-blink 2.4s steps(1) infinite; }
@@ -98,16 +99,17 @@ h1, h2, h3, p, figure, dl, dd { margin: 0; }
 /* ── body: module nav and the page ────────────────────────────────────────────── */
 .nm-app { flex: 1; min-height: 0; display: grid; grid-template-columns: 208px minmax(0, 1fr); }
 .nm-nav { display: flex; flex-direction: column; gap: 4px; min-height: 0; padding: 16px 14px 14px; border-right: 1px solid var(--edge); overflow: auto; }
-.nm-kick { font: 600 11px/1 var(--f-body); letter-spacing: .2em; color: var(--label); margin: 0 0 10px 6px; }
+.nm-kick { font: 600 11px/1 var(--f-body); letter-spacing: .2em; color: var(--label); margin: 0 0 10px 6px; text-transform: uppercase; }
 .nm-menu { list-style: none; display: flex; flex-direction: column; gap: 3px; }
 .nm-menu a { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border-left: 2px solid transparent;
-  text-decoration: none; font: 600 12px/1 var(--f-body); letter-spacing: .12em; color: var(--label); }
+  text-decoration: none; font: 600 12px/1 var(--f-body); letter-spacing: .12em; color: var(--label); text-transform: uppercase; }
 .nm-menu a i { font-style: normal; font-weight: 400; width: 20px; color: var(--label); }
 .nm-menu a:hover { color: var(--main); }
 .nm-menu a.on { background: var(--main); color: var(--crt); border-left-color: var(--hot); }
 .nm-menu a.on i { color: var(--crt); }
 .nm-health { margin-top: auto; padding: 10px; border: 1px solid var(--edge); background: var(--crt-2); }
 .nm-health .nm-kick { margin-bottom: 6px; }
+.nm-health .nm-kv { text-transform: uppercase; }
 .nm-kv { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 5px 0;
   border-bottom: 1px dotted var(--ghost); font: 600 11px/1 var(--f-body); letter-spacing: .1em; color: var(--label); }
 .nm-kv:last-child { border-bottom: 0; }
@@ -126,7 +128,8 @@ h1, h2, h3, p, figure, dl, dd { margin: 0; }
   scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: var(--label) var(--crt-2); }
 .nm-main:focus { outline: none; }
 .nm-head { flex: none; display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
-.nm-h1 { font: 400 26px/1 var(--f-display); letter-spacing: .16em; color: var(--main); text-shadow: 0 0 12px var(--glow-soft), 0 0 2px var(--glow); white-space: nowrap; }
+.nm-h1 { font: 400 26px/1 var(--f-display); letter-spacing: .16em; color: var(--main); text-shadow: 0 0 12px var(--glow-soft), 0 0 2px var(--glow); white-space: nowrap;
+  text-transform: uppercase; }
 .nm-cur { display: inline-block; width: .55em; height: .85em; margin-left: 10px; vertical-align: -.08em; background: var(--hot); box-shadow: 0 0 8px var(--glow); animation: nm-blink 1s steps(1) infinite; }
 .nm-sub { max-width: 470px; text-align: right; font: 400 12px/1.5 var(--f-body); letter-spacing: .04em; color: var(--label); text-transform: uppercase; }
 .nm-msg { flex: none; display: flex; align-items: center; min-height: 28px; padding: 6px 10px; background: var(--crt);

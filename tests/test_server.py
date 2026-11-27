@@ -554,6 +554,48 @@ def test_in_english_the_shipped_shell_is_served_as_it_is(make_server: Any, monke
     assert re.sub(r'(<meta name="monitor-(?:token|prefs|locale)" content=")[^"]*(")', r"\1\2", page) == shipped
 
 
+def _shell_marks() -> tuple[list[str], list[tuple[str, str]]]:
+    """The keys of the shipped index.html's marks: its words, and the attributes it fills."""
+    shipped = (i18n.CATALOG_DIR.parent / "index.html").read_text(encoding="utf-8")
+    return re.findall(r'\sdata-i18n="([^"]+)"', shipped), re.findall(r'\sdata-i18n-(title|aria-label|placeholder|alt)="([^"]+)"', shipped)
+
+
+@pytest.mark.parametrize("themed", [True, False], ids=["themed", "theme-unresolved"])
+@pytest.mark.parametrize("lang", ["fr", "pseudo"])
+def test_the_real_shell_fills_every_mark_in_another_language(make_server: Any, caplog: pytest.LogCaptureFixture,
+                                                              monkeypatch: pytest.MonkeyPatch, lang: str, themed: bool) -> None:
+    """#98: the shipped shell's words (the brand mark, the link line, the data age, Refresh and its tooltip, the sidebar's
+    name and heading, its seven links and its colour heading) are all filled from the catalog, in French and in the
+    pseudo-locale, with no log line, and also when the theme cannot be resolved. A word French lacks shows its English
+    marked lang="en"; an attribute cannot be marked."""
+    if lang == "pseudo":
+        monkeypatch.setenv(i18n.DEV_INSTANCE_ENV, "1")
+        monkeypatch.setenv(i18n.DEV_LANG_ENV, "pseudo")
+    if not themed:
+        monkeypatch.setattr(server_mod, "_themes", no_themes)
+    server, _ = make_server(webui_dir=i18n.CATALOG_DIR.parent, locale_provider=french if lang == "fr" else None)
+    with caplog.at_level(logging.WARNING):
+        page = request(server, "GET", "/")[2].decode("utf-8")
+    assert [r.getMessage() for r in caplog.records if "index.html" in r.getMessage()] == []
+    assert page.count(f'<html lang="{lang}"') == 1
+    words, attributes = _shell_marks()
+    assert set(words) >= {"shell.noscript", "shell.brand.mark", "header.link.loading", "header.age_none", "shell.refresh.button",
+                          "shell.nav.kicker", "nav.colour.label.phosphor"} | {f"shell.nav.{page}" for page in
+                          ("overview", "limits", "cost", "efficiency", "history", "settings", "about")}
+    assert sorted(attributes) == [("aria-label", "shell.nav.label"), ("title", "shell.refresh.title")]
+    catalog = i18n.load_catalog(lang)
+    for key in words:
+        found = catalog.lookup(key)
+        assert found is not None and isinstance(found.value, str), key
+        shown = re.search(r'<(\w+)\b[^>]*\sdata-i18n="' + re.escape(key) + r'"[^>]*>' + re.escape(html.escape(found.value, quote=False))
+                          + r"</\1>", page)
+        assert shown, key
+        assert (' lang="en"' in shown.group(0)) == (found.language != catalog.language), key
+    for attribute, key in attributes:
+        tag = next(t for t in re.findall(r"<\w+\b[^>]*>", page) if f'data-i18n-{attribute}="{key}"' in t)
+        assert re.search(r"\s" + attribute + r'="([^"]*)"', tag).group(1) == html.escape(catalog.lookup(key).value, quote=True), key
+
+
 def test_once_french_is_offered_the_setting_makes_the_page_french(make_server: Any, localized: Path,
                                                                   monkeypatch: pytest.MonkeyPatch) -> None:
     """From the setting to the page, through the server's own source: what #107 turns on."""
@@ -3874,6 +3916,10 @@ def install_fake_webview(monkeypatch: pytest.MonkeyPatch, window: Any, *, start:
         fake.renderer = renderer  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "webview", fake)
     monkeypatch.setenv(dashboard.TOKEN_ENV, "tok")
+    # dashboard_main sets it in this process. A delenv of an unset name records nothing to undo, so it is set first: the
+    # test then ends with the variable as it found it, whatever dashboard_main wrote.
+    monkeypatch.setenv(dashboard.WEBVIEW2_ARGS_ENV, "")
+    monkeypatch.delenv(dashboard.WEBVIEW2_ARGS_ENV)
     monkeypatch.setattr(dashboard, "_read_state", lambda base, token: state)
     monkeypatch.setattr(dashboard, "_notify_closed", lambda base, token: None)
     return created
@@ -3961,6 +4007,78 @@ def test_dashboard_main_keeps_the_default_colour_when_the_state_cannot_be_read(m
     assert dashboard.dashboard_main(["--dashboard", "--port", "5130"]) == 0
     assert created[0]["background_color"] == "#090909"
     assert (created[0]["width"], created[0]["height"]) == dashboard.DEFAULT_SIZE
+
+
+# ── WebView2's language (#88, #98) ─────────────────────────────────────────────────────
+
+def _locale_state(tag: Any) -> dict[str, Any]:
+    """The part of /api/state that names the monitor's locale."""
+    return {"settings": {}, "locale": {"setting": "fr", "language": "fr", "format": tag, "clock": 24}}
+
+
+def test_webview2_arguments_carry_pywebviews_own_and_the_language() -> None:
+    """#88: the window's language is the monitor's format tag (English: en-US), passed with pywebview's own switch, since
+    WebView2 may take the variable in place of pywebview's own options."""
+    assert dashboard.webview2_arguments(_locale_state("fr-CA"), None) == "--disable-features=ElasticOverscroll --lang=fr-CA"
+    assert dashboard.webview2_arguments({"locale": i18n.ENGLISH.as_json()}, "") == "--disable-features=ElasticOverscroll --lang=en-US"
+    assert dashboard.webview2_arguments(_locale_state("zh-Hant-TW"), None) == "--disable-features=ElasticOverscroll --lang=zh-Hant-TW"
+
+
+@pytest.mark.parametrize("state", [
+    None, {}, "state", {"locale": None}, {"locale": {}}, {"locale": "fr-FR"}, _locale_state(None), _locale_state(""),
+    _locale_state(12), _locale_state("fr-FR --remote-debugging-port=9222"), _locale_state("fr_FR"), _locale_state("--lang=fr"),
+    _locale_state("f"), _locale_state("en-US-ab-cd-ef"), _locale_state("fr-FR\n"), _locale_state("fr-FR,de"),
+])
+def test_a_format_that_is_not_a_language_tag_is_not_passed_to_webview2(state: Any) -> None:
+    """No state, no locale, or a format that does not read as a language tag: the variable is left as it is (WebView2's own
+    language, as before #98), so nothing from the state can add a switch."""
+    assert dashboard.webview2_arguments(state, None) is None
+    assert dashboard.webview2_arguments(state, "--lang=de-DE") is None
+
+
+def test_a_developers_own_webview2_arguments_are_kept() -> None:
+    """#98's critic 18: a developer's own switches stay, their own --lang wins, and their --disable-features list becomes
+    one switch with pywebview's (of two such switches the last one wins, so they are never two)."""
+    french = _locale_state("fr-CA")
+    assert dashboard.webview2_arguments(french, "--remote-debugging-port=9222") == (
+        "--disable-features=ElasticOverscroll --remote-debugging-port=9222 --lang=fr-CA")
+    assert dashboard.webview2_arguments(french, "--lang=de-DE") == "--disable-features=ElasticOverscroll --lang=de-DE"
+    assert dashboard.webview2_arguments(french, "--disable-features=Foo,Bar  --lang=de") == (
+        "--disable-features=Foo,Bar,ElasticOverscroll --lang=de")
+    assert dashboard.webview2_arguments(french, "--disable-features=ElasticOverscroll,Foo --disable-features=Bar,Foo") == (
+        "--disable-features=ElasticOverscroll,Foo,Bar --lang=fr-CA")
+    assert dashboard.webview2_arguments(french, "   ") == "--disable-features=ElasticOverscroll --lang=fr-CA"
+
+
+@pytest.mark.parametrize(("state", "seen"), [
+    (_locale_state("fr-FR"), "--disable-features=ElasticOverscroll --lang=fr-FR"),
+    ({"settings": {}, "locale": i18n.ENGLISH.as_json()}, "--disable-features=ElasticOverscroll --lang=en-US"),
+    (None, None),                                         # the state could not be read: WebView2's own language, as before
+])
+def test_the_dashboard_sets_the_language_before_the_window_starts(monkeypatch: pytest.MonkeyPatch, state: Any, seen: Any) -> None:
+    """The child's own environment holds the switches when webview.start makes the WebView2 environment, which is when
+    WebView2 reads them; the window is made with them in place too. The variable is named as WebView2's loader names it,
+    not through the dashboard's constant."""
+    started: list[Any] = []
+    created = install_fake_webview(monkeypatch, FakeWindow(), state=state,
+                                   start=lambda *a, **k: started.append(os.environ.get("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS")))
+    assert dashboard.dashboard_main(["--dashboard", "--port", "5131"]) == 0
+    assert started == [seen] and len(created) == 1
+
+
+def test_pywebviews_own_browser_arguments_are_the_ones_the_dashboard_repeats() -> None:
+    """pywebview 6.2.1 (constraints-build.txt) gives WebView2 one switch of its own and adds two only when asked
+    (ALLOW_FILE_URLS, REMOTE_DEBUGGING_PORT), which the dashboard never sets. Read from the installed file, never imported."""
+    import importlib.util  # noqa: PLC0415
+
+    spec = importlib.util.find_spec("webview")
+    if spec is None or not spec.submodule_search_locations:
+        pytest.skip("pywebview is not installed")
+    source = (Path(list(spec.submodule_search_locations)[0]) / "platforms" / "edgechromium.py").read_text(encoding="utf-8")
+    assert re.findall(r"props\.AdditionalBrowserArguments = '([^']*)'", source) == [dashboard.PYWEBVIEW_BROWSER_ARGUMENTS]
+    assert re.findall(r"props\.AdditionalBrowserArguments \+= \(?\s*f?'([^']*)'", source) == [
+        " --allow-file-access-from-files", ' --remote-debugging-port={webview_settings["REMOTE_DEBUGGING_PORT"]}']
+    assert not re.search(r"webview\.settings\[", Path(dashboard.__file__).read_text(encoding="utf-8"))
 
 
 def test_the_dashboard_process_reads_the_light_gates_colour_from_the_real_server(
