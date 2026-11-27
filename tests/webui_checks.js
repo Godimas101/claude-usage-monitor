@@ -1307,126 +1307,14 @@ async function updateFrenchLines() {
 }
 
 // ── how each look cases the update texts (#97): text-transform as the cascade gives it ─────────────────────────────────
-// The look's stylesheets (its theme sheet, motion.css and the three motion sheets, as index.html links them) are read rule
-// by rule. For an element, the rules whose selectors match it (tests/mini_dom.js's matching, :root read as html) give their
-// text-transform by importance, specificity and order, else its parent's does (the property is inherited), as a browser's
-// cascade does. The markup is the page's own: index.html's shell with, in #main, Settings' System card or the Overview's top
-// parts with the update banner, as app.js draws them. A text-transform inside an at-rule, on ::first-letter or
-// ::first-line, or behind a pseudo-class this cannot judge is an error, so no rule is skipped unread.
+// tests/css_case.js reads the look's stylesheets rule by rule and gives an element its text-transform as a browser's cascade
+// does (the rules that match it by importance, specificity and order; else the browser's reset of a button, an input, a
+// select or a textarea; else its parent's). The markup is the page's own: index.html's shell with, in #main, Settings'
+// System card or the Overview's top parts with the update banner, as app.js draws them.
 const DOM = require("./mini_dom.js");
-const AS_DRAWN_FALSE = new Set(["hover", "focus", "focus-visible", "focus-within", "active", "empty"]);  // never true of these texts as drawn
-const SHEETS = (theme) => ["themes/" + theme + ".css", "motion.css", "themes/nostromo.motion.css", "themes/night_city.motion.css",
-  "themes/gates.motion.css"];
-
-function splitTopLevel(text, sep) {
-  const out = [];
-  let depth = 0;
-  let quote = null;
-  let start = 0;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (quote) { if (c === quote) { quote = null; } continue; }
-    if (c === '"' || c === "'") { quote = c; } else if (c === "(" || c === "[") { depth++; } else if (c === ")" || c === "]") { depth--; }
-    else if (c === sep && depth === 0) { out.push(text.slice(start, i)); start = i + 1; }
-  }
-  out.push(text.slice(start));
-  return out.map((part) => part.trim()).filter(Boolean);
-}
-
-function declared(body, property) {
-  let found = null;
-  for (const declaration of splitTopLevel(body, ";")) {
-    const colon = declaration.indexOf(":");
-    if (colon > 0 && declaration.slice(0, colon).trim().toLowerCase() === property) {
-      const value = declaration.slice(colon + 1).trim();
-      const important = /!\s*important$/i.test(value);
-      if (!found || important || !found.important) {
-        found = { value: value.replace(/!\s*important$/i, "").trim().toLowerCase(), important };
-      }
-    }
-  }
-  return found;
-}
-
-function specificity(selector) {
-  let a = 0;
-  let b = 0;
-  let c = 0;
-  let rest = selector.replace(/\[[^\]]*\]/g, () => { b += 1; return " "; });
-  rest = rest.replace(/:not\(([^()]*)\)/g, (whole, inner) => { const [x, y, z] = specificity(inner); a += x; b += y; c += z; return " "; });
-  rest = rest.replace(/::?(before|after|placeholder|selection|marker|backdrop)\b/g, () => { c += 1; return " "; });
-  rest = rest.replace(/#[\w-]+/g, () => { a += 1; return " "; });
-  rest = rest.replace(/\.[\w-]+/g, () => { b += 1; return " "; });
-  rest = rest.replace(/:[\w-]+/g, () => { b += 1; return " "; });
-  rest.replace(/(^|[\s>+~])([A-Za-z][\w-]*)/g, (whole) => { c += 1; return whole; });
-  return [a, b, c];
-}
-
-function caseRule(selector, where) {
-  const bare = selector.replace(/\[[^\]]*\]/g, "");
-  if (/::?(first-letter|first-line)\b/.test(bare)) {
-    throw new Error(where + ": " + selector + " sets the case of a first letter or line, which the case check cannot judge");
-  }
-  if (/::?(before|after|placeholder|selection|marker|backdrop)\b/.test(bare)) {
-    return null;                                               // generated text, not the element's own
-  }
-  for (const m of bare.matchAll(/(?<!:):([\w-]+)/g)) {
-    if (m[1] !== "not" && m[1] !== "root" && !AS_DRAWN_FALSE.has(m[1])) {
-      throw new Error(where + ": " + selector + " has :" + m[1] + ", which the case check cannot judge");
-    }
-  }
-  return { test: DOM.compile(selector.replace(/:root\b/g, "html")), spec: specificity(selector) };
-}
-
-function caseRules(theme) {
-  const rules = [];
-  for (const sheet of SHEETS(theme)) {
-    const css = fs.readFileSync(path.join(webui, sheet), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-    const block = (text, at) => {
-      let i = 0;
-      while (i < text.length) {
-        const open = text.indexOf("{", i);
-        if (open < 0) { break; }
-        const prelude = text.slice(i, open).trim();
-        let depth = 0;
-        let j = open;
-        for (; j < text.length; j++) {
-          if (text[j] === "{") { depth += 1; } else if (text[j] === "}") { depth -= 1; if (depth === 0) { break; } }
-        }
-        const body = text.slice(open + 1, j);
-        i = j + 1;
-        if (prelude.startsWith("@")) {
-          if (/^@(media|supports|container|layer|scope)\b/.test(prelude)) { block(body, prelude); }
-          continue;                                            // @keyframes, @font-face: no element's case
-        }
-        const transform = declared(body, "text-transform");
-        if (transform === null) { continue; }
-        if (at) { throw new Error(sheet + ": a text-transform inside " + at + " (" + prelude + "), which the case check cannot judge"); }
-        for (const selector of splitTopLevel(prelude, ",")) {
-          const rule = caseRule(selector, sheet);
-          if (rule) { rules.push({ ...rule, selector, sheet, value: transform.value, important: transform.important, order: rules.length }); }
-        }
-      }
-    };
-    block(css, "");
-  }
-  return rules;
-}
-
-function caseOf(el, rules) {
-  const rank = (r) => [r.important ? 1 : 0, ...r.spec, r.order];
-  const higher = (x, y) => { for (let i = 0; i < x.length; i++) { if (x[i] !== y[i]) { return x[i] > y[i]; } } return false; };
-  for (let node = el; node && node.nodeType === 1; node = node.parentNode) {
-    let best = null;
-    for (const rule of rules) {
-      if (rule.test(node) && (!best || higher(rank(rule), rank(best)))) { best = rule; }
-    }
-    if (best && best.value !== "inherit" && best.value !== "unset") {
-      return { value: best.value === "initial" ? "none" : best.value, by: best.sheet + " " + best.selector + (node === el ? "" : " (inherited)") };
-    }
-  }
-  return { value: "none", by: "" };
-}
+const CSS_CASE = require("./css_case.js");
+const caseRules = (theme) => CSS_CASE.caseRules(webui, theme);
+const caseOf = (el, rules) => CSS_CASE.caseOf(el, rules);
 
 const CASE_LOOKS = {
   nostromo: { theme: "nostromo", variant: "amber" }, night_city: { theme: "night_city", variant: "blackwall" },

@@ -1,0 +1,3035 @@
+{
+ "_about": [
+  "The dev server's answers (usage_monitor/ui/devserver.py, scenario normal, its clock pinned to 2026-10-21 16:12 UTC) as tests/page_words.js serves them to the page: made-up data, trimmed to what the page reads (the themes without their colours, sixty days of history), the state as an installed monitor's. Frozen with the page-words record (#98): never regenerated, so the record stays comparable."
+ ],
+ "now": "2026-10-21T16:12:00Z",
+ "state": {
+  "state": {
+   "status": "live",
+   "status_detail": "Updated 16:11:48",
+   "usage": {
+    "fetched_at": "2026-10-21T16:11:48.000Z",
+    "limits": [
+     {
+      "kind": "session",
+      "group": "session",
+      "percent": 13.0,
+      "severity": "normal",
+      "resets_at": "2026-10-21T19:39:00.000Z",
+      "is_active": true,
+      "label": "SESSION",
+      "scope_model": null,
+      "scope_surface": null,
+      "window_seconds": 18000,
+      "allowance_pct": null,
+      "used_pct_of_weekly": null,
+      "locked_reason": null,
+      "dollars": null,
+      "fraction": 0.13
+     },
+     {
+      "kind": "weekly_all",
+      "group": "weekly",
+      "percent": 2.0,
+      "severity": "normal",
+      "resets_at": "2026-10-24T15:12:00.000Z",
+      "is_active": true,
+      "label": "WEEKLY",
+      "scope_model": null,
+      "scope_surface": null,
+      "window_seconds": 604800,
+      "allowance_pct": null,
+      "used_pct_of_weekly": null,
+      "locked_reason": null,
+      "dollars": null,
+      "fraction": 0.02
+     },
+     {
+      "kind": "weekly_scoped",
+      "group": "weekly",
+      "percent": 0.0,
+      "severity": "normal",
+      "resets_at": "2026-10-24T15:12:00.000Z",
+      "is_active": true,
+      "label": "FABLE WEEKLY",
+      "scope_model": "Fable",
+      "scope_surface": null,
+      "window_seconds": 604800,
+      "allowance_pct": 50.0,
+      "used_pct_of_weekly": 0.0,
+      "locked_reason": null,
+      "dollars": null,
+      "fraction": 0.0
+     }
+    ],
+    "breakdown": [
+     {
+      "key": "claude_code",
+      "name": "Claude Code",
+      "percent": 100.0
+     },
+     {
+      "key": "chat",
+      "name": "Chats",
+      "percent": 0.0
+     },
+     {
+      "key": "cowork",
+      "name": "Cowork",
+      "percent": 0.0
+     }
+    ],
+    "breakdown_window_start": "2026-10-17T15:12:00.000Z",
+    "spend": {
+     "enabled": false,
+     "used": null,
+     "limit": null,
+     "percent": null,
+     "severity": null,
+     "currency": null,
+     "balance": null,
+     "disabled_reason": null
+    }
+   },
+   "usage_fetched_at": "2026-10-21T16:11:48.000Z",
+   "plan": {
+    "subscription_type": "max",
+    "rate_limit_tier": "default_claude_max_5x",
+    "name": "Max 5x",
+    "monthly_price_usd": 100.0
+   },
+   "windows": {
+    "session": {
+     "name": "session",
+     "start": "2026-10-21T14:39:00.000Z",
+     "end": null,
+     "totals": {
+      "requests": 212,
+      "input": 2000000,
+      "output": 620000,
+      "cache_read": 964000000,
+      "cache_write_5m": 30000000,
+      "cache_write_1h": 4000000,
+      "thinking": 235600,
+      "cost_usd": 31.07,
+      "nocache_cost_usd": 127.07,
+      "unpriced_requests": 0,
+      "cache_write": 34000000,
+      "total_tokens": 1000620000,
+      "cache_hit_rate": 0.964,
+      "caching_saved_usd": 96.0
+     },
+     "by_model": {}
+    },
+    "today": {
+     "name": "today",
+     "start": "2026-10-21T00:00:00.000Z",
+     "end": null,
+     "totals": {
+      "requests": 410,
+      "input": 2000000,
+      "output": 2350000,
+      "cache_read": 964000000,
+      "cache_write_5m": 30000000,
+      "cache_write_1h": 4000000,
+      "thinking": 893000,
+      "cost_usd": 84.2,
+      "nocache_cost_usd": 294.2,
+      "unpriced_requests": 0,
+      "cache_write": 34000000,
+      "total_tokens": 1002350000,
+      "cache_hit_rate": 0.964,
+      "caching_saved_usd": 210.0
+     },
+     "by_model": {}
+    },
+    "week": {
+     "name": "week",
+     "start": "2026-10-17T15:12:00.000Z",
+     "end": null,
+     "totals": {
+      "requests": 2650,
+      "input": 2000000,
+      "output": 4100000,
+      "cache_read": 964000000,
+      "cache_write_5m": 30000000,
+      "cache_write_1h": 4000000,
+      "thinking": 1558000,
+      "cost_usd": 412.55,
+      "nocache_cost_usd": 1812.55,
+      "unpriced_requests": 0,
+      "cache_write": 34000000,
+      "total_tokens": 1004100000,
+      "cache_hit_rate": 0.964,
+      "caching_saved_usd": 1400.0
+     },
+     "by_model": {}
+    },
+    "month": {
+     "name": "month",
+     "start": "2026-10-01T00:00:00.000Z",
+     "end": null,
+     "totals": {
+      "requests": 5650,
+      "input": 8000000,
+      "output": 18410000,
+      "cache_read": 3856000000,
+      "cache_write_5m": 120000000,
+      "cache_write_1h": 16000000,
+      "thinking": 6995800,
+      "cost_usd": 1659.14,
+      "nocache_cost_usd": 15759.14,
+      "unpriced_requests": 0,
+      "cache_write": 136000000,
+      "total_tokens": 4018410000,
+      "cache_hit_rate": 0.964,
+      "caching_saved_usd": 14100.0
+     },
+     "by_model": {
+      "claude-opus-5-5": {
+       "requests": 2410,
+       "input": 2000000,
+       "output": 15900000,
+       "cache_read": 964000000,
+       "cache_write_5m": 30000000,
+       "cache_write_1h": 4000000,
+       "thinking": 6042000,
+       "cost_usd": 1426.9,
+       "nocache_cost_usd": 13546.9,
+       "unpriced_requests": 0,
+       "cache_write": 34000000,
+       "total_tokens": 1015900000,
+       "cache_hit_rate": 0.964,
+       "caching_saved_usd": 12120.0
+      },
+      "claude-sonnet-5-5": {
+       "requests": 880,
+       "input": 2000000,
+       "output": 1310000,
+       "cache_read": 964000000,
+       "cache_write_5m": 30000000,
+       "cache_write_1h": 4000000,
+       "thinking": 497800,
+       "cost_usd": 116.1,
+       "nocache_cost_usd": 1296.1,
+       "unpriced_requests": 0,
+       "cache_write": 34000000,
+       "total_tokens": 1001310000,
+       "cache_hit_rate": 0.964,
+       "caching_saved_usd": 1180.0
+      },
+      "claude-haiku-4-5": {
+       "requests": 1950,
+       "input": 2000000,
+       "output": 1020000,
+       "cache_read": 964000000,
+       "cache_write_5m": 30000000,
+       "cache_write_1h": 4000000,
+       "thinking": 387600,
+       "cost_usd": 99.5,
+       "nocache_cost_usd": 749.5,
+       "unpriced_requests": 0,
+       "cache_write": 34000000,
+       "total_tokens": 1001020000,
+       "cache_hit_rate": 0.964,
+       "caching_saved_usd": 650.0
+      },
+      "claude-haiku-5-5": {
+       "requests": 410,
+       "input": 2000000,
+       "output": 180000,
+       "cache_read": 964000000,
+       "cache_write_5m": 30000000,
+       "cache_write_1h": 4000000,
+       "thinking": 68400,
+       "cost_usd": 16.64,
+       "nocache_cost_usd": 166.64,
+       "unpriced_requests": 0,
+       "cache_write": 34000000,
+       "total_tokens": 1000180000,
+       "cache_hit_rate": 0.964,
+       "caching_saved_usd": 150.0
+      }
+     }
+    },
+    "all": {
+     "name": "all",
+     "start": "2026-04-24T16:12:00.000Z",
+     "end": null,
+     "totals": {
+      "requests": 9800,
+      "input": 2000000,
+      "output": 66000000,
+      "cache_read": 964000000,
+      "cache_write_5m": 30000000,
+      "cache_write_1h": 4000000,
+      "thinking": 25080000,
+      "cost_usd": 4812.66,
+      "nocache_cost_usd": 21412.66,
+      "unpriced_requests": 0,
+      "cache_write": 34000000,
+      "total_tokens": 1066000000,
+      "cache_hit_rate": 0.964,
+      "caching_saved_usd": 16600.0
+     },
+     "by_model": {}
+    }
+   },
+   "burn": {
+    "tokens_per_min": 1091.5,
+    "usd_per_hour": 5.37,
+    "velocity": "NORMAL",
+    "window_minutes": 30
+   },
+   "unpriced_models": [],
+   "ingest": {
+    "running": false,
+    "files_done": 4210,
+    "files_total": 4210,
+    "last_duration_s": 0.42,
+    "last_error": null
+   },
+   "updated_at": "2026-10-21T16:11:48.000Z",
+   "guard": {},
+   "signin_refused": null,
+   "detail": {
+    "code": "updated",
+    "values": {
+     "clock": "16:11:48"
+    }
+   }
+  },
+  "model_names": {
+   "claude-haiku-4-5": "Haiku 4.5",
+   "claude-haiku-5-5": "Haiku 5.5",
+   "claude-opus-5-5": "Opus 5.5",
+   "claude-sonnet-5-5": "Sonnet 5.5"
+  },
+  "settings": {
+   "theme_id": "nostromo",
+   "theme_variant": "amber",
+   "theme_mode": "system",
+   "poll_interval_ms": 900000,
+   "show_floating": true,
+   "show_taskbar": true,
+   "float_transparent_bg": false,
+   "float_text_fx": true,
+   "taskbar_transparent_bg": false,
+   "taskbar_text_fx": true,
+   "show_scoped_rows": "auto",
+   "hide_floating_in_fullscreen": false,
+   "billing_day": null,
+   "plan_price_override": null,
+   "reduce_motion": false,
+   "check_updates": true,
+   "launch_on_startup": false,
+   "alerts_enabled": true,
+   "alert_thresholds": [
+    80,
+    90,
+    100
+   ],
+   "alert_on_threshold": true,
+   "alert_on_reset": true,
+   "alert_on_credits": true,
+   "alert_quiet_hours": null,
+   "dashboard_bounds": null,
+   "dashboard_prefs": null,
+   "language": "system",
+   "guard_enabled": false,
+   "guard_session_cap": 95,
+   "guard_weekly_cap": 90,
+   "guard_scoped_cap": null,
+   "guard_resume_stagger_s": 120
+  },
+  "theme": {
+   "id": "nostromo",
+   "name": "Nostromo",
+   "variant": "amber",
+   "variant_name": "RAY TUBE",
+   "mode": "dark",
+   "css_vars": {},
+   "assets": {
+    "css": true,
+    "js": true
+   }
+  },
+  "version": "2.3.0",
+  "update": {
+   "available": false,
+   "version": null,
+   "url": null,
+   "can_self_update": false,
+   "skipped": false,
+   "info": null,
+   "skip_version": ""
+  },
+  "dev": false,
+  "locale": {
+   "setting": "system",
+   "language": "en",
+   "system": "en",
+   "format": "en-US",
+   "clock": 12,
+   "offered": [
+    "en"
+   ]
+  }
+ },
+ "themes": [
+  {
+   "id": "nostromo",
+   "name": "Nostromo",
+   "tagline": "Amber P3 phosphor on CRT black: segmented pip bars, chamfered panels and a typed boot log.",
+   "default_variant": "amber",
+   "assets": {
+    "css": true,
+    "js": true
+   },
+   "modes": [],
+   "variants": [
+    {
+     "id": "amber",
+     "name": "RAY TUBE",
+     "accent": "amber",
+     "default": true,
+     "mode": "dark",
+     "colors": {
+      "accent": "#ffb300"
+     }
+    },
+    {
+     "id": "green",
+     "name": "TERMINAL",
+     "accent": "green",
+     "default": false,
+     "mode": "dark",
+     "colors": {
+      "accent": "#6dffa4"
+     }
+    },
+    {
+     "id": "white",
+     "name": "STATIC",
+     "accent": "white",
+     "default": false,
+     "mode": "dark",
+     "colors": {
+      "accent": "#f4f8fa"
+     }
+    },
+    {
+     "id": "red",
+     "name": "ALERT",
+     "accent": "red",
+     "default": false,
+     "mode": "dark",
+     "colors": {
+      "accent": "#ff5a3c"
+     }
+    },
+    {
+     "id": "blue",
+     "name": "CRYO",
+     "accent": "blue",
+     "default": false,
+     "mode": "dark",
+     "colors": {
+      "accent": "#8fdcff"
+     }
+    },
+    {
+     "id": "purple",
+     "name": "PLASMA",
+     "accent": "purple",
+     "default": false,
+     "mode": "dark",
+     "colors": {
+      "accent": "#d7b4ff"
+     }
+    }
+   ]
+  },
+  {
+   "id": "night_city",
+   "name": "Night City",
+   "tagline": "Yellow plates for Edgerun with Breach lime, red line art and cyan RAM cells for Blackwall (default), chamfered frames, and a one-shot RGB split on refresh. Dark only.",
+   "default_variant": "blackwall",
+   "assets": {
+    "css": true,
+    "js": true
+   },
+   "modes": [],
+   "variants": [
+    {
+     "id": "blackwall",
+     "name": "Blackwall",
+     "accent": "blackwall",
+     "default": true,
+     "mode": "dark",
+     "colors": {
+      "accent": "#ff4a3c"
+     }
+    },
+    {
+     "id": "relic",
+     "name": "Relic",
+     "accent": "relic",
+     "default": false,
+     "mode": "dark",
+     "colors": {
+      "accent": "#7bacf9"
+     }
+    },
+    {
+     "id": "edgerun",
+     "name": "Edgerun",
+     "accent": "edgerun",
+     "default": false,
+     "mode": "dark",
+     "colors": {
+      "accent": "#fcee0a"
+     }
+    },
+    {
+     "id": "mox",
+     "name": "Mox",
+     "accent": "mox",
+     "default": false,
+     "mode": "dark",
+     "colors": {
+      "accent": "#2cc2e9"
+     }
+    }
+   ]
+  },
+  {
+   "id": "gates",
+   "name": "Gates",
+   "tagline": "Readouts on native Fluent surfaces: a rail for time, a bar for usage, one lamp for the link.",
+   "default_variant": "system-dark",
+   "assets": {
+    "css": true,
+    "js": true
+   },
+   "modes": [
+    "dark",
+    "light",
+    "system"
+   ],
+   "variants": [
+    {
+     "id": "system-dark",
+     "name": "System accent · Dark",
+     "accent": "system",
+     "default": true,
+     "mode": "dark",
+     "colors": {
+      "accent": "#ff5145"
+     }
+    },
+    {
+     "id": "blue-dark",
+     "name": "Blue · Dark",
+     "accent": "blue",
+     "default": false,
+     "mode": "dark",
+     "colors": {
+      "accent": "#5b9dff"
+     }
+    },
+    {
+     "id": "teal-dark",
+     "name": "Teal · Dark",
+     "accent": "teal",
+     "default": false,
+     "mode": "dark",
+     "colors": {
+      "accent": "#4dd6c2"
+     }
+    },
+    {
+     "id": "purple-dark",
+     "name": "Purple · Dark",
+     "accent": "purple",
+     "default": false,
+     "mode": "dark",
+     "colors": {
+      "accent": "#b39ae6"
+     }
+    },
+    {
+     "id": "rose-dark",
+     "name": "Rose · Dark",
+     "accent": "rose",
+     "default": false,
+     "mode": "dark",
+     "colors": {
+      "accent": "#ff8ac5"
+     }
+    },
+    {
+     "id": "orange-dark",
+     "name": "Orange · Dark",
+     "accent": "orange",
+     "default": false,
+     "mode": "dark",
+     "colors": {
+      "accent": "#ff9f5a"
+     }
+    },
+    {
+     "id": "green-dark",
+     "name": "Green · Dark",
+     "accent": "green",
+     "default": false,
+     "mode": "dark",
+     "colors": {
+      "accent": "#c3e86b"
+     }
+    },
+    {
+     "id": "system-light",
+     "name": "System accent · Light",
+     "accent": "system",
+     "default": false,
+     "mode": "light",
+     "colors": {
+      "accent": "#d0000c"
+     }
+    },
+    {
+     "id": "blue-light",
+     "name": "Blue · Light",
+     "accent": "blue",
+     "default": false,
+     "mode": "light",
+     "colors": {
+      "accent": "#2d5bd9"
+     }
+    },
+    {
+     "id": "teal-light",
+     "name": "Teal · Light",
+     "accent": "teal",
+     "default": false,
+     "mode": "light",
+     "colors": {
+      "accent": "#018574"
+     }
+    },
+    {
+     "id": "purple-light",
+     "name": "Purple · Light",
+     "accent": "purple",
+     "default": false,
+     "mode": "light",
+     "colors": {
+      "accent": "#6f4fa8"
+     }
+    },
+    {
+     "id": "rose-light",
+     "name": "Rose · Light",
+     "accent": "rose",
+     "default": false,
+     "mode": "light",
+     "colors": {
+      "accent": "#c10e74"
+     }
+    },
+    {
+     "id": "orange-light",
+     "name": "Orange · Light",
+     "accent": "orange",
+     "default": false,
+     "mode": "light",
+     "colors": {
+      "accent": "#c75300"
+     }
+    },
+    {
+     "id": "green-light",
+     "name": "Green · Light",
+     "accent": "green",
+     "default": false,
+     "mode": "light",
+     "colors": {
+      "accent": "#5a7f00"
+     }
+    }
+   ]
+  }
+ ],
+ "pacing": {
+  "now": "2026-10-21T16:12:00Z",
+  "session": {
+   "percent": 13.0,
+   "resets_at": "2026-10-21T19:39:00Z",
+   "window_start": "2026-10-21T14:39:00Z",
+   "slope_pct_per_hour": 8.034781588059234,
+   "projected_limit_at": null,
+   "verdict": "SAFE",
+   "points": [
+    [
+     "2026-10-21T14:40:00Z",
+     0.3
+    ],
+    [
+     "2026-10-21T14:45:00Z",
+     1.3
+    ],
+    [
+     "2026-10-21T14:50:00Z",
+     2.1
+    ],
+    [
+     "2026-10-21T14:55:00Z",
+     2.9
+    ],
+    [
+     "2026-10-21T15:00:00Z",
+     3.7
+    ],
+    [
+     "2026-10-21T15:05:00Z",
+     4.4
+    ],
+    [
+     "2026-10-21T15:10:00Z",
+     5.1
+    ],
+    [
+     "2026-10-21T15:15:00Z",
+     5.8
+    ],
+    [
+     "2026-10-21T15:20:00Z",
+     6.5
+    ],
+    [
+     "2026-10-21T15:25:00Z",
+     7.2
+    ],
+    [
+     "2026-10-21T15:30:00Z",
+     7.8
+    ],
+    [
+     "2026-10-21T15:35:00Z",
+     8.5
+    ],
+    [
+     "2026-10-21T15:40:00Z",
+     9.1
+    ],
+    [
+     "2026-10-21T15:45:00Z",
+     9.7
+    ],
+    [
+     "2026-10-21T15:50:00Z",
+     10.4
+    ],
+    [
+     "2026-10-21T15:55:00Z",
+     11.0
+    ],
+    [
+     "2026-10-21T16:00:00Z",
+     11.6
+    ],
+    [
+     "2026-10-21T16:05:00Z",
+     12.2
+    ],
+    [
+     "2026-10-21T16:11:48Z",
+     13.0
+    ]
+   ]
+  },
+  "weekly": {
+   "percent": 2.0,
+   "resets_at": "2026-10-24T15:12:00Z",
+   "window_start": "2026-10-17T15:12:00Z",
+   "elapsed_pct": 57.738095238095234,
+   "pace_delta_pp": -55.738095238095234,
+   "verdict": "BEHIND",
+   "daily_budget_pct": 33.12676056338028,
+   "even_daily_pct": 14.285714285714286,
+   "projected_end_pct": 3.463917525773196,
+   "points": [
+    [
+     "2026-10-17T16:00:00Z",
+     0.0
+    ],
+    [
+     "2026-10-17T17:00:00Z",
+     0.1
+    ],
+    [
+     "2026-10-17T18:00:00Z",
+     0.1
+    ],
+    [
+     "2026-10-17T19:00:00Z",
+     0.1
+    ],
+    [
+     "2026-10-17T20:00:00Z",
+     0.2
+    ],
+    [
+     "2026-10-17T21:00:00Z",
+     0.2
+    ],
+    [
+     "2026-10-17T22:00:00Z",
+     0.2
+    ],
+    [
+     "2026-10-17T23:00:00Z",
+     0.2
+    ],
+    [
+     "2026-10-18T00:00:00Z",
+     0.3
+    ],
+    [
+     "2026-10-18T01:00:00Z",
+     0.3
+    ],
+    [
+     "2026-10-18T02:00:00Z",
+     0.3
+    ],
+    [
+     "2026-10-18T03:00:00Z",
+     0.3
+    ],
+    [
+     "2026-10-18T04:00:00Z",
+     0.4
+    ],
+    [
+     "2026-10-18T05:00:00Z",
+     0.4
+    ],
+    [
+     "2026-10-18T06:00:00Z",
+     0.4
+    ],
+    [
+     "2026-10-18T07:00:00Z",
+     0.4
+    ],
+    [
+     "2026-10-18T08:00:00Z",
+     0.5
+    ],
+    [
+     "2026-10-18T09:00:00Z",
+     0.5
+    ],
+    [
+     "2026-10-18T10:00:00Z",
+     0.5
+    ],
+    [
+     "2026-10-18T11:00:00Z",
+     0.5
+    ],
+    [
+     "2026-10-18T12:00:00Z",
+     0.5
+    ],
+    [
+     "2026-10-18T13:00:00Z",
+     0.6
+    ],
+    [
+     "2026-10-18T14:00:00Z",
+     0.6
+    ],
+    [
+     "2026-10-18T15:00:00Z",
+     0.6
+    ],
+    [
+     "2026-10-18T16:00:00Z",
+     0.6
+    ],
+    [
+     "2026-10-18T17:00:00Z",
+     0.6
+    ],
+    [
+     "2026-10-18T18:00:00Z",
+     0.7
+    ],
+    [
+     "2026-10-18T19:00:00Z",
+     0.7
+    ],
+    [
+     "2026-10-18T20:00:00Z",
+     0.7
+    ],
+    [
+     "2026-10-18T21:00:00Z",
+     0.7
+    ],
+    [
+     "2026-10-18T22:00:00Z",
+     0.8
+    ],
+    [
+     "2026-10-18T23:00:00Z",
+     0.8
+    ],
+    [
+     "2026-10-19T00:00:00Z",
+     0.8
+    ],
+    [
+     "2026-10-19T01:00:00Z",
+     0.8
+    ],
+    [
+     "2026-10-19T02:00:00Z",
+     0.8
+    ],
+    [
+     "2026-10-19T03:00:00Z",
+     0.9
+    ],
+    [
+     "2026-10-19T04:00:00Z",
+     0.9
+    ],
+    [
+     "2026-10-19T05:00:00Z",
+     0.9
+    ],
+    [
+     "2026-10-19T06:00:00Z",
+     0.9
+    ],
+    [
+     "2026-10-19T07:00:00Z",
+     0.9
+    ],
+    [
+     "2026-10-19T08:00:00Z",
+     1.0
+    ],
+    [
+     "2026-10-19T09:00:00Z",
+     1.0
+    ],
+    [
+     "2026-10-19T10:00:00Z",
+     1.0
+    ],
+    [
+     "2026-10-19T11:00:00Z",
+     1.0
+    ],
+    [
+     "2026-10-19T12:00:00Z",
+     1.0
+    ],
+    [
+     "2026-10-19T13:00:00Z",
+     1.1
+    ],
+    [
+     "2026-10-19T14:00:00Z",
+     1.1
+    ],
+    [
+     "2026-10-19T15:00:00Z",
+     1.1
+    ],
+    [
+     "2026-10-19T16:00:00Z",
+     1.1
+    ],
+    [
+     "2026-10-19T17:00:00Z",
+     1.1
+    ],
+    [
+     "2026-10-19T18:00:00Z",
+     1.2
+    ],
+    [
+     "2026-10-19T19:00:00Z",
+     1.2
+    ],
+    [
+     "2026-10-19T20:00:00Z",
+     1.2
+    ],
+    [
+     "2026-10-19T21:00:00Z",
+     1.2
+    ],
+    [
+     "2026-10-19T22:00:00Z",
+     1.2
+    ],
+    [
+     "2026-10-19T23:00:00Z",
+     1.3
+    ],
+    [
+     "2026-10-20T00:00:00Z",
+     1.3
+    ],
+    [
+     "2026-10-20T01:00:00Z",
+     1.3
+    ],
+    [
+     "2026-10-20T02:00:00Z",
+     1.3
+    ],
+    [
+     "2026-10-20T03:00:00Z",
+     1.3
+    ],
+    [
+     "2026-10-20T04:00:00Z",
+     1.3
+    ],
+    [
+     "2026-10-20T05:00:00Z",
+     1.4
+    ],
+    [
+     "2026-10-20T06:00:00Z",
+     1.4
+    ],
+    [
+     "2026-10-20T07:00:00Z",
+     1.4
+    ],
+    [
+     "2026-10-20T08:00:00Z",
+     1.4
+    ],
+    [
+     "2026-10-20T09:00:00Z",
+     1.4
+    ],
+    [
+     "2026-10-20T10:00:00Z",
+     1.5
+    ],
+    [
+     "2026-10-20T11:00:00Z",
+     1.5
+    ],
+    [
+     "2026-10-20T12:00:00Z",
+     1.5
+    ],
+    [
+     "2026-10-20T13:00:00Z",
+     1.5
+    ],
+    [
+     "2026-10-20T14:00:00Z",
+     1.5
+    ],
+    [
+     "2026-10-20T15:00:00Z",
+     1.5
+    ],
+    [
+     "2026-10-20T16:00:00Z",
+     1.6
+    ],
+    [
+     "2026-10-20T17:00:00Z",
+     1.6
+    ],
+    [
+     "2026-10-20T18:00:00Z",
+     1.6
+    ],
+    [
+     "2026-10-20T19:00:00Z",
+     1.6
+    ],
+    [
+     "2026-10-20T20:00:00Z",
+     1.6
+    ],
+    [
+     "2026-10-20T21:00:00Z",
+     1.7
+    ],
+    [
+     "2026-10-20T22:00:00Z",
+     1.7
+    ],
+    [
+     "2026-10-20T23:00:00Z",
+     1.7
+    ],
+    [
+     "2026-10-21T00:00:00Z",
+     1.7
+    ],
+    [
+     "2026-10-21T01:00:00Z",
+     1.7
+    ],
+    [
+     "2026-10-21T02:00:00Z",
+     1.7
+    ],
+    [
+     "2026-10-21T03:00:00Z",
+     1.8
+    ],
+    [
+     "2026-10-21T04:00:00Z",
+     1.8
+    ],
+    [
+     "2026-10-21T05:00:00Z",
+     1.8
+    ],
+    [
+     "2026-10-21T06:00:00Z",
+     1.8
+    ],
+    [
+     "2026-10-21T07:00:00Z",
+     1.8
+    ],
+    [
+     "2026-10-21T08:00:00Z",
+     1.9
+    ],
+    [
+     "2026-10-21T09:00:00Z",
+     1.9
+    ],
+    [
+     "2026-10-21T10:00:00Z",
+     1.9
+    ],
+    [
+     "2026-10-21T11:00:00Z",
+     1.9
+    ],
+    [
+     "2026-10-21T12:00:00Z",
+     1.9
+    ],
+    [
+     "2026-10-21T13:00:00Z",
+     1.9
+    ],
+    [
+     "2026-10-21T14:55:00Z",
+     2.0
+    ],
+    [
+     "2026-10-21T15:55:00Z",
+     2.0
+    ],
+    [
+     "2026-10-21T16:11:48Z",
+     2.0
+    ]
+   ]
+  },
+  "scoped": [
+   {
+    "label": "FABLE WEEKLY",
+    "model": "Fable",
+    "kind": "weekly_scoped",
+    "scope_model": "Fable",
+    "scope_surface": null,
+    "allowance_pct": 50.0,
+    "used_pct_of_weekly": 0.0,
+    "percent": 0.0,
+    "resets_at": "2026-10-24T15:12:00Z",
+    "window_start": "2026-10-17T15:12:00Z",
+    "elapsed_pct": 57.738095238095234,
+    "pace_delta_pp": -57.738095238095234,
+    "verdict": "BEHIND",
+    "daily_budget_pct": 33.80281690140845,
+    "even_daily_pct": 14.285714285714286,
+    "projected_end_pct": 0.0,
+    "points": [
+     [
+      "2026-10-17T16:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-17T17:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-17T18:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-17T19:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-17T20:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-17T21:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-17T22:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-17T23:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-18T00:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-18T01:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-18T02:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-18T03:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-18T04:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-18T05:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-18T06:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-18T07:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-18T08:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-18T09:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-18T10:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-18T11:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-18T12:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-18T13:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-18T14:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-18T15:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-18T16:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-18T17:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-18T18:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-18T19:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-18T20:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-18T21:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-18T22:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-18T23:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-19T00:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-19T01:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-19T02:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-19T03:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-19T04:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-19T05:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-19T06:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-19T07:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-19T08:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-19T09:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-19T10:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-19T11:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-19T12:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-19T13:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-19T14:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-19T15:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-19T16:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-19T17:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-19T18:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-19T19:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-19T20:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-19T21:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-19T22:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-19T23:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-20T00:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-20T01:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-20T02:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-20T03:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-20T04:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-20T05:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-20T06:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-20T07:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-20T08:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-20T09:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-20T10:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-20T11:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-20T12:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-20T13:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-20T14:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-20T15:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-20T16:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-20T17:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-20T18:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-20T19:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-20T20:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-20T21:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-20T22:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-20T23:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-21T00:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-21T01:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-21T02:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-21T03:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-21T04:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-21T05:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-21T06:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-21T07:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-21T08:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-21T09:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-21T10:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-21T11:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-21T12:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-21T13:00:00Z",
+      0.0
+     ],
+     [
+      "2026-10-21T14:55:00Z",
+      0.0
+     ],
+     [
+      "2026-10-21T15:55:00Z",
+      0.0
+     ],
+     [
+      "2026-10-21T16:11:48Z",
+      0.0
+     ]
+    ]
+   }
+  ]
+ },
+ "cost": {
+  "basis": "API-equivalent at list prices",
+  "windows": {
+   "session": {
+    "start": "2026-10-21T14:39:00Z",
+    "end": "2026-10-21T19:39:00Z",
+    "requests": 55,
+    "tokens": {
+     "input": 93723,
+     "output": 266117,
+     "cache_read": 15744762,
+     "cache_write": 778789,
+     "thinking": 61968,
+     "total": 16883391
+    },
+    "cost_usd": 11.358058914999999,
+    "nocache_cost_usd": 60.577669799999995,
+    "unpriced_requests": 0
+   },
+   "today": {
+    "start": "2026-10-21T00:00:00Z",
+    "end": "2026-10-22T00:00:00Z",
+    "requests": 164,
+    "tokens": {
+     "input": 298637,
+     "output": 813872,
+     "cache_read": 47273210,
+     "cache_write": 2518508,
+     "thinking": 183202,
+     "total": 50904227
+    },
+    "cost_usd": 32.011838585,
+    "nocache_cost_usd": 180.70482600000003,
+    "unpriced_requests": 0
+   },
+   "week": {
+    "start": "2026-10-17T15:12:00Z",
+    "end": "2026-10-24T15:12:00Z",
+    "requests": 1173,
+    "tokens": {
+     "input": 1966022,
+     "output": 6142249,
+     "cache_read": 386752574,
+     "cache_write": 18323690,
+     "thinking": 1275089,
+     "total": 413184535
+    },
+    "cost_usd": 226.28959150999998,
+    "nocache_cost_usd": 1339.7765434,
+    "unpriced_requests": 0
+   },
+   "month": {
+    "start": "2026-10-01T00:00:00Z",
+    "end": "2026-11-01T00:00:00Z",
+    "requests": 3077,
+    "tokens": {
+     "input": 5091887,
+     "output": 16435090,
+     "cache_read": 992717764,
+     "cache_write": 48835897,
+     "thinking": 3335545,
+     "total": 1063080638
+    },
+    "cost_usd": 526.0397435249998,
+    "nocache_cost_usd": 3011.8734383999995,
+    "unpriced_requests": 0
+   },
+   "cycle": {
+    "start": "2026-10-01T00:00:00Z",
+    "end": "2026-11-01T00:00:00Z",
+    "requests": 3077,
+    "tokens": {
+     "input": 5091887,
+     "output": 16435090,
+     "cache_read": 992717764,
+     "cache_write": 48835897,
+     "thinking": 3335545,
+     "total": 1063080638
+    },
+    "cost_usd": 526.0397435249998,
+    "nocache_cost_usd": 3011.8734383999995,
+    "unpriced_requests": 0
+   },
+   "all": {
+    "start": null,
+    "end": null,
+    "requests": 43646,
+    "tokens": {
+     "input": 72058377,
+     "output": 224435029,
+     "cache_read": 13825971820,
+     "cache_write": 699963308,
+     "thinking": 44688529,
+     "total": 14822428534
+    },
+    "cost_usd": 9230.583252644985,
+    "nocache_cost_usd": 45641.52236819999,
+    "unpriced_requests": 0
+   }
+  },
+  "plan": {
+   "name": "Max 5x",
+   "subscription_type": "max",
+   "rate_limit_tier": "default_claude_max_5x",
+   "price_usd": 100.0,
+   "price_source": "detected"
+  },
+  "value": {
+   "cycle_start": "2026-10-01T00:00:00Z",
+   "cycle_end": "2026-11-01T00:00:00Z",
+   "cycle_cost_usd": 526.0397435249998,
+   "multiplier": 5.260397435249998,
+   "projected_cycle_cost_usd": 788.7415743301085
+  },
+  "monthly": [
+   {
+    "month": "2025-10",
+    "requests": 2587,
+    "tokens": 892584684,
+    "cost_usd": 584.8906084199996,
+    "multiplier": 5.848906084199996
+   },
+   {
+    "month": "2025-11",
+    "requests": 630,
+    "tokens": 208191098,
+    "cost_usd": 160.65616896999995,
+    "multiplier": 1.6065616896999995
+   },
+   {
+    "month": "2025-12",
+    "requests": 2824,
+    "tokens": 914024486,
+    "cost_usd": 719.151135555,
+    "multiplier": 7.19151135555
+   },
+   {
+    "month": "2026-01",
+    "requests": 4845,
+    "tokens": 1663195064,
+    "cost_usd": 1222.2441964249992,
+    "multiplier": 12.222441964249992
+   },
+   {
+    "month": "2026-02",
+    "requests": 3072,
+    "tokens": 1019927144,
+    "cost_usd": 804.9905041900001,
+    "multiplier": 8.0499050419
+   },
+   {
+    "month": "2026-03",
+    "requests": 2164,
+    "tokens": 735861296,
+    "cost_usd": 527.6876306749998,
+    "multiplier": 5.276876306749998
+   },
+   {
+    "month": "2026-04",
+    "requests": 4403,
+    "tokens": 1481066916,
+    "cost_usd": 1165.7933061900003,
+    "multiplier": 11.657933061900003
+   },
+   {
+    "month": "2026-05",
+    "requests": 4296,
+    "tokens": 1484663352,
+    "cost_usd": 950.6624092899998,
+    "multiplier": 9.506624092899997
+   },
+   {
+    "month": "2026-06",
+    "requests": 3428,
+    "tokens": 1142817917,
+    "cost_usd": 543.55158481,
+    "multiplier": 5.4355158481
+   },
+   {
+    "month": "2026-07",
+    "requests": 4162,
+    "tokens": 1463044982,
+    "cost_usd": 638.9481279199998,
+    "multiplier": 6.389481279199998
+   },
+   {
+    "month": "2026-08",
+    "requests": 4999,
+    "tokens": 1693262935,
+    "cost_usd": 868.82538043,
+    "multiplier": 8.6882538043
+   },
+   {
+    "month": "2026-09",
+    "requests": 3159,
+    "tokens": 1060708022,
+    "cost_usd": 517.1424562449997,
+    "multiplier": 5.171424562449997
+   },
+   {
+    "month": "2026-10",
+    "requests": 3077,
+    "tokens": 1063080638,
+    "cost_usd": 526.0397435249998,
+    "multiplier": 5.260397435249998
+   }
+  ],
+  "breakdowns": {
+   "window": "cycle",
+   "by_model": [
+    {
+     "model": "claude-opus-5-5",
+     "name": "Opus 5.5",
+     "requests": 1259,
+     "tokens": 543711322,
+     "cost_usd": 395.98797239999993,
+     "share": 0.752771966898316
+    },
+    {
+     "model": "claude-sonnet-5-5",
+     "name": "Sonnet 5.5",
+     "requests": 647,
+     "tokens": 194092121,
+     "cost_usd": 74.42371859999999,
+     "share": 0.14147926942037795
+    },
+    {
+     "model": "claude-haiku-4-5",
+     "name": "Haiku 4.5",
+     "requests": 529,
+     "tokens": 130031681,
+     "cost_usd": 33.89529445,
+     "share": 0.0644348547181381
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "name": "Haiku 5.5",
+     "requests": 642,
+     "tokens": 195245514,
+     "cost_usd": 21.732758075,
+     "share": 0.04131390896316783
+    }
+   ],
+   "by_project": [
+    {
+     "project": "C--Demo-atlas-web",
+     "name": "atlas-web",
+     "requests": 939,
+     "tokens": 324705812,
+     "cost_usd": 159.13063706999998,
+     "share": 0.3025068714459924
+    },
+    {
+     "project": "C--Demo-ledger-tools",
+     "name": "ledger-tools",
+     "requests": 708,
+     "tokens": 250869882,
+     "cost_usd": 156.307909585,
+     "share": 0.29714087482740076
+    },
+    {
+     "project": "C--Demo-home-automation",
+     "name": "home-automation",
+     "requests": 339,
+     "tokens": 108999681,
+     "cost_usd": 59.96615867999999,
+     "share": 0.11399549067940361
+    },
+    {
+     "project": "C--Demo-atlas-api",
+     "name": "atlas-api",
+     "requests": 360,
+     "tokens": 118992643,
+     "cost_usd": 47.05467268999999,
+     "share": 0.08945079391660779
+    },
+    {
+     "project": "D--Games-prototype",
+     "name": "prototype",
+     "requests": 209,
+     "tokens": 75548616,
+     "cost_usd": 40.606937005,
+     "share": 0.07719366740788886
+    },
+    {
+     "project": "C--Demo-atlas-web-packages-design-system",
+     "name": "design-system",
+     "requests": 183,
+     "tokens": 64139619,
+     "cost_usd": 28.666303579999997,
+     "share": 0.05449455850599173
+    },
+    {
+     "project": "C--Users-demo-notes",
+     "name": "notes",
+     "requests": 241,
+     "tokens": 89048892,
+     "cost_usd": 20.254416905,
+     "share": 0.038503586761857306
+    },
+    {
+     "project": "C--Demo-dotfiles",
+     "name": "dotfiles",
+     "requests": 98,
+     "tokens": 30775493,
+     "cost_usd": 14.052708009999998,
+     "share": 0.02671415645485757
+    }
+   ],
+   "by_folder": [
+    {
+     "folder": "C:\\Demo\\atlas-web",
+     "name": "atlas-web",
+     "requests": 939,
+     "tokens": 324705812,
+     "cost_usd": 159.13063706999998,
+     "share": 0.3025068714459924
+    },
+    {
+     "folder": "C:\\Demo\\ledger-tools",
+     "name": "ledger-tools",
+     "requests": 708,
+     "tokens": 250869882,
+     "cost_usd": 156.307909585,
+     "share": 0.29714087482740076
+    },
+    {
+     "folder": "C:\\Demo\\home-automation",
+     "name": "home-automation",
+     "requests": 339,
+     "tokens": 108999681,
+     "cost_usd": 59.96615867999999,
+     "share": 0.11399549067940361
+    },
+    {
+     "folder": "C:\\Demo\\atlas-api",
+     "name": "atlas-api",
+     "requests": 360,
+     "tokens": 118992643,
+     "cost_usd": 47.05467268999999,
+     "share": 0.08945079391660779
+    },
+    {
+     "folder": "D:\\Games\\prototype",
+     "name": "prototype",
+     "requests": 209,
+     "tokens": 75548616,
+     "cost_usd": 40.606937005,
+     "share": 0.07719366740788886
+    },
+    {
+     "folder": "C:\\Demo\\atlas-web\\packages\\design-system",
+     "name": "design-system",
+     "requests": 183,
+     "tokens": 64139619,
+     "cost_usd": 28.666303579999997,
+     "share": 0.05449455850599173
+    },
+    {
+     "folder": "C:\\Users\\demo\\notes",
+     "name": "notes",
+     "requests": 241,
+     "tokens": 89048892,
+     "cost_usd": 20.254416905,
+     "share": 0.038503586761857306
+    },
+    {
+     "folder": "C:\\Demo\\dotfiles",
+     "name": "dotfiles",
+     "requests": 98,
+     "tokens": 30775493,
+     "cost_usd": 14.052708009999998,
+     "share": 0.02671415645485757
+    }
+   ],
+   "by_thread": {
+    "main": {
+     "requests": 2450,
+     "tokens": 1012601088,
+     "cost_usd": 511.2185716049999
+    },
+    "subagent": {
+     "requests": 627,
+     "tokens": 50479550,
+     "cost_usd": 14.821171919999996
+    }
+   },
+   "haiku": {
+    "main": {
+     "requests": 752,
+     "tokens": 291414240,
+     "cost_usd": 49.32955340499999
+    },
+    "subagent": {
+     "requests": 419,
+     "tokens": 33862955,
+     "cost_usd": 6.298499119999998
+    }
+   },
+   "fast": {
+    "requests": 31,
+    "cost_usd": 20.475013999999998
+   }
+  },
+  "top_sessions_week": [
+   {
+    "session_id": "synthetic-session-0092252",
+    "title": "Investigate the flaky integration tests",
+    "project": "C--Demo-atlas-web",
+    "project_name": "atlas-web",
+    "first_ts": "2026-10-19T10:34:12Z",
+    "last_ts": "2026-10-19T13:14:31Z",
+    "requests": 97,
+    "tokens": 38513022,
+    "cost_usd": 26.407947084999996,
+    "subagent_cost_usd": 0.528637285,
+    "models": [
+     "Opus 5.5",
+     "Sonnet 5.5",
+     "Haiku 4.5"
+    ],
+    "prs": 0
+   },
+   {
+    "session_id": "synthetic-session-0092711",
+    "title": null,
+    "project": "C--Demo-atlas-web",
+    "project_name": "atlas-web",
+    "first_ts": "2026-10-20T15:12:42Z",
+    "last_ts": "2026-10-20T17:43:13Z",
+    "requests": 95,
+    "tokens": 37581851,
+    "cost_usd": 24.359419624999997,
+    "subagent_cost_usd": 0.564480825,
+    "models": [
+     "Opus 5.5",
+     "Sonnet 5.5",
+     "Haiku 4.5"
+    ],
+    "prs": 2
+   },
+   {
+    "session_id": "synthetic-session-0092930",
+    "title": null,
+    "project": "C--Demo-atlas-web",
+    "project_name": "atlas-web",
+    "first_ts": "2026-10-20T09:12:23Z",
+    "last_ts": "2026-10-20T11:37:43Z",
+    "requests": 89,
+    "tokens": 35576475,
+    "cost_usd": 23.11178034,
+    "subagent_cost_usd": 0.41895693999999994,
+    "models": [
+     "Opus 5.5",
+     "Sonnet 5.5",
+     "Haiku 4.5"
+    ],
+    "prs": 0
+   },
+   {
+    "session_id": "synthetic-session-0091422",
+    "title": null,
+    "project": "C--Demo-ledger-tools",
+    "project_name": "ledger-tools",
+    "first_ts": "2026-10-17T21:26:43Z",
+    "last_ts": "2026-10-17T23:48:58Z",
+    "requests": 94,
+    "tokens": 34160635,
+    "cost_usd": 22.8440934,
+    "subagent_cost_usd": 0.5121560000000001,
+    "models": [
+     "Opus 5.5",
+     "Sonnet 5.5",
+     "Haiku 4.5"
+    ],
+    "prs": 0
+   },
+   {
+    "session_id": "synthetic-session-0092443",
+    "title": "Speed up the dashboard query",
+    "project": "C--Demo-ledger-tools",
+    "project_name": "ledger-tools",
+    "first_ts": "2026-10-19T16:13:03Z",
+    "last_ts": "2026-10-19T18:17:42Z",
+    "requests": 82,
+    "tokens": 29949771,
+    "cost_usd": 21.148632005,
+    "subagent_cost_usd": 0.44364500500000004,
+    "models": [
+     "Opus 5.5",
+     "Sonnet 5.5",
+     "Haiku 4.5"
+    ],
+    "prs": 2
+   }
+  ],
+  "spend": {
+   "enabled": false,
+   "used": null,
+   "limit": null,
+   "percent": null,
+   "severity": null,
+   "currency": null,
+   "balance": null,
+   "disabled_reason": null
+  }
+ },
+ "history": {
+  "tz": "UTC",
+  "days": [
+   {
+    "date": "2026-08-23",
+    "requests": 0,
+    "tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": 0.0
+   },
+   {
+    "date": "2026-08-24",
+    "requests": 163,
+    "tokens": 63585136,
+    "output_tokens": 847507,
+    "cost_usd": 31.076651984999998
+   },
+   {
+    "date": "2026-08-25",
+    "requests": 225,
+    "tokens": 72605257,
+    "output_tokens": 1114407,
+    "cost_usd": 36.893197869999995
+   },
+   {
+    "date": "2026-08-26",
+    "requests": 172,
+    "tokens": 58470361,
+    "output_tokens": 823448,
+    "cost_usd": 32.65836684999999
+   },
+   {
+    "date": "2026-08-27",
+    "requests": 0,
+    "tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": 0.0
+   },
+   {
+    "date": "2026-08-28",
+    "requests": 239,
+    "tokens": 89765480,
+    "output_tokens": 1090344,
+    "cost_usd": 47.297761765
+   },
+   {
+    "date": "2026-08-29",
+    "requests": 0,
+    "tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": 0.0
+   },
+   {
+    "date": "2026-08-30",
+    "requests": 0,
+    "tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": 0.0
+   },
+   {
+    "date": "2026-08-31",
+    "requests": 154,
+    "tokens": 56441094,
+    "output_tokens": 784813,
+    "cost_usd": 38.030615014999995
+   },
+   {
+    "date": "2026-09-01",
+    "requests": 189,
+    "tokens": 68118822,
+    "output_tokens": 1019003,
+    "cost_usd": 41.735232145
+   },
+   {
+    "date": "2026-09-02",
+    "requests": 230,
+    "tokens": 73011185,
+    "output_tokens": 1283662,
+    "cost_usd": 40.046022045
+   },
+   {
+    "date": "2026-09-03",
+    "requests": 230,
+    "tokens": 77052938,
+    "output_tokens": 1258622,
+    "cost_usd": 38.95178736
+   },
+   {
+    "date": "2026-09-04",
+    "requests": 159,
+    "tokens": 52285553,
+    "output_tokens": 865554,
+    "cost_usd": 23.763093475
+   },
+   {
+    "date": "2026-09-05",
+    "requests": 0,
+    "tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": 0.0
+   },
+   {
+    "date": "2026-09-06",
+    "requests": 0,
+    "tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": 0.0
+   },
+   {
+    "date": "2026-09-07",
+    "requests": 0,
+    "tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": 0.0
+   },
+   {
+    "date": "2026-09-08",
+    "requests": 0,
+    "tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": 0.0
+   },
+   {
+    "date": "2026-09-09",
+    "requests": 209,
+    "tokens": 73985356,
+    "output_tokens": 1050979,
+    "cost_usd": 30.33031111
+   },
+   {
+    "date": "2026-09-10",
+    "requests": 132,
+    "tokens": 37552194,
+    "output_tokens": 607421,
+    "cost_usd": 14.47522605
+   },
+   {
+    "date": "2026-09-11",
+    "requests": 86,
+    "tokens": 21976272,
+    "output_tokens": 472836,
+    "cost_usd": 8.11761423
+   },
+   {
+    "date": "2026-09-12",
+    "requests": 0,
+    "tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": 0.0
+   },
+   {
+    "date": "2026-09-13",
+    "requests": 136,
+    "tokens": 38854923,
+    "output_tokens": 688713,
+    "cost_usd": 23.325707665000003
+   },
+   {
+    "date": "2026-09-14",
+    "requests": 220,
+    "tokens": 82453468,
+    "output_tokens": 1221610,
+    "cost_usd": 40.98022198499999
+   },
+   {
+    "date": "2026-09-15",
+    "requests": 0,
+    "tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": 0.0
+   },
+   {
+    "date": "2026-09-16",
+    "requests": 196,
+    "tokens": 80404310,
+    "output_tokens": 1063278,
+    "cost_usd": 53.18628513000001
+   },
+   {
+    "date": "2026-09-17",
+    "requests": 201,
+    "tokens": 68121048,
+    "output_tokens": 1033910,
+    "cost_usd": 37.65137906
+   },
+   {
+    "date": "2026-09-18",
+    "requests": 0,
+    "tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": 0.0
+   },
+   {
+    "date": "2026-09-19",
+    "requests": 125,
+    "tokens": 36446410,
+    "output_tokens": 693402,
+    "cost_usd": 23.324112364999998
+   },
+   {
+    "date": "2026-09-20",
+    "requests": 0,
+    "tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": 0.0
+   },
+   {
+    "date": "2026-09-21",
+    "requests": 0,
+    "tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": 0.0
+   },
+   {
+    "date": "2026-09-22",
+    "requests": 186,
+    "tokens": 64550134,
+    "output_tokens": 1023662,
+    "cost_usd": 17.918647254999996
+   },
+   {
+    "date": "2026-09-23",
+    "requests": 179,
+    "tokens": 58750228,
+    "output_tokens": 835153,
+    "cost_usd": 10.287184529999996
+   },
+   {
+    "date": "2026-09-24",
+    "requests": 196,
+    "tokens": 65759798,
+    "output_tokens": 1027945,
+    "cost_usd": 42.86340625
+   },
+   {
+    "date": "2026-09-25",
+    "requests": 156,
+    "tokens": 48342919,
+    "output_tokens": 838531,
+    "cost_usd": 32.554603654999994
+   },
+   {
+    "date": "2026-09-26",
+    "requests": 107,
+    "tokens": 31993046,
+    "output_tokens": 504980,
+    "cost_usd": 12.339127775
+   },
+   {
+    "date": "2026-09-27",
+    "requests": 0,
+    "tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": 0.0
+   },
+   {
+    "date": "2026-09-28",
+    "requests": 222,
+    "tokens": 81049418,
+    "output_tokens": 1116161,
+    "cost_usd": 25.29249416
+   },
+   {
+    "date": "2026-09-29",
+    "requests": 0,
+    "tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": 0.0
+   },
+   {
+    "date": "2026-09-30",
+    "requests": 0,
+    "tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": 0.0
+   },
+   {
+    "date": "2026-10-01",
+    "requests": 0,
+    "tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": 0.0
+   },
+   {
+    "date": "2026-10-02",
+    "requests": 133,
+    "tokens": 35005193,
+    "output_tokens": 684642,
+    "cost_usd": 11.295921555
+   },
+   {
+    "date": "2026-10-03",
+    "requests": 0,
+    "tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": 0.0
+   },
+   {
+    "date": "2026-10-04",
+    "requests": 0,
+    "tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": 0.0
+   },
+   {
+    "date": "2026-10-05",
+    "requests": 0,
+    "tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": 0.0
+   },
+   {
+    "date": "2026-10-06",
+    "requests": 241,
+    "tokens": 84586225,
+    "output_tokens": 1307230,
+    "cost_usd": 45.51744655
+   },
+   {
+    "date": "2026-10-07",
+    "requests": 206,
+    "tokens": 72551184,
+    "output_tokens": 1067763,
+    "cost_usd": 33.511237869999995
+   },
+   {
+    "date": "2026-10-08",
+    "requests": 105,
+    "tokens": 35210005,
+    "output_tokens": 584340,
+    "cost_usd": 13.28996542
+   },
+   {
+    "date": "2026-10-09",
+    "requests": 118,
+    "tokens": 39565298,
+    "output_tokens": 768072,
+    "cost_usd": 12.35648563
+   },
+   {
+    "date": "2026-10-10",
+    "requests": 0,
+    "tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": 0.0
+   },
+   {
+    "date": "2026-10-11",
+    "requests": 301,
+    "tokens": 109658255,
+    "output_tokens": 1583042,
+    "cost_usd": 52.73216035
+   },
+   {
+    "date": "2026-10-12",
+    "requests": 0,
+    "tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": 0.0
+   },
+   {
+    "date": "2026-10-13",
+    "requests": 134,
+    "tokens": 49602679,
+    "output_tokens": 793879,
+    "cost_usd": 29.63289876
+   },
+   {
+    "date": "2026-10-14",
+    "requests": 266,
+    "tokens": 93665924,
+    "output_tokens": 1420935,
+    "cost_usd": 47.43024996500001
+   },
+   {
+    "date": "2026-10-15",
+    "requests": 265,
+    "tokens": 91478324,
+    "output_tokens": 1450681,
+    "cost_usd": 41.80681022
+   },
+   {
+    "date": "2026-10-16",
+    "requests": 110,
+    "tokens": 34141538,
+    "output_tokens": 523265,
+    "cost_usd": 7.082719414999999
+   },
+   {
+    "date": "2026-10-17",
+    "requests": 271,
+    "tokens": 93326082,
+    "output_tokens": 1479712,
+    "cost_usd": 61.61511992999999
+   },
+   {
+    "date": "2026-10-18",
+    "requests": 205,
+    "tokens": 63895997,
+    "output_tokens": 1193038,
+    "cost_usd": 22.053014589999997
+   },
+   {
+    "date": "2026-10-19",
+    "requests": 226,
+    "tokens": 82510084,
+    "output_tokens": 1144840,
+    "cost_usd": 57.456282285
+   },
+   {
+    "date": "2026-10-20",
+    "requests": 332,
+    "tokens": 126979623,
+    "output_tokens": 1619779,
+    "cost_usd": 58.2475924
+   },
+   {
+    "date": "2026-10-21",
+    "requests": 164,
+    "tokens": 50904227,
+    "output_tokens": 813872,
+    "cost_usd": 32.011838585
+   }
+  ],
+  "hour_weekday": {
+   "requests": [
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     121,
+     661,
+     966,
+     783,
+     437,
+     461,
+     659,
+     952,
+     722,
+     292,
+     81,
+     127,
+     146,
+     72,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     223,
+     534,
+     709,
+     804,
+     649,
+     657,
+     889,
+     957,
+     814,
+     278,
+     37,
+     167,
+     315,
+     156,
+     24
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     203,
+     705,
+     878,
+     523,
+     566,
+     837,
+     1041,
+     1044,
+     893,
+     347,
+     19,
+     103,
+     227,
+     134,
+     23
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     232,
+     745,
+     885,
+     618,
+     411,
+     669,
+     1086,
+     905,
+     561,
+     228,
+     44,
+     103,
+     153,
+     82,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     186,
+     736,
+     1171,
+     746,
+     340,
+     594,
+     800,
+     671,
+     568,
+     385,
+     186,
+     316,
+     385,
+     158,
+     52
+    ],
+    [
+     2,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     67,
+     184,
+     444,
+     374,
+     256,
+     312,
+     769,
+     803,
+     342,
+     122,
+     68,
+     138,
+     127,
+     103,
+     38
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     54,
+     390,
+     593,
+     419,
+     178,
+     229,
+     344,
+     275,
+     178,
+     75,
+     33,
+     70,
+     208,
+     165,
+     39
+    ]
+   ],
+   "cost_usd": [
+    [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     14.662389189999999,
+     110.940022345,
+     221.86875867999998,
+     184.03832269,
+     85.95872792499998,
+     89.03864693999999,
+     133.41048905500003,
+     209.99937569000002,
+     167.43158389000004,
+     60.66960780499998,
+     16.977834925,
+     21.942381444999995,
+     35.769762115,
+     20.565385274999997,
+     0.0
+    ],
+    [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     30.987889315000004,
+     109.65254713000002,
+     137.48370159999996,
+     153.146250155,
+     145.67018671500003,
+     148.52178457999995,
+     198.10381668,
+     209.89932770500005,
+     211.62922626,
+     64.08570821500001,
+     7.644170674999999,
+     22.8583003,
+     72.06679424000001,
+     58.74623096999999,
+     7.537865139999999
+    ],
+    [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     37.57175357500001,
+     136.22875507999996,
+     196.97562380999992,
+     126.10320270000003,
+     124.90393780000004,
+     167.30757349499996,
+     226.760317015,
+     200.81376019999993,
+     213.83859770500004,
+     99.185437535,
+     1.078031725,
+     23.562444675,
+     57.03778274500001,
+     39.332129099999996,
+     4.016897815
+    ],
+    [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     36.41611687,
+     140.83076756500006,
+     198.37229105000006,
+     144.717501975,
+     88.66549839499997,
+     142.780425535,
+     216.948941515,
+     175.61438839000002,
+     107.64060459,
+     58.08725971,
+     9.626724324999998,
+     20.2066611,
+     27.4587116,
+     18.555493109999997,
+     0.0
+    ],
+    [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     40.99385173,
+     157.39006873000002,
+     247.78845430500002,
+     158.39947361999995,
+     77.78374198499999,
+     108.80662850499998,
+     152.30841278499994,
+     157.44965488,
+     137.79023764000002,
+     80.287257335,
+     40.464854165000006,
+     35.5698201,
+     75.82257341,
+     32.66884706,
+     12.579590429999998
+    ],
+    [
+     0.49694399999999994,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     11.42849859,
+     36.65092711,
+     92.52376666,
+     71.624794715,
+     45.173244285,
+     52.77159000499998,
+     150.91431054,
+     181.53920416000005,
+     73.71453253499998,
+     25.088774984999997,
+     13.323411729999998,
+     18.778345469999998,
+     19.195007165,
+     14.232348129999998,
+     9.057740775000001
+    ],
+    [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     9.709767294999999,
+     68.46814837,
+     117.886629305,
+     98.34355508499999,
+     46.03797117,
+     37.206715705,
+     54.227394524999994,
+     45.87631424999999,
+     29.363365314999996,
+     11.042975899999998,
+     4.24799946,
+     15.736609085,
+     47.678023974999995,
+     48.517816614999994,
+     15.396059265
+    ]
+   ]
+  },
+  "streaks": {
+   "current_days": 9,
+   "longest_days": 26,
+   "longest_start": "2026-07-28",
+   "longest_end": "2026-08-22"
+  },
+  "busiest_day": {
+   "date": "2026-04-28",
+   "cost_usd": 112.58560580499996,
+   "tokens": 120704739
+  },
+  "first_use": "2025-10-07T09:26:29Z",
+  "active_days": 245,
+  "odometer": {
+   "total_tokens": 14822428534,
+   "output_tokens": 224435029,
+   "requests": 43646,
+   "cost_usd": 9230.583252645,
+   "comparisons": [
+    {
+     "key": "war_and_peace",
+     "label": "War and Peace (copies)",
+     "value": 286.6347752234994
+    },
+    {
+     "key": "britannica",
+     "label": "Encyclopaedia Britannica (sets)",
+     "value": 252.51155935264055
+    },
+    {
+     "key": "page_stack_m",
+     "label": "Stack of printed pages (m)",
+     "value": 33.665254350000005
+    }
+   ]
+  }
+ },
+ "efficiency": {
+  "start": "2026-10-01T00:00:00Z",
+  "end": "2026-11-01T00:00:00Z",
+  "basis": "API-equivalent at list prices",
+  "cache": {
+   "hit_rate": 0.9484755998790146,
+   "fresh_input_tokens": 5091887,
+   "read_tokens": 992717764,
+   "write_tokens": 48835897,
+   "write_5m_tokens": 47719773,
+   "write_1h_tokens": 1116124,
+   "cost_usd": 526.039743525,
+   "nocache_cost_usd": 3011.8734384,
+   "saved_usd": 2485.833694875
+  },
+  "thinking": {
+   "thinking_tokens": 3335545,
+   "output_tokens": 16435090,
+   "share": 0.20295264583278827
+  },
+  "context": {
+   "requests": 3077,
+   "avg": 340151.2993175171,
+   "p50": 321946,
+   "p95": 625856,
+   "max": 636704
+  },
+  "compactions": {
+   "count": 7,
+   "auto": 7,
+   "manual": 0,
+   "per_active_day": 0.4666666666666667,
+   "avg_pre_tokens": 164647.57142857142
+  },
+  "active_days": 15,
+  "tools": {
+   "total": 3390,
+   "errors": 164,
+   "error_rate": 0.04837758112094395,
+   "builtin": [
+    {
+     "name": "Bash",
+     "count": 1019
+    },
+    {
+     "name": "Read",
+     "count": 745
+    },
+    {
+     "name": "Edit",
+     "count": 538
+    },
+    {
+     "name": "Grep",
+     "count": 280
+    },
+    {
+     "name": "Glob",
+     "count": 173
+    },
+    {
+     "name": "TodoWrite",
+     "count": 129
+    },
+    {
+     "name": "Write",
+     "count": 118
+    },
+    {
+     "name": "Task",
+     "count": 100
+    },
+    {
+     "name": "WebSearch",
+     "count": 25
+    }
+   ],
+   "mcp": [
+    {
+     "server": "github",
+     "count": 140,
+     "tools": 2
+    },
+    {
+     "server": "n8n-mcp",
+     "count": 123,
+     "tools": 2
+    }
+   ]
+  },
+  "productivity": {
+   "lines_added": 38558,
+   "lines_removed": 16415,
+   "files_created": 75,
+   "commits": 77,
+   "pushes": 37,
+   "prs": 19,
+   "cost_per_pr_usd": 27.68630229078947,
+   "cost_per_100_lines_usd": 0.9569056510014006
+  },
+  "effort": [
+   {
+    "effort": "medium",
+    "requests": 721,
+    "cost_usd": 175.08420142499997
+   },
+   {
+    "effort": "high",
+    "requests": 644,
+    "cost_usd": 112.60936178499999
+   },
+   {
+    "effort": "xhigh",
+    "requests": 373,
+    "cost_usd": 101.14191344999999
+   },
+   {
+    "effort": "default",
+    "requests": 993,
+    "cost_usd": 75.06240156499999
+   },
+   {
+    "effort": "low",
+    "requests": 346,
+    "cost_usd": 62.14186529999999
+   }
+  ],
+  "api_errors": 10,
+  "web": {
+   "searches": 27,
+   "fetches": 0
+  }
+ }
+}

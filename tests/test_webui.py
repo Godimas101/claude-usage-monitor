@@ -3834,3 +3834,220 @@ def test_the_test_hook_is_inert_unless_a_test_sets_it() -> None:
     assert code.count("__USAGE_MONITOR_TEST__") == 2                                         # the guard and the hand-over
     hook = code[code.index("if (window.__USAGE_MONITOR_TEST__)"):]
     assert hook.index("return;") < hook.index("init();")                           # the page is not started under test
+
+# ── The page's English in every look (#98) ────────────────────────────────────────
+
+# The dashboard's English before #98 moved its words into the catalog, as a person sees it in each of the five looks:
+# tests/page_words.js on the code at c05f45d (tests/fixtures/page_words_english.json, never re-recorded), from the frozen
+# answers in tests/fixtures/page_words_inputs.json.
+PAGE_WORDS_JS = Path(__file__).resolve().parent / "page_words.js"
+PAGE_WORDS_RECORD: dict[str, Any] = json.loads(
+    (Path(__file__).resolve().parent / "fixtures" / "page_words_english.json").read_text(encoding="utf-8"))
+PAGE_LOOKS = [{"name": "nostromo", "theme": "nostromo", "variant": "amber"},
+              {"name": "night_city", "theme": "night_city", "variant": "blackwall"},
+              {"name": "edgerun", "theme": "night_city", "variant": "edgerun"},
+              {"name": "gates-dark", "theme": "gates", "variant": "blue-dark"},
+              {"name": "gates-light", "theme": "gates", "variant": "blue-light"}]
+CHROME_REGIONS = ["chrome:brand", "chrome:uplink", "chrome:age", "chrome:refresh", "chrome:nav"]
+OVERVIEW_CARDS = ["card:limit-session", "card:limit-weekly", "card:limit-scoped", "card:cost", "card:efficiency",
+                  "card:models", "card:surfaces", "card:burn"]
+BEFORE_STATE = {"before-state", "before-state-tick", "first-poll-failed"}     # Gates' theme script comes with the state
+
+
+def page_views(record: dict[str, Any]) -> dict[str, dict[str, dict[str, Any]]]:
+    """case|look|page -> region -> {text, attrs, and gates where the record has it}."""
+    strings = record["strings"]
+    views: dict[str, dict[str, dict[str, Any]]] = {}
+    for key, regions in record["views"].items():
+        views[key] = {}
+        for name, refs in regions.items():
+            region: dict[str, Any] = {"text": strings[refs[0]], "attrs": json.loads(strings[refs[1]])}
+            if len(refs) > 2:
+                region["gates"] = None if refs[2] is None else strings[refs[2]]
+            views[key][name] = region
+    return views
+
+
+THEN = page_views(PAGE_WORDS_RECORD)
+
+
+@pytest.fixture(scope="module")
+def page_words() -> dict[str, Any]:
+    """What tests/page_words.js reads off the page now (one node run for the module, with the record's TZ)."""
+    run = subprocess.run([node_binary(), str(PAGE_WORDS_JS), str(WEBUI)], capture_output=True, text=True, timeout=600,
+                         check=False, encoding="utf-8", env={**os.environ, "TZ": "UTC"}, creationflags=NO_WINDOW)
+    assert run.returncode == 0, run.stderr[-2000:]
+    return json.loads(run.stdout)
+
+
+def words_in(page: str, region: str, look: str = "nostromo") -> str:
+    """Every text the record holds for a region of a page in one look, joined."""
+    return "\n".join(r["text"] for key, view in THEN.items() if key.endswith("|" + look + "|" + page)
+                     for name, r in view.items() if name == region or (region.endswith("*") and name.startswith(region[:-1])))
+
+
+def test_the_page_words_record_is_whole() -> None:
+    """The record covers what #98 moves (its critic 3): the shell, the header and the sidebar; Overview and Limits; the
+    heading and banners of every page; the sign-in help's heading; Cost's value and credits cards and Efficiency's
+    pipeline card; in all five looks. Its cases reach every status and a lost link, the page before its first state, at
+    its first tick and after a failed first poll, every answer a report can get (each failure, pending, stale), every
+    verdict, pace chip and velocity, credits on and off, no, one and two scoped limits, the plan's price known, unknown and
+    overridden for an unknown plan, an ingest, unpriced models, no Claude Code activity and an update on offer."""
+    record = PAGE_WORDS_RECORD
+    assert record["looks"] == PAGE_LOOKS
+    assert len(record["strings"]) == len(set(record["strings"]))
+    keys = [c["name"] + "|" + look["name"] + "|" + page for c in record["cases"] for look in PAGE_LOOKS for page in c["pages"]]
+    assert list(THEN) == keys
+    for c in record["cases"]:
+        assert c["pages"] and set(c["pages"]) <= set(PAGES), c
+        for look in PAGE_LOOKS:
+            for i, page in enumerate(c["pages"]):
+                view = THEN[c["name"] + "|" + look["name"] + "|" + page]
+                assert ([r for r in view if r.startswith("chrome:")] == CHROME_REGIONS) == (i == 0), (c, page)
+                assert "top:head" in view, (c, page)
+                if page == "overview":
+                    assert all(card in view for card in OVERVIEW_CARDS), (c, look)
+                if page == "limits":
+                    assert any(r.startswith("card:limit-") for r in view) and any(r.startswith("card:credits") for r in view)
+                if page == "cost" and c["name"] != "no-activity":
+                    assert "card:value" in view and "card:credits" in view, (c, look)
+                if page == "efficiency" and c["name"] != "no-activity":
+                    assert "card:pipeline" in view, (c, look)
+                gated = look["theme"] == "gates" and c["name"] in BEFORE_STATE
+                assert all(("gates" in r) == gated for r in view.values()), (c, look, page)
+    pages_of = {c["name"]: c["pages"] for c in record["cases"]}
+    assert set(pages_of["live"]) == set(PAGES) and set(pages_of["before-state"]) == set(PAGES)
+    uplink = words_in("overview", "chrome:uplink")
+    for word in ("UPLINK LIVE", "ACQUIRING", "AUTH LOST", "NO CARRIER", "RATE LIMITED", "NO LOGIN", "PAUSED", "NO LINK"):
+        assert word in uplink, word
+    assert "DATA AGE --" in words_in("overview", "chrome:age") and "DATA AGE 3 H" in words_in("overview", "chrome:age")
+    assert "INGEST 28%" in words_in("overview", "chrome:nav") and "UNPRICED2" in words_in("overview", "chrome:nav")
+    status = words_in("overview", "top:status")
+    for heading in ("ACQUIRING", "AUTH LOST", "NO CARRIER", "RATE LIMITED", "NO CLAUDE SIGN-IN YET", "PAUSED"):
+        assert heading in status, heading
+    for page in ("overview", "limits", "cost", "efficiency", "history"):
+        assert "STATISTICS OLD" in words_in(page, "top:stale"), page
+        assert ("STATISTICS UNAVAILABLE" in words_in(page, "top:problem")) == (page != "limits"), page   # Limits says it in its cards
+    assert "Statistics could not be loaded (HTTP 502)." in words_in("limits", "card:limit-session")
+    problem = words_in("cost", "top:problem")
+    for reason in ("THE DASHBOARD LOST ITS LINK", "INTERNAL ERROR", "IS NOT READY YET", "NOT AVAILABLE IN THIS BUILD"):
+        assert reason in problem, reason
+    limits_cards = words_in("limits", "card:limit-*") + words_in("overview", "card:limit-*")
+    for word in ("LIMITED", "AT RISK", "SAFE", "IDLE", "UNKNOWN", "AHEAD", "ON PACE", "BEHIND", "UNUSED", "NO DRAW",
+                 "AHEAD OF PACE", "UNDER PACE", "NO CLOCK", "NO RESET TIME", "LIMIT REACHED", "LIMIT ~", "SAFE UNTIL RESET",
+                 "IDLE NO RECENT DRAW", "FORECAST NEEDS MORE READINGS", "PROJECTION NEEDS MORE TIME", "BUDGET"):
+        assert word in limits_cards, word
+    burn = words_in("overview", "card:burn")
+    for velocity in ("IDLE", "SLOW", "NORMAL", "FAST", "VERY FAST", "WARP"):
+        assert "BURN RATE" + velocity in burn, velocity
+    credits = words_in("limits", "card:credits*") + words_in("cost", "card:credits")
+    assert "USAGE CREDITS ARE OFF" in credits and "25% USED" in credits
+    assert "CLAUDE CODE WEEKLY" in words_in("limits", "card:limit-scoped-1") and "card:limit-scoped" in THEN["scoped-none|nostromo|overview"]
+    cost = words_in("overview", "card:cost")
+    assert "PLAN PRICE UNKNOWN" in cost and "PLAN · $50 / MONTH" in cost and "1 CELL = 1 MONTH OF PLAN PLAN" in cost
+    assert "NO CLAUDE CODE ACTIVITY ON THIS PC." in cost
+    assert "IS AVAILABLE" in words_in("about", "top:about-update")
+
+
+@ui_only
+def test_the_page_shows_todays_english_in_every_look(page_words: dict[str, Any]) -> None:
+    """#98: the shell, the header, the sidebar, the page headings and banners, Overview and Limits (and the cards elsewhere
+    that share their code) read as they did before their words moved into the catalog, byte for byte, in every look: each
+    region's text as drawn (the look's CSS capitals, and in Gates what gates.js makes of it) and every attribute people read.
+    The page met no error on the way."""
+    assert page_words["problems"] == []
+    now = page_views(page_words)
+    assert list(now) == list(THEN)
+    differences = []
+    for key, regions in THEN.items():
+        for name in sorted(set(regions) | set(now[key])):
+            then, shown = regions.get(name), now[key].get(name)
+            if then != shown:
+                differences.append(f"{key} {name}:\n  then {json.dumps(then, ensure_ascii=False)[:600]}\n"
+                                   f"  now  {json.dumps(shown, ensure_ascii=False)[:600]}")
+    assert not differences, f"{len(differences)} regions differ:\n" + "\n".join(differences[:12])
+
+
+MINI_DOM_JS = Path(__file__).resolve().parent / "mini_dom.js"
+MINI_DOM_OBSERVED = r"""
+const D = require(process.argv[1]);
+const doc = D.createDocument('<html><body><div id="screen"><p id="p">One <b>two</b></p><i id="i">x</i></div><div id="off">z</div></body></html>');
+const screen = doc.getElementById("screen");
+const heard = [];
+const name = (n) => (n.nodeType === 3 ? "#" + n.data : n.localName + (n.id ? "#" + n.id : ""));
+const mo = new D.MutationObserver((records) => heard.push(records.map((r) => r.type + ":" + name(r.target) + ":" +
+  r.addedNodes.map(name).join(",") + "/" + r.removedNodes.map(name).join(",") + (r.attributeName ? ":" + r.attributeName : ""))));
+mo.observe(screen, { childList: true, subtree: true, characterData: true });
+const attrs = [];
+new D.MutationObserver((records) => attrs.push(records.map((r) => r.attributeName + "=" + r.oldValue))).observe(doc.documentElement,
+  { attributes: true, attributeFilter: ["data-theme"] });
+doc.getElementById("p").firstChild.nodeValue = "Uno ";
+doc.getElementById("i").textContent = "y";
+screen.querySelector("b").innerHTML = "<u>three</u>";
+doc.getElementById("off").textContent = "unheard";
+doc.documentElement.setAttribute("data-theme", "gates");
+doc.documentElement.setAttribute("data-variant", "x");
+const sync = heard.length;
+const walker = doc.createTreeWalker(screen, D.NodeFilter.SHOW_TEXT, null);
+const texts = [];
+for (let n = walker.nextNode(); n; n = walker.nextNode()) { texts.push(n.data); }
+const loose = doc.createElement("span");
+Promise.resolve().then(() => {
+  mo.disconnect();
+  doc.getElementById("i").textContent = "after";
+  return Promise.resolve();
+}).then(() => {
+  console.log(JSON.stringify({ sync, heard, attrs, texts, connected: [screen.isConnected, loose.isConnected, screen.firstChild.firstChild.isConnected] }));
+});
+"""
+
+
+@ui_only
+def test_the_small_dom_hears_changes_and_walks_text_as_a_browser_does() -> None:
+    """tests/mini_dom.js (for tests/page_words.js, #98): a MutationObserver hears a text change, children added and removed
+    and an attribute named in its filter, only under what it observes, in one batch a microtask later, and nothing once it
+    is disconnected; createTreeWalker gives the text nodes in document order; isConnected says whether a node is in the page.
+    gates.js rewords the page with exactly these."""
+    run = subprocess.run([node_binary(), "-e", MINI_DOM_OBSERVED, str(MINI_DOM_JS)], capture_output=True, encoding="utf-8",
+                         timeout=60, check=False, creationflags=NO_WINDOW)
+    assert run.returncode == 0, run.stderr[-2000:]
+    out = json.loads(run.stdout)
+    assert out["sync"] == 0                                                             # nothing is heard synchronously
+    # one batch, #off's change unheard; markup parsed into the page is heard level by level (a browser sends the one record
+    # of <u>), which an observer that walks what was added reads the same
+    assert out["heard"] == [["characterData:#Uno :/", "childList:i#i:/#x", "childList:i#i:#y/", "childList:b:/#two",
+                             "childList:b:u/", "childList:u:#three/"]]
+    assert out["attrs"] == [["data-theme=null"]]                                        # data-variant is not in the filter
+    assert out["texts"] == ["Uno ", "three", "y"]
+    assert out["connected"] == [True, False, True]
+
+
+CASE_RESET_JS = r"""
+const C = require(process.argv[1]);
+const D = require(process.argv[2]);
+const rules = C.caseRules(process.argv[3], "t");
+const doc = D.createDocument('<html><body><div class="bar"><span id="s">a</span><button id="b">b<span id="bs">c</span></button>' +
+  '<button class="up" id="u">d</button><input id="i"><select id="sel"></select><textarea id="ta"></textarea></div></body></html>');
+const out = {};
+for (const id of ["s", "b", "bs", "u", "i", "sel", "ta"]) { out[id] = C.caseOf(doc.getElementById(id), rules, new Map()).value; }
+out.shown = C.shownIn("Refresh", out.u);
+console.log(JSON.stringify(out));
+"""
+
+
+@ui_only
+def test_the_case_check_knows_the_browsers_reset_of_buttons_and_fields(tmp_path: Path) -> None:
+    """tests/css_case.js (#98's critic 21): a button, an input, a select and a textarea take the browser's own
+    text-transform: none, not their parent's, unless a rule names them; what is inside a button takes the button's. So a
+    capitals rule on the header's right side does not pass for capitals on its Refresh button."""
+    (tmp_path / "themes").mkdir()
+    (tmp_path / "themes" / "t.css").write_text(".bar { text-transform: uppercase; }\n.up { text-transform: uppercase; }\n",
+                                               encoding="utf-8")
+    for sheet in ("motion.css", "themes/nostromo.motion.css", "themes/night_city.motion.css", "themes/gates.motion.css"):
+        (tmp_path / sheet).write_text("", encoding="utf-8")
+    run = subprocess.run([node_binary(), "-e", CASE_RESET_JS, str(Path(__file__).resolve().parent / "css_case.js"),
+                          str(MINI_DOM_JS), str(tmp_path)], capture_output=True, encoding="utf-8", timeout=60, check=False,
+                         creationflags=NO_WINDOW)
+    assert run.returncode == 0, run.stderr[-2000:]
+    assert json.loads(run.stdout) == {"s": "uppercase", "b": "none", "bs": "none", "u": "uppercase", "i": "none", "sel": "none",
+                                      "ta": "none", "shown": "REFRESH"}

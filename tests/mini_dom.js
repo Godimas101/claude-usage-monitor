@@ -1,12 +1,15 @@
 "use strict";
-/* A small DOM, for running the dashboard's real scripts under node with no browser (tests/english_scan.js).
+/* A small DOM, for running the dashboard's real scripts under node with no browser (tests/english_scan.js,
+ * tests/page_words.js).
  *
  * It parses HTML into a tree and writes the tree back out, finds elements with the selectors the dashboard uses (tag, *,
  * #id, .class, [attr], [attr=value] and the other attribute tests, :not() and unknown pseudo-classes, which match
  * nothing; descendant, child and sibling combinators; comma lists), keeps form state (value, checked, the selected
- * option), and dispatches events that bubble from the target to the document and the window. There is no layout and no
- * style: every element reports one fixed width, so the charts draw at one size. Anything the scripts call that is not
- * here throws, so a gap shows as an error rather than as missing text.
+ * option), and dispatches events that bubble from the target to the document and the window. A MutationObserver hears
+ * of added and removed children, text changes and attribute changes as a browser's does (its records arrive in a
+ * microtask), and createTreeWalker walks a subtree in document order, so a theme script that rewrites the page's words
+ * (gates.js) runs on it. There is no layout and no style: every element reports one fixed width, so the charts draw at
+ * one size. Anything the scripts call that is not here throws, so a gap shows as an error rather than as missing text.
  */
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
@@ -115,6 +118,77 @@ class Target {
   }
 }
 
+// ── Mutation observers ─────────────────────────────────────────────────────────
+
+// What a node's document's observers hear: a record goes to every observer of the node (or, with subtree, of a node that
+// holds it) that asked for its type, and each observer's records arrive together in a microtask, as in a browser.
+function notify(node, record) {
+  const doc = node.ownerDocument;
+  const regs = doc && doc._observers;
+  if (!regs || !regs.length) {
+    return;
+  }
+  for (const reg of regs.slice()) {
+    const o = reg.options;
+    const near = reg.target === record.target || (o.subtree && reg.target.contains(record.target));
+    const wanted = record.type === "childList" ? o.childList
+      : record.type === "characterData" ? o.characterData || o.characterDataOldValue
+      : (o.attributes || o.attributeFilter || o.attributeOldValue) && (!o.attributeFilter || o.attributeFilter.indexOf(record.attributeName) >= 0);
+    if (near && wanted) {
+      reg.observer._take(record, doc);
+    }
+  }
+}
+
+class MutationObserver {
+  constructor(callback) {
+    if (typeof callback !== "function") {
+      throw new TypeError("MutationObserver: the callback is not a function");
+    }
+    this._callback = callback;
+    this._records = [];
+    this._docs = new Set();
+    this._due = false;
+  }
+  observe(target, options) {
+    const doc = target.nodeType === 9 ? target : target.ownerDocument;
+    doc._observers = (doc._observers || []).filter((r) => !(r.observer === this && r.target === target));
+    doc._observers.push({ observer: this, target, options: options || {} });
+    this._docs.add(doc);
+  }
+  disconnect() {
+    this._docs.forEach((doc) => { doc._observers = (doc._observers || []).filter((r) => r.observer !== this); });
+    this._docs.clear();
+    this._records = [];
+  }
+  takeRecords() {
+    const out = this._records;
+    this._records = [];
+    return out;
+  }
+  _take(record, doc) {
+    this._records.push(record);
+    if (this._due) {
+      return;
+    }
+    this._due = true;
+    Promise.resolve().then(() => {
+      this._due = false;
+      const records = this.takeRecords();
+      if (records.length) {
+        try { this._callback(records, this); } catch (e) { doc._report(e, { type: "mutation" }); }
+      }
+    });
+  }
+}
+
+const childRecord = (target, added, removed) => ({ type: "childList", target, addedNodes: added, removedNodes: removed,
+  attributeName: null, oldValue: null, previousSibling: null, nextSibling: null });
+
+// What createTreeWalker's whatToShow names, by nodeType.
+const NodeFilter = { SHOW_ALL: 0xFFFFFFFF, SHOW_ELEMENT: 0x1, SHOW_TEXT: 0x4, SHOW_COMMENT: 0x80, FILTER_ACCEPT: 1, FILTER_REJECT: 2,
+  FILTER_SKIP: 3 };
+
 // ── Nodes ──────────────────────────────────────────────────────────────────────
 
 class Node extends Target {
@@ -127,6 +201,12 @@ class Node extends Target {
   get firstChild() { return this.childNodes[0] || null; }
   get lastChild() { return this.childNodes[this.childNodes.length - 1] || null; }
   get parentElement() { return this.parentNode && this.parentNode.nodeType === 1 ? this.parentNode : null; }
+  get isConnected() {
+    for (let n = this; n; n = n.parentNode) {
+      if (n.nodeType === 9) { return true; }
+    }
+    return false;
+  }
   get nextSibling() { return this._sibling(1); }
   get previousSibling() { return this._sibling(-1); }
   _sibling(step) {
@@ -158,6 +238,7 @@ class Node extends Target {
     const at = ref ? this.childNodes.indexOf(ref) : this.childNodes.length;
     this.childNodes.splice(at, 0, child);
     child.parentNode = this;
+    notify(this, childRecord(this, [child], []));
     return child;
   }
   removeChild(child) {
@@ -167,7 +248,16 @@ class Node extends Target {
     }
     this.childNodes.splice(at, 1);
     child.parentNode = null;
+    notify(this, childRecord(this, [], [child]));
     return child;
+  }
+  _clear() {
+    const gone = this.childNodes;
+    gone.forEach((c) => { c.parentNode = null; });
+    this.childNodes = [];
+    if (gone.length) {
+      notify(this, childRecord(this, [], gone));
+    }
   }
   replaceChild(fresh, old) {
     this.insertBefore(fresh, old);
@@ -182,8 +272,7 @@ class Node extends Target {
   }
   get textContent() { return this.childNodes.map((c) => (c.nodeType === 8 ? "" : c.textContent)).join(""); }
   set textContent(value) {
-    this.childNodes.forEach((c) => { c.parentNode = null; });
-    this.childNodes = [];
+    this._clear();
     const text = value === null || value === undefined ? "" : String(value);
     if (text) {
       this.appendChild(this.ownerDocument.createTextNode(text));
@@ -216,7 +305,13 @@ class Text extends Node {
     super(doc);
     this.nodeType = 3;
     this.nodeName = "#text";
-    this.data = String(data);
+    this._data = String(data);
+  }
+  get data() { return this._data; }
+  set data(v) {
+    const old = this._data;
+    this._data = String(v);
+    notify(this, { type: "characterData", target: this, addedNodes: [], removedNodes: [], attributeName: null, oldValue: old });
   }
   get nodeValue() { return this.data; }
   set nodeValue(v) { this.data = String(v); }
@@ -248,11 +343,19 @@ class Fragment extends Node {
 
 class ClassList {
   constructor(el) { this.el = el; }
-  _get() { return String(this.el.getAttribute("class") || "").split(/\s+/).filter(Boolean); }
+  _get() { return this._names().slice(); }
+  _names() {                                          // the class names, read again only when the attribute changed
+    const text = String(this.el.getAttribute("class") || "");
+    if (text !== this._text) {
+      this._text = text;
+      this._list = text.split(/\s+/).filter(Boolean);
+    }
+    return this._list;
+  }
   _set(list) { this.el.setAttribute("class", list.join(" ")); }
   get length() { return this._get().length; }
   item(i) { return this._get()[i] || null; }
-  contains(c) { return this._get().indexOf(String(c)) >= 0; }
+  contains(c) { return this._names().indexOf(String(c)) >= 0; }
   add(...cs) { const l = this._get(); cs.forEach((c) => { if (l.indexOf(String(c)) < 0) { l.push(String(c)); } }); this._set(l); }
   remove(...cs) { const drop = cs.map(String); this._set(this._get().filter((c) => drop.indexOf(c) < 0)); }
   toggle(c, force) {
@@ -310,13 +413,22 @@ class Element extends Node {
   getAttribute(name) { const a = this._attr(name); return a ? a.value : null; }
   setAttribute(name, value) {
     const a = this._attr(name);
+    const old = a ? a.value : null;
     if (a) {
       a.value = String(value);
     } else {
       this._attrs.push({ name: this.namespaceURI === HTML_NS ? String(name).toLowerCase() : String(name), value: String(value) });
     }
+    notify(this, { type: "attributes", target: this, addedNodes: [], removedNodes: [], attributeName: (a || this._attrs[this._attrs.length - 1]).name,
+      oldValue: old });
   }
-  removeAttribute(name) { const a = this._attr(name); if (a) { this._attrs.splice(this._attrs.indexOf(a), 1); } }
+  removeAttribute(name) {
+    const a = this._attr(name);
+    if (a) {
+      this._attrs.splice(this._attrs.indexOf(a), 1);
+      notify(this, { type: "attributes", target: this, addedNodes: [], removedNodes: [], attributeName: a.name, oldValue: a.value });
+    }
+  }
   hasAttribute(name) { return this._attr(name) !== null; }
   toggleAttribute(name, force) {
     const want = force === undefined ? !this.hasAttribute(name) : !!force;
@@ -389,8 +501,7 @@ class Element extends Node {
   }
   set innerHTML(html) {
     const host = this.localName === "template" ? this.content : this;
-    host.childNodes.forEach((c) => { c.parentNode = null; });
-    host.childNodes = [];
+    host._clear();
     parseInto(host, String(html), this.ownerDocument, this.namespaceURI === SVG_NS || this.localName === "svg" ? SVG_NS : HTML_NS,
       RAW_TEXT.has(this.localName) || ESCAPABLE_RAW.has(this.localName) ? this.localName : null);
   }
@@ -467,7 +578,48 @@ class Document extends Node {
   createTextNode(text) { return new Text(this, text); }
   createComment(text) { return new Comment(this, text); }
   createDocumentFragment() { return new Fragment(this); }
-  getElementById(id) { return selectAll(this, "*").find((e) => e.getAttribute("id") === String(id)) || null; }
+  /* A walker over root's subtree in document order, root itself not included. whatToShow is NodeFilter's bits; filter, a
+   * function or {acceptNode}, accepts a node with FILTER_ACCEPT (here a rejected node's children are still visited). */
+  createTreeWalker(root, whatToShow, filter) {
+    const show = whatToShow === undefined || whatToShow === null ? NodeFilter.SHOW_ALL : whatToShow;
+    const accepts = (n) => {
+      if (!(show & (1 << (n.nodeType - 1)))) { return false; }
+      if (!filter) { return true; }
+      return (typeof filter === "function" ? filter(n) : filter.acceptNode(n)) === NodeFilter.FILTER_ACCEPT;
+    };
+    const after = (n) => {
+      if (n.childNodes.length && n.localName !== "template") { return n.childNodes[0]; }
+      for (let m = n; m && m !== root; m = m.parentNode) {
+        const next = m.nextSibling;
+        if (next) { return next; }
+      }
+      return null;
+    };
+    const walker = {
+      root, whatToShow: show, filter: filter || null, currentNode: root,
+      nextNode() {
+        for (let n = after(walker.currentNode); n; n = after(n)) {
+          if (accepts(n)) { walker.currentNode = n; return n; }
+        }
+        return null;
+      },
+    };
+    return walker;
+  }
+  getElementById(id) {
+    const want = String(id);
+    const find = (node) => {
+      for (const c of node.childNodes) {
+        if (c.nodeType === 1) {
+          if (c.getAttribute("id") === want) { return c; }
+          const inner = find(c);
+          if (inner) { return inner; }
+        }
+      }
+      return null;
+    };
+    return find(this);
+  }
   querySelectorAll(selector) { return selectAll(this, selector); }
   querySelector(selector) { return selectAll(this, selector)[0] || null; }
   getElementsByTagName(tag) { return selectAll(this, tag); }
@@ -749,4 +901,5 @@ function createDocument(html, options) {
   return doc;
 }
 
-module.exports = { createDocument, Event, CustomEvent, Target, Node, Element, Text, Document, serialize, compile, decode, HTML_NS, SVG_NS };
+module.exports = { createDocument, Event, CustomEvent, Target, Node, Element, Text, Document, serialize, compile, decode, HTML_NS, SVG_NS,
+  MutationObserver, NodeFilter };
