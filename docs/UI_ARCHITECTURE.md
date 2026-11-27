@@ -612,7 +612,11 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   double quotes. English text filled into an element on another language's page gets `lang="en"`, unless the element
   names a language already; an attribute filled with English is not marked. A key no catalog has, a mark the server
   cannot read, and a marked element that holds markup stay as written and are logged. In English the page is
-  `index.html` with its metas filled (and the theme's attributes on `<html>`). The server builds the catalog script
+  `index.html` with its metas filled (and the theme's attributes on `<html>`). Since #98 the shell's own words are marks
+  (the Refresh button and its title, the link word and the data age it shows before the first state, the nav's label,
+  kicker and page names, each name in a `<span>` beside its number, and the colour heading); the product name `CLAUDE USAGE
+  MONITOR` stays as written and unmarked, and #86's brand mark `// ONBOARD COMPUTER` is `shell.brand.mark`, kept as
+  written in every language. The server builds the catalog script
   from the JSON (`window.MonitorI18n = {language, strings, fallback}`), so each catalog exists once and
   `script-src 'self'` still holds. `app.js` reads the locale from the meta (`LOCALE`) and the catalog (`I18N`), never
   `navigator.language`, and words text with `t()`, `tHtml()` and `tPlural()`. `tHtml()` escapes everything except a
@@ -630,15 +634,66 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   setting shows once a second language is offered, or when a dev instance shows one that is not: "System default (…)"
   naming what it resolves to, then each language named in itself. Its Apply button saves the choice, and the state
   that follows brings the reload; until then the list keeps the pick.
-- **Case** (the rule the dashboard tickets, #98 to #101, carry out). Dashboard strings are to be stored in natural
-  case: Nostromo's and Night City's capitals will come from CSS `text-transform` under `lang`, or
-  `toLocaleUpperCase(lang)` for SVG text; Gates will show strings as stored, and its own wordings (the `VOCAB` link
-  states, "Tokens / min", "Updated {age} ago") get theme keys. Today `app.js` still writes many labels in capitals, and
-  `gates.js` re-cases them through `VOCAB` and `PHRASES`. It keeps a compact figure's magnitude in capitals (`1.5M`, and
+- **Case** (the rule the dashboard tickets, #98 to #101, carry out). Dashboard strings are stored in natural case:
+  Nostromo's and Night City's capitals come from CSS `text-transform`, and an SVG label's from `tUpper` (the text in its
+  language's capitals, `FMT.upper`, its values filled in after, so a figure keeps its own case); Gates shows strings as
+  stored. #98 did this for the shell, the header, the sidebar, every page's heading and banners, Overview, Limits and the
+  cards elsewhere that share their code (Cost's value and credits cards). Nostromo gained `text-transform: uppercase` on
+  `.nm-uplink`, `#data-age`, `.nm-refresh` (a button takes the browser's own `none`, not its parent's case), `.nm-kick`,
+  `.nm-menu a`, `.nm-health .nm-kv` and `.nm-h1`, and Nostromo and Night City on `.nm-remain .l`; Night City set the
+  others already. Gates' own wordings are `page.gates.*` keys (its link words, `Updated {age} ago`, `Updated --`,
+  `Tokens / min`, `-- / Hour`) that `app.js` writes when the look is Gates (`gatesLook()`: `data-theme` on `<html>`,
+  which the server writes into the first paint), so Gates shows its own words from the first frame. Efficiency's pipeline
+  card (#99's) keeps its link row in capitals (`FMT.upper` of the header's word) until #99 moves the card. The other pages
+  still write many labels in capitals, and `gates.js` re-cases them, and what #98 leaves in capitals (English limit tags,
+  names, dates, the SVG labels), through `VOCAB` and `PHRASES`. It keeps a compact figure's magnitude in capitals (`1.5M`, and
   `1,5 M` or Turkish `1,5 B` after the formats' no-break space). That re-casing lowers ASCII letters only, by English's
   rule, so on a non-English page it breaks words the page writes in its language's capitals: the formats' dates (Turkish
   `24 ekİ`, `AĞu 9`; Spanish `SÁb, 16:12`, `MiÉ`) and, on a Turkish page, the model and product names in the model rows
   (`Haİku 4.5`, `Claude İn Chrome`, where English capitals gave `Haiku`). It goes with those tickets (#101 for Gates).
+- **The page's words (#98).** The shell, the header, the sidebar, every page's heading and banners, Overview and Limits
+  take their words from the catalog: `shell.*` (the shell's marks), `header.*` (the link word by status code, `lost` when
+  the monitor does not answer, and the data age), `nav.*` (the health box, the colour heading, and the sidebar's colour
+  buttons: `nav.colour.title.<id>` words an accent or a phosphor from its id, `nav.colour.short.<id>` Gates' three
+  letters; Night City's cuts of its variant names stay its own, #102's), `heading.<page>.title` and `.sub`,
+  `banner.stats.*` (the problem and stale banners), `stats.*` (the problem lines, the cards' short lines, the reasons),
+  `limit.*` (shared by Overview's limit cards and Limits' pacing cards), `overview.*`, `limits.*`, `plan.unknown`,
+  `ratio.*`, `format.now` and `page.gates.*`. No key is also the start of another (`a.b` and `a.b.c` never both:
+  `test_i18n.py`). Text set with `textContent` is a line (`tLine`: its text and the language it came from), and its
+  element carries `lang="en"` when English stands on another language's page (`markLineLang`, `lineLangAttr`). An
+  element a theme's entrance animates (the directors' selectors: `.nm-h1`, `.nm-sub`, `.nm-tag`, `.nm-ttl`,
+  `.nm-meta-t`, `.nm-mrow .k`, `.nm-kv-grid .nm-kv b`) holds its words as its own text, never in an inner span, since
+  Nostromo's typer and Night City's decoder read only the element's own text: `tHtmlLine` gives such an element its
+  markup and language, and `lineAttrs` puts `lang="en"` and, for a name (`nameLine`), `translate="no"` on the element
+  itself, off English only, so English's markup is as it was. Elsewhere a name keeps `tName`'s span. A report's failure
+  is worded by the page (`statReason`): no answer is `lost`; each of the five texts the statistics routes answer with
+  (501, the two 503s, 500 and 401: `STAT_ERRORS`, which a test holds to `server.py`) is its reason when its status
+  matches; anything else is `HTTP {status}`. A reason is one placeholder in a whole sentence, and #102 may give the
+  answers codes in `statReason` alone. `fmtRemain(ms, inSentence)` keeps the badge form (`3 H 27 M`, `NOW`) and has a
+  sentence form, its units in lower case (`In 3 h 27 m`, `format.now`). In English a limit's tag is its own label (the
+  identity string); another language names it from its kind and scope (`limit.name.*`). A plan whose sign-in names no
+  subscription shows `plan.unknown` (`planWords`, #90's hand-off). `ratioNote` stays plain text, since Cost escapes it.
+  The pacing card's hidden sizing texts come from the story keys, with the language's clock of noon and its `00.0`.
+  English is unchanged on screen, byte for byte in every look, as `tests/fixtures/page_words_english.json` holds it
+  ("Test tools"); the one difference is Gates before its first state, which shows its own words from the first frame
+  instead of the shell's capitals until `gates.js` arrived. Three English forms changed that cannot show: the one forms
+  of `limits.fact.value.days` and `.hours` (`1 day`, `1 hour`; the windows are 5 hours and 7 days) and of `ratio.scaled`
+  (a cell of one month is never scaled).
+- **Longer words (#98, owner question 1).** Outside English a line longer than its room wraps and its box grows; nothing
+  shrinks or is cut. The rules sit at the end of each theme sheet under `:root:not(:lang(en))`, so English keeps its
+  one-line layout, its designed ellipses included. Card titles, metas and tags, chips, pace and forecast lines and the
+  limit facts wrap (`white-space: normal`, `overflow-wrap: break-word`); Nostromo's Overview grid rows grow with their
+  cards (`minmax(auto, ...)`, from 1001 px), as Night City's always did; Night City's nav items grow past 34 px, its
+  slanted cursor after the page heading gets 4 px of room, and its data age gives way below 800 px, as Nostromo's always
+  has; and the meter's two rows share one first column (a grid with the rows as subgrids, `fit-content(50%)`, never under
+  English's 112 px), so their bars start at the same x. English keeps its own overflows, which
+  `tests/fixtures/page_overflow_english.json` names (owner question 3): Night City's page heading (its slanted cursor runs
+  3 px past the box; nothing is cut), the Overview cards' metas that the theme cuts with an ellipsis (Edgerun's surfaces
+  meta in the default window, and at 1060 x 640 more of them in Nostromo, Night City and Edgerun), and one find outside
+  #98: at 1060 x 640 Nostromo's weekly and scoped Overview cards cut their reset lines and their chip off when the figure
+  has two digits (the warning and critical scenarios). These rules are plain wrapping; owner question 1 as decided (a
+  room in each constrained key's note, an ellipsis with the full text reachable on the Overview subtitles only) is a
+  follow-up stage of #98.
 - **Rendering never reads Windows.** The locale rides on the view model (#91, not #93: it is the first ticket in which
   the widgets draw something that depends on the language): `build_model(..., locale=)` fills `WidgetModel.locale`,
   English by default, and the app passes `MonitorApp.locale()`. A locale change redraws, since the frame caches key on
@@ -921,7 +976,46 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   (#91).
   `tests/test_english_left.py` holds the result to `tests/fixtures/english_left.json`, which each extraction ticket
   (#93 to #101) shrinks by recording again (`python tests/english_left.py --record`, which adds new English only with
-  `--allow-new`).
+  `--allow-new`). #98's passes open Overview and Limits: `status:offline`, `status:rate_limited`, `status:paused` and
+  `status:loading` (each with the detail the data layer words for it, `english_left.STATUS_DETAILS`), `link-lost` (the
+  monitor never answers the state), `reports-stale` (Refresh pressed while every report fails) and `gates` (the state's
+  theme and the shell's). The only English they add is those four details (#102's), recorded with `--allow-new` and held
+  by `test_english_left.py`. The dashboard half also takes out, as whole words, the page's weekday and month names and
+  AM/PM, and the dev server's plan, scope and surface names (`dashboard_format_words`, `dashboard_names`), which the
+  catalog's sentences hold as plain text.
+  #98's English guard: `tests/page_words.js` runs the real page (init, the poll loop, the router and the theme scripts it
+  loads) on the small DOM against a server of its own that answers from `tests/fixtures/page_words_inputs.json` (the dev
+  server's answers at 2026-10-21 16:12 UTC, frozen), with a still clock and a timer queue (TZ=UTC). It reads each region
+  (the header's parts, the sidebar, every top part of every page, every card of Overview and Limits, Cost's value and
+  credits cards, Efficiency's pipeline card) as drawn in each of the five looks: each text node in the case its element
+  takes from the look's sheets (`tests/css_case.js`: the cascade, with the browser's own `text-transform: none` on
+  `button`, `input`, `select` and `textarea`), in Gates after `gates.js`, with the attributes people read. `--record`
+  wrote `tests/fixtures/page_words_english.json` from the code before #98 moved a word, and refuses to write it again;
+  `test_webui.py` holds the page to it. Its other outputs feed the gated tests: the first chrome (before the first
+  state, after the 1 s tick and after a failed first poll), the entrances (`motion.js` and every theme script under
+  reduced motion, each director's settings kept: every element a director animates holds its words as its own text, in
+  English and on a French page) and the French page's unmarked English. The small DOM has a `MutationObserver` (its
+  records delivered level by level, where a browser delivers them per task) and a tree walker, for `gates.js`.
+  In a real browser, `tests/browser/page_probe.js` (Playwright for node with an installed Chromium, not part of pytest)
+  is the headless stand-in for the real-web-view tests below. It runs dev servers of its own on 127.0.0.1 with throwaway
+  settings, their clock and the page's held at the record's moment, the page in UTC. Its steps: widths (Overview and
+  Limits in English, the pseudo-locale and French, every look, the normal, warning, critical and stale scenarios and four
+  states it answers itself, in 1200 x 780, 1060 x 640 and 720 x 480 windows), clip (the clip test's measure at its four
+  sizes, in English and the pseudo-locale), caps (the CSS capitals), record (the page answered from the page-words
+  inputs: every region equals the record's live view in every look and page), update (#97's lines) and motion (without
+  reduced motion, in English and French: every element a theme's entrance animates is animated). What it reads from the
+  page is `tests/browser/page_checks.js`, which the real-web-view tests evaluate in WebView2 too. Its limits: headless
+  Chromium at a device pixel ratio of 1 (WebView2 at 125 or 150 % display scaling rounds text widths otherwise), and the
+  daily chart's axis may draw a date fewer than the small DOM's (a note, not a failure).
+  The real-web-view tests in `tests/test_server.py` (gated; they open WebView2 windows parked off screen): the clip test
+  in English and the pseudo-locale; `test_overview_and_limits_overflow_nothing_in_the_real_web_view` (every look,
+  English and the pseudo-locale, `measure()` at the three sizes, English allowed only the record's known overflows);
+  `test_css_capitals_read_as_todays_english_in_the_real_web_view` (the header, the sidebar and the headings against the
+  page-words record, the CSS capitals, and #97's update texts, which #97 left to #98); and
+  `test_webview2_follows_the_language_the_dashboard_passes_in_the_real_web_view` (`navigator.language` follows
+  `--lang`). The page they measure is a copy of `webui/` whose `index.html` loads a script that holds `Date` at the dev
+  server's moment (`held_webui`), so the page draws what its stand-in draws. They read a page once `settled()` says no
+  boot and no entrance is playing: WebView2 plays both unless Windows reduces motion.
   The frame check (`tests/frame_layout.py`, held by `tests/test_frame_layout.py`; no window, so not gated, #94) draws
   every state `tests/skin_words.py` records for the skins in `frame_layout.THEMES` (Nostromo, Night City since #95
   and Gates since #96) in English, the pseudo-locale and the French, Spanish and Turkish dev locales: the floating
@@ -1305,6 +1399,15 @@ default browser instead, and the exit code says so (below).
     with `error` null, and a failure is `ok` false with a short reason (never a stack trace). The
     page names only the format: the path written to is the user's choice in the dialog. One dialog is
     open at a time. Fetching comes first, so a failed fetch never asks where to save nothing.
+- **The window's language (#88, #98).** `dashboard_main` sets `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` before pywebview
+  starts, from the `/api/state` it reads first: `--lang=<locale.format>` (English `en-US`) beside pywebview's own
+  `--disable-features=ElasticOverscroll` (`webview2_arguments`). A developer's own value is kept: its `--lang` wins, and
+  its `--disable-features` lists become one switch with ElasticOverscroll in it (two such switches do not add up). A
+  format that is not a language tag leaves the variable as it is, with a warning. Only the child's environment changes.
+  WebView2 takes its language when it starts, and for now a language change does not reopen the window: the page
+  reloads into the new language at once, and the time and number fields follow from the next time the dashboard
+  opens. Reopening the window on a language change, with its opening and a keep-or-revert prompt, is #115's (#98's
+  owner question 2); it relies on this `--lang`.
 - **`find_window_of(pid)`** (formerly the private `_find_window_of`, kept as an alias) finds the
   visible dashboard window a process owns; the monitor closes the dashboard through it, by owner and
   not by title, because an installed copy beside a dev build can have a window of the same title.
@@ -1462,9 +1565,10 @@ default browser instead, and the exit code says so (below).
   session and weekly verdicts (`SESSION_TONE`, `WEEKLY_TONE`), the burn velocity (`VELOCITY_TONE`) and the guard's OFF, ARMED and
   HOLDING. `gates.js` copies it to `data-g-tone`, and a value it does not know is `neutral`. `matchScoped` finds a scoped limit's
   pacing row by `kind`, `scope_model` and `scope_surface` (the dashboard's entries carry them, `state.json` does not), so two
-  limits that share a label, or have no model, keep their own rows. The health box's LINK row and the age are built from
-  tables keyed by code (`LINK_WORD`, and `fmtAge`, which returns `{n, unit}` for `ageWords`, with `AGE_UNIT` and
-  `AGE_UNIT_IN_SENTENCE`), so no word is cut or lower-cased; the header and the pipeline's LINK row show the `STATUS` text. Night City
+  limits that share a label, or have no model, keep their own rows. The link's words are tables of catalog keys by status
+  code (`LINK_WORDS`, and Gates' `GATES_LINK_WORDS`, #98; `STATUS` keeps only whether the link is up) and the age is built
+  from `fmtAge` (`{n, unit}` for `ageWords`, with `AGE_UNIT` and `AGE_UNIT_IN_SENTENCE`), so no word is cut or
+  lower-cased; the pipeline's LINK row shows the header's word in capitals until #99. Night City
   pairs a card across two renders by its `data-card`. The English on the page is unchanged; the one visible change is that the
   Settings "Data and plan" card now has its Gates icon.
 - **Forecast.** A limit's forecast runs from now at the average rate so far (used / elapsed, `averageRateForecast`) to where

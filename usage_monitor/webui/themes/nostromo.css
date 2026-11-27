@@ -578,3 +578,22 @@ html[data-reduce-motion="1"] *, html[data-reduce-motion="1"] *::before, html[dat
 .nm-chart-t { padding: 0; }
 .nm-daily { min-height: 132px; }
 .nm-why { white-space: normal; }
+
+/* Outside English (#98, owner question 1): a line longer than its room wraps and its box grows; nothing is cut or shrunk.
+   Each rule holds only on a page whose language is not English, so English keeps its one-line layout, its designed
+   ellipses included. */
+:root:not(:lang(en)) .nm-card-t { flex-wrap: wrap; row-gap: 0; }
+:root:not(:lang(en)) :is(.nm-tag, .nm-ttl, .nm-meta-t, .nm-pace, .nm-chip) { white-space: normal; overflow-wrap: break-word; }
+:root:not(:lang(en)) .nm-grid .nm-card-t:not(.nm-chart-t) .nm-meta-t { overflow: visible; text-overflow: clip; }
+:root:not(:lang(en)) .nm-row2 > .nm-facts { min-width: 0; white-space: normal; overflow-wrap: break-word; }
+:root:not(:lang(en)) .nm-error { overflow-wrap: break-word; }     /* a word longer than the line breaks (mono is wide) */
+/* the Overview grid's rows grow with what their cards hold (as Night City's do), so a wrapped line never cuts a card off */
+@media (min-width: 1001px) {
+  :root:not(:lang(en)) .nm-grid { grid-template-rows: minmax(auto, 196fr) minmax(auto, 276fr) minmax(auto, 146fr); }
+  :root:not(:lang(en)) .nm-grid > .nm-card { min-height: auto; }
+}
+/* the meter's two rows share one first column, as wide as the longer label (up to half the meter), so their bars start at
+   the same x */
+:root:not(:lang(en)) .nm-meter { display: grid; grid-template-columns: fit-content(50%) minmax(0, 1fr) 48px; gap: 7px 10px; }
+:root:not(:lang(en)) .nm-meter .nm-mrow { grid-column: 1 / -1; grid-template-columns: subgrid; height: auto; min-height: 18px; }
+:root:not(:lang(en)) .nm-meter .nm-mrow .k { min-width: 112px; white-space: normal; overflow-wrap: break-word; line-height: 1.2; }

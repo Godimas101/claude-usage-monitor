@@ -21,6 +21,7 @@ import math
 import os
 import queue
 import re
+import shutil
 import socket
 import sqlite3
 import struct
@@ -5156,7 +5157,8 @@ MEASURE = '''(() => {
             over: inner.scrollHeight - inner.clientHeight,
             tiles: tile ? +(inner.getBoundingClientRect().bottom - tile.getBoundingClientRect().bottom).toFixed(2) : null};
   });
-  const plan = [...document.querySelectorAll('#cost .nm-plan .nm-facts span')].map(span => span.textContent);
+  // the plan block's lines: the facts' own spans (the plan's name sits in a span of its own inside one, #98)
+  const plan = [...document.querySelectorAll('#cost .nm-plan .nm-facts > span')].map(span => span.textContent);
   const main = document.getElementById('main');
   // For the failure message only: what else could take the cards' height (a scrollbar, a banner, the scale, the fonts).
   const page = {main: main && [main.clientWidth, main.clientHeight, main.scrollWidth, main.scrollHeight],
@@ -5172,7 +5174,7 @@ def probe(window):
         # data-pending). Measure once the cost card holds its numbers and its plan lines and nothing is pending.
         for _ in range(150):
             if window.evaluate_js("!!document.querySelector('#cost .nm-tile') && "
-                                  "document.querySelectorAll('#cost .nm-plan .nm-facts span').length >= 2 && "
+                                  "document.querySelectorAll('#cost .nm-plan .nm-facts > span').length >= 2 && "
                                   "!document.querySelector('.nm-grid [data-pending], .nm-grid .nm-card[data-state=pending]')"):
                 break
             time.sleep(0.2)
@@ -5203,14 +5205,34 @@ except Exception as exc:
 """
 
 
+def plan_lines(lang: str) -> list[str]:
+    """The cost card's plan block in ``lang`` for the dev server's plan (Max 5x at $100 a month), as the clip test reads it
+    (upper-cased): the catalog's overview.cost.your_plan and overview.cost.plan_price, the name in the page's capitals and the
+    price in English's shape (the pseudo-locale writes English's, #91)."""
+    catalog = i18n.load_catalog(lang)
+    return [str(catalog.text("overview.cost.your_plan")).upper(),
+            i18n.fill(str(catalog.text("overview.cost.plan_price")), {"plan": "MAX 5X", "price": "$100"}).upper()]
+
+
+def test_the_clip_test_reads_the_plan_block_in_each_language() -> None:
+    """English reads as it did before #98; the pseudo-locale reads its own words around the same name and price."""
+    assert plan_lines("en") == ["YOUR PLAN", "MAX 5X · $100 / MONTH"]
+    pseudo = plan_lines("pseudo")
+    assert pseudo[0] == i18n.pseudo_text("Your plan").upper()
+    assert "MAX 5X" in pseudo[1] and "$100" in pseudo[1] and pseudo[1].startswith("[")
+
+
 @ui_only
+@pytest.mark.parametrize("lang", ["en", "pseudo"])
 @pytest.mark.parametrize("theme", ["nostromo/amber", "night_city/edgerun", "gates/blue-light"])
-def test_overview_cards_never_clip_their_content_in_the_real_web_view(tmp_path: Path, theme: str) -> None:
+def test_overview_cards_never_clip_their_content_in_the_real_web_view(tmp_path: Path, theme: str, lang: str) -> None:
     """The cost card used to cut the numerals of its two tiles off in the default window (a 1200 x 780 outer
     size leaves a 1184 x 741 page): the plan block had a line more than the approved design, and the cost
     row had a fixed floor below its content. Measured in WebView2, the engine the dashboard really uses,
-    for each theme (the page opens in the theme's own look, see _themed_shell)."""
-    server, settings = devserver.make_server("normal", 0, settings_dir=tmp_path / "dev", theme=theme, clock=lambda: NOW)
+    for each theme (the page opens in the theme's own look, see _themed_shell). In English and in the pseudo-locale (#98):
+    outside English a line longer than its room wraps, and the Overview grid's rows grow with it, so no card cuts it off."""
+    server, settings = devserver.make_server("normal", 0, settings_dir=tmp_path / "dev", theme=theme, lang=lang,
+                                             clock=lambda: NOW)
     server.start()
     try:
         env = dict(os.environ, **REAL_PROFILE_ENV, USAGE_MONITOR_APPDATA_DIR=str(tmp_path / "app"))
@@ -5226,7 +5248,7 @@ def test_overview_cards_never_clip_their_content_in_the_real_web_view(tmp_path: 
     assert run.returncode == 0, run.stderr[-800:]
     measured = json.loads(run.stdout.strip().splitlines()[-1])
     assert len(measured) == len(sizes)
-    assert [line.upper() for line in measured[0]["plan"]] == ["YOUR PLAN", "MAX 5X · $100 / MONTH"]   # two lines
+    assert [line.upper() for line in measured[0]["plan"]] == plan_lines(lang)   # two lines
     for size, result in zip(sizes, measured):
         assert result["vw"] > 1000, f"{size}: the page is in the one column layout"
         clipped = {card["name"]: card["over"] for card in result["cards"] if card["over"] > 0}
@@ -5234,6 +5256,454 @@ def test_overview_cards_never_clip_their_content_in_the_real_web_view(tmp_path: 
                              f"page {result['page']}")
         cost = next(card for card in result["cards"] if card["name"] == "cost")
         assert cost["tiles"] is not None and cost["tiles"] >= 4, f"{size}: the tile numerals touch the card edge"
+
+
+# ── #98: the page in each language it is built for, in the real web view ─────────────────────────────
+
+# What the real-web-view tests read from the page: the same functions tests/browser/page_probe.js (their headless stand-in)
+# uses. English's own overflows (#98's owner question 3), made from an English run of the stand-in; the page-words record of
+# today's English (#98); #97's update lines.
+PAGE_CHECKS = Path(__file__).resolve().parent / "browser" / "page_checks.js"
+OVERFLOW_RECORD = Path(__file__).resolve().parent / "fixtures" / "page_overflow_english.json"
+PAGE_WORDS_RECORD = Path(__file__).resolve().parent / "fixtures" / "page_words_english.json"
+UPDATE_LINES_RECORD = Path(__file__).resolve().parent / "fixtures" / "update_lines_english.json"
+# The five looks the owner checks, by the names the records use.
+LOOKS_98 = {"nostromo": "nostromo/amber", "night_city": "night_city/blackwall", "edgerun": "night_city/edgerun",
+            "gates-dark": "gates/blue-dark", "gates-light": "gates/blue-light"}
+CAPS_LOOKS = frozenset({"nostromo", "night_city", "edgerun"})       # the looks that set these words in capitals by CSS
+OVERFLOW_SIZES = [[1200, 780], [1060, 640], [720, 480]]              # outer sizes; at 1060 Gates' nav column is 232 px
+
+
+def held_webui(folder: Path, moment: datetime = NOW) -> Path:
+    """A copy of the dashboard's files whose page keeps its clock at ``moment``, where its dev server's clock is held (the page
+    would count down to resets from today's date otherwise, and draw other words than its stand-in, which holds both clocks
+    the same way). Only the copy's index.html changes: a script file of its own (script-src is 'self') replaces Date before
+    formats.js loads."""
+    copy = folder / "webui"
+    shutil.copytree(server_mod.default_webui_dir(), copy)
+    (copy / "held-clock.js").write_text(
+        "(function () { var now = %d; var Real = Date;\n"
+        "  class Held extends Real { constructor(...a) { super(...(a.length ? a : [now])); } static now() { return now; } }\n"
+        "  window.Date = Held; })();\n" % int(moment.timestamp() * 1000), encoding="utf-8", newline="\n")
+    index = copy / "index.html"
+    text = index.read_text(encoding="utf-8")
+    first = '<script src="/static/formats.js"></script>'
+    assert text.count(first) == 1
+    index.write_text(text.replace(first, '<script src="/static/held-clock.js"></script>\n' + first), encoding="utf-8",
+                     newline="\n")
+    return copy
+
+
+def held_server(folder: Path, monkeypatch: pytest.MonkeyPatch, look: str, lang: str,
+                **options: Any) -> tuple[ApiServer, Settings]:
+    """The dev server's normal scenario in ``look`` and ``lang`` at NOW, serving held_webui's copy."""
+    webui_copy = held_webui(folder)
+    monkeypatch.setattr(server_mod, "default_webui_dir", lambda: webui_copy)
+    return devserver.make_server("normal", 0, settings_dir=folder / "dev", theme=LOOKS_98[look], lang=lang,
+                                 clock=lambda: NOW, **options)
+
+
+def test_the_held_page_is_the_page_with_its_clock_held(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The real-web-view tests below measure the shipped page: the copy differs from it by the clock script alone, which the
+    server serves and the page loads before its formats."""
+    shipped = server_mod.default_webui_dir()
+    server, settings = held_server(tmp_path, monkeypatch, "nostromo", "en")
+    server.start()
+    try:
+        page = request(server, "GET", "/")[2].decode("utf-8")
+        status, _, clock = request(server, "GET", "/static/held-clock.js")
+    finally:
+        server.stop()
+        settings.close()
+    assert status == 200 and str(int(NOW.timestamp() * 1000)) in clock.decode("utf-8")
+    assert page.index('<script src="/static/held-clock.js"></script>') < page.index('<script src="/static/formats.js"></script>')
+    copied = (tmp_path / "webui" / "index.html").read_text(encoding="utf-8")
+    assert copied.replace('<script src="/static/held-clock.js"></script>\n', "") == (shipped / "index.html").read_text(encoding="utf-8")
+    for path in shipped.rglob("*"):
+        if path.is_file() and path.name != "index.html":
+            assert (tmp_path / "webui" / path.relative_to(shipped)).read_bytes() == path.read_bytes(), path
+
+
+# Runs in a child process like _LAYOUT_PROBE. argv: the page's URL, the outer sizes, the pages, tests/browser/page_checks.js,
+# what to read and #97's lines. "overflow": measure() of each page at each size. "caps": the regions and the CSS capitals of
+# each page at the first size, then Settings' and the update banner's update texts, with each line written into their line
+# elements.
+_PAGE_PROBE = r"""
+import json, sys, time
+import webview
+
+URL, SIZES, PAGES, CHECKS, MODE, LINES = (sys.argv[1], json.loads(sys.argv[2]), json.loads(sys.argv[3]),
+                                          open(sys.argv[4], encoding="utf-8").read(), sys.argv[5], json.loads(sys.argv[6]))
+CALL = "(function () {\n" + CHECKS + "\nreturn JSON.stringify(@EXPRESSION@);\n})()"     # the checks' text is never formatted
+results = []
+
+
+def ask(window, expression):
+    try:
+        return json.loads(window.evaluate_js(CALL.replace("@EXPRESSION@", expression)))
+    except Exception:
+        return None                              # the page is between two documents
+
+
+def wait_for(window, expression, seconds):
+    end = time.time() + seconds
+    while time.time() < end:
+        if ask(window, expression):
+            return True
+        time.sleep(0.2)
+    return False
+
+
+def open_page(window, page):
+    window.evaluate_js("location.hash = '#%s'" % page)
+    settled = wait_for(window, "location.hash === '#%s' && settled()" % page, 40)
+    time.sleep(1.0)                              # the entrance and the arrival effects are over
+    return settled
+
+
+def steady(window, expression):
+    # read until two reads agree: a page still settling after a resize is read again, one that stays wrong fails
+    measured = ask(window, expression)
+    for _ in range(20):
+        time.sleep(0.3)
+        again = ask(window, expression)
+        if again == measured:
+            break
+        measured = again
+    return measured
+
+
+def probe(window):
+    try:
+        if MODE == "overflow":
+            for page in PAGES:
+                settled = open_page(window, page)
+                for width, height in SIZES:
+                    window.resize(width, height)
+                    time.sleep(1.0)
+                    results.append({"page": page, "size": [width, height], "settled": settled,
+                                    "measured": steady(window, "measure()")})
+        else:
+            for page in PAGES:
+                settled = open_page(window, page)
+                sels = json.dumps([sel for sel, where in ask(window, "CSS_CAPS") if where in ("*", page)])
+                results.append({"page": page, "settled": settled,
+                                "regions": ask(window, "regions(%s)" % json.dumps([page, page == PAGES[0], None])),
+                                "caps": ask(window, "readCaps(%s)" % sels)})
+            window.evaluate_js("location.hash = '#settings'")
+            wait_for(window, "!!document.querySelector('[data-action=\"install-update\"]:not([hidden])')", 40)
+            time.sleep(1.0)
+            results.append({"page": "settings", "update": ask(window, "readUpdate()"),
+                            "lines": ask(window, "writeLines(%s)" % json.dumps(["#set-update-status", LINES]))})
+            window.evaluate_js("location.hash = '#overview'")
+            wait_for(window, "!!document.querySelector('.nm-update .nm-status')", 40)
+            time.sleep(1.0)
+            results.append({"page": "banner", "update": ask(window, "readUpdate()"),
+                            "lines": ask(window, "writeLines(%s)" % json.dumps([".nm-update .nm-status", LINES]))})
+    finally:
+        print(json.dumps(results), flush=True)
+        window.destroy()
+
+
+window = webview.create_window("page probe", URL + "#" + PAGES[0], width=SIZES[0][0], height=SIZES[0][1], x=-30000, y=-30000)
+try:
+    webview.start(probe, window)
+except Exception as exc:
+    print("no web view here:", type(exc).__name__, file=sys.stderr)
+    sys.exit(3)
+"""
+
+
+def run_page_probe(server: ApiServer, tmp_path: Path, mode: str, sizes: list[list[int]], pages: list[str],
+                   lines: list[str] | None = None, timeout: float = 240) -> list[dict[str, Any]]:
+    """_PAGE_PROBE in a child process against ``server``; skips where pywebview or WebView2 is missing."""
+    env = dict(os.environ, **REAL_PROFILE_ENV, USAGE_MONITOR_APPDATA_DIR=str(tmp_path / "app"))
+    run = subprocess.run([sys.executable, "-c", _PAGE_PROBE, server.url, json.dumps(sizes), json.dumps(pages), str(PAGE_CHECKS),
+                          mode, json.dumps(lines or [])], env=env, cwd=str(Path(__file__).resolve().parents[1]),
+                         capture_output=True, text=True, encoding="utf-8", timeout=timeout, check=False, creationflags=NO_WINDOW)
+    if run.returncode == 3:
+        pytest.skip("pywebview or WebView2 is not available here")
+    assert run.returncode == 0, run.stderr[-800:]
+    return json.loads(run.stdout.strip().splitlines()[-1])
+
+
+def overflow_known(look: str, lang: str) -> list[dict[str, Any]]:
+    """English's own overflows in ``look`` in the normal scenario (OVERFLOW_RECORD); another language has none."""
+    if lang != "en":
+        return []
+    known = json.loads(OVERFLOW_RECORD.read_text(encoding="utf-8"))["known"]
+    return [k for k in known if look in k["looks"] and (k["states"] == "*" or "normal" in k["states"])]
+
+
+def overflow_problems(look: str, lang: str, results: list[dict[str, Any]]) -> list[str]:
+    """What runs past its room in ``results`` (each page at each size, as measure() reads it) that English's record does not
+    name, and a known one that runs more than 1 px further than in English."""
+    known = overflow_known(look, lang)
+    problems = []
+    for result in results:
+        size = "%dx%d" % tuple(result["size"])
+        if not result.get("settled", True):
+            problems.append(f"{result['page']} {size}: the page did not settle")
+        for item in result["measured"]["over"]:
+            past = item["sw"] - item["cw"] if item["kind"] == "wide" else item.get("by")
+            match = next((k for k in known if k["kind"] == item["kind"] and k["at"] == item["at"] and k["page"] == result["page"]
+                          and size in k["sizes"]), None)
+            if match is None:
+                problems.append(f"{result['page']} {size}: {item}")
+            elif past > match["by"] + 1:
+                problems.append(f"{result['page']} {size}: {item['at']} runs {past} px past its box, English's known {match['by']} px")
+    return problems
+
+
+def test_the_overflow_record_names_englishs_own_and_no_other_language_has_any() -> None:
+    """OVERFLOW_RECORD names each of English's overflows with its look, page, size, element and width, by what it is (#98's
+    owner question 3): Night City's heading (its slanted cursor, 3 px past the heading's box, nothing cut), the Overview
+    grid's metas that the theme cuts with an ellipsis, and a find outside #98 (Nostromo's critical scenario at 1060 x 640,
+    never the normal one). The judge passes a known one in English, fails it 2 px further, fails it in another language, and
+    fails anything it does not name."""
+    record = json.loads(OVERFLOW_RECORD.read_text(encoding="utf-8"))
+    assert {k["why"] for k in record["known"]} <= {"heading", "ellipsis", "find"}
+    for k in record["known"]:
+        assert set(k) == {"why", "looks", "states", "page", "sizes", "kind", "at", "by"}, k
+        assert set(k["looks"]) <= set(LOOKS_98) and k["page"] in ("overview", "limits") and k["by"] > 0, k
+        assert k["why"] != "heading" or (k["at"].endswith("h1.nm-h1") and set(k["looks"]) <= {"night_city", "edgerun"}
+                                         and k["by"] <= 3), k
+        assert k["why"] != "ellipsis" or k["at"].endswith("span.nm-meta-t"), k
+        assert k["why"] != "find" or (k["states"] != "*" and "normal" not in k["states"]), k
+    heading = next(k for k in record["known"] if k["why"] == "heading")
+    item = {"kind": heading["kind"], "at": heading["at"], "sw": 100 + heading["by"], "cw": 100}
+    result = {"page": heading["page"], "size": [int(x) for x in heading["sizes"][0].split("x")], "measured": {"over": [item]}}
+    look = heading["looks"][0]
+    assert overflow_problems(look, "en", [result]) == []
+    assert overflow_problems(look, "pseudo", [result])
+    assert overflow_problems(look, "en", [dict(result, measured={"over": [dict(item, sw=item["sw"] + 2)]})])
+    assert overflow_problems(look, "en", [dict(result, measured={"over": [dict(item, at="span.nm-other")]})])
+
+
+@ui_only
+@pytest.mark.parametrize("lang", ["en", "pseudo"])
+@pytest.mark.parametrize("look", list(LOOKS_98))
+def test_overview_and_limits_overflow_nothing_in_the_real_web_view(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                                     look: str, lang: str) -> None:
+    """#98: in the header, the nav and the page, nothing runs past its room on Overview and Limits, in the default window, at
+    1060 x 640 (Gates' 232 px nav column) and at 720 x 480 (one column): no nowrap element, nav item or row cell wider than its
+    box; nothing taller than a box that cannot grow; no words that leave their card, the bar or the nav, or sit on other
+    words; the nav's blocks and the header's parts apart; a meter's two bars starting at the same x. English may have only
+    its own known overflows (OVERFLOW_RECORD, none more than 1 px further), the pseudo-locale none: outside English a longer
+    line wraps (#98's owner question 1). Measured in WebView2 by tests/browser/page_checks.js, which the headless stand-in
+    (tests/browser/page_probe.js) runs too, with the page's clock and the dev server's held at NOW."""
+    server, settings = held_server(tmp_path, monkeypatch, look, lang)
+    server.start()
+    try:
+        results = run_page_probe(server, tmp_path, "overflow", OVERFLOW_SIZES, ["overview", "limits"])
+    finally:
+        server.stop()
+        settings.close()
+    assert len(results) == 2 * len(OVERFLOW_SIZES)
+    assert all(result["measured"]["lang"] == lang for result in results)
+    assert any(result["measured"]["meters"] for result in results if result["page"] == "limits")
+    problems = overflow_problems(look, lang, results)
+    assert not problems, f"{look} in {lang}: " + "; ".join(problems[:20])
+
+
+def caps_problems(look: str, results: list[dict[str, Any]]) -> list[str]:
+    """What the page shows in ``look`` (English) that is not today's English: the regions of Overview and Limits that do not
+    hang on the clock's zone (the header, the sidebar, the page heading) against the page-words record's live view; each
+    element that has its capitals from CSS since #98 shown in capitals over natural-case text in Nostromo, Night City and
+    Edgerun, as stored in Gates; #97's update texts as update_lines_english.json says each look showed them."""
+    record = json.loads(PAGE_WORDS_RECORD.read_text(encoding="utf-8"))
+    strings = record["strings"]
+    lines = json.loads(UPDATE_LINES_RECORD.read_text(encoding="utf-8"))["lines"]
+    caps = look in CAPS_LOOKS
+    problems: list[str] = []
+
+    def flat(text: str) -> str:                 # innerText breaks lines between blocks, textContent does not
+        return re.sub(r"\s+", "", text)
+
+    for result in results:
+        page = result["page"]
+        if page in ("overview", "limits"):
+            if not result["settled"]:
+                problems.append(f"{page}: the page did not settle")
+            want = record["views"][f"live|{look}|{page}"]
+            for name, refs in want.items():
+                if not name.startswith(("chrome:", "top:")):
+                    continue
+                got = (result["regions"] or {}).get(name)
+                text, attrs = strings[refs[0]], strings[refs[1]]
+                if got is None:
+                    problems.append(f"{page}: no region {name}")
+                elif got["text"] != text or json.dumps(got["attrs"], ensure_ascii=False, separators=(",", ":")) != attrs:
+                    problems.append(f"{page}: {name} shows {got['text']!r} {got['attrs']}, the record {text!r} {attrs}")
+            for item in (i for found in result["caps"] or [] for i in found if not i["hidden"]):
+                shown, stored = flat(item["shown"]), flat(item["stored"])
+                wrong = (item["tt"] != "uppercase" or shown != stored.upper()) if caps else (item["tt"] != "none" or shown != stored)
+                if wrong:
+                    problems.append(f"{page}: {item['sel']} shows {item['shown']!r} ({item['tt']}), stores {item['stored']!r}")
+            continue
+        update = (result["update"] or {}).get("banner" if page == "banner" else "settings") or {}
+        said = [(f"button {i + 1}", button, None, caps) for i, button in enumerate(update.get("buttons", []))]
+        if page == "settings":
+            said += [("row title", update.get("title"), "Check for updates", caps),
+                     ("row help", update.get("help"), "Look for a newer release once in a while.", False)]
+        else:
+            said += [("heading", update.get("title"), None, caps),
+                     ("sentence", update.get("sentence"), "Update now installs it and restarts the monitor.", look == "nostromo")]
+        if not update.get("buttons"):
+            problems.append(f"{page}: no update buttons")
+        for name, item, want, upper in said:
+            if item is None:
+                problems.append(f"{page}: no {name}")
+                continue
+            stored = item["stored"].strip()
+            if want is not None and stored != want:
+                problems.append(f"{page}: the {name} stores {stored!r} (want {want!r})")
+            if caps and stored == stored.upper():
+                problems.append(f"{page}: the {name} is stored in capitals ({stored!r})")
+            shown = stored.upper() if upper else stored
+            if item["shown"].strip() != shown:
+                problems.append(f"{page}: the {name} shows {item['shown']!r} (want {shown!r})")
+        got_lines = result["lines"] or []
+        if len(got_lines) != len(lines):
+            problems.append(f"{page}: {len(got_lines)} of {len(lines)} update lines read")
+        for line, got in zip(lines, got_lines):
+            want = line["today"].upper() if caps else line["gates"]
+            if got["stored"] != line["gates"] or got["shown"].strip() != want:
+                problems.append(f"{page}: {line['said']} shows {got['shown']!r}, stores {got['stored']!r} "
+                                f"(want shown {want!r}, stored {line['gates']!r})")
+    return problems
+
+
+def test_the_capitals_judge_holds_the_record_the_css_and_97s_lines() -> None:
+    """caps_problems, without a window: today's English passes in a look that sets capitals and in Gates; a region that is not
+    the record's, an element without its capitals, an update line stored in capitals and a button shown in natural case
+    fail, each once."""
+    record = json.loads(PAGE_WORDS_RECORD.read_text(encoding="utf-8"))
+    strings = record["strings"]
+    lines = json.loads(UPDATE_LINES_RECORD.read_text(encoding="utf-8"))["lines"]
+
+    def results(look: str) -> list[dict[str, Any]]:
+        upper = look in CAPS_LOOKS
+        out: list[dict[str, Any]] = []
+        for page in ("overview", "limits"):
+            regions = {name: {"text": strings[r[0]], "attrs": json.loads(strings[r[1]])}
+                       for name, r in record["views"][f"live|{look}|{page}"].items() if name.startswith(("chrome:", "top:"))}
+            caps = [[{"sel": ".nm-h1", "shown": "OVERVIEW" if upper else "Overview", "stored": "Overview",
+                      "tt": "uppercase" if upper else "none", "hidden": False}]]
+            out.append({"page": page, "settled": True, "regions": regions, "caps": caps})
+
+        def shown(text: str, in_capitals: bool) -> dict[str, str]:
+            return {"stored": text, "shown": text.upper() if in_capitals else text}
+
+        out.append({"page": "settings", "update": {"settings": {
+            "buttons": [shown("Install update", upper)], "title": shown("Check for updates", upper),
+            "help": shown("Look for a newer release once in a while.", False)}},
+            "lines": [{"stored": line["gates"], "shown": line["today"].upper() if upper else line["gates"]} for line in lines]})
+        out.append({"page": "banner", "update": {"banner": {
+            "buttons": [shown("Update now", upper)], "title": shown("Claude Usage Monitor v9.9.9 is available", upper),
+            "sentence": shown("Update now installs it and restarts the monitor.", look == "nostromo")}},
+            "lines": [{"stored": line["gates"], "shown": line["today"].upper() if upper else line["gates"]} for line in lines]})
+        return out
+
+    for look in LOOKS_98:
+        assert caps_problems(look, results(look)) == [], look
+    broken = results("nostromo")
+    broken[0]["regions"]["chrome:refresh"]["text"] = "Refresh"
+    broken[1]["caps"][0][0]["tt"] = "none"
+    broken[2]["lines"][1]["stored"] = broken[2]["lines"][1]["stored"].upper()
+    broken[3]["update"]["banner"]["buttons"][0]["shown"] = "Update now"
+    found = caps_problems("nostromo", broken)
+    assert len(found) == 4, found
+
+
+@ui_only
+@pytest.mark.parametrize("look", list(LOOKS_98))
+def test_css_capitals_read_as_todays_english_in_the_real_web_view(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                                    look: str) -> None:
+    """#98 moved words the page stored in capitals into the catalog in natural case, the capitals now from each look's
+    stylesheet; #97 did the same for the update texts and left this check to #98. In WebView2 (the static cascade check,
+    tests/css_case.js, runs no browser, and gates.js re-cases at run time only), in English: the header, the sidebar and the
+    page heading of Overview and Limits equal the page-words record's live view, region by region (text as drawn and the
+    attributes people read; the clocks held at NOW, so the data age is the record's); every element of CSS_CAPS shows
+    capitals over natural-case text in Nostromo, Night City and Edgerun, and what it stores in Gates; Settings' update row
+    and buttons and the update banner show what they did before #97, and each of update_lines_english.json's 28 lines, as
+    the catalog words it and written into Settings' line and the banner's, is stored as that record's natural English and
+    shows its "today" (Nostromo, Night City, Edgerun) or that English (Gates)."""
+    server, settings = held_server(tmp_path, monkeypatch, look, "en", update_demo="ok")
+    server.start()
+    try:
+        catalog = i18n.load_catalog("en")
+        lines = [i18n.fill(str(catalog.text(line["key"])), line["values"])          # as the page words each one
+                 for line in json.loads(UPDATE_LINES_RECORD.read_text(encoding="utf-8"))["lines"]]
+        results = run_page_probe(server, tmp_path, "caps", [[1200, 780]], ["overview", "limits"], lines)
+    finally:
+        server.stop()
+        settings.close()
+    assert [result["page"] for result in results] == ["overview", "limits", "settings", "banner"]
+    problems = caps_problems(look, results)
+    assert not problems, f"{look}: " + "; ".join(problems[:20])
+
+
+# Runs in a child process: WebView2's language as dashboard_main passes it (WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS, set before
+# webview.start), read back as the page's navigator.language. argv: the format tag.
+_LANGUAGE_PROBE = r"""
+import json, os, sys, time
+from usage_monitor.ui import dashboard
+
+arguments = dashboard.webview2_arguments({"locale": {"format": sys.argv[1]}}, None)
+os.environ[dashboard.WEBVIEW2_ARGS_ENV] = arguments
+import webview
+
+result = {"arguments": arguments}
+
+
+def probe(window):
+    try:
+        for _ in range(50):
+            language = window.evaluate_js("navigator.language")
+            if language:
+                result["language"] = language
+                break
+            time.sleep(0.2)
+    finally:
+        print(json.dumps(result), flush=True)
+        window.destroy()
+
+
+window = webview.create_window("language probe", html="<!doctype html><title>language probe</title>", width=400, height=300,
+                               x=-30000, y=-30000)
+try:
+    webview.start(probe, window)
+except Exception as exc:
+    print("no web view here:", type(exc).__name__, file=sys.stderr)
+    sys.exit(3)
+"""
+
+
+@ui_only
+@pytest.mark.parametrize("tag, language", [("fr-FR", ("fr", "fr-FR")), ("en-US", ("en-US",))], ids=["fr-FR", "en-US"])
+def test_webview2_follows_the_language_the_dashboard_passes_in_the_real_web_view(tmp_path: Path, tag: str,
+                                                                                  language: tuple[str, ...]) -> None:
+    """#88 and #98: the dashboard passes WebView2 the monitor's format tag with --lang (webview2_arguments), and the page's
+    navigator.language follows it (#88's spike saw "fr" for fr-FR), so the time and number fields take the monitor's
+    language whatever language Windows shows. The variable is set in the child before pywebview starts, as dashboard_main
+    sets it; a developer's own value is not inherited here."""
+    env = {k: v for k, v in os.environ.items() if k != dashboard.WEBVIEW2_ARGS_ENV}
+    env.update(REAL_PROFILE_ENV, USAGE_MONITOR_APPDATA_DIR=str(tmp_path / "app"))
+    run = subprocess.run([sys.executable, "-c", _LANGUAGE_PROBE, tag], env=env, cwd=str(Path(__file__).resolve().parents[1]),
+                         capture_output=True, text=True, timeout=120, check=False, creationflags=NO_WINDOW)
+    if run.returncode == 3:
+        pytest.skip("pywebview or WebView2 is not available here")
+    assert run.returncode == 0, run.stderr[-800:]
+    result = json.loads(run.stdout.strip().splitlines()[-1])
+    assert f"--lang={tag}" in result["arguments"].split()
+    assert result.get("language") in language, result
+
+
+def test_the_real_web_view_probes_compile() -> None:
+    """The child scripts of the real-web-view tests at least parse: they run only with USAGE_MONITOR_UI_TESTS=1."""
+    for source in (_LAYOUT_PROBE, _PAGE_PROBE, _LANGUAGE_PROBE):
+        compile(source, "<probe>", "exec")
 
 
 # ── No card moves when its report lands (real web view) ───────────────────────────

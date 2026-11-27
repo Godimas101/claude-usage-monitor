@@ -158,6 +158,56 @@ def test_the_update_said_passes_reach_every_outcome(tmp_path: Path) -> None:
     assert all(text.startswith("[") and text.endswith("]") for text in in_settings | in_banner), sorted(in_settings | in_banner)
 
 
+@ui_only
+def test_the_status_passes_show_only_pseudo_and_102s_details(tmp_path: Path) -> None:
+    """#98: the passes for the statuses no scenario shows, a link that is lost, figures gone old and the Gates theme. Each shows
+    its own words in the pseudo-locale (the header's link word, the old figures' banner, Gates' own link word, in the Gates
+    theme), and the only English they add to the record is #102's: the four status details the data layer words."""
+    node()
+    english = json.loads((english_left.WEBUI / "i18n" / "en.json").read_text(encoding="utf-8"))
+    statuses = [f"status:{code}" for code in english_left.STATUS_DETAILS]
+    passes = [*statuses, *english_left.LOOK_PASSES]
+    assert set(passes) <= set(english_left.PASSES["normal"])
+    result = english_left.scan_dashboard("normal", passes, tmp_path)
+    by_pass: dict[str, list[dict[str, Any]]] = {}
+    for snap in result["snapshots"]:
+        by_pass.setdefault(snap["pass"], []).append(snap)
+
+    def shows(name: str, text: str) -> bool:
+        return any(html.escape(text, quote=False) in snap["body"] for snap in by_pass.get(name, []))
+
+    for code, detail in english_left.STATUS_DETAILS.items():
+        assert shows(f"status:{code}", P(english[f"header.link.{code}"])), code
+        assert shows(f"status:{code}", detail), code
+    assert shows("link-lost", P(english["header.link.lost"]))
+    assert shows("reports-stale", P(english["banner.stats.old_title"]))
+    gates = by_pass.get("gates", [])
+    assert gates and all(snap["theme"] == "gates" for snap in gates)
+    assert shows("gates", P(english["page.gates.link.live"])) and not shows("gates", P(english["header.link.live"]))
+    found = set(scan_english(result))
+    four = {entry(text) for text in english_left.STATUS_DETAILS.values()}
+    recorded = set(english_left.recorded()["dashboard"])
+    assert four <= found, sorted(four - found)
+    assert four <= recorded, sorted(four - recorded)
+    assert found - four <= recorded, f"English these passes add besides #102's details: {sorted(found - four - recorded)}"
+
+
+def test_the_status_details_are_the_data_layers_and_on_record() -> None:
+    """#98's status passes show the detail the data layer words for each status (details.english; the dashboard shows it as
+    given until #102 words the codes), and the record holds the four as the dashboard's English, digits folded."""
+    from usage_monitor.data import details
+
+    assert set(english_left.STATUS_DETAILS) == {"offline", "rate_limited", "paused", "loading"}
+    assert english_left.STATUS_DETAILS["paused"] == details.english(details.Detail(details.PAUSED))
+    assert english_left.STATUS_DETAILS["loading"] == details.english(details.Detail(details.LOADING))
+    offline, limited = details.offline("timed_out"), details.Detail(details.RATE_LIMITED)
+    assert english_left.STATUS_DETAILS["offline"].startswith(details.english(offline) + "; next try at ")
+    assert english_left.STATUS_DETAILS["rate_limited"].startswith(details.english(limited) + "; next try at ")
+    recorded = set(english_left.recorded()["dashboard"])
+    for text in english_left.STATUS_DETAILS.values():
+        assert entry(text) in recorded and english([text]), text
+
+
 def test_the_record_holds_sorted_entries_each_of_them_english() -> None:
     record = english_left.recorded()
     assert set(record) == set(english_left.HALVES)

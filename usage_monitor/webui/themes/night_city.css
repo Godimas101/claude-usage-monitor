@@ -824,3 +824,22 @@ html[data-reduce-motion="1"] *, html[data-reduce-motion="1"] *::before, html[dat
 :root[data-variant="blackwall"] .nm-grid > [data-limit] .nm-facts > span:not(.nm-chip) { padding: 1px 5px 0; box-shadow: inset 0 0 0 1px var(--nc-line); }
 :root[data-variant="blackwall"] .nm-grid > [data-limit] .nm-facts > span:nth-child(2):not(.nm-chip):not(:has(b)) { color: var(--nc-accent); box-shadow: inset 0 0 0 1px var(--nc-accent); }
 :root[data-variant="blackwall"] .nm-grid > [data-limit] .nm-facts > span:first-child:not(.nm-chip):not(:has(b)) { padding: 1px 0 0; box-shadow: none; }
+
+/* Outside English (#98, owner question 1): a line longer than its room wraps and its box grows; nothing is cut or shrunk.
+   In the header the data age gives way first, as Nostromo's does. Each rule holds only on a page whose language is not
+   English, so English keeps its one-line layout, its designed ellipses included. */
+:root:not(:lang(en)) .nm-menu a { white-space: normal; overflow-wrap: break-word; height: auto; min-height: 34px; padding-top: 6px; padding-bottom: 6px; line-height: 1.15; }
+@media (max-width: 800px) { :root:not(:lang(en)) #data-age { display: none; } }
+:root:not(:lang(en)) .nm-cur { margin-right: 4px; }          /* the slanted cursor stays inside the heading's box */
+:root:not(:lang(en)) .nm-card-t { flex-wrap: wrap; row-gap: 0; }
+:root:not(:lang(en)) :is(.nm-tag, .nm-ttl, .nm-meta-t, .nm-facts) { white-space: normal; overflow-wrap: break-word; }
+:root:not(:lang(en)) .nm-grid .nm-card-t:not(.nm-chart-t) .nm-meta-t { overflow: visible; text-overflow: clip; }
+:root:not(:lang(en)) .nm-row2 > .nm-facts { min-width: 0; }
+:root:not(:lang(en)) .nm-grid > [data-limit] :is(.nm-facts > span:not(.nm-chip), .nm-pace > span:first-child, .nm-pace > .fc) {
+  white-space: normal; overflow-wrap: break-word; overflow: visible; text-overflow: clip;
+}
+/* the meter's two rows share one first column, as wide as the longer label (up to half the meter), so their bars start at
+   the same x */
+:root:not(:lang(en)) .nm-meter { display: grid; grid-template-columns: fit-content(50%) minmax(0, 1fr) 48px; gap: 7px 10px; }
+:root:not(:lang(en)) .nm-meter .nm-mrow { grid-column: 1 / -1; grid-template-columns: subgrid; height: auto; min-height: 18px; }
+:root:not(:lang(en)) .nm-meter .nm-mrow .k { min-width: 112px; white-space: normal; overflow-wrap: break-word; line-height: 1.2; }

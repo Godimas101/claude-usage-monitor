@@ -591,6 +591,8 @@ in local time; may wrap midnight).
   data change or animation ticks.
 - **Dashboard:** the main process serves `webui/` + a JSON API on `127.0.0.1:<random port>`
   with a per-run token. A separate `--dashboard` process opens it in pywebview (WebView2),
-  so it costs nothing while closed and a normal browser can load the same URL for testing.
+  so it costs nothing while closed and a normal browser can load the same URL for testing. Its WebView2 runs in the
+  monitor's language (`--lang=<format tag>`, #98); a language change reloads the page, not the window (the reopen is
+  #115's).
 - **Themes:** `themes/<name>.json` (tokens + variants) read by both the Pillow skins and the
   dashboard CSS. Nostromo (default), Night City, Gates.

@@ -718,3 +718,10 @@ html[data-g-swatches] .nm-variants .nm-btn[aria-pressed="true"]::before { box-sh
 /* reduced motion: nothing moves */
 html[data-reduce-motion="1"] *, html[data-reduce-motion="1"] *::before, html[data-reduce-motion="1"] *::after { animation: none !important; transition: none !important; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* Outside English (#98, owner question 1): a line longer than its room wraps and its box grows; nothing is cut or shrunk.
+   The meter's two rows share one first column, as wide as the longer label (up to half the meter), so their bars start at
+   the same x. Held to a page whose language is not English, so English keeps its layout. */
+:root:not(:lang(en)) .nm-meter { display: grid; grid-template-columns: fit-content(50%) minmax(0, 1fr) 48px; gap: 9px 10px; }
+:root:not(:lang(en)) .nm-meter .nm-mrow { grid-column: 1 / -1; grid-template-columns: subgrid; }
+:root:not(:lang(en)) .nm-meter .nm-mrow .k { min-width: 112px; white-space: normal; overflow-wrap: break-word; }

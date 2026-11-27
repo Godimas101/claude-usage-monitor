@@ -29,25 +29,38 @@
  *                   error, internal, unavailable, token, http: the monitor's refusals; lost: no answer; hang: none yet);
  *                   Settings' three update buttons and the banner's Update now and Skip this version are pressed, each on
  *                   a page opened afresh (in the hang pass the page is then opened again, as its next state redraws it)
+ *   status:S        Overview and Limits with the state's status S (offline, rate_limited, paused, loading) and the detail
+ *                   the data layer words for it (#98: the header's link word, the status banner, the health box's link row;
+ *                   the detail is the data layer's English, #102's)
+ *   link-lost       Overview and Limits when the monitor never answers the state (#98: the header and the health box say the
+ *                   link is lost: a first poll that fails draws them)
+ *   reports-stale   Overview and Limits with their reports in, then Refresh pressed while every report fails (#98: the
+ *                   banner that says the figures are old)
+ *   gates           Overview and Limits in the Gates theme (the state's theme and the shell's, as the server writes them):
+ *                   the words app.js gives Gates alone (#98's page.gates.* keys)
  *
  *   node tests/english_scan.js <webui folder> <the page's URL, with its key> <now, in ms since 1970> <passes as JSON>
+ *        [<the status details as JSON: {code: text}, for the status passes>]
  *
  * The page's clock stands still at <now> (the dev server's, so its times agree), its timers never fire (nothing is
  * left to a later tick), and english_left.py runs node with TZ pinned, so two runs give the same snapshots. motion.js
  * and the theme scripts are not run: they move and decorate what app.js draws, and the themes' boot texts are #101's.
- * Prints {shell, snapshots: [{pass, step, title, body}], problems: [text]}; a problem is an error the page met (a
+ * Prints {shell, snapshots: [{pass, step, title, theme, body}], problems: [text]}; a problem is an error the page met (a
  * script or a listener that threw, a rejected promise, a console.error) or a step the scan could not take. Nothing
  * here reads a user's data: the dev server's data is made up.
  */
 const vm = require("vm");
 const D = require("./mini_dom.js");
 
-const [, , webui, pageUrl, nowArg, passesArg] = process.argv;
+const [, , webui, pageUrl, nowArg, passesArg, detailsArg] = process.argv;
 const NOW = Number(nowArg);
 if (!webui || !pageUrl || !Number.isFinite(NOW)) {
   throw new Error("usage: node tests/english_scan.js <webui folder> <page URL> <now in ms> <passes as JSON>");
 }
 const PASSES = JSON.parse(passesArg || '["installed"]');
+const DETAILS = JSON.parse(detailsArg || "{}");          // each status pass's detail, as the data layer words it
+const MINE = ["overview", "limits"];                     // the pages #98's passes open
+const flags = { failing: false };                        // reports-stale: the reports fail from the moment this is set
 const page = new URL(pageUrl);
 const origin = page.origin;
 const WIDTH = 640;
@@ -114,6 +127,20 @@ function rulesFor(pass) {
     }
     if (pass === "posts-failed" && method !== "GET") {
       return "fail";
+    }
+    if (pass.startsWith("status:") && api === "/api/state") {
+      const code = pass.slice("status:".length);
+      return state((data) => ({ dev: false, state: Object.assign(data.state, { status: code, status_detail: DETAILS[code] }) }));
+    }
+    if (pass === "link-lost" && api === "/api/state") {
+      return "fail";
+    }
+    if (pass === "reports-stale" && api.startsWith("/api/analytics/") && flags.failing) {
+      return "fail";
+    }
+    if (pass === "gates" && api === "/api/state") {
+      return state((data) => ({ dev: false, theme: Object.assign(data.theme, { id: "gates", variant: "blue", mode: "dark" }),
+        settings: Object.assign(data.settings, { theme_id: "gates", theme_variant: "blue", theme_mode: "dark" }) }));
     }
     if (pass.startsWith("update-said:")) {
       if (api === "/api/state") {
@@ -244,13 +271,17 @@ function keep(doc, pass, step) {
   const body = doc.body ? doc.body.outerHTML : "";
   if (!kept.has(body)) {
     kept.add(body);
-    snapshots.push({ pass, step, title: doc.title, body });
+    snapshots.push({ pass, step, title: doc.title, theme: doc.documentElement.getAttribute("data-theme"), body });
   }
 }
 
 async function load(pass) {
   current = pass + "/load";
-  const shell = await (await fetch(page.href)).text();
+  let shell = await (await fetch(page.href)).text();
+  if (pass === "gates") {
+    // the shell as the server writes it for the Gates theme (ui/server.py's _themed_shell): the theme on <html>
+    shell = shell.replace(/<html\b[^>]*>/, (tag) => tag.replace(/\sdata-theme="[^"]*"/, ' data-theme="gates"'));
+  }
   const doc = D.createDocument(shell, {
     width: WIDTH, report: (e, event) => problems.push(current + ": a " + event.type + " listener threw: " + describe(e)),
   });
@@ -386,6 +417,26 @@ async function everyAction(pass, key, scope) {
         await everyPage(pass, false);
         await everyAction(pass, "overview", "#main .nm-update");
         await everyAction(pass, "about", "#main");
+      } else if (pass.startsWith("status:") || pass === "link-lost" || pass === "gates") {
+        if (pass.startsWith("status:") && !DETAILS[pass.slice("status:".length)]) {
+          problems.push("no detail for " + pass);
+          continue;
+        }
+        const view = await load(pass);
+        keep(view.doc, pass, "load");
+        for (const key of MINE) {
+          await open(view, pass, key);
+        }
+      } else if (pass === "reports-stale") {
+        flags.failing = false;
+        const view = await load(pass);
+        for (const key of MINE) {
+          await open(view, pass, key);
+        }
+        flags.failing = true;
+        await press(view, pass, "limits:refresh", view.doc.getElementById("refresh"));
+        await open(view, pass, "overview");
+        flags.failing = false;
       } else if (pass.startsWith("reports-")) {
         const view = await load(pass);
         for (const key of STAT_PAGES) {

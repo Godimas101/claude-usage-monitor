@@ -527,6 +527,32 @@ def test_only_edgerun_draws_the_time_left_bar() -> None:
     assert '".nm-remain{display:none}"' in APP_CODE                            # and so does a theme that says nothing
 
 
+def test_the_longer_words_rules_hold_only_outside_english() -> None:
+    """#98's owner question 1: outside English a line longer than its room wraps. Each theme sheet ends with its block of those
+    rules, and every rule in it (in a media query too) is held to a page whose language is not English, so English's layout
+    cannot change; no other rule of the sheet names a language."""
+
+    def top_level(prelude: str) -> list[str]:                 # a selector list split at its own commas, not :is()'s
+        parts, depth, start = [], 0, 0
+        for i, ch in enumerate(prelude):
+            depth += {"(": 1, ")": -1}.get(ch, 0)
+            if ch == "," and depth == 0:
+                parts.append(prelude[start:i].strip())
+                start = i + 1
+        return parts + [prelude[start:].strip()]
+
+    for theme_id in ("nostromo", "night_city", "gates"):
+        css = THEME_CSS[theme_id]
+        mark = css.index("/* Outside English (#98, owner question 1)")
+        assert ":lang(" not in re.sub(r"/\*.*?\*/", "", css[:mark], flags=re.S), theme_id
+        block = re.sub(r"/\*.*?\*/", "", css[mark:], flags=re.S)
+        selectors = [part for prelude in re.findall(r"([^{}]+)\{", block) if not prelude.strip().startswith("@media")
+                     for part in top_level(prelude.strip())]
+        assert selectors, theme_id
+        stray = [part for part in selectors if not part.startswith(":root:not(:lang(en)) ")]
+        assert not stray, (theme_id, stray)
+
+
 def test_the_time_left_bar_keeps_both_texts_readable_over_the_fill_and_the_track() -> None:
     """The label and the time left each span the whole bar and are painted from one hard-stop gradient that flips where
     the fill ends (ink on the fill, the signal colour on the track), so both read from a fresh window to an empty one.

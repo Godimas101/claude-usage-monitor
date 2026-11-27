@@ -31,7 +31,9 @@ The dashboard: tests/english_scan.js runs the page (index.html, formats.js, the 
 dev server) on a small DOM, for every scenario of the dev server under the pseudo-locale, in the passes PASSES lists:
 every page and segment as an installed monitor and as a dev instance shows them, and in some scenarios every action
 and control, the update banner, Settings during an update in each state of its run (#58), what each update button says
-for every answer the monitor gives (#97), the reports' loading and failed states, and every change failing. The theme scripts'
+for every answer the monitor gives (#97), the reports' loading and failed states, and every change failing; and since
+#98 the statuses no scenario shows (with the data layer's detail, STATUS_DETAILS), the link lost, the figures old after a
+failed refresh and the Gates theme, on Overview and Limits. The theme scripts'
 boot texts and the words in the stylesheets are not in it (#101 moves them). Besides the names, the dashboard half takes out
 the page's format words, as whole words (its weekday and month names and AM/PM, English's in the pseudo-locale since #91),
 and the dev server's data names that the catalog's sentences hold (#98: a plan's name, a limit's scope), which a sentence
@@ -59,7 +61,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Iterable, Sequence
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -69,6 +71,7 @@ if str(REPO) not in sys.path:
 
 import update_check  # noqa: E402
 from usage_monitor import i18n  # noqa: E402
+from usage_monitor.data import details  # noqa: E402
 
 RECORD = Path(__file__).resolve().parent / "fixtures" / "english_left.json"
 SCAN_JS = Path(__file__).resolve().parent / "english_scan.js"
@@ -100,10 +103,23 @@ UPDATE_RUNS: tuple[str, ...] = ("downloading", "unknown", "connecting", "checkin
                                 *(f"failed-{code}" for code in update_check.REASONS))
 # The monitor's answers to the update buttons (#97): one update-said pass each, in "normal".
 UPDATE_SAID: tuple[str, ...] = ("found", "none", "unchecked", "error", "internal", "unavailable", "token", "http", "lost", "hang")
+# The statuses the dev server's scenarios never show (#98): one status pass each, in "normal", with the detail the data
+# layer words for it (details.english; the next try five minutes after the scan's moment, as the usage API's clock writes
+# it). The detail is the data layer's English, which #102 words: these four are the only English the passes add.
+_NEXT_TRY = (SCAN_NOW + timedelta(minutes=5)).strftime("%H:%M:%S")
+STATUS_DETAILS: dict[str, str] = {
+    "offline": details.english(details.offline("timed_out").with_next_try(_NEXT_TRY)),
+    "rate_limited": details.english(details.Detail(details.RATE_LIMITED).with_next_try(_NEXT_TRY)),
+    "paused": details.english(details.Detail(details.PAUSED)),
+    "loading": details.english(details.Detail(details.LOADING)),
+}
+# #98's passes besides the statuses: the link lost, the figures old, and the Gates theme (english_scan.js says what each does).
+LOOK_PASSES: tuple[str, ...] = ("link-lost", "reports-stale", "gates")
 PASSES: dict[str, tuple[str, ...]] = {
     "normal": (*EVERY_SCENARIO, "actions", "update", "update-self", "pending", "reports-503", "reports-501",
                "reports-failed", "lookups-failed", "posts-failed", *(f"update-run:{state}" for state in UPDATE_RUNS),
-               *(f"update-said:{answer}" for answer in UPDATE_SAID)),
+               *(f"update-said:{answer}" for answer in UPDATE_SAID), *(f"status:{code}" for code in STATUS_DETAILS),
+               *LOOK_PASSES),
     "no_login": (*EVERY_SCENARIO, "actions", "posts-failed"),
     "refused": (*EVERY_SCENARIO, "actions"),
     "stale": (*EVERY_SCENARIO, "actions"),
@@ -583,7 +599,8 @@ def scan_dashboard(scenario: str, passes: Sequence[str], folder: Path) -> dict[s
     try:
         server.start()
         run = subprocess.run([node, str(SCAN_JS), str(WEBUI), server.url, str(int(SCAN_NOW.timestamp() * 1000)),
-                              json.dumps(list(passes))], env={**os.environ, "TZ": NODE_TZ}, capture_output=True,
+                              json.dumps(list(passes)), json.dumps(STATUS_DETAILS)], env={**os.environ, "TZ": NODE_TZ},
+                             capture_output=True,
                              encoding="utf-8", timeout=1200, check=False, creationflags=NO_WINDOW)
     finally:
         server.stop()
