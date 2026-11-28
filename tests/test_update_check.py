@@ -2194,6 +2194,7 @@ RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 UNINSTALL_ROOT = r"Software\Microsoft\Windows\CurrentVersion\Uninstall"
 V1_SWITCHES = ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"]               # what v1.1.5's updater passes (it cannot change)
 V2_SWITCHES = [*V1_SWITCHES, '/MERGETASKS="!startup"']                          # what update_check.py passes
+# (and /LANG=<the app's language> since #103: English in the release build, so only the language runs add it)
 REAL_IDENTITY = (                                                                # none of these may survive in a sandbox script
     "{localappdata}", "{userappdata}\\ClaudeUsageMonitor", "Global\\ClaudeUsageMonitor", "'ClaudeUsageMonitor'", "Explorer\\StartupApproved",
     '"ClaudeUsageMonitor"', "AppName=Claude Usage Monitor", '#define AppIdValue "Claude Usage Monitor"',
@@ -2253,6 +2254,36 @@ def test_the_installer_script_compiles(tmp_path: Path) -> None:
     assert "Compiler engine version: Inno Setup 6.7.1" in done.stdout          # the version the script's guard asks for
     warnings = [line for line in (done.stdout + done.stderr).splitlines() if line.startswith("Warning")]
     assert not warnings, warnings
+    assert [p.name for p in out.iterdir()] == ["ClaudeUsageMonitorSetup-v9.9.9.exe"]
+
+
+# How ISCC (Inno Setup 6.7.1) warns of a custom message a language's file lacks, one line per message and language
+# (Compiler.SetupCompiler.pas CheckCustomMessageDefinitions): it names the first language that defines the message,
+# whose text Setup then shows in that language.
+MISSING_MESSAGE = re.compile(r'Warning: Custom message "(\w+)" has not been defined for the "(\w+)" language\. Will use '
+                             r'the custom message from the first language in which it was defined: "(\w+)"\.')
+
+
+@UI
+@needs_iscc
+def test_the_review_build_compiles_and_falls_back_to_english(tmp_path: Path) -> None:
+    """The review build (ISCC /DAllLanguages, never published) declares every language of the app (#103). It compiles
+    with Inno Setup 6.7.1, and ISCC's only warnings are one per message and language that the language's file lacks:
+    exactly the gaps tests/installer_words.py lists (installer_words.missing; 24 for each of fr, es and tr while their
+    drafts, #104 to #106, are empty), each filled with English, the first language that defines it. It only compiles:
+    Setup is never started."""
+    out = tmp_path / "out"
+    done = compile_iss(ROOT / "installer.iss", out, make_dummy_dist(tmp_path), "9.9.9", defines=("AllLanguages",),
+                       quiet=False)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "Compiler engine version: Inno Setup 6.7.1" in done.stdout
+    warnings = [line for line in (done.stdout + done.stderr).splitlines() if line.startswith("Warning")]
+    found = [MISSING_MESSAGE.fullmatch(line) for line in warnings]
+    assert all(found), [line for line, match in zip(warnings, found) if match is None]
+    languages = [entry["Name"] for entry in installer_words.language_entries(ISS, review=True)]
+    gaps = sorted((language, name) for language in languages for name in installer_words.missing(language))
+    assert sorted((match[2], match[1]) for match in found if match) == gaps
+    assert {match[3] for match in found if match} <= {"en"}, "a message falls back to another language than English"
     assert [p.name for p in out.iterdir()] == ["ClaudeUsageMonitorSetup-v9.9.9.exe"]
 
 
@@ -2344,9 +2375,10 @@ class Sandbox:
     """A renamed copy of the installer, a stand-in v1 installer with the same AppId, and what a run leaves behind."""
 
     def __init__(self, root: Path, *, exe: Path | None = None, bundle_files: int = 0,
-                 extra: list[tuple[str, str]] | None = None) -> None:
-        """``exe`` replaces the bundle's unrunnable exe, ``bundle_files`` makes the bundle slower to delete and copy, and
-        ``extra`` changes the v2 script further for one test (each swap must match exactly once)."""
+                 extra: list[tuple[str, str]] | None = None, review: bool = False) -> None:
+        """``exe`` replaces the bundle's unrunnable exe, ``bundle_files`` makes the bundle slower to delete and copy,
+        ``extra`` changes the v2 script further for one test (each swap must match exactly once), and ``review`` builds
+        the v2 Setup as the review build (ISCC /DAllLanguages: every language, #103)."""
         self.root = root
         self.app = root / "app"
         self.logs = root / "logs"
@@ -2365,11 +2397,12 @@ class Sandbox:
         (scripts / "v2.iss").write_text(script, encoding="ascii")
         shutil.copytree(ROOT / "installer-messages", scripts / "installer-messages")   # MessagesFile names it from the script
         (scripts / "v1.iss").write_text(v1_stand_in_script(self.app), encoding="ascii")
-        self.v2 = self._build(scripts / "v2.iss", "v2", dist, "2.0.0", "ClaudeUsageMonitorSetup-v2.0.0.exe")
+        self.v2 = self._build(scripts / "v2.iss", "v2", dist, "2.0.0", "ClaudeUsageMonitorSetup-v2.0.0.exe",
+                              ("AllLanguages",) if review else ())
         self.v1 = self._build(scripts / "v1.iss", "v1", dist, "1.1.5", "v1like.exe")
 
-    def _build(self, script: Path, name: str, dist: Path, version: str, exe: str) -> Path:
-        done = compile_iss(script, self.root / "out" / name, dist, version)
+    def _build(self, script: Path, name: str, dist: Path, version: str, exe: str, defines: tuple[str, ...] = ()) -> Path:
+        done = compile_iss(script, self.root / "out" / name, dist, version, defines=defines)
         assert done.returncode == 0, done.stdout + done.stderr
         return self.root / "out" / name / exe
 
@@ -2408,6 +2441,17 @@ class Sandbox:
         try:
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER, rf"{UNINSTALL_ROOT}\{SANDBOX}_is1") as key:
                 return str(winreg.QueryValueEx(key, "DisplayVersion")[0])
+        except FileNotFoundError:
+            return None
+
+    def key_value(self, name: str) -> str | None:
+        """A value of the sandbox install's uninstall key: "Inno Setup: Language", the [Languages] name of the last
+        Setup run, which the uninstaller then speaks (#103), or "DisplayName", the name in Apps."""
+        import winreg
+
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, rf"{UNINSTALL_ROOT}\{SANDBOX}_is1") as key:
+                return str(winreg.QueryValueEx(key, name)[0])
         except FileNotFoundError:
             return None
 
@@ -3453,6 +3497,147 @@ def test_a_sandboxed_uninstall_ends_the_readers_and_removes_their_files(tmp_path
             end_stand_ins(readers)
         finally:
             box.cleanup()
+    assert real_install_state() == before
+
+
+# ── The languages (#103), on the sandbox: written for the owner's runs ────────────────────────────────────────────────
+#
+# The review build declares every language; its texts are installer_words.message's: the language's own, or English where
+# its draft (#104 to #106) lacks it, so these runs pass before the drafts land and check the drafts once they do.
+# /LANG=<id> is what the app's update passes (update_check.SETUP_LANGUAGES); v1.1.5's updater passes none.
+
+REVIEW_LANGUAGES = [entry["Name"] for entry in installer_words.language_entries(ISS, review=True)]
+
+
+def setup_log(path: Path) -> str:
+    """An Inno Setup log as written, CR LF kept (UTF-8, Setup.LoggingFunc.pas)."""
+    return path.read_bytes().decode("utf-8-sig", errors="replace")
+
+
+def logged(text: str) -> str:
+    """``text`` as one Log call writes it: each line after the first indented by 26 spaces, under the first line's time
+    (Inno Setup 6.7.1, Setup.LoggingFunc.pas Log)."""
+    return text.replace("\n", "\n" + " " * 26)
+
+
+def logged_box(answer: str, buttons: str, text: str) -> str:
+    """How Setup logs a box that /SUPPRESSMSGBOXES answers: "Defaulting to <answer> for suppressed message box
+    (<buttons>):", then the box's text on the next line (Setup.MainFunc.pas LogSuppressedMsgBox)."""
+    return logged(f"Defaulting to {answer} for suppressed message box ({buttons}):\r\n{text}")
+
+
+def windows_pick(entries: list[str]) -> str:
+    """The [Languages] entry Setup takes on this PC with no /LANG=: Windows' display language (GetUserDefaultUILanguage)
+    by Inno Setup's rule (installer_words.inno_language)."""
+    import ctypes
+
+    kernel32 = ctypes.WinDLL("kernel32")
+    kernel32.GetUserDefaultUILanguage.restype = ctypes.c_ushort
+    return installer_words.inno_language(kernel32.GetUserDefaultUILanguage(), entries)
+
+
+@SANDBOX_RUNS
+@needs_csc
+@pytest.mark.usefixtures("keeps_real_readers")
+@pytest.mark.parametrize("language", REVIEW_LANGUAGES)
+def test_a_sandboxed_install_speaks_each_language(tmp_path: Path, language: str) -> None:
+    """The review build with /LANG=<language>, as the app's update passes it. Setup records the language, and the name
+    in Apps stays the one name. An update that finds the monitor still running says so in that language: its box and its
+    Preparing page, both answered by /SUPPRESSMSGBOXES and logged with their text. The uninstaller, which speaks the
+    language of the last Setup run, passes it on to the exe (--lang, for #102); with an exe that never answers, its
+    window's status line and its stand-in for the exe's report are in that language too."""
+    def say(name: str) -> str:
+        return installer_words.message(language, name)
+
+    box = Sandbox(tmp_path, review=True)
+    switch = f"/LANG={language}"
+    before = real_install_state()
+    monitor: list[subprocess.Popen[bytes]] = []
+    try:
+        box.reset(None, None)
+        assert box.run(box.v2, [*V1_SWITCHES, switch], "install") == 0
+        assert box.key_value("Inno Setup: Language") == language
+        assert box.key_value("DisplayName") == f"{SANDBOX} version 2.0.0"
+        # An update while the monitor stays: Setup's box (Retry or Cancel; Cancel), then the Preparing page.
+        monitor.append(running_sandbox_monitor(box, build_stand_in(box), quits=False))
+        assert box.run(box.v2, [*V2_SWITCHES, switch], "monitor stays") == 7
+        log = setup_log(box.logs / "monitor_stays.log")
+        assert logged_box("Cancel", "Retry/Cancel", say("StillRunningSetup")) in log, log[-2000:]
+        assert logged("PrepareToInstall failed: " + say("StillRunningStopped")) in log, log[-2000:]
+        assert logged_box("OK", "OK", say("StillRunningStopped")) in log, log[-2000:]
+        end_stand_ins(monitor)
+        assert box.key_value("Inno Setup: Language") == language
+        # The uninstall, with the exe that notes the words it is given (RECORDER_SOURCE).
+        shutil.copy(build_recorder(tmp_path / "recorder"), box.app / "ClaudeUsageMonitor.exe")
+        box.uninstall()
+        calls = (box.root / "modes.txt").read_text(encoding="ascii").splitlines()
+        assert len(calls) == 1 and calls[0].startswith("--remove-setup "), calls
+        assert calls[0].endswith(f"claude-code-left.txt --lang {language}"), calls
+        assert not box.app.exists(), "the uninstall did not finish"
+        # Once more, with an exe that never answers and the uninstall window on screen (/SILENT, as by hand).
+        assert box.run(box.v2, [*V1_SWITCHES, switch], "install again") == 0
+        shutil.copy(build_recorder(tmp_path / "hung", HUNG_SOURCE), box.app / "ClaudeUsageMonitor.exe")
+        _hung, _seen, said = box.uninstall("/SILENT /SUPPRESSMSGBOXES /NORESTART", during=watch_uninstall_window)
+        assert say("TakingOutOfClaudeCode") in said, said
+        log = setup_log(max(box.logs.glob("uninstall-*.log"), key=lambda path: path.stat().st_mtime))
+        assert logged("Left in Claude Code: " + say("MaybeLeftInClaudeCode")) in log, log[-2000:]
+        assert not box.app.exists(), "the uninstall did not finish"
+    finally:
+        try:
+            end_stand_ins(monitor)
+        finally:
+            box.cleanup()
+    assert real_install_state() == before
+
+
+@SANDBOX_RUNS
+@pytest.mark.usefixtures("keeps_real_readers")
+def test_a_sandboxed_update_speaks_the_apps_language_or_windows_never_the_last_installs(tmp_path: Path) -> None:
+    """UsePreviousLanguage=no: an update speaks the language it is given (/LANG=, the app's own) or, given none (v1.1.5's
+    updater), Windows' display language as Inno Setup's rule picks it on this PC; never the language of the install
+    before it, which Inno Setup would otherwise take in a silent run too. The review build, so every language can be
+    picked; the three languages are chosen to differ from each other and from Windows' pick."""
+    windows = windows_pick(REVIEW_LANGUAGES)
+    first = next(name for name in REVIEW_LANGUAGES if name not in (windows, "en"))
+    chosen = next(name for name in REVIEW_LANGUAGES if name not in (windows, first, "en"))
+    box = Sandbox(tmp_path, review=True)
+    before = real_install_state()
+    try:
+        box.reset(None, None)
+        assert box.run(box.v2, [*V1_SWITCHES, f"/LANG={first}"], "install") == 0
+        assert box.key_value("Inno Setup: Language") == first
+        assert box.run(box.v2, V1_SWITCHES, "update without a language") == 0
+        assert box.key_value("Inno Setup: Language") == windows, "the update kept the last install's language"
+        assert box.run(box.v2, [*V2_SWITCHES, f"/LANG={chosen}"], "update in the apps language") == 0
+        assert box.key_value("Inno Setup: Language") == chosen
+        assert box.display_version() == "2.0.0" and box.moved_aside() == []
+    finally:
+        box.cleanup()
+    assert real_install_state() == before
+
+
+@SANDBOX_RUNS
+@pytest.mark.usefixtures("keeps_real_readers")
+def test_the_sandboxed_release_build_passes_over_a_language_it_lacks(tmp_path: Path) -> None:
+    """The release build declares the languages the app offers (English alone until #107). A /LANG= naming another, as an
+    update from an app showing that language passes it, is passed over: Setup installs and updates in the language it
+    would take with none (Windows' display language when the build has it, else English), and the name in Apps stays."""
+    release = [entry["Name"] for entry in installer_words.language_entries(ISS, review=False)]
+    lacked = [name for name in REVIEW_LANGUAGES if name not in release]
+    if not lacked:
+        pytest.skip("the release build declares every language")
+    box = Sandbox(tmp_path)
+    before = real_install_state()
+    try:
+        box.reset(None, None)
+        assert box.run(box.v2, [*V1_SWITCHES, f"/LANG={lacked[0]}"], "install") == 0
+        assert box.key_value("Inno Setup: Language") == windows_pick(release)
+        assert box.key_value("DisplayName") == f"{SANDBOX} version 2.0.0"
+        assert box.run(box.v2, [*V2_SWITCHES, f"/LANG={lacked[-1]}"], "update") == 0
+        assert box.key_value("Inno Setup: Language") == windows_pick(release)
+        assert box.display_version() == "2.0.0"
+    finally:
+        box.cleanup()
     assert real_install_state() == before
 
 
