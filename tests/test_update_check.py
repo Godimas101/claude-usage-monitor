@@ -2169,11 +2169,16 @@ def make_dummy_dist(root: Path) -> Path:
     return dist
 
 
-def compile_iss(script: Path, out: Path, dist: Path, version: str) -> subprocess.CompletedProcess[str]:
+def compile_iss(script: Path, out: Path, dist: Path, version: str, *, defines: tuple[str, ...] = (),
+                quiet: bool = True) -> subprocess.CompletedProcess[str]:
+    """ISCC on ``script`` into ``out``, with /DAppVer, /DDistDir and /D<name> for each of ``defines``. ``quiet`` passes
+    /Q, which keeps ISCC to its errors: its warnings print only without it (Inno Setup 6.7.1, #103)."""
     iscc = find_iscc()
     assert iscc is not None
     out.mkdir(parents=True, exist_ok=True)
-    return subprocess.run([str(iscc), "/Q", f"/DAppVer={version}", f"/DDistDir={dist}", f"/O{out}", str(script)],
+    switches = ["/Q"] if quiet else []
+    return subprocess.run([str(iscc), *switches, *(f"/D{name}" for name in defines), f"/DAppVer={version}",
+                           f"/DDistDir={dist}", f"/O{out}", str(script)],
                           capture_output=True, text=True, timeout=300, cwd=str(out.parent), creationflags=NO_WINDOW)
 
 
@@ -2181,10 +2186,16 @@ def compile_iss(script: Path, out: Path, dist: Path, version: str) -> subprocess
 @needs_iscc
 def test_the_installer_script_compiles(tmp_path: Path) -> None:
     """ISCC type-checks the [Code] section, so a mistyped routine, an unknown function or a missing declaration
-    fails here, not on release day. It only compiles: Setup is never started."""
+    fails here, not on release day; a {cm:} naming no message fails too (a CustomMessage('X') naming none does not:
+    Setup raises at run time, and tests/test_installer_words.py catches it). The release build compiles without a
+    warning, so no language it declares lacks a message (#103): ISCC runs without /Q, which hides them. It only
+    compiles: Setup is never started."""
     out = tmp_path / "out"
-    done = compile_iss(ROOT / "installer.iss", out, make_dummy_dist(tmp_path), "9.9.9")
+    done = compile_iss(ROOT / "installer.iss", out, make_dummy_dist(tmp_path), "9.9.9", quiet=False)
     assert done.returncode == 0, done.stdout + done.stderr
+    assert "Compiler engine version: Inno Setup 6.7.1" in done.stdout          # the version the script's guard asks for
+    warnings = [line for line in (done.stdout + done.stderr).splitlines() if line.startswith("Warning")]
+    assert not warnings, warnings
     assert [p.name for p in out.iterdir()] == ["ClaudeUsageMonitorSetup-v9.9.9.exe"]
 
 
