@@ -19,7 +19,8 @@
 ; speak the language chosen in the app (#103); it is left out for a language the updater does not know, and a build
 ; that lacks the language passes over it. v1.1.5's updater, which cannot be changed, runs the same line WITHOUT
 ; /MERGETASKS or /LANG, so the entry is also decided in code (WriteStartupEntry), not only by the task, and that
-; update speaks Windows' display language. tests/test_update_check.py keeps this file and the updater in agreement.
+; update speaks Windows' display language. The 2.0 to 2.3.0 updaters pass /MERGETASKS but no /LANG, so their updates
+; also speak Windows' display language. tests/test_update_check.py keeps this file and the updater in agreement.
 
 #ifndef AppVer
   #define VersionFile FileOpen(SourcePath + "VERSION")
@@ -431,7 +432,9 @@ begin
 end;
 
 // Closes the monitor. While it stays, asks the person to close it and click Retry, or to Cancel. False means stop with
-// nothing changed. A silent run has no one to ask and stops at once (SuppressibleMsgBox answers Cancel), as AppMutex did.
+// nothing changed. A silent uninstall, and a silent Setup with /SUPPRESSMSGBOXES (every update passes it), have no one
+// to ask and stop at once (UninstallSilent; SuppressibleMsgBox answers Cancel), as AppMutex did. A silent Setup without
+// that switch shows its box.
 // Setup's box and the uninstaller's are two whole messages, so no language has to fit a word into the other's sentence.
 function MonitorClosed: Boolean;
 begin
@@ -448,7 +451,7 @@ end;
 
 // The mode word on a command line of the exe, or '' when it has none (the monitor is started with no mode). Quotes
 // and tabs become spaces and the line is padded with spaces, so a mode matches only as a whole word, as in main.py.
-// (Written when the script still ran on Inno Setup 6.3, which has no StringSplit.)
+// (Inno Setup 6.7.1 has StringSplit, which would read better; this loop predates the pin.)
 function OtherMode(CommandLine: String): String;
 var
   Modes, Mode: String;

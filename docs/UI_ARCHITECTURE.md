@@ -980,17 +980,20 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   that language's messages) and passes it to the exe as `--remove-setup <report> --lang <name>`, after the report's
   path, for #102 to word the report in; `main.py` ignores it until then. Inno Setup has no plural forms: each count has
   two messages, `...One` for 1 and `...Other` (the count as `%1`) for more, chosen in `EndedNote`: CLDR's choice for
-  every count from 1 to 999,999 in all four languages. In a silent run a box is not shown but logged with its
-  text (`Defaulting to <answer> for suppressed message box (<buttons>):` and the text on the next line); the
-  uninstaller's box for a monitor that stays is a plain `MsgBox`, never shown or logged in a silent uninstall.
-  Names stay as written in every language (#86): the product, the publisher, the Start-menu folder and its two
-  shortcuts, and the name in Apps (`UninstallDisplayName=Claude Usage Monitor version {#AppVer}`, which Setup would
-  otherwise build from the language's `NameAndVersion`). `tests/fixtures/installer_words_english.json`, recorded from
-  the script before #103 moved a word, holds every English text and name byte for byte; `tests/test_installer_words.py`
-  renders each site of today's script with `en.isl` against it (`tests/installer_words.py`), and holds each language's
-  file to English's shape (arguments, line breaks, the access key, the names that stay, UTF-8 without a BOM, NFC). A
-  language the release build declares must have every message; the others' gaps are listed (`python
-  tests/installer_words.py --todo`). Inno Setup is 6.7.1, exactly: the script's guard refuses any other version.
+  every count from 1 to 999,999 in all four languages. Setup's boxes are all `SuppressibleMsgBox`: in a silent run with
+  `/SUPPRESSMSGBOXES` (every update passes it) a box is not shown but logged with its text
+  (`Defaulting to <answer> for suppressed message box (<buttons>):` and the text on the next line); a silent run without
+  that switch shows it (logged as `Message box (<buttons>):` and the text). The uninstaller's three boxes (a monitor
+  that stays, deleting the settings and usage history, what is left in Claude Code) are plain `MsgBox`es behind
+  `UninstallSilent`, never shown or logged in a silent uninstall. Names stay as written in every language (#86): the
+  product, the publisher, the Start-menu folder and its two shortcuts, and the name in Apps
+  (`UninstallDisplayName=Claude Usage Monitor version {#AppVer}`, which Setup would otherwise build from the language's
+  `NameAndVersion`). `tests/fixtures/installer_words_english.json`, recorded from the script before #103 moved a word,
+  holds every English text and name byte for byte; `tests/test_installer_words.py` renders each site of today's script
+  with `en.isl` against it (`tests/installer_words.py`), and holds each language's file to English's shape (arguments,
+  line breaks, the access key, no literal `%`, the names that stay, UTF-8 without a BOM, NFC). A language the release
+  build declares must have every message; the others' gaps are listed (`python tests/installer_words.py --todo`). Inno
+  Setup is 6.7.1, exactly: the script's guard refuses any other version.
 - **Test tools (#89).** The pseudo-locale (`i18n.PSEUDO`, `pseudo`) is `en.json` made longer (about 40%), accented
   (`İ ı ğ ş é ñ` among the look-alikes) and bracketed (`i18n.pseudo_text`), so English left over, a missing glyph
   and a cut end all show. A dev instance shows it with `USAGE_MONITOR_LANG=pseudo`, and the dev server with

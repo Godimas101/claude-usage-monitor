@@ -85,6 +85,21 @@ def test_each_language_file_holds_englishs_messages_in_the_same_shape():
         assert installer_words.problems(language) == [], language
 
 
+def test_a_literal_percent_sign_is_refused(tmp_path):
+    """English has no literal %, and most boxes show CustomMessage() as it is, with no FmtMessage to make %% one sign
+    (NotPutBack, the WebView2 boxes, EndedToolsOne): a draft's 50 %% would show as two signs, and a lone % is refused
+    too. English's own text, with its %1 and %n, is not."""
+    (tmp_path / "en.isl").write_bytes((installer_words.MESSAGES_DIR / "en.isl").read_bytes())
+    english = installer_words.read_isl((tmp_path / "en.isl").read_text(encoding="utf-8"))["CustomMessages"]
+    refused = "a literal % (English has none: Setup shows %% as two signs where no FmtMessage runs)"
+    for name, old, new in (("NotPutBack", "did not finish", "did not finish (50 %%)"),
+                           ("EndedToolsOther", "%1 Claude Code sessions", "%1 Claude Code sessions (50 %)")):
+        assert english[name].count(old) == 1
+        for value, expected in ((english[name], []), (english[name].replace(old, new), [f"{name}: {refused}"])):
+            (tmp_path / "fr.isl").write_text(f"[CustomMessages]\n{name}={value}\n", encoding="utf-8")
+            assert installer_words.problems("fr", tmp_path) == expected, (name, value)
+
+
 def test_an_offered_language_has_every_message():
     """A language the release build declares has every message of en.isl: a gap would show English there. The others
     (the review build's) are drafts (#104 to #106): what each lacks is listed, not failed."""
@@ -296,7 +311,8 @@ def test_the_renderer_reads_pascal_as_setup_builds_it():
 def test_the_messages_files_are_read_as_iscc_reads_them():
     """name=value under [CustomMessages], the name trimmed and the value kept as written after the =, %n as CR LF (a %
     before anything else stays, for FmtMessage), blank lines and ; comments skipped; text before a section refused; the
-    Apps-list name is UninstallDisplayName, else AppVerName, else the language's NameAndVersion."""
+    Apps-list name is UninstallDisplayName, else AppVerName, else the language's NameAndVersion; {cm:X} is X through
+    FmtMessage, as Setup expands it."""
     isl = "; a note\n\n[LangOptions]\nLanguageName=x\n[CustomMessages]\n  Name = a%nb 100%% %1 =c\n; skipped\nTwo=%n\n"
     assert installer_words.custom_messages(isl) == {"Name": " a\r\nb 100%% %1 =c", "Two": "\r\n"}
     with pytest.raises(ValueError):
@@ -308,3 +324,4 @@ def test_the_messages_files_are_read_as_iscc_reads_them():
     assert installer_words.apps_name(setup, messages) == "A version {AppVer}"
     assert installer_words.apps_name({**setup, "UninstallDisplayName": "A v{#AppVer}"}, messages) == "A v{AppVer}"
     assert installer_words.constants("{cm:Pinned} {app}", messages) == "never {app}"
+    assert installer_words.constants("{cm:Share}", {"Share": "100%% of %1"}) == "100% of %1"   # {cm:} runs FmtMessage

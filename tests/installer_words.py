@@ -411,8 +411,9 @@ def expression(text: str, at: int, context: Context) -> tuple[str, int]:
 
 
 def constants(value: str, messages: dict[str, str], used: list[str] | None = None) -> str:
-    """A section value as Setup shows it: {cm:X} is the message, {#Name} (the preprocessor's) is {Name}; other
-    constants stay as written. ``used`` collects the message names it read."""
+    """A section value as Setup shows it: {cm:X} is the message through FmtMessage with no arguments (%% one %, as
+    Setup.MainFunc.pas's ExpandCustomMessageConst gives it), {#Name} (the preprocessor's) is {Name}; other constants
+    stay as written. ``used`` collects the message names it read."""
     def one(found: re.Match[str]) -> str:
         inner = found.group(1)
         if inner.startswith("cm:"):
@@ -420,7 +421,7 @@ def constants(value: str, messages: dict[str, str], used: list[str] | None = Non
                 raise ValueError(f"{{{inner}}}: a message with arguments is not read here")
             if used is not None:
                 used.append(inner[3:])
-            return Context(messages).message(inner[3:])
+            return fmt_message(Context(messages).message(inner[3:]), [])
         if inner.startswith("#"):
             return "{" + inner[1:] + "}"
         return found.group(0)
@@ -603,8 +604,9 @@ def _access_keys(value: str) -> int:
 def problems(language: str, folder: Path = MESSAGES_DIR) -> list[str]:
     """What is wrong with <language>.isl's shape against en.isl: an encoding other than UTF-8 without a byte order mark
     in NFC (en.isl: ASCII), a section other than [CustomMessages], a name English lacks or one of Inno Setup's own,
-    another set of %1 to %9, another count of %n or of & (the access key), a % that is none of those or %%, a name that
-    stays as written (KEPT_NAMES) dropped, or a space at either end."""
+    another set of %1 to %9, another count of %n or of & (the access key), any other % (a literal one, %% too: English
+    has none, and a box that shows CustomMessage() without FmtMessage shows %% as two signs), a name that stays as
+    written (KEPT_NAMES) dropped, or a space at either end."""
     import unicodedata
 
     path = folder / f"{language}.isl"
@@ -638,8 +640,9 @@ def problems(language: str, folder: Path = MESSAGES_DIR) -> list[str]:
             found.append(f"{name}: {source.count('%n')} line breaks, English has {model.count('%n')}")
         if _access_keys(source) != _access_keys(model):
             found.append(f"{name}: another count of & than English's")
-        if re.search(r"%(?![1-9n%])", re.sub("%%", "", source)):
-            found.append(f"{name}: a % that is not %1 to %9, %n or %%")
+        if re.search(r"%(?![1-9n])", source):
+            found.append(f"{name}: a literal % (English has none: Setup shows %% as two signs where no "
+                         "FmtMessage runs)")
         found += [f"{name}: drops {kept!r}" for kept in KEPT_NAMES if kept in model and kept not in source]
         if source != source.strip():
             found.append(f"{name}: a space at an end")

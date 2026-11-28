@@ -59,6 +59,9 @@ UI = pytest.mark.skipif(
 # by a process without a console of its own (pytest run from an editor, a task runner, an agent) otherwise opens a
 # terminal window on the desktop, one per process. test_no_test_starts_a_console_program_without_the_flag keeps it so.
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+# The C# compiler of the .NET Framework that Windows carries: the stand-in installer and exe below are built with it.
+CSC = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Microsoft.NET" / "Framework64" / "v4.0.30319" / "csc.exe"
+needs_csc = pytest.mark.skipif(not CSC.is_file(), reason="the .NET Framework C# compiler (csc.exe) is not on this PC")
 
 ROOT = Path(__file__).resolve().parent.parent
 REPO = version.REPO
@@ -1653,17 +1656,65 @@ def wait_for(condition: Callable[[], bool], timeout: float = 15.0, interval: flo
     return bool(condition())
 
 
+# The installer the real helper runs, standing in for Setup.exe: a windowed program with no window, as Setup is in a
+# silent run, built with csc. It writes the arguments it got, one per line, to the file USAGE_MONITOR_TEST_SETUP_ARGS
+# names (outside the helper's folder, which the helper removes), and exits 1. It exits 2 rather than fail with an
+# exception, which would show a crash box on the desktop.
+SETUP_STAND_IN_SOURCE = """\
+using System;
+using System.IO;
+using System.Text;
+
+static class SetupStandIn {
+    static int Main() {
+        try {
+            string[] args = Environment.GetCommandLineArgs();
+            File.WriteAllText(Environment.GetEnvironmentVariable("USAGE_MONITOR_TEST_SETUP_ARGS"),
+                              string.Join("\\n", args, 1, args.Length - 1), new UTF8Encoding(false));
+            return 1;
+        } catch (Exception) {
+            return 2;
+        }
+    }
+}
+"""
+
+
+def build_setup_stand_in(folder: Path) -> Path:
+    """Compile the stand-in installer into ``folder``, a new folder. Returns the exe."""
+    folder.mkdir(parents=True)
+    source = folder / "setup_stand_in.cs"
+    source.write_text(SETUP_STAND_IN_SOURCE, encoding="ascii")
+    exe = folder / "Setup.exe"
+    done = subprocess.run([str(CSC), "/nologo", "/target:winexe", f"/out:{exe}", str(source)], capture_output=True,
+                          text=True, timeout=120, creationflags=NO_WINDOW)
+    assert done.returncode == 0, done.stdout + done.stderr
+    return exe
+
+
+def setup_arguments(language: str | None, temp: Path) -> list[str]:
+    """The arguments Setup must get from the helper's line, as Windows splits them: SILENT_ARGS in order, then
+    /LANG=<language> as one argument when the update passes one and nothing at all in its place when not (#103), then
+    /LOG= in the temp folder."""
+    switches = [word.replace('"', "") for word in uc.SILENT_ARGS.split(" ")]
+    return [*switches, *([f"/LANG={language}"] if language else []), f"/LOG={temp}\\ClaudeUsageMonitor-setup.log"]
+
+
 @UI
+@needs_csc
 def test_the_real_helper_waits_for_the_monitor_installs_relaunches_and_cleans_up(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
     """Seven helpers at once, each in a temp folder with other characters, each against a stand-in monitor
-    (a process that lives ~5 s) and a stand-in installer (ping.exe, which exits 1 on the unknown switches).
+    (a process that lives ~5 s) and a stand-in installer (SETUP_STAND_IN_SOURCE: it records its arguments, exits 1).
     The helper must not run the installer before the monitor is gone, must run it through the folder name,
     must relaunch the app when its exe exists (a windowed stand-in, StandInApp), and must remove its own folder
-    whether or not it could."""
+    whether or not it could. The first update passes the app's language (fr), the others none, the second with a
+    /LANG=tr in the test's own environment: each installer gets exactly setup_arguments(), so /LANG=fr arrives as one
+    argument between /MERGETASKS and /LOG=, and where no language is passed nothing stands in its place (#103)."""
     system32 = Path(os.environ["SystemRoot"]) / "System32"
     ping = str(system32 / "ping.exe")
+    setup = build_setup_stand_in(tmp_path / "setup-stand-in")
     cases: list[dict[str, Any]] = []
     app: StandInApp | None = None
     try:
@@ -1671,14 +1722,19 @@ def test_the_real_helper_waits_for_the_monitor_installs_relaunches_and_cleans_up
             temp = tmp_path / folder
             work = temp / "usage-monitor-update-abc123"
             work.mkdir(parents=True)
-            shutil.copy(ping, work / "Setup.exe")
+            shutil.copy(setup, work / "Setup.exe")
             relaunched = tmp_path / f"relaunched{index}.txt"
-            extra_env: dict[str, str] = {}
+            arguments = tmp_path / f"setup-arguments{index}.txt"
+            language = "fr" if index == 0 else None
+            extra_env: dict[str, str] = {"USAGE_MONITOR_TEST_SETUP_ARGS": str(arguments)}
             if index == 0:
                 app = StandInApp(tmp_path / "standin", relaunched)
-                exe, extra_env = app.exe, app.env
+                exe = app.exe
+                extra_env.update(app.env)
             else:
                 exe = str(tmp_path / "no such app.exe")        # missing: the helper must finish all the same
+            if index == 1:
+                extra_env["USAGE_MONITOR_UPDATE_LANG"] = "/LANG=tr"   # ours, not the update's: Setup must not get it
             monitor = subprocess.Popen([ping, "-n", "6", "127.0.0.1"], stdout=subprocess.DEVNULL,
                                        stderr=subprocess.DEVNULL, creationflags=NO_WINDOW)
             monkeypatch.setattr(tempfile, "gettempdir", lambda t=temp: str(t))
@@ -1686,9 +1742,10 @@ def test_the_real_helper_waits_for_the_monitor_installs_relaunches_and_cleans_up
             with monkeypatch.context() as scoped:        # the helper copies the environment as it starts
                 for name, value in extra_env.items():
                     scoped.setenv(name, value)
-                helper = uc._spawn_installer(str(work / "Setup.exe"), exe=exe, pid=monitor.pid)
-            cases.append({"temp": temp, "work": work, "monitor": monitor, "helper": helper,
-                          "relaunched": relaunched, "log": temp / "ClaudeUsageMonitor-update.log", "installer_ran_after_monitor": None})
+                helper = uc._spawn_installer(str(work / "Setup.exe"), exe=exe, pid=monitor.pid, language=language)
+            cases.append({"temp": temp, "work": work, "monitor": monitor, "helper": helper, "language": language,
+                          "arguments": arguments, "relaunched": relaunched, "log": temp / "ClaudeUsageMonitor-update.log",
+                          "installer_ran_after_monitor": None})
 
         deadline = time.monotonic() + 120
         while time.monotonic() < deadline:
@@ -1706,6 +1763,8 @@ def test_the_real_helper_waits_for_the_monitor_installs_relaunches_and_cleans_up
             assert not case["work"].exists(), f"{label}: the helper left its folder behind"
             assert "update helper started" in log_text, label
             assert "installer exit code 1" in log_text, f"{label}: the installer was not run through the path\n{log_text}"
+            got = case["arguments"].read_text(encoding="utf-8").split("\n")
+            assert got == setup_arguments(case["language"], case["temp"]), f"{label}: Setup got {got}"
             assert case["installer_ran_after_monitor"] is True, f"{label}: the installer ran while the monitor was alive"
         # The relaunched program starts a moment after cmd runs `start` (the interpreter has to come up).
         assert wait_for(cases[0]["relaunched"].exists), "the helper did not start the app again"
@@ -2646,7 +2705,6 @@ def test_a_sandboxed_update_with_a_file_held_open_stops_and_changes_nothing(tmp_
 # Started with --x-monitor-quits or --x-monitor-stays, then a mutex name and a window class, it is the monitor as Setup
 # finds it: it holds the mutex and a hidden window of that class, and quits on WM_CLOSE (or, staying, ignores it). Those
 # words are no mode of the exe, so Setup counts it as the monitor. It ends by itself after 180 s either way.
-CSC = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Microsoft.NET" / "Framework64" / "v4.0.30319" / "csc.exe"
 STAND_IN_SOURCE = """\
 using System;
 using System.IO;
@@ -2719,7 +2777,6 @@ static class StandIn {
     }
 }
 """
-needs_csc = pytest.mark.skipif(not CSC.is_file(), reason="the .NET Framework C# compiler (csc.exe) is not on this PC")
 
 
 def build_stand_in(box: Sandbox) -> Path:
@@ -3906,7 +3963,7 @@ def test_the_installer_is_built_with_the_pinned_inno_setup() -> None:
     assert "if (-not ($out -match '^Compiler engine version: Inno Setup 6\\.7\\.1$')) { throw" in build
     assert "$code = $LASTEXITCODE" in build and "if ($code -ne 0) { throw" in build
     assert ISS.startswith("; Claude Usage Monitor installer (Inno Setup 6.7.1 exactly")
-    texts = {**workflows, **{name: (ROOT / name).read_text(encoding="utf-8") for name in (
+    texts = {**workflows, "installer.iss": ISS, **{name: (ROOT / name).read_text(encoding="utf-8") for name in (
         "build.bat", "docs/RELEASING.md", "docs/UI_ARCHITECTURE.md", "AGENTS.md", "README.md", "CONTRIBUTING.md")}}
     for name, text in texts.items():
         assert set(re.findall(r"Inno Setup (\d+(?:\.\d+)+)", text)) <= {"6.7.1"}, name

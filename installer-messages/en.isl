@@ -11,6 +11,7 @@
 ; WebView2, microsoft.com, /mcp and the web address. "Setup" is this installer: use the word the language's own Inno
 ; Setup messages use for it. A box's buttons (Yes, No, Retry, Cancel) are not in this file: where a message names one,
 ; use the word the box shows on it in that language (to be checked on the review build).
+; Do not write a literal percent sign; English has none (most boxes would show %% as two signs).
 ; Plain UTF-8 without a byte order mark; NFC. Each message has its note on the lines above it.
 
 [CustomMessages]
