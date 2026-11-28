@@ -20,6 +20,11 @@ jobs:
           python-version: '3.14'   # the Python the release is built and smoke-tested with
       - name: Install dependencies
         run: pip install -r requirements-dev.txt -c constraints-build.txt
+      # Inno Setup 6.7.1 exactly, as release.yml installs it: installer.iss refuses any other, and the plain run reads
+      # its English where it is installed (tests/test_installer_words.py, #103). Moving to another version is #119.
+      - name: Install Inno Setup
+        timeout-minutes: 15
+        run: choco install innosetup --version=6.7.1 --allow-downgrade --no-progress -y
       - name: Run tests
         run: python -m pytest
       # The dashboard scripts are tested by running them under node (tests/webui_checks.js, and motion.js on a fake DOM in
@@ -33,3 +38,11 @@ jobs:
         env:
           USAGE_MONITOR_UI_TESTS: '1'
         run: python -m pytest tests/test_webui.py tests/test_motion.py tests/test_english_left.py
+      # ISCC compiles installer.iss as the release build and as the review build (ISCC /DAllLanguages), into pytest's
+      # temp folder: the [Code] section, the messages a language's file lacks and the compiler's version line (6.7.1).
+      # Setup never runs.
+      - name: Compile the installer script
+        timeout-minutes: 10
+        env:
+          USAGE_MONITOR_UI_TESTS: '1'
+        run: python -m pytest tests/test_update_check.py -k compiles

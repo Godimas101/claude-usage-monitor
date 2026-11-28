@@ -27,14 +27,18 @@ Every step has a timeout.
    `gh release create` then attaches the new build to that tag's old commit. Delete such a tag first
    (`git push --delete origin vX.Y.Z`). A rehearsal skips this check.
 2. On a Windows runner it installs Python 3.14, `requirements.txt` and PyInstaller, held to the versions in
-   `constraints-build.txt`, and runs the test suite (`python -m pytest`, then the node-based dashboard script tests,
-   the two runs of `tests.yml`); a failing test stops the release.
+   `constraints-build.txt`, and Inno Setup 6.7.1 exactly (`choco install innosetup --version=6.7.1 --allow-downgrade`):
+   its own pages and messages are part of what the installer shows, and `installer.iss` refuses any other version
+   (#103; moving to another is #119). It runs the test suite (`python -m pytest`, then the node-based dashboard script
+   tests and the installer script's compile tests, the release build and the review build, as `tests.yml` does); a
+   failing test stops the release.
 3. It runs `pyinstaller --noconfirm ClaudeUsageMonitor.spec`: a windowed onedir bundle, `dist\ClaudeUsageMonitor\`. It
    then starts the built exe with `--print-version` and stops unless it reports `VERSION`, and runs a 45 second
    `--smoke-test` of the exe, which **fails the release** when it reports a problem (the dashboard's page must start,
    not only be fetched). The report and the logs are kept as the `smoke-report` artifact whatever happens.
-4. It installs Inno Setup (Chocolatey, any 6.3 or newer) and runs `ISCC /DAppVer=<VERSION> installer.iss`,
-   which writes `installer\ClaudeUsageMonitorSetup-v<VERSION>.exe`. The run summary shows its SHA-256.
+4. It runs `ISCC /DAppVer=<VERSION> installer.iss`, which writes `installer\ClaudeUsageMonitorSetup-v<VERSION>.exe`,
+   and stops unless ISCC's `Compiler engine version:` line names Inno Setup 6.7.1. The run summary shows its
+   SHA-256.
 5. It checks that file exists, then runs `gh release create v<VERSION> --draft --target <the built commit>` with the
    installer as the only asset. The notes are the body of the `## [<VERSION>]` section of `CHANGELOG.md`, up to the next
    `## [` heading. If that section is missing or empty, GitHub's generated notes are used instead. The tag is created
@@ -84,21 +88,27 @@ having `update_check.py` verify the signature as well as the digest, would also 
 
 - [ ] `python -m pytest -q` passes, and so does `USAGE_MONITOR_UI_TESTS=1 python -m pytest -q` on your desktop (it adds the
       window and process tests, including the update helpers under the real `cmd.exe`, the installer script
-      compiled by Inno Setup, and the signature check of the WebView2 download). `tests.yml` is green on the
-      commit that will reach `main`.
+      compiled by Inno Setup 6.7.1 as the release build and as the review build, and the signature check of the
+      WebView2 download). `tests.yml` is green on the commit that will reach `main`.
 - [ ] The sandboxed installer runs pass: `USAGE_MONITOR_UI_TESTS=1 USAGE_MONITOR_INSTALLER_E2E=1 python -m pytest -q tests/test_update_check.py -k sandboxed`.
       They install and uninstall a **renamed** copy of the installer (own AppId, folder, Run value and mutex; the test
       refuses to run if a real name is left in it) and check the Start with Windows entry for each updater and each
       starting state, and that an update with a file held open stops with the old install whole. Your own install is
-      read before and after and must be unchanged. They need Inno Setup 6.
+      read before and after and must be unchanged. They need Inno Setup 6.7.1; the stand-in tests also need the
+      .NET Framework's `csc.exe`. The language runs (#103) build the review build (ISCC `/DAllLanguages`) and install it
+      with `/LANG=en`, `fr`, `es` and `tr`: the language recorded, the name in Apps, Setup's box and Preparing page for
+      a monitor that stays, the uninstaller's `--lang` and its status line, each in that language (English where its
+      draft lacks a message); an update with and without `/LANG` (never the last install's language); and the release
+      build passing over a language it lacks.
 - [ ] Every frame `CHANGED` in `tests/test_frame_golden.py` lists is a change this release means to make. That test
       checks every widget frame against the last release's, pixel for pixel, and `CHANGED` names the ones that differ
       on purpose (#32). Compare any you doubt with `python main.py --dump-frames DIR` here and at the last tag.
 - [ ] `CHANGELOG.md` has the user-facing notes under `## [X.Y.Z] — YYYY-MM-DD` (the heading must start with
       `## [X.Y.Z]` or the notes are not found), and `[Unreleased]` is empty above it. `README.md` agrees.
 - [ ] `build.bat` succeeds. It builds the exe and the installer from `VERSION`, checks that the frozen exe
-      reports that version (`--print-version`) and prints the installer's SHA-256. It needs Inno Setup 6.3+
-      and `python -m pip install -r requirements.txt pyinstaller`. Set `USAGE_MONITOR_DISTPATH`, `USAGE_MONITOR_WORKPATH` and
+      reports that version (`--print-version`) and prints the installer's SHA-256. It needs Inno Setup 6.7.1
+      exactly (`installer.iss` refuses any other; https://github.com/jrsoftware/issrc/releases/tag/is-6_7_1) and
+      `python -m pip install -r requirements.txt pyinstaller`. Set `USAGE_MONITOR_DISTPATH`, `USAGE_MONITOR_WORKPATH` and
       `USAGE_MONITOR_OUTDIR` to short folders if the checkout is deep (both tools fail past 260 characters). Its toolchain line
       (Python, PyInstaller, Pillow, pywebview) should match what the release workflow's last log shows; if it does
       not, build again with CI's versions before the next two items.
@@ -125,6 +135,27 @@ having `update_check.py` verify the signature as well as the digest, would also 
     window closes with it, and the last page starts the monitor again;
   - uninstalling removes that Run value and Windows' startup record for it, takes the hooks and the MCP tool out of
     Claude Code, and asks before deleting `%APPDATA%\ClaudeUsageMonitor` (No keeps it).
+- [ ] **The installer in each language (#103), on the same spare user or VM, never on your own profile.** After
+      `build.bat`, build the review build from the same bundle (another folder if you set `USAGE_MONITOR_DISTPATH`;
+      ISCC is `C:\Program Files (x86)\Inno Setup 6\ISCC.exe`). It is never published, and
+      nothing else builds it:
+
+      ISCC /DAllLanguages /DAppVer=<VERSION> "/DDistDir=dist\ClaudeUsageMonitor" "/O<scratch folder>" installer.iss
+
+      ISCC warns once for each message a language's file lacks, and English stands in for it
+      (`python tests/installer_words.py --todo` lists them). Then, with that Setup:
+  - set the user's Windows display language to French (Settings → Time & language → Language & region), sign out
+    and in, and run it with no `/LANG`: no language dialog, Inno Setup's own pages in French, the tasks page's heading
+    `Démarrage :` above the Start with Windows box. Run it once more over that install while a Claude Code session
+    uses the monitor's tool, so the last page says what Setup closed. Uninstall: its confirmation and Inno Setup's
+    own words in French. Our own texts (the boxes, the status lines, the last page's sentences, the delete question)
+    stay English until French's draft (#104) lands; nothing may be cut off. Apps lists `Claude Usage Monitor version
+    <VERSION>`, as in English;
+  - the same with a display language Setup does not have (German): everything in English;
+  - without a French display pack: the same Setup with `/LANG=fr`, then `/LANG=es` and `/LANG=tr`. Note the words on
+    a box's buttons: a message that names a button must use the word the box shows (`installer-messages/en.isl`'s
+    header);
+  - screenshots on #103 for the first round, and on #104 to #106 as each draft lands.
 - [ ] **With Claude Code open.** In a Claude Code session that started after the monitor's MCP tool was registered,
       `/mcp` shows `claude-usage` as connected. With the monitor running, run the new installer by hand over that install
       (your own install is fine for this one). It closes the monitor without asking, goes through without an "in use"

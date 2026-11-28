@@ -77,6 +77,14 @@ jobs:
         timeout-minutes: 15
         run: pip install -r requirements-dev.txt -c constraints-build.txt
 
+      # Inno Setup 6.7.1 exactly, the version that built v2.3.0: its own pages and messages are part of what the
+      # installer shows, and installer.iss refuses any other (#103). Installed before the tests, which read its
+      # English and compile the script with it. Moving to another version is #119.
+      - name: Install Inno Setup
+        if: steps.exists.outputs.skip == 'false'
+        timeout-minutes: 15
+        run: choco install innosetup --version=6.7.1 --allow-downgrade --no-progress -y
+
       - name: Run the tests
         if: steps.exists.outputs.skip == 'false'
         timeout-minutes: 25
@@ -93,6 +101,16 @@ jobs:
         env:
           USAGE_MONITOR_UI_TESTS: '1'
         run: python -m pytest tests/test_webui.py tests/test_motion.py
+
+      # ISCC compiles installer.iss as the release build and as the review build (ISCC /DAllLanguages), into pytest's
+      # temp folder: the [Code] section, the messages a language's file lacks and the compiler's version line. Setup
+      # never runs.
+      - name: Compile the installer script
+        if: steps.exists.outputs.skip == 'false'
+        timeout-minutes: 10
+        env:
+          USAGE_MONITOR_UI_TESTS: '1'
+        run: python -m pytest tests/test_update_check.py -k compiles
 
       - name: Build the exe
         if: steps.exists.outputs.skip == 'false'
@@ -159,17 +177,17 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-      - name: Install Inno Setup
-        if: steps.exists.outputs.skip == 'false'
-        timeout-minutes: 15
-        run: choco install innosetup --no-progress -y
-
       - name: Build the installer
         if: steps.exists.outputs.skip == 'false'
         timeout-minutes: 10
         shell: pwsh
         run: |
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DAppVer=${{ steps.ver.outputs.version }}" installer.iss
+          # installer.iss refuses any Inno Setup but 6.7.1 (its guard); the compiler's own line says which one ran.
+          $out = & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DAppVer=${{ steps.ver.outputs.version }}" installer.iss
+          $code = $LASTEXITCODE
+          $out
+          if ($code -ne 0) { throw "ISCC failed (exit code $code)" }
+          if (-not ($out -match '^Compiler engine version: Inno Setup 6\.7\.1$')) { throw 'the installer was not built by Inno Setup 6.7.1' }
 
       - name: Verify build output
         if: steps.exists.outputs.skip == 'false'

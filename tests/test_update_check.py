@@ -3881,6 +3881,40 @@ def test_build_bat_is_plain_ascii_and_builds_what_the_workflow_builds() -> None:
     assert "Toolchain" in script and "importlib.metadata" in script   # CI does not pin its dependencies: the local build says what it used
 
 
+# ── Inno Setup 6.7.1 ──────────────────────────────────────────────────────────
+
+INNO_PIN = "choco install innosetup --version=6.7.1 --allow-downgrade"
+
+
+def test_the_installer_is_built_with_the_pinned_inno_setup() -> None:
+    """Inno Setup's own pages and messages are part of what Setup shows, so one version builds it: 6.7.1, which built
+    v2.3.0 (#103, the owner's choice of 2026-11-27; moving to another is #119). The script refuses any other version; both
+    workflows install exactly that one before their tests, which read its English, and compile the script with it; the
+    release stops unless ISCC's version line names it; and every file that names an Inno Setup version names that one."""
+    assert re.search(r"^#if Ver != EncodeVer\(6, 7, 1\)\n  #error ", ISS, re.M)
+    workflows = {name: (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
+                 for name in ("release.yml", "tests.yml")}
+    for name, workflow in workflows.items():
+        assert workflow.count("choco install") == 1 and INNO_PIN in _workflow_step(workflow, "Install Inno Setup"), name
+        tests = "Run the tests" if name == "release.yml" else "Run tests"
+        assert workflow.index("- name: Install Inno Setup") < workflow.index(f"- name: {tests}\n"), name
+        compiles = _workflow_step(workflow, "Compile the installer script")
+        assert "USAGE_MONITOR_UI_TESTS: '1'" in compiles, name
+        assert "run: python -m pytest tests/test_update_check.py -k compiles" in compiles, name
+        assert re.search(r"timeout-minutes: \d+", compiles), name
+    build = _workflow_step(workflows["release.yml"], "Build the installer")
+    assert "if (-not ($out -match '^Compiler engine version: Inno Setup 6\\.7\\.1$')) { throw" in build
+    assert "$code = $LASTEXITCODE" in build and "if ($code -ne 0) { throw" in build
+    assert ISS.startswith("; Claude Usage Monitor installer (Inno Setup 6.7.1 exactly")
+    texts = {**workflows, **{name: (ROOT / name).read_text(encoding="utf-8") for name in (
+        "build.bat", "docs/RELEASING.md", "docs/UI_ARCHITECTURE.md", "AGENTS.md", "README.md", "CONTRIBUTING.md")}}
+    for name, text in texts.items():
+        assert set(re.findall(r"Inno Setup (\d+(?:\.\d+)+)", text)) <= {"6.7.1"}, name
+    assert "ERROR: Inno Setup 6.7.1 was not found." in texts["build.bat"]
+    assert "https://github.com/jrsoftware/issrc/releases/tag/is-6_7_1" in texts["build.bat"]
+    assert INNO_PIN in texts["docs/RELEASING.md"]
+
+
 # ── docs/RELEASING.md ─────────────────────────────────────────────────────────
 
 def test_releasing_md_describes_the_updater_and_the_release_workflow_as_they_are() -> None:
@@ -3905,6 +3939,9 @@ def test_releasing_md_describes_the_updater_and_the_release_workflow_as_they_are
     for line in ("ping 127.0.0.1 -n 4 >nul", "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART", "ping 127.0.0.1 -n 8 >nul"):
         assert line in releasing, line
     assert "/MERGETASKS" not in releasing.split("ping 127.0.0.1 -n 4 >nul")[1].split("ping 127.0.0.1 -n 8 >nul")[0]
+    # The language runs and the review build by hand (#103): the sandboxed runs, the build, and the spare user in French.
+    assert "ISCC /DAllLanguages /DAppVer=<VERSION>" in releasing and "python tests/installer_words.py --todo" in releasing
+    assert "/LANG=en`, `fr`, `es` and `tr`" in releasing and "display language to French" in releasing
 
 
 def _workflow_step(workflow: str, name: str) -> str:

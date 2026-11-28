@@ -42,6 +42,8 @@ if errorlevel 1 (
     exit /b 1
 )
 
+rem Inno Setup 6.7.1 exactly: its own pages and messages are part of what Setup shows, so installer.iss refuses any
+rem other version (#103).
 set "ISCC="
 for %%p in (
     "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
@@ -49,8 +51,8 @@ for %%p in (
 ) do if exist %%p set "ISCC=%%~p"
 
 if not defined ISCC (
-    echo ERROR: Inno Setup 6 was not found.
-    echo        Download from: https://jrsoftware.org/isdownload.php
+    echo ERROR: Inno Setup 6.7.1 was not found.
+    echo        Download it from: https://github.com/jrsoftware/issrc/releases/tag/is-6_7_1
     %DOPAUSE%
     exit /b 1
 )
@@ -102,7 +104,7 @@ echo.
 echo [3/3] Building the installer with Inno Setup...
 "%ISCC%" /DAppVer=%APPVER% "/DDistDir=%BUNDLE%" "/O%USAGE_MONITOR_OUTDIR%" installer.iss
 if errorlevel 1 (
-    echo ERROR: Inno Setup failed.
+    echo ERROR: Inno Setup failed. installer.iss needs Inno Setup 6.7.1 exactly: see ISCC's message above.
     %DOPAUSE%
     exit /b 1
 )
