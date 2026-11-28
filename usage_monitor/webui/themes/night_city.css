@@ -848,15 +848,16 @@ html[data-reduce-motion="1"] *, html[data-reduce-motion="1"] *::before, html[dat
 :root:not(:lang(en)) .nm-row2 > .nm-facts { min-width: 0; max-width: 60%; }
 :root:not(:lang(en)) .nm-facts b { white-space: nowrap; }
 /* a limit card's facts and its sentences (the pace line, the forecast) wrap; a word longer than the line breaks, with no
-   hyphen and no "…" */
+   hyphen and no "…" (anywhere, not break-word: the pace row is a wrapping flex row, and only anywhere lets an item narrow
+   below its longest word, #98's second review) */
 :root:not(:lang(en)) .nm-grid > [data-limit] :is(.nm-facts > span:not(.nm-chip), .nm-pace > span:first-child, .nm-pace > .fc) {
-  white-space: normal; overflow-wrap: break-word; overflow: visible; text-overflow: clip;
+  white-space: normal; overflow-wrap: anywhere; overflow: visible; text-overflow: clip;
 }
 /* a chip's words clear of its 1 px frame: an accented capital (É, İ) or a cedilla (Ç, Ş) runs past the 14 px box's single
    line, so the chip grows with its words (#98's review); a chip's own word stays on one line, and the pace verdict (a
    sentence this look frames as a chip) wraps inside its card */
 :root:not(:lang(en)) :is(.nm-chip, .nm-pace > b) { height: auto; min-height: 14px; padding-top: 2px; padding-bottom: 2px; line-height: 1.15; }
-:root:not(:lang(en)) .nm-pace > b { white-space: normal; min-width: 0; max-width: 100%; overflow-wrap: break-word; }
+:root:not(:lang(en)) .nm-pace > b { white-space: normal; min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 /* the meter: its two rows share one first column, as wide as the longer label up to half the meter, so their bars start at
    the same x; the bar keeps at least 96 px (a label never squeezes it), and a longer label wraps */
 :root:not(:lang(en)) .nm-meter { display: grid; grid-template-columns: fit-content(50%) minmax(96px, 1fr) 48px; gap: 7px 10px; }

@@ -1727,10 +1727,18 @@
     return nameLine(limit.label || FMT.upper(String(limit.kind || "").replace(/_/g, " "), "en"));
   }
 
-  /* The attributes of a line the Overview may cut: a card's meta, a limit card's pace chip. Outside English the Overview's rows
-   * keep their height, so such a line longer than its room is cut with "…" there by the theme's CSS (#98's owner question 1:
-   * a designed cut). Its whole text stays in the element, in its title and in the card's name (cardName). English keeps its
-   * markup. */
+  /* The attributes of an Overview card's meta (its subtitle, .nm-meta-t): its line's, and its whole text in a title, in every
+   * language (Chris on #98, 2026-11-27: a cut subtitle can be read). English's own rule cuts a meta with "…" where its row
+   * has no room (#118 moves it under the title instead); outside English the Overview's rows keep their height, so a meta
+   * longer than its room is cut there too (#98's owner question 1: a designed cut), its whole text in the element, in this
+   * title and in the card's name (cardName). */
+  function metaAttrs(line) {
+    var text = lineText(line);
+    return lineAttrs(line) + (text ? ' title="' + esc(text) + '"' : "");
+  }
+
+  /* The attributes of a limit card's pace chip, which the Overview may cut outside English (the other designed cut): its
+   * word in its title there, and in the card's name (cardName). English keeps its markup. */
   function cutAttrs(line) {
     var text = lineText(line);
     return lineAttrs(line) + (I18N.language !== "en" && text ? ' title="' + esc(text) + '"' : "");
@@ -1779,7 +1787,7 @@
     return '<section class="nm-card' + (opts.wide ? " wide" : "") + sevClass(limit) + '" data-limit="' + esc(limit.kind) + '"' +
       (I18N.language !== "en" ? ' aria-label="' + esc(cardName(tag.text, opts.meta, chip)) + '"' : "") + ">" +
       '<div class="nm-card-in">' +
-      '<div class="nm-card-t"><span class="nm-tag"' + lineAttrs(tag) + ">" + esc(tag.text) + '</span><span class="nm-meta-t"' + cutAttrs(opts.meta) + ">" +
+      '<div class="nm-card-t"><span class="nm-tag"' + lineAttrs(tag) + ">" + esc(tag.text) + '</span><span class="nm-meta-t"' + metaAttrs(opts.meta) + ">" +
       esc(lineText(opts.meta) || "") + "</span></div>" +
       '<div class="nm-row2"><div class="nm-big">' + esc(fmtPct(pct)) + '</div><div class="nm-facts">' + facts.join("") + "</div></div>" +
       remainHTML(p) +
@@ -1790,12 +1798,13 @@
       "</div></section>";
   }
 
-  /* A limit's card before its first reading, or with no limit to show: tag and meta are lines. */
-  function emptyLimitCard(tag, meta) {
+  /* A limit's card before its first reading, or with no limit to show: tag and meta are lines. On the Overview its meta is a
+   * card subtitle (metaAttrs, a title in every language); Limits' card ("limits") keeps the markup it had (cutAttrs). */
+  function emptyLimitCard(tag, meta, page) {
     var waiting = tLine("overview.limit.waiting");
     return '<section class="nm-card"' + (I18N.language !== "en" ? ' aria-label="' + esc(cardName(tag.text, meta)) + '"' : "") +
       '><div class="nm-card-in"><div class="nm-card-t"><span class="nm-tag"' + lineAttrs(tag) + ">" + esc(tag.text) +
-      '</span><span class="nm-meta-t"' + cutAttrs(meta) + ">" + esc(meta.text) + '</span></div><p class="nm-empty"' + lineAttrs(waiting) + ">" +
+      '</span><span class="nm-meta-t"' + (page === "limits" ? cutAttrs(meta) : metaAttrs(meta)) + ">" + esc(meta.text) + '</span></div><p class="nm-empty"' + lineAttrs(waiting) + ">" +
       esc(waiting.text) + "</p></div></section>";
   }
 
@@ -2641,7 +2650,7 @@
       });
     }, [he.digest, pipsOn, cycleStart], "nm-daily", waiting);
     return '<div class="nm-card-t nm-chart-t"><span class="nm-ttl"' + lineAttrs(title) + ">" + esc(title.text) + '</span><span class="nm-meta-t"' + (waiting ? ' data-pending=""' : "") +
-      lineAttrs(meta) + ">" + esc(meta.text) + "</span></div>" +
+      metaAttrs(meta) + ">" + esc(meta.text) + "</span></div>" +
       '<div class="nm-chart">' + host + "</div>";
   }
 
@@ -2670,7 +2679,7 @@
     var meta = n.cycleStart ? tLine("overview.cost.meta_range", { range: rangeText(n.cycleStart, n.cycleEnd) }) : tLine("overview.cost.meta");
     var today = tLine("overview.cost.today"), week = tLine("overview.cost.week");
     return '<section class="nm-card wide" id="cost" aria-label="' + esc(cardName(title.text, meta)) + '" data-card="cost"><div class="nm-card-in">' +
-      '<div class="nm-card-t"><h2 class="nm-ttl"' + lineAttrs(title) + ">" + esc(title.text) + '</h2><span class="nm-meta-t"' + cutAttrs(meta) + ">" + esc(meta.text) + "</span></div>" +
+      '<div class="nm-card-t"><h2 class="nm-ttl"' + lineAttrs(title) + ">" + esc(title.text) + '</h2><span class="nm-meta-t"' + metaAttrs(meta) + ">" + esc(meta.text) + "</span></div>" +
       '<div class="nm-cost"><div class="nm-cost-l"><div class="nm-hero"><div class="nm-big h" style="--n:' + heroText.length + '">' + esc(heroText) + "</div>" + planBlock + "</div>" +
       (ratio === null || n.price === null ? "" : ratioCells(ratio, t("overview.cost.ratio_label", { multiple: fmtMult(ratio) }), n.pending ? 12 : 0)) +
       '<div class="nm-note"' + lineAttrs(note) + ">" + esc(note.text) + "</div>" +
@@ -2687,7 +2696,7 @@
     var title = tLine("overview.efficiency.title");
     var meta = n.loaded ? tLine("overview.efficiency.cycle") : tLine("overview.efficiency.month");
     return '<section class="nm-card" id="efficiency" aria-label="' + esc(cardName(t("overview.efficiency.label"), meta)) + '" data-card="efficiency"><div class="nm-card-in">' +
-      '<div class="nm-card-t"><h2 class="nm-ttl"' + lineAttrs(title) + ">" + esc(title.text) + '</h2><span class="nm-meta-t"' + cutAttrs(meta) + ">" + esc(meta.text) + "</span></div>" +
+      '<div class="nm-card-t"><h2 class="nm-ttl"' + lineAttrs(title) + ">" + esc(title.text) + '</h2><span class="nm-meta-t"' + metaAttrs(meta) + ">" + esc(meta.text) + "</span></div>" +
       '<div class="nm-kpi"><div class="nm-kl">' + tHtml("overview.efficiency.hit") + '</div><div class="nm-big m">' + esc(hit === null ? "--" : FMT.percent(hit.toFixed(1))) +
       '</div><div class="nm-cells" aria-hidden="true">' + cellsHTML(20, hit || 0) + "</div></div>" +
       '<div class="nm-kpi"><div class="nm-kl">' + tHtml("overview.efficiency.thinking") + '</div><div class="nm-big m">' + esc(thinking === null ? "--" : fmtPct(thinking)) +
@@ -2709,7 +2718,7 @@
     var title = tLine("overview.models.title");
     var meta = n.loaded ? tLine("overview.models.cycle") : tLine("overview.models.month");
     return '<section class="nm-card" id="models" aria-label="' + esc(cardName(title.text, meta)) + '" data-card="models"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl"' + lineAttrs(title) + ">" +
-      esc(title.text) + '</h2><span class="nm-meta-t"' + cutAttrs(meta) + ">" + esc(meta.text) + "</span></div>" +
+      esc(title.text) + '</h2><span class="nm-meta-t"' + metaAttrs(meta) + ">" + esc(meta.text) + "</span></div>" +
       '<div class="nm-mix">' + body + "</div></div></section>";
   }
 
@@ -2725,7 +2734,7 @@
     var title = tLine("overview.surfaces.title");
     var meta = tLine("overview.surfaces.meta");
     return '<section class="nm-card" aria-label="' + esc(cardName(title.text, meta)) + '" data-card="surfaces"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl"' + lineAttrs(title) + ">" +
-      esc(title.text) + '</h2><span class="nm-meta-t"' + cutAttrs(meta) + ">" + esc(meta.text) + "</span></div>" +
+      esc(title.text) + '</h2><span class="nm-meta-t"' + metaAttrs(meta) + ">" + esc(meta.text) + "</span></div>" +
       '<div class="nm-mix">' + body + "</div></div></section>";
   }
 
@@ -3143,7 +3152,7 @@
       }));
     });
     if (!cards.length) {
-      cards.push(cardPart("limit-none", "ready", [], function () { return emptyLimitCard(tLine("limits.none.tag"), tLine("limits.none.meta")); }));
+      cards.push(cardPart("limit-none", "ready", [], function () { return emptyLimitCard(tLine("limits.none.tag"), tLine("limits.none.meta"), "limits"); }));
     }
     var spendCard = card({ key: "credits", title: tLine("limits.credits.title"), meta: tLine("limits.credits.meta"), cls: "is-real",
       body: spendCardBody(u && u.spend, !!(u && u.skeleton)) });

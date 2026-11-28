@@ -20,6 +20,7 @@ against the dev server (python -m usage_monitor.ui.devserver).
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -566,9 +567,11 @@ def test_outside_english_long_text_follows_the_owners_rules() -> None:
     no zoom, no hyphenation); the only ellipsis of the block is Nostromo's pace chip in a limit card's facts, a designed cut,
     and the Overview's card metas keep English's own ellipsis in Nostromo and Night City (one line beside the title, the
     title whole up to 70 % of the row, the meta alone giving way), where Gates moves them below the title as in English; nothing sets a nav tab, the link's words, a
-    sentence line or a chip's own word on one line but the chip, which never wraps; the link's words wrap; a limit's facts
-    wrap within 60 % of the row with their figure on one line; and the meter's bar keeps tests/browser/page_checks.js's
-    BAR_FLOOR."""
+    sentence line or a chip's own word on one line but the chip, which never wraps; a card's title row wraps, so a chip
+    moves below its title; a nav tab that wraps grows where its tab has a fixed height (Night City, Gates); a word longer
+    than a sentence's line breaks (overflow-wrap: break-word in Nostromo's pace column, anywhere in Night City's and Gates'
+    wrapping pace rows); the link's words wrap; a limit's facts wrap within 60 % of the row with their figure on one line;
+    and the meter's bar keeps tests/browser/page_checks.js's BAR_FLOOR."""
     checks_js = (Path(__file__).resolve().parent / "browser" / "page_checks.js").read_text(encoding="utf-8")
     floor = re.search(r"^var BAR_FLOOR = (\d+);$", checks_js, re.M).group(1)
     meta = ":root:not(:lang(en)) .nm-grid .nm-card-t:not(.nm-chart-t) > .nm-meta-t"
@@ -590,8 +593,15 @@ def test_outside_english_long_text_follows_the_owners_rules() -> None:
         assert re.search(rf"minmax\({floor}px, 1fr\)", bodies[":root:not(:lang(en)) .nm-meter"]), theme_id
         assert "max-width: 60%" in bodies[":root:not(:lang(en)) .nm-row2 > .nm-facts"], theme_id
         assert any(sel.endswith(" b") and ".nm-facts" in sel and "white-space: nowrap" in body for sel, body in rules), theme_id
-        assert any(".nm-pace" in sel and "overflow-wrap: break-word" in body for sel, body in rules), theme_id
+        # a word longer than its line breaks: Nostromo's pace is a column, where break-word does it; Night City's and Gates' pace
+        # rows wrap their items, and only anywhere lets one narrow below its longest word (#98's second review)
+        wrap = "overflow-wrap: break-word" if theme_id == "nostromo" else "overflow-wrap: anywhere"
+        assert any(".nm-pace" in sel and wrap in body for sel, body in rules), theme_id
+        assert theme_id == "nostromo" or not any(".nm-pace" in sel and "overflow-wrap: break-word" in body for sel, body in rules), theme_id
+        # a nav tab that wraps grows with its two lines where the look's tab has a fixed height (Nostromo's two lines fit its 34 px)
+        assert theme_id == "nostromo" or any(sel == ":root:not(:lang(en)) .nm-menu a" and "height: auto" in body for sel, body in rules), theme_id
         if theme_id == "gates":
+            assert re.search(r"^\.nm-card-t \{ display: flex; flex-wrap: wrap;", THEME_CSS["gates"], re.M)
             assert not any(".nm-meta-t" in sel for sel, _ in rules)
             assert any(sel == ":root:not(:lang(en)) .nm-menu a" and "white-space: normal" in body for sel, body in rules)
         else:
@@ -599,6 +609,8 @@ def test_outside_english_long_text_follows_the_owners_rules() -> None:
             title = bodies[":root:not(:lang(en)) .nm-grid .nm-card-t:not(.nm-chart-t):has(> .nm-meta-t) > :is(.nm-tag, .nm-ttl)"]
             assert "flex-shrink: 0" in title and "max-width: 70%" in title, theme_id
             assert "flex-wrap: nowrap" in bodies[":root:not(:lang(en)) .nm-grid .nm-card-t:not(.nm-chart-t):has(> .nm-meta-t)"], theme_id
+            # a card's title row wraps, so a chip moves below its title (Gates' row wraps in every language)
+            assert "flex-wrap: wrap" in bodies[":root:not(:lang(en)) .nm-card-t"], theme_id
             # English's own cut, which the designed cut keeps outside English
             english = THEME_CSS[theme_id][:THEME_CSS[theme_id].index("/* Outside English (#98, owner question 1")]
             assert ".nm-grid .nm-card-t:not(.nm-chart-t) .nm-meta-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }" in english
@@ -4132,7 +4144,8 @@ def test_english_limit_tags_are_the_limits_own_and_other_languages_name_the_kind
     pacing card's aria-label keeps it, capitals and all. Another language names the limit from its kind and scope (the
     widgets' rule, #93): "{name} weekly" with the scope as the usage API names it, the scoped placeholder "Scoped", and a
     kind it has no words for keeps the label. A name's element is marked translate="no" there; English keeps its markup.
-    Outside English the Overview card's meta carries its whole text in a title and the card a name (#98's owner question 1)."""
+    Outside English the Overview card's meta carries its whole text in a title and the card a name (#98's owner question 1);
+    in English the meta's title alone (Chris on #98, 2026-11-27)."""
     tags = checks["stageB"]["tags"]
     en = {name: (tag["text"], tag["lang"], tag.get("name", False)) for name, tag in tags["en"].items()}
     assert en == {"scoped": ("FABLE WEEKLY", "", True), "surface": ("CLAUDE_CODE WEEKLY", "", True), "unnamed": ("WEEKLY SCOPED", "", True),
@@ -4144,7 +4157,7 @@ def test_english_limit_tags_are_the_limits_own_and_other_languages_name_the_kind
                   "unlabelled": ("SESSION-FR", "fr", False), "weekly": ("Weekly", "en", False), "other": ("MONTHLY THING", "", True),
                   "otherBare": ("MONTHLY THING", "", True)}
     markup = checks["stageB"]["tagMarkup"]
-    assert '<span class="nm-tag">FABLE WEEKLY</span><span class="nm-meta-t">7-day window</span>' in markup["en"]
+    assert '<span class="nm-tag">FABLE WEEKLY</span><span class="nm-meta-t" title="7-day window">7-day window</span>' in markup["en"]
     assert '<span class="nm-tag">Fable HEBDO-FR</span><span class="nm-meta-t" lang="en" title="7-day window">7-day window</span>' in markup["fr"]
     assert markup["fr"].startswith('<section class="nm-card" data-limit="weekly_scoped" aria-label="Fable HEBDO-FR, 7-day window, ')
     assert '<span class="nm-tag" lang="en">Weekly</span>' in markup["frWeekly"]
@@ -4177,8 +4190,10 @@ def test_an_unknown_plan_is_worded_by_the_page(checks: dict[str, Any]) -> None:
 def test_the_overviews_cut_lines_keep_their_whole_text_outside_english(checks: dict[str, Any]) -> None:
     """#98's owner question 1, as decided: outside English the Overview may cut a card's meta, and a limit card's pace chip,
     with an ellipsis (the designed cuts). Each keeps its whole text in the element, in its title, and in the card's name
-    (aria-label: overview.card.name, overview.card.name_chip for a limit card). English keeps its markup: no title on a meta
-    or a chip, no name on a limit card, each other card named by its title as before."""
+    (aria-label: overview.card.name, overview.card.name_chip for a limit card). Every Overview card subtitle carries its
+    whole text in a title in English too (Chris on #98, 2026-11-27: a cut subtitle can be read), the cost card's daily
+    chart's too; otherwise English keeps its markup: no title on a chip, no name on a limit card, each other card named by
+    its title as before."""
     def opening(markup: str) -> str:
         return re.match(r"<section[^>]*>", markup).group(0)
 
@@ -4187,7 +4202,12 @@ def test_the_overviews_cut_lines_keep_their_whole_text_outside_english(checks: d
 
     english = checks["q1"]["en"]
     for card, markup in english.items():
-        assert not re.search(r'class="nm-meta-t"[^>]*title=', markup) and not re.search(r'class="nm-chip[^"]*"[^>]*title=', markup), card
+        metas = [(attrs, text) for attrs, text in re.findall(r'<span class="nm-meta-t"([^>]*)>([^<]*)</span>', markup) if text != "&nbsp;"]
+        assert metas, card
+        for attrs, text in metas:
+            title = re.search(r' title="([^"]*)"', attrs)
+            assert title and unescape(title.group(1)) == unescape(text), (card, attrs, text)
+        assert not re.search(r'class="nm-chip[^"]*"[^>]*title=', markup), card
     assert "aria-label" not in opening(english["limit"]) and "aria-label" not in opening(english["empty"])
     assert [name(english[card]) for card in ("cost", "efficiency", "models", "surfaces")] == [
         ENGLISH_CATALOG["overview.cost.title"], ENGLISH_CATALOG["overview.efficiency.label"], ENGLISH_CATALOG["overview.models.title"],
@@ -4426,6 +4446,94 @@ def test_the_later_record_holds_the_answers_the_first_lacked() -> None:
     assert "THE LATEST REFRESH FAILED (UNKNOWN PARAMETER: WINDW). THESE FIGURES ARE FROM 2 M AGO." in texts
     assert "HTTP 4" not in texts
     assert "YOUR PLANUNKNOWN PLAN · $50 / MONTH" in texts and "Your planUnknown plan · $50 / month" in texts    # Nostromo, Gates
+
+
+# Each record as tests/page_words.js first made it (--record, --record-more, on the code at c05f45d), by its sha256. Since then
+# both differ from that by one deliberate change alone (Chris on #98, 2026-11-27): every Overview card subtitle (.nm-meta-t on
+# the Overview's cards) carries its full text in a title, in English too, derived from the record (nothing on screen moved).
+FIRST_MAKING = {"page_words_english.json": "1a05b790667797d3007db97201bb3fbc9c7b48fb715c8cdb8bb058dab5c160ec",
+                "page_words_english_more.json": "7bcbfe92adafa0c47feef5352668445b7ceea64534dad6395f5661aa15a06653"}
+# The subtitles each Overview card can show (en.json's keys), by region: the limit cards', the cost card's and its daily
+# chart's, efficiency's, model mix's and the surfaces card's. The burn card has none.
+SUBTITLE_KEYS = {"limit": ["limit.meta.session", "limit.meta.weekly", "overview.limit.no_scoped"],
+                 "cost": ["overview.cost.meta", "overview.cost.meta_range"],
+                 "daily": ["overview.daily.top", "overview.daily.no_use", "overview.daily.pip"],
+                 "efficiency": ["overview.efficiency.cycle", "overview.efficiency.month"],
+                 "models": ["overview.models.cycle", "overview.models.month"], "surfaces": ["overview.surfaces.meta"]}
+
+
+def record_text(record: dict[str, Any]) -> str:
+    """A record as tests/page_words.js's format() writes it: one case, string or view a line."""
+    def dumps(value: Any) -> str:
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+    def lines(items: list[str]) -> str:
+        return ",\n".join("  " + item for item in items)
+    views = [dumps(key) + ": " + dumps(view) for key, view in record["views"].items()]
+    return "\n".join(["{", ' "_about": ' + dumps(record["_about"]) + ",", ' "looks": ' + dumps(record["looks"]) + ",",
+                      ' "cases": [', lines([dumps(c) for c in record["cases"]]), " ],",
+                      ' "strings": [', lines([dumps(t) for t in record["strings"]]), " ],",
+                      ' "views": {', lines(views), " }", "}", ""])
+
+
+def record_pack(views: dict[str, dict[str, dict[str, Any]]]) -> tuple[list[str], dict[str, dict[str, list[Any]]]]:
+    """page_views' views as tests/page_words.js's pack() keeps them: every distinct text once, in the order first met."""
+    strings: list[str] = []
+    index: dict[str, int] = {}
+
+    def ref(value: Any) -> int:
+        text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+        if text not in index:
+            index[text] = len(strings)
+            strings.append(text)
+        return index[text]
+    packed = {key: {name: [ref(r["text"]), ref(r["attrs"])] + ([None if r["gates"] is None else ref(r["gates"])] if "gates" in r else [])
+                    for name, r in regions.items()} for key, regions in views.items()}
+    return strings, packed
+
+
+def test_the_records_differ_from_their_first_making_by_the_subtitle_titles_alone() -> None:
+    """The one deliberate change to English's records (Chris on #98, 2026-11-27, attributes only): each Overview card's
+    subtitle carries its full text in a title. Take every such title out of both records and each is, byte for byte, the
+    file tests/page_words.js first made (FIRST_MAKING), its _about without the sentence that says so. Each title taken out
+    sits on an Overview card, is a subtitle the card's text shows (en.json's English for one of the meta keys), and every
+    card has its subtitle's: one on each card but the burn card (none) and the cost card (two where its daily chart shows
+    a subtitle beside its title)."""
+    english = ENGLISH_CATALOG
+
+    def pattern(key: str) -> re.Pattern[str]:
+        return re.compile(".+".join(re.escape(part) for part in re.split(r"\{\w+\}", english[key])), re.S)
+
+    shapes = {group: [pattern(key) for key in keys] for group, keys in SUBTITLE_KEYS.items()}
+    daily = re.compile(r"daily · last \d+ days?(.)", re.I | re.S)
+    for name, sha in FIRST_MAKING.items():
+        path = Path(__file__).resolve().parent / "fixtures" / name
+        record = json.loads(path.read_text(encoding="utf-8"))
+        assert path.read_bytes() == record_text(record).encode("utf-8"), name           # the recorder's own form
+        assert len(record["_about"]) == 2 and "Chris on #98, 2026-11-27" in record["_about"][1], name
+        views = page_views(record)
+        taken = 0
+        for key, regions in views.items():
+            for region, r in regions.items():
+                if not (key.endswith("|overview") and region.startswith("card:")):
+                    continue                    # every other region as first made: the sha256 below holds it
+                shown = (r["gates"] if r.get("gates") else r["text"]).casefold()
+                added = [attr == "title" and bool(value) and value.casefold() in shown for attr, value in r["attrs"]]
+                titles = [value for (_, value), new in zip(r["attrs"], added) if new]
+                r["attrs"] = [attr for attr, new in zip(r["attrs"], added) if not new]
+                taken += len(titles)
+                group = "limit" if region.startswith("card:limit-") else region[5:]
+                if group == "burn":
+                    assert not titles, (name, key)
+                    continue
+                with_daily = group == "cost" and (found := daily.search(shown)) is not None and found.group(1) != "\u00a0"
+                assert len(titles) == 1 + with_daily, (name, key, region, titles)
+                assert any(shape.fullmatch(titles[0]) for shape in shapes[group]), (name, key, region, titles)
+                assert not with_daily or any(shape.fullmatch(titles[1]) for shape in shapes["daily"]), (name, key, titles)
+        assert taken > 0, name
+        strings, packed = record_pack(views)
+        first = dict(record, _about=record["_about"][:1], strings=strings, views=packed)
+        assert hashlib.sha256(record_text(first).encode("utf-8")).hexdigest() == sha, name
 
 
 @ui_only

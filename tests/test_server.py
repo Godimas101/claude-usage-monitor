@@ -5268,8 +5268,8 @@ def test_overview_cards_never_clip_their_content_in_the_real_web_view(tmp_path: 
 # ── #98: the page in each language it is built for, in the real web view ─────────────────────────────
 
 # What the real-web-view tests read from the page: the same functions tests/browser/page_probe.js (their headless stand-in)
-# uses. English's own overflows (two decided by #98's owner question 3, the rest awaiting the owner), made from an English
-# run of the stand-in; the page-words record of
+# uses. English's own overflows, made from an English run of the stand-in, each kept by the owner's decision it names (#98:
+# Night City's heading decided, the cut subtitles until #118, Nostromo's facts until #117); the page-words record of
 # today's English (#98); #97's update lines.
 PAGE_CHECKS = Path(__file__).resolve().parent / "browser" / "page_checks.js"
 OVERFLOW_RECORD = Path(__file__).resolve().parent / "fixtures" / "page_overflow_english.json"
@@ -5346,7 +5346,7 @@ def test_the_held_page_is_the_page_with_its_clock_held(tmp_path: Path, monkeypat
 
 
 # Runs in a child process like _LAYOUT_PROBE. argv: the page's URL, the outer sizes, the pages, tests/browser/page_checks.js,
-# what to read and #97's lines. "overflow": measure() of each page at each size. "caps": the regions and the CSS capitals of
+# what to read and #97's lines. "overflow": measure() and chips() of each page at each size. "caps": the regions and the CSS capitals of
 # each page at the first size, then Settings' and the update banner's update texts, with each line written into their line
 # elements.
 _PAGE_PROBE = r"""
@@ -5403,7 +5403,7 @@ def probe(window):
                     window.resize(width, height)
                     time.sleep(1.0)
                     results.append({"page": page, "size": [width, height], "settled": settled,
-                                    "measured": steady(window, "measure()")})
+                                    "measured": steady(window, "measure()"), "chips": steady(window, "chips()")})
         else:
             for page in PAGES:
                 settled = open_page(window, page)
@@ -5484,11 +5484,28 @@ def cut_problem(item: dict[str, Any], look: str, lang: str, page: str, size: str
     return None
 
 
+def chip_problems(chip: dict[str, Any], lang: str) -> list[str]:
+    """What is wrong with one chip as chips() reads it (#98's review, finding F2; the stand-in's widths step judges the same):
+    its words' ink less than 1 px clear of a framed chip's top or bottom (inside an unframed one's box); its frame out of
+    its card while its words stay in (words that leave are measure()'s); outside English a chip's own word on more than one
+    line."""
+    room = 1 if chip["framed"] else 0
+    problems = []
+    if chip["top"] < room or chip["bottom"] < room:
+        problems.append(f"the ink of {chip['at']} {chip['text']!r} sits {chip['top']} / {chip['bottom']} px inside its box")
+    if chip["out"] > 0.5 and chip["wordsOut"] <= 0.5:
+        problems.append(f"the frame of {chip['at']} {chip['text']!r} runs {chip['out']} px out of its card")
+    if lang != "en" and chip["chip"] and chip["lines"] > 1:
+        problems.append(f"the word of {chip['at']} {chip['text']!r} takes {chip['lines']} lines")
+    return problems
+
+
 def overflow_problems(look: str, lang: str, results: list[dict[str, Any]]) -> list[str]:
     """What runs past its room in ``results`` (each page at each size, as measure() reads it) that English's record does not
-    name, and a known one that runs more than 1 px further than in English. Outside English (#98's owner question 1, as
-    decided): a cut with an ellipsis that is not a designed cut passing cut_problem's rules, an ellipsis set on a nav tab,
-    the header's link words, a sentence line or a figure (measure()'s styled), and a meter's bar under BAR_FLOOR."""
+    name, and a known one that runs more than 1 px further than in English; and each chip chips() reads that chip_problems
+    fails, in every language. Outside English (#98's owner question 1, as decided): a cut with an ellipsis that is not a
+    designed cut passing cut_problem's rules, an ellipsis set on a nav tab, the header's link words, a sentence line or a
+    figure (measure()'s styled), and a meter's bar under BAR_FLOOR."""
     known = overflow_known(look, lang)
     problems = []
     for result in results:
@@ -5498,7 +5515,7 @@ def overflow_problems(look: str, lang: str, results: list[dict[str, Any]]) -> li
         if not result.get("settled", True):
             problems.append(f"{page} {size}: the page did not settle")
         for item in measured["over"]:
-            past = item["sw"] - item["cw"] if item["kind"] == "wide" else item.get("by")
+            past = item["sw"] - item["cw"] if item["kind"] == "wide" and "by" not in item else item.get("by")   # a cut under a px: by
             match = known_match(known, item, page, size)
             if match is None and lang != "en" and item.get("cut"):
                 why = cut_problem(item, look, lang, page, size)
@@ -5508,6 +5525,8 @@ def overflow_problems(look: str, lang: str, results: list[dict[str, Any]]) -> li
                 problems.append(f"{page} {size}: {item}")
             elif past > match["by"] + 1:
                 problems.append(f"{page} {size}: {item['at']} runs {past} px past its box, English's known {match['by']} px")
+        for chip in result.get("chips") or []:
+            problems.extend(f"{page} {size}: {why}" for why in chip_problems(chip, lang))
         if lang == "en":
             continue
         for styled in measured.get("styled", []):
@@ -5557,7 +5576,7 @@ def test_the_overflow_judge_holds_the_designed_cuts_to_their_rules() -> None:
     assert one(judge(lang="fr", size=[1200, 780]), "default window")
     # English's own cut through a fallback: Edgerun's surfaces meta, which English's record names in the default window
     surfaces = next(k for k in json.loads(OVERFLOW_RECORD.read_text(encoding="utf-8"))["known"]
-                    if k["owner"] == "decided" and k["why"] == "ellipsis")
+                    if k["why"] == "ellipsis" and k["sizes"] == [DEFAULT_SIZE])
     english = {"kind": "wide", "at": surfaces["at"], "sw": 100, "cw": 90,
                "cut": dict(cut, full="share, 7 days", title="share, 7 days", lang="en")}
     shown = {"page": "overview", "size": [1200, 780], "measured": {"over": [english], "styled": [], "bars": []}}
@@ -5573,31 +5592,63 @@ def test_the_overflow_judge_holds_the_designed_cuts_to_their_rules() -> None:
         styled, styled=[], bars=[{"at": "div.nm-meter", "widths": [96, 120]}])}]) == []
 
 
+def test_the_overflow_judge_holds_each_chip_to_its_frame_and_its_card() -> None:
+    """#98's review (finding F2), in the real web view too since its second review: a chip's words' ink at least 1 px clear of
+    a framed chip's top and bottom (an accented capital on Night City's 14 px chips), inside an unframed one's box; its frame
+    inside its card while its words stay in; outside English a chip's own word on one line. English is judged the same way
+    (its views pass the stand-in's chip check), but a chip's word may wrap there."""
+    chip = {"at": "limit-session b", "text": "[ÜÑDÉR PÁÇÉ]", "top": 1.5, "bottom": 1.5, "h": 18, "framed": True, "chip": False,
+            "lines": 1, "out": 0, "wordsOut": 0}
+
+    def judge(lang: str = "pseudo", **changes: Any) -> list[str]:
+        measured = {"over": [], "styled": [], "bars": []}
+        return overflow_problems("night_city", lang, [{"page": "overview", "size": [1200, 780], "measured": measured,
+                                                       "chips": [dict(chip, **changes)]}])
+
+    assert judge() == [] and judge(lang="en") == [] and judge(top=1, bottom=1) == []
+    assert len(judge(top=-0.5)) == 1 and "ink" in judge(top=-0.5)[0] and len(judge(bottom=0.9)) == 1
+    assert judge(framed=False, top=0, bottom=0) == [] and len(judge(framed=False, top=-0.5)) == 1
+    assert len(judge(out=3, wordsOut=0)) == 1 and "out of its card" in judge(out=3, wordsOut=0)[0]
+    assert judge(out=3, wordsOut=3) == []                              # words that leave are measure()'s, which the record judges
+    assert len(judge(chip=True, lines=2)) == 1 and judge(chip=True, lines=2, lang="en") == [] and judge(lines=2) == []
+    assert judge(lang="en", top=-0.5)                                   # English's chips too
+    results = [{"page": "overview", "size": [1200, 780], "measured": {"over": [], "styled": [], "bars": []}}]
+    assert overflow_problems("night_city", "pseudo", results) == []    # a result without chips (the stand-in's dry runs)
+
+
 def test_the_overflow_record_names_englishs_own_and_no_other_language_has_any() -> None:
-    """OVERFLOW_RECORD names each of English's overflows with its look, page, size, element and width, by what it is, and who
-    has accepted it (owner). #98's owner question 3 decided two, labelled decided: Night City's heading (its slanted cursor,
-    3 px past the heading's box, nothing cut; both pages, every size) and Edgerun's Overview surfaces meta, cut with the
-    theme's ellipsis in the default window. Every other entry is labelled awaiting: English as it was, first measured at
-    1060 x 640 (critic 22), kept so English does not change until the owner accepts it on #98: more Overview metas cut with
-    the same ellipsis, and a find outside #98 (Nostromo's warning and critical scenarios, never the normal one), for a
-    ticket of its own. The judge passes a known one in English, fails it 2 px further, fails it in another language, and
-    fails anything it does not name."""
+    """OVERFLOW_RECORD names each of English's overflows with its look, page, size, element and width, by what it is, and the
+    owner's decision that keeps it (owner), as Chris made them on #98 (owner question 3 on 2026-11-26, then all of them looked
+    at one by one on 2026-11-27): Night City's heading (its slanted cursor, 3 px past the heading's box, nothing cut; both
+    pages, every size) "decided, kept (Chris 2026-11-26)"; every Overview card subtitle cut with the theme's ellipsis
+    (Edgerun's surfaces meta in the default window, the others at 1060 x 640, two of them by less than a px, which the
+    record names since #98's second review) "kept until #118 (approved 2026-11-27) moves the subtitle under the title"; the six entries of Nostromo's facts cut at 1060 x 640 (its warning and critical scenarios,
+    never the normal one) "kept until #117". The record keeps them so English does not change until those tickets land. The
+    judge passes a known one in English, fails it 2 px further, fails it in another language, fails anything it does not
+    name, and judges a cut under a px (measure()'s by) by how far it runs past."""
     record = json.loads(OVERFLOW_RECORD.read_text(encoding="utf-8"))
-    assert {k["why"] for k in record["known"]} <= {"heading", "ellipsis", "find"}
-    decided = [k for k in record["known"] if k["owner"] == "decided"]
-    assert [(k["why"], k["looks"], k["page"], k["sizes"]) for k in decided] == [
-        ("ellipsis", ["edgerun"], "overview", ["1200x780"]),
-        ("heading", ["night_city", "edgerun"], "limits", ["1200x780", "1060x640", "720x480"]),
-        ("heading", ["night_city", "edgerun"], "overview", ["1200x780", "1060x640", "720x480"])]
-    assert decided[0]["at"].endswith("[data-card=surfaces]>div.nm-card-in>div.nm-card-t>span.nm-meta-t")
+    owners = {"heading": "decided, kept (Chris 2026-11-26)",
+              "ellipsis": "kept until #118 (approved 2026-11-27) moves the subtitle under the title", "find": "kept until #117"}
+    assert {k["why"] for k in record["known"]} == set(owners)
+    assert [sum(k["why"] == why for k in record["known"]) for why in ("heading", "ellipsis", "find")] == [2, 13, 6]
+    # the two cuts under a px that #98's second review's measure sees (by to 0.1 px), both at 1060 x 640
+    assert sorted((k["looks"], k["at"].split(">")[0], k["by"]) for k in record["known"] if k["by"] < 1) == [
+        (["edgerun"], "section#efficiency.nm-card[data-card=efficiency]", 0.2), (["night_city"], "section#models.nm-card[data-card=models]", 0.6)]
+    assert "#117" in record["_about"] and "#118" in record["_about"] and "awaiting" not in record["_about"]
+    assert [(k["looks"], k["page"], k["sizes"]) for k in record["known"] if k["why"] == "heading"] == [
+        (["night_city", "edgerun"], "limits", ["1200x780", "1060x640", "720x480"]),
+        (["night_city", "edgerun"], "overview", ["1200x780", "1060x640", "720x480"])]
+    default = [k for k in record["known"] if k["why"] != "heading" and k["sizes"] != ["1060x640"]]
+    assert [(k["why"], k["looks"], k["sizes"]) for k in default] == [("ellipsis", ["edgerun"], [DEFAULT_SIZE])]
+    assert default[0]["at"].endswith("[data-card=surfaces]>div.nm-card-in>div.nm-card-t>span.nm-meta-t")
     for k in record["known"]:
         assert set(k) == {"why", "owner", "looks", "states", "page", "sizes", "kind", "at", "by"}, k
-        assert k["owner"] == "decided" or (k["owner"] == "awaiting" and k["sizes"] == ["1060x640"]), k
+        assert k["owner"] == owners[k["why"]], k
         assert set(k["looks"]) <= set(LOOKS_98) and k["page"] in ("overview", "limits") and k["by"] > 0, k
         assert k["why"] != "heading" or (k["at"].endswith("h1.nm-h1") and set(k["looks"]) <= {"night_city", "edgerun"}
                                          and k["by"] <= 3), k
-        assert k["why"] != "ellipsis" or k["at"].endswith("span.nm-meta-t"), k
-        assert k["why"] != "find" or (k["states"] != "*" and "normal" not in k["states"]), k
+        assert k["why"] != "ellipsis" or (k["at"].endswith("span.nm-meta-t") and k["page"] == "overview"), k
+        assert k["why"] != "find" or (k["states"] != "*" and "normal" not in k["states"] and k["looks"] == ["nostromo"]), k
     heading = next(k for k in record["known"] if k["why"] == "heading")
     item = {"kind": heading["kind"], "at": heading["at"], "sw": 100 + heading["by"], "cw": 100}
     result = {"page": heading["page"], "size": [int(x) for x in heading["sizes"][0].split("x")], "measured": {"over": [item]}}
@@ -5606,6 +5657,10 @@ def test_the_overflow_record_names_englishs_own_and_no_other_language_has_any() 
     assert overflow_problems(look, "pseudo", [result])
     assert overflow_problems(look, "en", [dict(result, measured={"over": [dict(item, sw=item["sw"] + 2)]})])
     assert overflow_problems(look, "en", [dict(result, measured={"over": [dict(item, at="span.nm-other")]})])
+    # a cut under a px (#98's second review): its scroll widths equal, its by (to 0.1 px) says how far it runs past
+    fine = dict(item, sw=100, cw=100, by=heading["by"] + 0.6)
+    assert overflow_problems(look, "en", [dict(result, measured={"over": [fine]})]) == []
+    assert overflow_problems(look, "en", [dict(result, measured={"over": [dict(fine, by=heading["by"] + 1.2)]})])
 
 
 @ui_only
@@ -5616,8 +5671,12 @@ def test_overview_and_limits_overflow_nothing_in_the_real_web_view(tmp_path: Pat
     """#98: in the header, the nav and the page, nothing runs past its room on Overview and Limits, in the default window, at
     1060 x 640 (Gates' 232 px nav column) and at 720 x 480 (one column): no nowrap element, nav item or row cell wider than its
     box; nothing taller than a box that cannot grow; no words that leave their card, the bar or the nav, or sit on other
-    words; the nav's blocks and the header's parts apart; a meter's two bars starting at the same x. English may have only
-    its own known overflows (OVERFLOW_RECORD, none more than 1 px further). The pseudo-locale has none but the designed cuts
+    words; the nav's blocks and the header's parts apart; a meter's two bars starting at the same x; and in every language
+    each chip's words' ink clear of its 1 px frame and its frame inside its card (chips(), chip_problems: #98's review, finding
+    F2, an accented capital on Night City's chips; read here since its second review, as WebView2's display scaling may
+    place the ink otherwise than the stand-in's). An element cut with an ellipsis is cut however little its words run past
+    its box. English may have only its own known overflows (OVERFLOW_RECORD, none more than 1 px further). The
+    pseudo-locale has none but the designed cuts
     (#98's owner question 1, as decided: a longer line wraps, and an Overview card's meta or a limit card's chip may be cut
     with an ellipsis, its whole text kept in the element, its title and the card's name), no ellipsis on a nav tab, the
     link's words, a sentence line or a figure, no nav tab over two lines, and no meter bar under BAR_FLOOR (overflow_problems).

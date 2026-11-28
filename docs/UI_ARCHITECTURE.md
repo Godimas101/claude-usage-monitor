@@ -693,7 +693,11 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   The pacing card's hidden sizing texts come from the story keys, with the language's clock of noon and its `00.0`.
   English is unchanged on screen, byte for byte in every look, as `tests/fixtures/page_words_english.json` holds it
   ("Test tools"); the one difference is Gates before its first state, which shows its own words from `app.js`'s first render
-  instead of the shell's capitals until `gates.js` arrived. Three English forms changed that cannot show: the one forms
+  instead of the shell's capitals until `gates.js` arrived. One deliberate change, attributes only (Chris on #98,
+  2026-11-27): every Overview card subtitle (`.nm-meta-t` on the Overview's cards, the cost card's daily chart's too) carries
+  its full text in a `title` in every language (`metaAttrs`), so a subtitle English's own rule cuts with "…" can be read;
+  nothing on screen moves (#118 moves a subtitle that does not fit under its title). Both records gained those titles,
+  derived from the records, not re-recorded. Three English forms changed that cannot show: the one forms
   of `limits.fact.value.days` and `.hours` (`1 day`, `1 hour`; the windows are 5 hours and 7 days) and of `ratio.scaled`
   (a cell of one month is never scaled).
 - **Longer words (#98, owner question 1).** As the owner decided on #98, after a look at what other apps do: outside
@@ -715,18 +719,22 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
     with English's own ellipsis. Nostromo's pace chip in a limit card's facts is the other designed cut, where the column beside the
     figure has no more room. Gates moves a meta below its title, as in English, and on the other pages a meta moves below
     the title in every look.
-  - The pace line, its verdict and the forecast are sentences: they wrap, a word longer than its line breaks
-    (`overflow-wrap: break-word`, no hyphen), never an ellipsis.
+  - The pace line, its verdict and the forecast are sentences: they wrap, a word longer than its line breaks (no hyphen),
+    never an ellipsis: `overflow-wrap: break-word` in Nostromo's pace column, `anywhere` in Night City's and Gates' pace
+    rows, whose items wrap as flex items and narrow below their longest word only with `anywhere` (#98's second review).
   - A limit card's facts wrap within at most 60 % of the row; their figure (`b`) stays on one line.
   - The meter's two rows share one first column (a grid with the rows as subgrids, `fit-content(50%)`, never under
     English's 112 px), so their bars start at the same x, and the bar keeps at least 96 px (`minmax(96px, 1fr)`); a longer
     label wraps (Gates' English ellipsis on the label stays English's).
   - Nostromo's Overview grid rows grow with their cards (`minmax(auto, ...)`, from 1001 px), as Night City's always did,
-    and Night City's slanted cursor after the page heading gets 4 px of room.
+    and Night City's slanted cursor after the page heading gets 4 px of room. Without that growth the pseudo-locale's limit
+    cards draw their meta over their facts and run their facts off the card (default window and 1060 x 640), and French
+    does too at 1060 x 640 (the stand-in, #98's second review).
 
-  A designed cut keeps its whole text in the element (the CSS cuts only what is drawn), in its `title` (`cutAttrs`) and in
-  the card's name (`aria-label`, `cardName`: `overview.card.name`, and `overview.card.name_chip` for a limit card, with
-  its chip's word), outside English only; English's markup is unchanged. `DESIGNED_CUTS` in
+  A designed cut keeps its whole text in the element (the CSS cuts only what is drawn), in its `title` (a meta's
+  `metaAttrs`, which English's subtitles have too; the pace chip's `cutAttrs`, outside English only) and in the card's name
+  (`aria-label`, `cardName`: `overview.card.name`, and `overview.card.name_chip` for a limit card, with its chip's word),
+  outside English only. `DESIGNED_CUTS` in
   `tests/browser/page_checks.js` (the same list in `tests/test_server.py`) names them, `NEVER_CUT` the elements never cut
   (a nav tab, the link's words, a sentence line, a figure) and `BAR_FLOOR` the meter's 96 px ("Test tools"). The designed
   cuts are the one exception to #98's acceptance "nothing cut in the pseudo-locale"; in a real language the target is
@@ -734,22 +742,23 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   Rooms: each constrained key's note in `en.json` says "room about N px, about C capitals", the narrowest look's room in
   the default window as the stand-in's rooms step measures it (and holds the note to, within 1 px and 1 capital): a nav
   tab 120 px (Night City), an Overview card's meta from 76 px (the surfaces card) to 311 px (the cost card), a limit
-  card's facts and its chip 146 px, the burn card's chip 147 px, a meter's label 112 px. A string over its room goes back
+  card's facts 120 px and its pace chip's words 106 px (Nostromo, beside the figure at its widest, 100 % as French writes
+  it, and the chip's words without its frame and padding: #98's second review), the burn card's chip 147 px, a meter's
+  label 112 px. A string over its room goes back
   to its translator; the CSS is not changed to fit it. The header's link words have no px room (they share the row with
   the data age and Refresh), and a sentence line's note asks for no shorthand.
   The data age cannot be read at all where the header hides it and the sidebar's health box is hidden too (every look
   hides the box under 1001 px, where the nav is a row): in Nostromo under 801 px in every language, as at c05f45d, and
   under 1001 px outside English; in Night City and Edgerun under 801 px outside English. Recorded (`AGE_GAPS` in
   `page_probe.js`), not fixed here. English keeps its own overflows, which
-  `tests/fixtures/page_overflow_english.json` names element by element, each labelled with its `owner`. Owner question 3
-  decided two of them (`decided`): Night City's page heading (its slanted cursor runs 3 px past the box; nothing is cut)
-  and Edgerun's Overview surfaces meta, cut with an ellipsis in the default window. The rest are English as it was at
-  c05f45d, which the 1060 x 640 window (#98's critic 22) shows for the first time, and await the owner's acceptance on #98
-  (`awaiting`): ten more Overview metas cut with the same
-  ellipsis at 1060 x 640 (in Nostromo, Night City and Edgerun), and six entries of one find, not a design: at 1060 x 640
-  Nostromo's weekly and scoped Overview cards cut their reset lines and their chip off when the figure has two digits
-  (the warning and critical scenarios), for a ticket of its own. Until then the record keeps them, so English's layout
-  does not change.
+  `tests/fixtures/page_overflow_english.json` names element by element, each with the owner's decision that keeps it
+  (`owner`), as Chris made them on #98 (owner question 3 on 2026-11-26, then all of them looked at one by one on
+  2026-11-27): Night City's page heading (its slanted cursor runs 3 px past the box; nothing is cut), "decided, kept (Chris
+  2026-11-26)"; the Overview card subtitles cut with English's own ellipsis (Edgerun's surfaces meta in the default window,
+  the others at 1060 x 640, which #98's critic 22 measured first; two of those by less than a px, named since #98's second
+  review measures such cuts), "kept until #118 (approved 2026-11-27) moves the subtitle under the title"; and six entries of one find, not a design (at 1060 x 640 Nostromo's weekly and scoped Overview cards
+  cut their reset lines and their chip off when the figure has two digits, in the warning and critical scenarios), "kept
+  until #117". Until #117 and #118 land the record keeps them all, so English's layout does not change here.
 - **Rendering never reads Windows.** The locale rides on the view model (#91, not #93: it is the first ticket in which
   the widgets draw something that depends on the language): `build_model(..., locale=)` fills `WidgetModel.locale`,
   English by default, and the app passes `MonitorApp.locale()`. A locale change redraws, since the frame caches key on
@@ -1073,7 +1082,13 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   `aria-label` holding it, and in a real language never in the default window but where English's own cut shows through
   a key the language has no words for yet. It fails any other ellipsis, an ellipsis set on a `NEVER_CUT` element, a nav
   tab over two lines, a chip whose word wraps and a meter bar under `BAR_FLOOR`, and on Limits it reads the first meter
-  again with each label far longer than a translation should be (`meterStress()`). The header step also fails where the
+  again with each label far longer than a translation should be (`meterStress()`). On the Overview, outside English, it
+  writes what the real words never reach (#98's second review): the burn card's chip longer than its room beside the title
+  (`burnStress()`: it moves below the title, leaves the title's lines as they were and stays in the card), a nav tab's
+  label long enough for two lines (`navStress()`: its words stay in the tab) and one word far longer than a line in the
+  first limit card's pace line, verdict and forecast (`sentenceStress()`: each breaks inside the card). An element cut with
+  an ellipsis counts as cut once its words run past its content box by more than Chromium's 1/64 px layout unit, which
+  whole-px scroll widths do not show under about 1 px (`measure()` gives such a cut's `by` to 0.1 px). The header step also fails where the
   data age is in neither the header nor the health box but the gaps `AGE_GAPS` records, and outside English it writes the
   link's words twice as long: they wrap to at most two lines inside the bar. The rooms step (English, the default window)
   measures each constrained text's room (`rooms()`) and holds each key `ROOM_KEYS` names to its note. What it reads from
@@ -1086,7 +1101,9 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   The real-web-view tests in `tests/test_server.py` (gated; they open WebView2 windows parked off screen): the clip test
   in English and the pseudo-locale; `test_overview_and_limits_overflow_nothing_in_the_real_web_view` (every look,
   English and the pseudo-locale, `measure()` at the three sizes, English allowed only the record's known overflows and the
-  pseudo-locale only the designed cuts, judged by `overflow_problems` as the stand-in judges them);
+  pseudo-locale only the designed cuts, judged by `overflow_problems` as the stand-in judges them, and since #98's second
+  review `chips()` there too, each chip held by `chip_problems` to the stand-in's rules: its ink clear of a 1 px frame,
+  its frame inside its card, and outside English its word on one line);
   `test_css_capitals_read_as_todays_english_in_the_real_web_view` (the header, the sidebar and the headings against the
   page-words record, the CSS capitals, and #97's update texts, which #97 left to #98); and
   `test_webview2_follows_the_language_the_dashboard_passes_in_the_real_web_view` (`navigator.language` follows

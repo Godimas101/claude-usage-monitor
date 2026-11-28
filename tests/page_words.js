@@ -12,6 +12,11 @@
  *                                                            and steps, for tests/browser/page_probe.js to answer a real
  *                                                            browser the same way
  *
+ * Both records have since gained one deliberate change, derived from them and never re-recorded (Chris on #98, 2026-11-27):
+ * every Overview card subtitle carries its full text in a title. test_webui.py's
+ * test_the_records_differ_from_their_first_making_by_the_subtitle_titles_alone takes those titles out and finds, byte for
+ * byte, the files this script first wrote.
+ *
  * Each view is one fresh load of the real page on the small DOM (tests/mini_dom.js): index.html as the server serves it in
  * English (its theme on <html>, as ui/server.py's _themed_shell writes it), then formats.js, the English catalog, charts.js
  * and app.js, which starts as it does in the app (init: the first render, the first poll). A small server in this file

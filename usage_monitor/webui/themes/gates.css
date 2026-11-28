@@ -730,8 +730,10 @@ html[data-reduce-motion="1"] *, html[data-reduce-motion="1"] *::before, html[dat
 }
 /* the link's words wrap in their pill once the bar has no room left; never cut */
 :root:not(:lang(en)) .nm-uplink { white-space: normal; height: auto; min-height: 28px; line-height: 16px; }
-/* sentences (the pace line, the forecast): a word longer than the line breaks, with no hyphen and no "…" */
-:root:not(:lang(en)) :is(.nm-pace, .nm-pace > *) { overflow-wrap: break-word; }
+/* sentences (the pace line, the forecast): a word longer than the line breaks, with no hyphen and no "…" (anywhere, not
+   break-word: the pace row is a wrapping flex row, and only anywhere lets an item narrow below its longest word, #98's
+   second review) */
+:root:not(:lang(en)) :is(.nm-pace, .nm-pace > *) { overflow-wrap: anywhere; }
 /* a limit's facts: a label wraps within its room (at most 60 % of the row), its figure (b) and the chip's word stay on one
    line */
 :root:not(:lang(en)) .nm-row2 > .nm-facts { min-width: 0; max-width: 60%; white-space: normal; overflow-wrap: break-word; }

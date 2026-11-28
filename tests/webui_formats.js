@@ -331,8 +331,9 @@ const CALLS = {
     e.data = api.skelHistory();
     e.data.days.slice(-30).forEach((x, i) => { x.cost_usd = cost * (i % 3); x.requests = i; });
     const html = api.dailyChart(null);
-    return [String(html).match(/<span class="nm-meta-t">([^<]*)</) ? String(html).match(/<span class="nm-meta-t">([^<]*)</)[1] : null]
-      .concat(drawn(500));
+    // the meta's text, whatever its attributes (#98: its whole text in a title too, Chris on #98, 2026-11-27)
+    const meta = String(html).match(/<span class="nm-meta-t"[^>]*>([^<]*)</);
+    return [meta ? meta[1] : null].concat(drawn(500));
   }, one([0, 0.5, 7.5, 40, 1500])),
 };
 

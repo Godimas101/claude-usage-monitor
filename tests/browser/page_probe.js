@@ -45,7 +45,12 @@
 //           a nav tab, the header's link words, a sentence line or a figure (NEVER_CUT), a nav tab over two lines, a chip
 //           whose word wraps, and a meter's bar narrower than BAR_FLOOR fail; on Limits the first meter is read again with
 //           each label far longer than a translation should be (meterStress): its bars keep BAR_FLOOR and start at the same
-//           x, and nothing leaves the card.
+//           x, and nothing leaves the card. On the Overview, outside English (#98's second review: rules the real words never
+//           reach): the burn card's chip written longer than its room moves below its title, leaves the title's lines and
+//           stays in the card (burnStress); a nav tab written for two lines keeps its words in the tab (navStress); and one
+//           word far longer than a line in the pace line, the verdict or the forecast breaks inside the card
+//           (sentenceStress). An element cut with an ellipsis is cut once its words run past its content box by more than
+//           Chromium's 1/64 px (measure(): its by to 0.1 px), however little.
 //   header  The header bar in each language and look, with each link word (live, loading, stale, offline, rate_limited,
 //           no_credentials, paused, and lost: the monitor stops answering), at every page width from 704 to 1184 px (most
 //           20 px apart): the bar's one row never runs past the window (its scroll width), Refresh's right edge stays inside
@@ -124,19 +129,19 @@ const LOOK = {
   'gates-light': { settings: { theme_id: 'gates', theme_variant: 'blue', theme_mode: 'light' }, caps: false },
 };
 
-// English's own overflows, as English draws them today (#98's owner question 3 decided two: Night City's heading and Edgerun's
-// surfaces meta in the default window, each entry's owner "decided"; the others, first seen at 1060 x 640, "awaiting" the
-// owner on #98). Each is named with the
-// views it shows in and how far it runs past its box (wide: scrollWidth - clientWidth; leaves-side: px past its card); in
-// English a known one may run at most 1 px further, and anything else fails. Another language has none but the designed
-// cuts (DESIGNED_CUTS below): it wraps.
-//   heading   Night City's page heading: its slanted cursor runs 3 px past the heading's box (nothing is cut).
-//   ellipsis  the Overview grid's card metas, cut with an ellipsis by the theme's own rule (.nm-grid .nm-card-t .nm-meta-t):
-//             Edgerun's surfaces meta in the default window, and at the 1060 x 640 window (Gates' 232 px nav column, which
-//             the plan never measured) more of them in Nostromo, Night City and Edgerun.
-//   find      not by design, and outside #98 (English must not change here): at 1060 x 640 Nostromo's weekly and scoped
-//             Overview cards cut their reset lines and chip off when the figure has two digits (the warning and critical
-//             scenarios), for a ticket of its own.
+// English's own overflows, as English draws them today, each with the owner's decision that keeps it (owner), as Chris made
+// them on #98 (owner question 3 on 2026-11-26, then all of them looked at one by one on 2026-11-27). Each is named with the
+// views it shows in and how far it runs past its box (wide: scrollWidth - clientWidth, or to 0.1 px for a cut under a px;
+// leaves-side: px past its card); in English a known one may run at most 1 px further, and anything else fails. Another
+// language has none but the designed cuts (DESIGNED_CUTS below): it wraps.
+//   heading   Night City's page heading: its slanted cursor runs 3 px past the heading's box (nothing is cut): "decided,
+//             kept (Chris 2026-11-26)".
+//   ellipsis  the Overview grid's card subtitles, cut with an ellipsis by the theme's own rule (.nm-grid .nm-card-t
+//             .nm-meta-t; since #98 the whole text is in its title): Edgerun's surfaces meta in the default window, and at
+//             the 1060 x 640 window (Gates' 232 px nav column, which the plan never measured) more of them in Nostromo,
+//             Night City and Edgerun: "kept until #118 (approved 2026-11-27) moves the subtitle under the title".
+//   find      not by design: at 1060 x 640 Nostromo's weekly and scoped Overview cards cut their reset lines and chip off
+//             when the figure has two digits (the warning and critical scenarios): "kept until #117".
 // Made from an English run of the widths step (all its scenarios and states) with the clocks held at MOMENT.
 const KNOWN = JSON.parse(fs.readFileSync(path.join(REPO, 'tests', 'fixtures', 'page_overflow_english.json'), 'utf8')).known;
 // Outside English: the designed cuts (#98's owner question 1, decided on #98), and what is never cut. The lists are
@@ -245,7 +250,8 @@ async function resize(page, size) {
 
 // ── step widths: what runs past its room ─────────────────────────────────────────────────────────────────────────────
 
-const pastBy = (item) => (item.kind === 'wide' ? item.sw - item.cw : item.by);
+// how far an item runs past its box: a wide one by its scroll width, but a cut under a px, which measure() gives to 0.1 px
+const pastBy = (item) => (item.kind === 'wide' && item.by === undefined ? item.sw - item.cw : item.by);
 
 /* English's own overflow of this item in this view, as tests/fixtures/page_overflow_english.json names it. */
 function englishKnown(item, look, state, page, size) {
@@ -305,6 +311,31 @@ function judgeStress(where, s) {
   if (Math.max(...lefts) - Math.min(...lefts) > 0.5) { fail(`${where}: with a long label the bars start at ${JSON.stringify(lefts)}`); }
   if (s.card !== null && s.right > s.card + 0.5) { fail(`${where}: with a long label the meter ends at ${s.right}, past its card's ${s.card}`); }
   if (s.labels.some((l) => l.sw > l.cw + 1)) { fail(`${where}: a long label runs past its box: ${JSON.stringify(s.labels)}`); }
+}
+
+// One word far longer than any line, as a sentence line may hold in a language of long compounds (#98's second review).
+const LONG_WORD = 'Abcdefghijklmnopqrstuvwxyz'.repeat(2) + 'ab';
+
+/* Outside English, on the Overview (#98's second review, owner question 1's rules that the real words never reach): the burn
+ * card's chip written longer than its room beside the title moves below the title, leaves the title's lines as they were and
+ * stays inside the card (burnStress); a nav tab written long enough for two lines keeps its words inside the tab (navStress);
+ * and the first limit card's pace line, verdict and forecast, each one word longer than its line, break inside the card
+ * (sentenceStress). */
+async function judgeLongText(page, where) {
+  const burn = await page.evaluate(CHECKS.burnStress);
+  if (burn && !burn.skipped) {
+    if (!burn.below) { fail(`${where}/long chip: the burn card's chip (${burn.count} capitals, room ${burn.room} px) stays beside its title`); }
+    if (burn.lines !== burn.before) { fail(`${where}/long chip: the burn card's title takes ${burn.lines} lines with it (${burn.before} without)`); }
+    if (burn.right > burn.card + 0.5) { fail(`${where}/long chip: the burn card's chip ends at ${burn.right}, past its card's ${burn.card}`); }
+  }
+  const nav = await page.evaluate(CHECKS.navStress);
+  if (nav) {
+    if (nav.lines !== 2) { fail(`${where}/long tab: a nav label written for two lines takes ${nav.lines} ("${nav.text}")`); }
+    if (nav.top < -0.5 || nav.bottom < -0.5) { fail(`${where}/long tab: a two-line nav label runs out of its ${nav.h} px tab (top ${nav.top}, bottom ${nav.bottom})`); }
+  }
+  for (const s of (await page.evaluate(CHECKS.sentenceStress, LONG_WORD)) || []) {
+    if (s.out > 0.5) { fail(`${where}/long word: one long word in the ${s.part} runs ${s.out} px past its card`); }
+  }
 }
 
 // What the probe answers for a routed state (route), and what it does once the page has loaded (then).
@@ -383,6 +414,7 @@ async function widthsView(browser, server, lang, look, state, routed) {
           const label = await page.evaluate(() => { const k = document.querySelector('#main .nm-meter .nm-mrow .k'); return k ? k.textContent : null; });
           if (label) { judgeStress(where + '/long label', await page.evaluate(CHECKS.meterStress, (label + ' ').repeat(4).trim() + ' ' + 'W'.repeat(40))); }
         }
+        if (lang !== 'en' && hash === 'overview' && !routed) { await judgeLongText(page, where); }
         if (hash === 'limits' && !m.meters && !routed) { fail(`${where}: no meter on Limits`); }
         if (SHOTS === 'all' || (SHOTS === 'narrow' && size === SIZES[SIZES.length - 1])) {
           await page.screenshot({ path: path.join(OUT, `widths-${lang}-${look}-${state}-${hash}-${sizeName(size)}.png`) });
@@ -805,8 +837,9 @@ async function updateLook(browser, server, look) {
 
 // The keys whose en.json note gives translators a room, by what rooms() measures for them: nav (a nav tab), meta:<card>
 // (an Overview card's meta; limit.meta.weekly and overview.limit.no_scoped sit on the weekly and scoped cards), facts (a
-// limit card's facts column; its chip's words, limit.pace.*, in caps of the chip's font), burn (the burn card's chip) and
-// meter (a meter's label).
+// limit card's facts column beside its figure at its widest, 100 % as any of the page's languages writes it; its chip's
+// words, limit.pace.*, in the column less the chip's frame and padding, in caps of the chip's font), burn (the burn card's
+// chip) and meter (a meter's label).
 const ROOM_KEYS = {
   nav: ['shell.nav.overview', 'shell.nav.limits', 'shell.nav.cost', 'shell.nav.efficiency', 'shell.nav.history', 'shell.nav.settings', 'shell.nav.about'],
   'meta:limit-session': ['limit.meta.session'],
@@ -833,7 +866,7 @@ async function roomsLook(browser, server, look) {
         found.nav = r.nav;
         r.metas.forEach((m) => { found['meta:' + m.card] = [m]; });
         found.facts = r.facts;
-        found['facts:chip'] = r.facts.filter((f) => f.chipCaps !== null).map((f) => ({ card: f.card, room: f.room, caps: f.chipCaps }));
+        found['facts:chip'] = r.facts.filter((f) => f.chipCaps !== null).map((f) => ({ card: f.card, room: f.chipRoom, caps: f.chipCaps }));
         found.burn = r.burn;
       } else {
         found.meter = r.meter;

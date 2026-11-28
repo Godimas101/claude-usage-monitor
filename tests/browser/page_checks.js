@@ -10,8 +10,15 @@
  *                      a meter's bar may be outside English
  *   measure()          everything in the header, the nav and #main that runs past its room (page_probe.js's header says what
  *                      counts); {vw, vh, lang, over: [{at, kind, ...}], meters, bars, styled}. An element cut with a visible
- *                      ellipsis carries cut: {designed, role, full, title, named, catalog, lang}
+ *                      ellipsis carries cut: {designed, role, full, title, named, catalog, lang}; one cut by less than a px
+ *                      (its words past its content box, which whole-px scroll widths do not show) carries by, to 0.1 px
  *   meterStress(text)  the first meter with each label replaced by text, read and put back: its bars and its labels
+ *   burnStress()       the burn card's chip with a word longer than its room beside the title, read and put back: whether it
+ *                      moved below the title, the title's lines before and with it, and its right edge against the card's
+ *   navStress()        the first nav tab with its label written long enough for two lines, read and put back: its lines, and
+ *                      how far its words sit inside the tab's top and bottom
+ *   sentenceStress(w)  the first limit card's pace line, verdict and forecast each written as the one word w, read and put
+ *                      back: how far each one's words run past the card
  *   rooms()            the room each constrained text has in the window: px, and about how many capitals fit
  *   regions(args)      every region tests/page_words.js reads (the header, the sidebar, each top part of #main, the cards
  *                      the record keeps), each text node in its element's computed text-transform, with the attributes
@@ -26,6 +33,9 @@
  *                      against its box and whether the look draws a frame there, and how far the chip and its words run out
  *                      of its card, and how many lines its words take: [{at, text, top, bottom, h, framed, chip, lines,
  *                      out, wordsOut}]
+ *
+ * The real-web-view overflow test reads measure() and chips(); header(), meterStress(), burnStress(), navStress(),
+ * sentenceStress() and rooms() are the stand-in's alone (they write words into the page or need its routed states).
  */
 
 function settled() {
@@ -124,6 +134,16 @@ function measure(lists) {
   const squash = (s) => String(s || '').replace(/\s+/g, ' ').trim();
   const roleOf = (el) => (LISTS.never.find(([, sel]) => el.matches(sel)) || [null])[0];
   const ellipsis = (cs) => cs.textOverflow === 'ellipsis' && /hidden|clip/.test(cs.overflowX);
+  // how far an element's words run past its content box, in px: a range over its contents keeps the words' whole width where
+  // the element clips them; more than CUT_TOLERANCE (a little over Chromium's 1/64 px layout unit) and "…" is drawn
+  const CUT_TOLERANCE = 0.02;
+  const wordsPast = (el, cs) => {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const box = el.getBoundingClientRect().width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) -
+      parseFloat(cs.borderLeftWidth) - parseFloat(cs.borderRightWidth);
+    return range.getBoundingClientRect().width - box;
+  };
   // the page's catalog strings (its language's, English's behind them), each as a pattern its filled text matches whole; a
   // string with fewer than three letters outside its placeholders ("{name}, {meta}") would match any text and is left out
   let patterns = null;
@@ -165,10 +185,16 @@ function measure(lists) {
       const cs = getComputedStyle(el);
       const inline = cs.display === 'inline';
       const text = (el.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 90);
-      // wider than its box
-      if (!inline && el.clientWidth > 0 && (/nowrap|pre/.test(cs.whiteSpace) || el.matches(WIDE)) && el.scrollWidth > el.clientWidth + 1) {
+      // wider than its box; an element its look cuts with an ellipsis is cut as soon as its words are wider than its content
+      // box by more than Chromium's layout unit (1/64 px), which the whole-px scroll widths do not show under about 1 px:
+      // such a cut's by is how far its words run past, to 0.1 px (#98's second review)
+      const nowrap = /nowrap|pre/.test(cs.whiteSpace);
+      const wide = el.scrollWidth > el.clientWidth + 1;
+      const fine = !inline && !wide && el.clientWidth > 0 && nowrap && ellipsis(cs) ? wordsPast(el, cs) : 0;
+      if (!inline && el.clientWidth > 0 && (nowrap || el.matches(WIDE)) && (wide || fine > CUT_TOLERANCE)) {
         const item = { at: where(el), kind: 'wide', sw: el.scrollWidth, cw: el.clientWidth, text };
-        if (ellipsis(cs) && /nowrap|pre/.test(cs.whiteSpace)) { item.cut = cutOf(el); }      // cut with a visible ellipsis
+        if (!wide) { item.by = Math.ceil(fine * 10) / 10; }
+        if (ellipsis(cs) && nowrap) { item.cut = cutOf(el); }      // cut with a visible ellipsis
         over.push(item);
       }
       // an ellipsis set on an element that is never cut, whether its words fit or not
@@ -481,12 +507,120 @@ function meterStress(text) {
   return out;
 }
 
+/* The burn card's chip with one word longer than its room beside the title but no wider than the card (#98's second review),
+ * read, and put back: outside English the card's title row wraps, so the chip moves to a line of its own below its title
+ * (its top past the title's middle: a look's line boxes may overlap by a px or two), the title keeps its lines and the chip
+ * stays inside the card. The word is capitals of the chip's own font, one more at a time until the chip is wider than the
+ * room beside the title; null without the card, skipped where the card has no room for it. */
+function burnStress() {
+  var row = document.querySelector("#main #burn .nm-card-t");
+  var chip = row && row.querySelector(":scope > .nm-chip");
+  var title = row && row.querySelector(":scope > .nm-ttl");
+  var card = row && row.closest(".nm-card-in");
+  if (!chip || !title || !card || !chip.getClientRects().length) { return null; }
+  var inner = function (el) {
+    var b = el.getBoundingClientRect();
+    var s = getComputedStyle(el);
+    return { left: b.left + parseFloat(s.paddingLeft) + parseFloat(s.borderLeftWidth), right: b.right - parseFloat(s.paddingRight) - parseFloat(s.borderRightWidth) };
+  };
+  var lines = function (el) {
+    var range = document.createRange();
+    range.selectNodeContents(el);
+    var tops = [];
+    Array.prototype.forEach.call(range.getClientRects(), function (q) { if (q.width > 0 && !tops.some(function (t) { return Math.abs(t - q.top) < 2; })) { tops.push(q.top); } });
+    return tops.length;
+  };
+  var cs = getComputedStyle(chip);
+  var ctx = document.createElement("canvas").getContext("2d");
+  ctx.font = cs.fontStyle + " " + cs.fontWeight + " " + cs.fontSize + " " + cs.fontFamily;
+  var each = ctx.measureText("ABCDEFGHIJKLMNOPQRSTUVWXYZ").width / 26 + (parseFloat(cs.letterSpacing) || 0);
+  var frame = chip.offsetWidth - chip.clientWidth + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+  var beside = inner(row).right - title.getBoundingClientRect().right - (parseFloat(getComputedStyle(row).columnGap) || 0);
+  var room = beside - frame;
+  var box = inner(card);
+  var most = Math.floor((box.right - box.left - frame) / each) - 1;
+  var kept = chip.innerHTML;
+  var before = lines(title);
+  // the word grows a capital at a time from the room's estimate until the chip is wider than the room beside the title
+  var count = Math.max(1, Math.floor(room / each) + 1);
+  for (; count <= most; count++) {
+    chip.textContent = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".repeat(8).slice(0, count);
+    if (chip.getBoundingClientRect().width > beside + 0.5) { break; }
+  }
+  if (count > most) {
+    chip.innerHTML = kept;
+    return { skipped: true, room: +room.toFixed(1) };
+  }
+  var t = title.getBoundingClientRect();
+  var c = chip.getBoundingClientRect();
+  var out = { count: count, room: +room.toFixed(1), below: c.top >= (t.top + t.bottom) / 2, lines: lines(title), before: before,
+    right: +c.right.toFixed(1), card: +card.getBoundingClientRect().right.toFixed(1) };
+  chip.innerHTML = kept;
+  return out;
+}
+
+/* The first nav tab with its label written long enough to take two lines (#98's second review: one word at a time is added
+ * until it wraps), read, and put back: outside English its words stay inside the tab, which grows where its look lets it. */
+function navStress() {
+  var a = Array.prototype.filter.call(document.querySelectorAll(".nm-menu a"), function (x) { return x.getClientRects().length > 0; })[0];
+  var span = a && a.querySelector("span");
+  if (!span) { return null; }
+  var words = function () {
+    var range = document.createRange();
+    range.selectNodeContents(span);
+    var tops = [], top = Infinity, bottom = -Infinity;
+    Array.prototype.forEach.call(range.getClientRects(), function (q) {
+      if (q.width <= 0) { return; }
+      if (!tops.some(function (t) { return Math.abs(t - q.top) < 2; })) { tops.push(q.top); }
+      top = Math.min(top, q.top);
+      bottom = Math.max(bottom, q.bottom);
+    });
+    return { lines: tops.length, top: top, bottom: bottom };
+  };
+  var kept = span.textContent;
+  var text = kept;
+  for (var i = 0; i < 40 && words().lines < 2; i++) {
+    text += " Mxw";
+    span.textContent = text;
+  }
+  var w = words();
+  var tab = a.getBoundingClientRect();
+  var out = { text: text, lines: w.lines, top: +(w.top - tab.top).toFixed(1), bottom: +(tab.bottom - w.bottom).toFixed(1), h: +tab.height.toFixed(1),
+    min: parseFloat(getComputedStyle(a).minHeight) || 0 };
+  span.textContent = kept;
+  return out;
+}
+
+/* The first limit card's sentences on the page (its pace line, its verdict, its forecast) each written as one word far longer
+ * than any line (#98's second review: a word longer than its line breaks), read, and put back: how far each one's words run
+ * past the card at either side. */
+function sentenceStress(word) {
+  var pace = document.querySelector("#main .nm-grid > [data-limit] .nm-pace");
+  var card = pace && pace.closest(".nm-card-in");
+  if (!card) { return null; }
+  var parts = [["pace line", pace.querySelector(":scope > span:first-child")], ["verdict", pace.querySelector(":scope > b")],
+    ["forecast", pace.querySelector(":scope > .fc")]].filter(function (p) { return p[1]; });
+  var kept = parts.map(function (p) { return p[1].innerHTML; });
+  parts.forEach(function (p) { p[1].textContent = word; });
+  var c = card.getBoundingClientRect();
+  var out = parts.map(function (p) {
+    var range = document.createRange();
+    range.selectNodeContents(p[1]);
+    var left = Infinity, right = -Infinity;
+    Array.prototype.forEach.call(range.getClientRects(), function (q) { if (q.width > 0) { left = Math.min(left, q.left); right = Math.max(right, q.right); } });
+    return { part: p[0], out: isFinite(left) ? +Math.max(right - c.right, c.left - left, 0).toFixed(1) : 0 };
+  });
+  parts.forEach(function (p, i) { p[1].innerHTML = kept[i]; });
+  return out;
+}
+
 /* The room each constrained text has in the window, as en.json's notes give it to translators (#98's owner question 1):
  * px, and about how many capitals of the element's font fit (its letter spacing included). nav: a tab's words, from their
  * left edge to the tab's padding; metas: an Overview card's meta beside its title (the row's width less the title and the
- * gap); facts: a limit card's facts column beside its figure written as 100 % (the widest it gets), and at most 60 % of the
- * row as outside English (a look whose facts are not a column of their own is left out); burn: the burn card's chip beside
- * its title; meter: a meter's label column. */
+ * gap); facts: a limit card's facts column beside its figure written as 100 % at its widest (as English, French, Spanish
+ * or Turkish writes it), and at most 60 % of the row as outside English (a look whose facts are not a column of their own is
+ * left out), with its chip's words' own room (chipRoom: the column less the chip's frame and padding); burn: the burn
+ * card's chip beside its title; meter: a meter's label column. */
 function rooms() {
   var canvas = document.createElement("canvas");
   var ctx = canvas.getContext("2d");
@@ -524,10 +658,15 @@ function rooms() {
     var facts = row.querySelector(":scope > .nm-facts");
     var figure = row.querySelector(":scope > .nm-big");
     if (!facts || !figure || getComputedStyle(facts).display !== "flex") { return; }
-    var kept = figure.textContent;
-    figure.textContent = kept.replace(/\d+/, "100");
-    var wide = figure.getBoundingClientRect().width;
-    figure.textContent = kept;
+    // the figure at its widest: 100 % as any language the page is built for writes it (English 100%, French and Spanish with
+    // a no-break space, Turkish %100; #98's second review), the widest of them
+    var kept = figure.innerHTML;
+    var wide = 0;
+    ["100%", "100\u00a0%", "100\u202f%", "%100"].forEach(function (form) {
+      figure.textContent = form;
+      wide = Math.max(wide, figure.getBoundingClientRect().width);
+    });
+    figure.innerHTML = kept;
     var box = inner(row);
     var room = Math.min(box.right - box.left - wide - (parseFloat(getComputedStyle(row).columnGap) || 0), 0.6 * (box.right - box.left));
     var label = facts.querySelector(":scope > span:not(.nm-chip)") || facts;
@@ -537,7 +676,7 @@ function rooms() {
     var chipRoom = chip ? room - (chip.offsetWidth - chip.clientWidth) - parseFloat(getComputedStyle(chip).paddingLeft) -
       parseFloat(getComputedStyle(chip).paddingRight) : 0;
     out.facts.push({ card: host ? host.getAttribute("data-card") : "?", room: px(room), row: px(box.right - box.left), figure: px(wide),
-      caps: caps(label, room), chipCaps: chip ? caps(chip, chipRoom) : null });
+      caps: caps(label, room), chipRoom: chip ? px(chipRoom) : null, chipCaps: chip ? caps(chip, chipRoom) : null });
   });
   var burn = document.querySelector("#main #burn .nm-card-t");
   var chip = burn && burn.querySelector(":scope > .nm-chip");
@@ -557,5 +696,5 @@ function rooms() {
 if (typeof module !== "undefined") {
   module.exports = { settled: settled, DESIGNED_CUTS: DESIGNED_CUTS, NEVER_CUT: NEVER_CUT, BAR_FLOOR: BAR_FLOOR, measure: measure,
     regions: regions, readCaps: readCaps, CSS_CAPS: CSS_CAPS, writeLines: writeLines, readUpdate: readUpdate, header: header,
-    chips: chips, meterStress: meterStress, rooms: rooms };
+    chips: chips, meterStress: meterStress, burnStress: burnStress, navStress: navStress, sentenceStress: sentenceStress, rooms: rooms };
 }
