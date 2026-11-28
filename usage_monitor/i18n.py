@@ -37,10 +37,11 @@ log = get_logger(__name__)
 DEFAULT = "en"
 LANGUAGES: tuple[str, ...] = ("en", "fr", "es", "tr")       # every catalog the app has
 # The languages Windows' language or the setting may pick. Changed only by a language's sign-off change (#107), which
-# also adds it to the installer's [Languages] (#103).
+# also moves its [Languages] entry in installer.iss into the release build (#103; tests/test_installer_words.py).
 OFFERED: tuple[str, ...] = ("en",)
-# Only Windows' first display language counts, the one the installer reads too (#86's default). True takes the first
-# offered language anywhere in Windows' list instead (#86's other choice).
+# Only Windows' first preferred language counts (#86's default). Setup reads Windows' display language, the same one
+# unless the first is not yet applied or has no display pack (#103, #108). True takes the first offered language
+# anywhere in Windows' list instead (#86's other choice).
 WALK_DISPLAY_LANGUAGES = False
 SETTING_VALUES: tuple[str, ...] = ("system", *LANGUAGES)
 # The app's own pseudo-locale (#89): en.json with accented look-alikes, longer and bracketed, so English left over, a

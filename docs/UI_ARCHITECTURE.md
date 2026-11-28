@@ -460,14 +460,18 @@ display language when it is one the app offers, and falls back to English. `usag
 holds the rule; the localization tickets (#86 to #109) fill the catalogs and move each surface's text into them.
 
 - **Offered.** `i18n.OFFERED` is the list Windows' language or the setting may pick. A language joins it only in its
-  sign-off change (#107), with the installer's `[Languages]` line (#103). Until then it holds English alone, so a
+  sign-off change (#107), which also moves its `[Languages]` entry in `installer.iss` into the release build
+  ("Installer and uninstaller", below; a test holds the two lists equal). Until then it holds English alone, so a
   half-done catalog is never shown. A dev instance can show any catalog language with `USAGE_MONITOR_LANG=<id>`
   (honoured only with `USAGE_MONITOR_DEV_INSTANCE=1`). The resolver, the locale source and the server read `OFFERED`
   and `WALK_DISPLAY_LANGUAGES` when they use them, so the change (or a test) that sets them reaches all three; only the
   `i18n.ENGLISH` constant takes the list at import.
 - **Detection.** Only the first entry of `GetUserPreferredUILanguages(MUI_LANGUAGE_NAME)` counts (fallback
-  `GetUserDefaultUILanguage`, named by `LCIDToLocaleName`). Setup is to detect the same Windows UI language once it
-  offers more than English (`LanguageDetectionMethod=uilanguage`, #103). `WALK_DISPLAY_LANGUAGES = True` would take
+  `GetUserDefaultUILanguage`, named by `LCIDToLocaleName`). Setup reads `GetUserDefaultUILanguage`, Windows' display
+  language (#103). The two are the same language, so the app and Setup agree, except when the first preferred language
+  is not the display language: one moved to the top without its display pack, or a change not applied until the user
+  signs out. Then the app follows the list and a first install by hand follows the display language (#108 checks it on
+  a real profile). `WALK_DISPLAY_LANGUAGES = True` would take
   the first offered language anywhere in the list instead (#86's other choice). Never `locale.getlocale()` or
   `getdefaultlocale()`, which report the regional format, not a language. The app makes its reader
   (`i18n.LazyWindows`) and reads Windows on first use, when the log is set up, and reads the display languages only
@@ -951,6 +955,38 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   waits) sits exactly at 250 (`test_budgets.LONGEST_NOTES`). `tests/fixtures/toast_words_english.json`, recorded before
   #97 moved a word, holds every English toast and alert byte for byte (`tests/test_toast_words.py`, worked out in a
   fresh Python with the time zone pinned).
+- **Installer and uninstaller (#103).** Setup's and the uninstaller's own texts (24 messages: the boxes, the status
+  lines, the download page, the Finish page's sentences, the task and run boxes) are `[CustomMessages]` in
+  `installer-messages/<lang>.isl`, one file per language, each the second `MessagesFile` of its `[Languages]` entry after
+  Inno Setup's own file (`compiler:Default.isl`, `compiler:Languages\French.isl`, ...), which words Inno's pages and
+  buttons. `installer.iss` stays ASCII and names each text by `{cm:Name}` or `CustomMessage('Name')`; `en.isl` holds
+  the English with a note above each message (where it shows, its arguments, its line breaks), and `fr.isl`, `es.isl`
+  and `tr.isl` the drafts (#104 to #106), empty until then. The entries' names are the app's ids (`en`, `fr`, `es`,
+  `tr`). English is the first entry, so it is Setup's language for a Windows language it does not offer, and ISCC fills
+  a message a language's file lacks from the first language that defines it: English, one warning per missing message
+  and language. The release build declares the languages the app offers (`i18n.OFFERED`, English alone today); the
+  others sit behind `#ifdef AllLanguages`, the review build (`ISCC /DAllLanguages`), never published, and a language
+  moves above it in its sign-off change (#107).
+  Setup's language: `LanguageDetectionMethod=uilanguage` (Windows' display language, `GetUserDefaultUILanguage`: the
+  entry with its LANGID, else one with its primary language, else English), `ShowLanguageDialog=no`,
+  `UsePreviousLanguage=no` (Inno Setup would otherwise take the last install's language, in a silent run too); a
+  `/LANG=<name>` naming an entry comes first, and one naming none is ignored. The in-app update passes none yet, so a
+  silent update follows Windows' display language. For the same display language it is the app's pick; the inputs can
+  differ, as "Detection" says. The uninstaller speaks the language of the last Setup run (Setup records it and hands it
+  that language's messages) and passes it to the exe as `--remove-setup <report> --lang <name>`, after the report's
+  path, for #102 to word the report in; `main.py` ignores it until then. Inno Setup has no plural forms: each count has
+  two messages, `...One` for 1 and `...Other` (the count as `%1`) for more, chosen in `EndedNote`: CLDR's choice for
+  every count from 1 to 999,999 in all four languages. In a silent run a box is not shown but logged with its
+  text (`Defaulting to <answer> for suppressed message box (<buttons>):` and the text on the next line); the
+  uninstaller's box for a monitor that stays is a plain `MsgBox`, never shown or logged in a silent uninstall.
+  Names stay as written in every language (#86): the product, the publisher, the Start-menu folder and its two
+  shortcuts, and the name in Apps (`UninstallDisplayName=Claude Usage Monitor version {#AppVer}`, which Setup would
+  otherwise build from the language's `NameAndVersion`). `tests/fixtures/installer_words_english.json`, recorded from
+  the script before #103 moved a word, holds every English text and name byte for byte; `tests/test_installer_words.py`
+  renders each site of today's script with `en.isl` against it (`tests/installer_words.py`), and holds each language's
+  file to English's shape (arguments, line breaks, the access key, the names that stay, UTF-8 without a BOM, NFC). A
+  language the release build declares must have every message; the others' gaps are listed (`python
+  tests/installer_words.py --todo`). Inno Setup is 6.7.1, exactly: the script's guard refuses any other version.
 - **Test tools (#89).** The pseudo-locale (`i18n.PSEUDO`, `pseudo`) is `en.json` made longer (about 40%), accented
   (`İ ı ğ ş é ñ` among the look-alikes) and bracketed (`i18n.pseudo_text`), so English left over, a missing glyph
   and a cut end all show. A dev instance shows it with `USAGE_MONITOR_LANG=pseudo`, and the dev server with
@@ -1165,8 +1201,9 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   CLDR formats and a floor of French, Spanish and Turkish letters must be mapped, with an outline, in the face that
   draws it. It reads every shipped theme through the skin `get_skin` gives it, so a new theme, skin or face (S3, O3)
   joins through its theme JSON and its skin's `_FACE_ROLES` with no edit to the test.
-- **Stays English:** the agent modes and `state.json`, the logs, the export's columns, and the dashboard window title
-  "Claude Usage Monitor" (the installer and the app find the window by it).
+- **Stays English:** the agent modes and `state.json`, the logs (Setup's and the uninstaller's `Log` lines too), the
+  export's columns, and the dashboard window title "Claude Usage Monitor" (the installer and the app find the window
+  by it).
 
 ## Themes
 
@@ -1431,9 +1468,10 @@ would garble a translated sentence, and the monitor words them in its own langua
 are on one line; one that starts with `{` and is not the counts (whole numbers from 0 to 9999) says nothing and goes,
 logged without its text. `MonitorApp._announce_update_note` shows it once as a toast, "Claude Usage Monitor updated",
 at the first state or unlock, held back like the update toast and kept when the shell refuses it, and then deletes the
-file. `EndedNote`'s four English forms are `en.json`'s `toast.updated.*`
-(`test_update_check.py::test_the_finish_page_and_the_toast_say_the_same_english`); #103 moves them into
-`[CustomMessages]` and keeps the counts line ASCII.
+file. `EndedNote`'s four forms are `installer-messages/en.isl`'s `EndedToolsOne`, `EndedToolsOther`, `EndedWaitsOne`
+and `EndedWaitsOther` since #103 (the count as `%1`), the same English as `en.json`'s `toast.updated.*`
+(`test_update_check.py::test_the_finish_page_and_the_toast_say_the_same_english`) and the same words in each language
+that has both (`test_installer_words.py`); the counts line stays ASCII.
 
 ## Dashboard process
 

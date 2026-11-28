@@ -27,6 +27,7 @@ Privacy, everywhere: never print, store or log message text, prompts, file conte
 | `usage_monitor/formats.py`, `casing.py`, `cldr.py` | The locale's numbers, percents, money, clocks, weekdays and durations, and letter case by the language's rules (#91). English keeps today's US formats byte for byte; French, Spanish and Turkish read `cldr.py`, CLDR 47 data that `tests/cldr_gen.py` generates. Standard library only |
 | `usage_monitor/webui/` | Dashboard HTML/CSS/JS, its formats and letter case in the locale (`formats.js`, #91), the motion layer (`motion.js`, `motion.css`, `themes/<id>.motion.css`) and the bundled OFL fonts (the Pillow skins read them too) |
 | `update_check.py`, `version.py` | GitHub release check and self-update; version read from `VERSION` |
+| `installer.iss`, `installer-messages/` | The installer and uninstaller (Inno Setup 6.7.1 exactly). Their own texts are in `installer-messages/<lang>.isl`, one file per language, `en.isl` the English (#103); the release build has the languages the app offers, `ISCC /DAllLanguages` all of them (a review build, never published). See `docs/UI_ARCHITECTURE.md`, "Languages" |
 | `tests/` | pytest, offline, synthetic fixtures only |
 
 Read before changing anything: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (data layer rules and
