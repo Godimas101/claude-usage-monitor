@@ -838,6 +838,10 @@ html[data-reduce-motion="1"] *, html[data-reduce-motion="1"] *::before, html[dat
 :root:not(:lang(en)) .nm-grid > [data-limit] :is(.nm-facts > span:not(.nm-chip), .nm-pace > span:first-child, .nm-pace > .fc) {
   white-space: normal; overflow-wrap: break-word; overflow: visible; text-overflow: clip;
 }
+/* a chip's words clear of its 1 px frame: an accented capital (É, İ) or a cedilla (Ç, Ş) runs past the 14 px box's single
+   line, so the chip grows with its words (#98's review); the verdict and the burn card's chip wrap inside their card */
+:root:not(:lang(en)) :is(.nm-chip, .nm-pace > b) { height: auto; min-height: 14px; padding-top: 2px; padding-bottom: 2px; line-height: 1.15; }
+:root:not(:lang(en)) :is(.nm-pace > b, .nm-card-t > .nm-chip) { white-space: normal; min-width: 0; max-width: 100%; overflow-wrap: break-word; }
 /* the meter's two rows share one first column, as wide as the longer label (up to half the meter), so their bars start at
    the same x */
 :root:not(:lang(en)) .nm-meter { display: grid; grid-template-columns: fit-content(50%) minmax(0, 1fr) 48px; gap: 7px 10px; }

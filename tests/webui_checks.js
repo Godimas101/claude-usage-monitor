@@ -887,6 +887,20 @@ out.accentLabels = {
   out.sidebar = { nostromo: sidebar(nostromoMeta, "blue"), nightCity: sidebar(nightCityMeta, "relic"), gates: sidebar(gatesMeta, "teal-dark") };
   delete elements.variants;
   delete elements["phos-label"];
+  // a French page whose catalog has teal's tooltip and Gates' "blu" (made up here), the other buttons' words English's: a
+  // button is marked lang="en" while its tooltip or its letters are English
+  const frenchSidebar = (meta, variant) => {
+    const P = load(null, { MonitorI18n: { language: "fr", strings: { "nav.colour.title.teal": "sarcelle", "nav.colour.title.blue": "bleu",
+      "nav.colour.short.blue": "BLE" }, fallback: EN_CATALOG.fallback } });
+    P.elements.variants = element("variants");
+    P.elements["phos-label"] = element("phos-label");
+    P.api.S.themes = [meta];
+    P.api.S.data = { theme: { id: meta.id, variant } };
+    P.api.renderVariants();
+    return { label: P.elements["phos-label"].textContent, html: P.elements.variants.innerHTML };
+  };
+  out.sidebarFrench = { nostromo: frenchSidebar(nostromoMeta, "blue"), nightCity: frenchSidebar(nightCityMeta, "relic"),
+    gates: frenchSidebar(gatesMeta, "teal-dark") };
   // the Settings page: the same names, and a name that is not the colour's id keeps the id as its tooltip
   const picker = (meta, variant) => {
     const parts = { "#set-themes": element("set-themes"), "#set-accents": element("set-accents"), "#set-mode": element("set-mode"), "#set-theme-meta": element("set-theme-meta") };
@@ -1082,6 +1096,15 @@ for (const page of ["cost", "efficiency", "history"]) {
 for (const page of PAGE_LIST) out.noRecords.stats[page] = api.pageStats(page).map((e) => e.key);
 out.noRecords.overview = modelOf("overview");
 out.noRecords.limits = states("limits");
+// the same PC on a French page (an empty catalog: English's sentence, marked): Claude Code keeps its name's span off English
+{
+  const P = load(null, { MonitorI18n: { language: "fr", strings: {}, fallback: EN_CATALOG.fallback } }).api;
+  P.S.data = JSON.parse(JSON.stringify(S.data));
+  const cards = [];
+  const walk = (parts) => parts.forEach((p) => { if (p.grid) { walk(p.parts); } else if (p.card) { cards.push({ key: p.key, html: p.html }); } });
+  walk(P.buildModel("overview").cards);
+  out.noRecords.frenchOverview = cards.filter((c) => ["cost", "efficiency", "models"].includes(c.key));
+}
 // a failed cost report is nothing to report when nothing is counted
 monitorState("live");
 failed("cost", { window: "cycle" }, 500);
@@ -2577,18 +2600,21 @@ function gatesWords(page, theme) {
   const es = load(esMeta, { MonitorI18n: { language: "es", strings: { "overview.daily.tip": strings["overview.daily.tip"] },
     fallback: EN_CATALOG.fallback } }).api;
   const B = {};
-  // why a report failed: each answer the page can get, and some it cannot
+  // why a report failed: each answer the page can get, and some it cannot. [status, the answer's own text ("" when it has
+  // none)]; the entry holds them as loadStat does (error: the text, or "HTTP n" when there is none)
   const answers = {
-    lost: [0, "the dashboard lost its link"], token: [401, "missing or wrong token"], token_blank: [401, "HTTP 401"],
-    unavailable: [501, "statistics are not available"], internal: [500, "internal error"], internal_other: [500, "HTTP 500"],
+    lost: [0, ""], token: [401, "missing or wrong token"], token_blank: [401, ""],
+    unavailable: [501, "statistics are not available"], internal: [500, "internal error"], internal_blank: [500, ""],
+    internal_other: [500, "database is locked"],
     busy: [503, "statistics are not available right now"], closed: [503, "the statistics database could not be opened"],
-    busy_other: [503, "the disk is on fire"], bad_gateway: [502, "HTTP 502"], query: [400, "unknown parameter: x"],
-    wrong_status: [503, "internal error"],
+    busy_other: [503, "the disk is on fire"], bad_gateway: [502, ""], query: [400, "invalid days: expected a whole number from 7 to 800"],
+    unknown_report: [404, "unknown report"], wrong_status: [503, "internal error"], markup: [400, "unknown parameter: <b>&x"],
   };
   B.reasons = {};
-  for (const [name, [status, error]] of Object.entries(answers)) {
-    const stale = { data: { x: 1 }, error, status, at: Date.now() - 180000 };
-    const failed = { data: null, error, status, at: 0 };
+  for (const [name, [status, sent]] of Object.entries(answers)) {
+    const error = !status ? "the dashboard lost its link" : sent || "HTTP " + status;
+    const stale = { data: { x: 1 }, error, sent, status, at: Date.now() - 180000 };
+    const failed = { data: null, error, sent, status, at: 0 };
     B.reasons[name] = {
       code: api.statReason(failed), problem: api.problemBanner([failed]), stale: api.staleBanner([stale]),
       frenchStale: fr.staleBanner([stale]), frenchProblem: fr.problemBanner([failed]),
@@ -2643,10 +2669,20 @@ function gatesWords(page, theme) {
   // an unknown plan: the sign-in names no subscription, and the data layer's name for it is English
   const n = { cycle: 10, today: 1, week: 5, multiplier: 0.2, projected: null, price: 50, cycleStart: null, cycleEnd: null, pending: false };
   const unknown = { name: "Unknown plan", subscription_type: null };
+  // a French page whose catalog has the plan line but not plan.unknown: the English word is marked inside the French line
+  const partial = load(meta, { MonitorI18n: { language: "fr", strings: { "overview.cost.plan_price": "{plan} - {price} PAR MOIS" },
+    fallback: EN_CATALOG.fallback } }).api;
+  const card = (P, plan) => {
+    P.S.nextCharts = P.S.nextCharts || {};             // the card's daily chart registers itself there
+    return P.costCard(Object.assign({ planName: P.planWords(plan), planUnknown: P.planUnknown(plan) }, n));
+  };
   B.plan = {
     words: [api.planWords(unknown), fr.planWords(unknown), fr.planWords({ name: "Max 5x", subscription_type: "max" }),
       api.planWords({ name: null, subscription_type: null }), api.planWords(null), api.planWords({ name: "Team", subscription_type: undefined })],
-    en: api.costCard(Object.assign({ planName: api.planWords(unknown) }, n)), fr: fr.costCard(Object.assign({ planName: fr.planWords(unknown) }, n)),
+    unknown: [api.planUnknown(unknown), api.planUnknown({ name: "Max 5x", subscription_type: "max" }), api.planUnknown({ name: null, subscription_type: null }),
+      api.planUnknown(null)],
+    en: card(api, unknown), fr: card(fr, unknown), partial: card(partial, unknown),
+    named: { en: card(api, { name: "Max 5x", subscription_type: "max" }), fr: card(fr, { name: "Max 5x", subscription_type: "max" }) },
   };
   // the pacing cards' hidden sizing texts, in the page's words and formats
   B.pending = { en: [api.pendingStory("session"), api.pendingStory("weekly")], fr: [fr.pendingStory("session"), fr.pendingStory("weekly")] };
@@ -2660,6 +2696,18 @@ function gatesWords(page, theme) {
     return (/<svg[^>]*aria-label="([^"]*)"/.exec(svg) || [])[1] || null;
   };
   B.chartLabel = { en: labelOf(api), fr: labelOf(fr) };
+  // the label above the forecast's end: the language's percent (French "100 %", Turkish "%100"), as its tooltip has it
+  const turkish = { setting: "tr", language: "tr", system: "tr", format: "tr-TR", clock: 24, offered: ["en", "tr"] };
+  const trMeta = (sel) => (sel === 'meta[name="monitor-locale"]' ? { getAttribute: (k) => (k === "content" ? JSON.stringify(turkish) : null) } : null);
+  const tr = load(trMeta, { MonitorI18n: { language: "tr", strings: {}, fallback: EN_CATALOG.fallback } }).api;
+  const endOf = (P) => {
+    P.S.nextCharts = {};
+    P.pacingChart(crossing, "weekly", Date.now(), "d", false);
+    const svg = Object.values(P.S.nextCharts)[0].build(480);
+    return { label: (/<text class="mon-t is-strong is-mid"[^>]*>([^<]*)<\/text>/.exec(svg) || [])[1] || null,
+      tip: (/mon-dot is-hollow[^>]*aria-label="([^"]*)"/.exec(svg) || [])[1] || null };
+  };
+  B.endLabel = { en: endOf(api), fr: endOf(fr), tr: endOf(tr) };
   // the severity in a limit's facts
   B.severity = { en: api.limitFacts(limits.session, null, "session", api.paceOf(limits.session, Date.now()), false),
     fr: fr.limitFacts(limits.session, null, "session", fr.paceOf(limits.session, Date.now()), false) };

@@ -4068,14 +4068,21 @@ def test_the_dashboard_sets_the_language_before_the_window_starts(monkeypatch: p
 
 
 def test_pywebviews_own_browser_arguments_are_the_ones_the_dashboard_repeats() -> None:
-    """pywebview 6.2.1 (constraints-build.txt) gives WebView2 one switch of its own and adds two only when asked
-    (ALLOW_FILE_URLS, REMOTE_DEBUGGING_PORT), which the dashboard never sets. Read from the installed file, never imported."""
+    """pywebview 6.2.1 (constraints-build.txt) gives WebView2 its own switches: --disable-features=ElasticOverscroll, which
+    the dashboard repeats when it sets the variable; --allow-file-access-from-files, by default (ALLOW_FILE_URLS defaults to
+    True), which the dashboard leaves out on purpose (its page is http://127.0.0.1, never file://); and
+    --remote-debugging-port only when REMOTE_DEBUGGING_PORT is set, which the dashboard never does. The defaults are held
+    too, so a pywebview that changes either fails here. Read from the installed files, never imported."""
     import importlib.util  # noqa: PLC0415
 
     spec = importlib.util.find_spec("webview")
     if spec is None or not spec.submodule_search_locations:
         pytest.skip("pywebview is not installed")
-    source = (Path(list(spec.submodule_search_locations)[0]) / "platforms" / "edgechromium.py").read_text(encoding="utf-8")
+    package = Path(list(spec.submodule_search_locations)[0])
+    defaults = (package / "__init__.py").read_text(encoding="utf-8")
+    assert re.findall(r"^\s*'ALLOW_FILE_URLS': (\w+),$", defaults, re.M) == ["True"]
+    assert re.findall(r"^\s*'REMOTE_DEBUGGING_PORT': (\w+),$", defaults, re.M) == ["None"]
+    source = (package / "platforms" / "edgechromium.py").read_text(encoding="utf-8")
     assert re.findall(r"props\.AdditionalBrowserArguments = '([^']*)'", source) == [dashboard.PYWEBVIEW_BROWSER_ARGUMENTS]
     assert re.findall(r"props\.AdditionalBrowserArguments \+= \(?\s*f?'([^']*)'", source) == [
         " --allow-file-access-from-files", ' --remote-debugging-port={webview_settings["REMOTE_DEBUGGING_PORT"]}']
@@ -5261,7 +5268,8 @@ def test_overview_cards_never_clip_their_content_in_the_real_web_view(tmp_path: 
 # ── #98: the page in each language it is built for, in the real web view ─────────────────────────────
 
 # What the real-web-view tests read from the page: the same functions tests/browser/page_probe.js (their headless stand-in)
-# uses. English's own overflows (#98's owner question 3), made from an English run of the stand-in; the page-words record of
+# uses. English's own overflows (two decided by #98's owner question 3, the rest awaiting the owner), made from an English
+# run of the stand-in; the page-words record of
 # today's English (#98); #97's update lines.
 PAGE_CHECKS = Path(__file__).resolve().parent / "browser" / "page_checks.js"
 OVERFLOW_RECORD = Path(__file__).resolve().parent / "fixtures" / "page_overflow_english.json"
@@ -5456,15 +5464,25 @@ def overflow_problems(look: str, lang: str, results: list[dict[str, Any]]) -> li
 
 
 def test_the_overflow_record_names_englishs_own_and_no_other_language_has_any() -> None:
-    """OVERFLOW_RECORD names each of English's overflows with its look, page, size, element and width, by what it is (#98's
-    owner question 3): Night City's heading (its slanted cursor, 3 px past the heading's box, nothing cut), the Overview
-    grid's metas that the theme cuts with an ellipsis, and a find outside #98 (Nostromo's critical scenario at 1060 x 640,
-    never the normal one). The judge passes a known one in English, fails it 2 px further, fails it in another language, and
+    """OVERFLOW_RECORD names each of English's overflows with its look, page, size, element and width, by what it is, and who
+    has accepted it (owner). #98's owner question 3 decided two, labelled decided: Night City's heading (its slanted cursor,
+    3 px past the heading's box, nothing cut; both pages, every size) and Edgerun's Overview surfaces meta, cut with the
+    theme's ellipsis in the default window. Every other entry is labelled awaiting: English as it was, first measured at
+    1060 x 640 (critic 22), kept so English does not change until the owner accepts it on #98: more Overview metas cut with
+    the same ellipsis, and a find outside #98 (Nostromo's warning and critical scenarios, never the normal one), for a
+    ticket of its own. The judge passes a known one in English, fails it 2 px further, fails it in another language, and
     fails anything it does not name."""
     record = json.loads(OVERFLOW_RECORD.read_text(encoding="utf-8"))
     assert {k["why"] for k in record["known"]} <= {"heading", "ellipsis", "find"}
+    decided = [k for k in record["known"] if k["owner"] == "decided"]
+    assert [(k["why"], k["looks"], k["page"], k["sizes"]) for k in decided] == [
+        ("ellipsis", ["edgerun"], "overview", ["1200x780"]),
+        ("heading", ["night_city", "edgerun"], "limits", ["1200x780", "1060x640", "720x480"]),
+        ("heading", ["night_city", "edgerun"], "overview", ["1200x780", "1060x640", "720x480"])]
+    assert decided[0]["at"].endswith("[data-card=surfaces]>div.nm-card-in>div.nm-card-t>span.nm-meta-t")
     for k in record["known"]:
-        assert set(k) == {"why", "looks", "states", "page", "sizes", "kind", "at", "by"}, k
+        assert set(k) == {"why", "owner", "looks", "states", "page", "sizes", "kind", "at", "by"}, k
+        assert k["owner"] == "decided" or (k["owner"] == "awaiting" and k["sizes"] == ["1060x640"]), k
         assert set(k["looks"]) <= set(LOOKS_98) and k["page"] in ("overview", "limits") and k["by"] > 0, k
         assert k["why"] != "heading" or (k["at"].endswith("h1.nm-h1") and set(k["looks"]) <= {"night_city", "edgerun"}
                                          and k["by"] <= 3), k
@@ -5628,7 +5646,9 @@ def test_css_capitals_read_as_todays_english_in_the_real_web_view(tmp_path: Path
     capitals over natural-case text in Nostromo, Night City and Edgerun, and what it stores in Gates; Settings' update row
     and buttons and the update banner show what they did before #97, and each of update_lines_english.json's 28 lines, as
     the catalog words it and written into Settings' line and the banner's, is stored as that record's natural English and
-    shows its "today" (Nostromo, Night City, Edgerun) or that English (Gates)."""
+    shows its "today" (Nostromo, Night City, Edgerun) or that English (Gates). The normal scenario only: the elements other
+    states alone draw (the banners' headings, the verdicts and velocities it does not show) are read in a browser by the
+    headless stand-in's caps step (tests/browser/page_probe.js), and by the static cascade check."""
     server, settings = held_server(tmp_path, monkeypatch, look, "en", update_demo="ok")
     server.start()
     try:
@@ -5681,13 +5701,15 @@ except Exception as exc:
 
 
 @ui_only
-@pytest.mark.parametrize("tag, language", [("fr-FR", ("fr", "fr-FR")), ("en-US", ("en-US",))], ids=["fr-FR", "en-US"])
+@pytest.mark.parametrize("tag, language", [("fr-FR", ("fr", "fr-FR")), ("de-DE", ("de", "de-DE")), ("en-US", ("en-US",))],
+                         ids=["fr-FR", "de-DE", "en-US"])
 def test_webview2_follows_the_language_the_dashboard_passes_in_the_real_web_view(tmp_path: Path, tag: str,
                                                                                   language: tuple[str, ...]) -> None:
     """#88 and #98: the dashboard passes WebView2 the monitor's format tag with --lang (webview2_arguments), and the page's
     navigator.language follows it (#88's spike saw "fr" for fr-FR), so the time and number fields take the monitor's
     language whatever language Windows shows. The variable is set in the child before pywebview starts, as dashboard_main
-    sets it; a developer's own value is not inherited here."""
+    sets it; a developer's own value is not inherited here. fr-FR and de-DE are the proof that WebView2 follows --lang: on an
+    English Windows en-US matches the machine with or without the switch, and fr or de can come only from --lang."""
     env = {k: v for k, v in os.environ.items() if k != dashboard.WEBVIEW2_ARGS_ENV}
     env.update(REAL_PROFILE_ENV, USAGE_MONITOR_APPDATA_DIR=str(tmp_path / "app"))
     run = subprocess.run([sys.executable, "-c", _LANGUAGE_PROBE, tag], env=env, cwd=str(Path(__file__).resolve().parents[1]),

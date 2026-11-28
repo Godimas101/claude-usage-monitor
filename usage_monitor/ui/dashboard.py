@@ -60,9 +60,12 @@ MIN_SIZE = (720, 480)
 # What the window shows until the page has painted, when the active theme's own page colour is not known (Nostromo's black).
 DEFAULT_BACKGROUND = "#090909"
 
-# WebView2 reads extra browser switches from this variable when it starts (Microsoft's documented name). pywebview passes its
-# own switch in the environment's options (webview/platforms/edgechromium.py; a test holds it to this text), and the
-# variable may take the place of those, so the dashboard repeats it.
+# WebView2 reads extra browser switches from this variable when it starts (Microsoft's documented name). pywebview passes
+# its own in the environment's options (webview/platforms/edgechromium.py; a test holds them and their defaults): this
+# switch, and by default (its ALLOW_FILE_URLS setting is True) --allow-file-access-from-files. The variable may take the
+# place of those, so the dashboard repeats the first. The second is left out on purpose: the page is http://127.0.0.1,
+# never a file:// page, so it would only loosen file:// isolation the window does not need. (pywebview's third,
+# --remote-debugging-port, comes only when its REMOTE_DEBUGGING_PORT setting is set, which the dashboard never does.)
 WEBVIEW2_ARGS_ENV = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"
 PYWEBVIEW_BROWSER_ARGUMENTS = "--disable-features=ElasticOverscroll"
 # A BCP 47 tag as the monitor's locale writes its format ("en-US", "fr-CA", "zh-Hant-TW"): letters, digits and hyphens only,

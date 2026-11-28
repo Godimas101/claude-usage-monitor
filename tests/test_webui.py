@@ -2935,6 +2935,24 @@ def test_the_sidebar_names_nostromos_phosphors_and_keeps_the_short_labels_elsewh
     assert [b["aria-pressed"] for b in buttons] == ["false", "false", "false", "false", "true", "false"]
     assert sidebar["nightCity"]["label"] == "Accent" and Markup(sidebar["nightCity"]["html"]).text == ["BLA", "REL", "EDG", "MOX"]
     assert Markup(sidebar["gates"]["html"]).text == ["SYS", "BLU", "TEA", "PUR", "ROS", "ORG", "GRN"]
+    assert all("lang" not in b for key in sidebar for b in Markup(sidebar[key]["html"]).find("button"))     # English: as before
+
+
+@ui_only
+def test_the_sidebar_colour_buttons_mark_englishs_words_on_another_languages_page(checks: dict[str, Any]) -> None:
+    """#98's review (critic 8's words): on a French page a colour button whose tooltip, or in Gates whose three letters, are
+    English's carries lang="en" on the button; one whose words are all French carries none. Nostromo's names are its own
+    (English names, cased by English's rule), so its tooltip alone decides; Night City's ids are names, with no language."""
+    french = checks["sidebarFrench"]
+    nostromo = Markup(french["nostromo"]["html"]).find("button")
+    assert [(b["data-accent"], b["title"], b.get("lang")) for b in nostromo] == [
+        ("amber", "amber", "en"), ("green", "green", "en"), ("white", "white", "en"), ("red", "red", "en"), ("blue", "bleu", None),
+        ("purple", "purple", "en")]
+    gates = Markup(french["gates"]["html"])
+    assert gates.text == ["SYS", "BLE", "TEA", "PUR", "ROS", "ORG", "GRN"]
+    assert [(b["title"], b.get("lang")) for b in gates.find("button")] == [
+        ("system", "en"), ("bleu", None), ("sarcelle", "en"), ("purple", "en"), ("rose", "en"), ("orange", "en"), ("green", "en")]
+    assert all(b.get("lang") is None for b in Markup(french["nightCity"]["html"]).find("button"))
 
 
 @ui_only
@@ -3805,8 +3823,13 @@ def test_the_overviews_record_cards_say_so_and_the_others_stay(checks: dict[str,
         html = cards[key]["html"]
         assert cards[key]["state"] == "ready" and "data-needs" not in html, key
         assert f'<h2 class="nm-ttl">{title}</h2>' in html, key                          # the frame and the title stay
-        assert html.endswith('<p class="nm-empty">No <span translate="no">Claude Code</span> activity on this PC.</p></div></section>'), key
+        # plain text in English, as before #98 (nameInLine; #98's review): a name's span only off English
+        assert html.endswith(f'<p class="nm-empty">{NO_ACTIVITY}.</p></div></section>'), key
         assert not re.search(r"nm-big|nm-mrow|nm-kpi|nm-tile|nm-chart|nm-cost|nm-cells", html), key
+    for french in checks["noRecords"]["frenchOverview"]:       # off English the name keeps its span (tName)
+        assert french["html"].endswith('<p class="nm-empty"><span lang="en">No <span translate="no">Claude Code</span> activity on '
+                                       'this PC.</span></p></div></section>'), french["key"]
+    assert [c["key"] for c in checks["noRecords"]["frenchOverview"]] == ["cost", "efficiency", "models"]
     for key in ("limit-session", "limit-weekly", "limit-scoped", "surfaces", "burn"):
         assert "No Claude Code activity" not in cards[key]["html"], key
         assert cards[key]["state"] == "ready", key
@@ -3954,7 +3977,7 @@ SERVER_CODE = (Path(__file__).resolve().parent.parent / "usage_monitor" / "ui" /
 def test_the_reason_texts_the_page_compares_are_the_servers() -> None:
     """#98: statReason tells a report's reasons apart by the answer's status and, within a status, by the monitor's text,
     compared whole. Each text in app.js's table, with its status, is one ui/server.py answers: a change on either side fails
-    here, not silently on the page (where the reason would read "HTTP 503")."""
+    here, not silently on the page (where the reason would be the monitor's English text as it came, never the catalog's)."""
     table = re.search(r"var STAT_ERRORS = \{(.*?)\};", APP_CODE, re.S).group(1)
     texts = dict(re.findall(r'(\w+): "([^"]+)"', table))
     statuses = {code: int(status) for code, status in re.findall(r"(\w+): (\d{3})", re.search(
@@ -3971,19 +3994,24 @@ def test_the_reason_texts_the_page_compares_are_the_servers() -> None:
 
 @ui_only
 def test_each_stats_answer_is_worded_by_its_status(checks: dict[str, Any]) -> None:
-    """#98: a failed report's reason in the banners and the problem lines is the catalog's, chosen by the answer's status
-    (and the monitor's text where a status has two reasons), never the text as the monitor sent it. Every answer the page can
-    get reads in English as it did; one it cannot (a 400, a 503 with another text) is named by its status. On a French page
-    the reason is French where the catalog has it, else English's marked lang="en", inside the French sentence."""
+    """#98: a failed report's reason in the banners and the problem lines is the catalog's when the page knows it: chosen by
+    the answer's status (and the monitor's text where a status has two reasons). Any other text the monitor sends (a query it
+    refused, an unknown report, a 500 or 503 with another text) is shown as it came, escaped, as English always showed it;
+    "HTTP {status}" names only an answer with no text. So English reads as it did before #98 for every answer. On a French
+    page the reason is French where the catalog has it, else English's, and the monitor's own text, marked lang="en", inside
+    the French sentence."""
     reasons = checks["stageB"]["reasons"]
     codes = {name: found["code"] for name, found in reasons.items()}
     assert codes == {"lost": "lost", "token": "token", "token_blank": "http", "unavailable": "unavailable", "internal": "internal",
-                     "internal_other": "http", "busy": "busy", "closed": "closed", "busy_other": "http", "bad_gateway": "http",
-                     "query": "http", "wrong_status": "http"}
+                     "internal_blank": "http", "internal_other": "sent", "busy": "busy", "closed": "closed", "busy_other": "sent",
+                     "bad_gateway": "http", "query": "sent", "unknown_report": "sent", "wrong_status": "sent", "markup": "sent"}
     said = {"lost": "the dashboard lost its link", "token": "missing or wrong token", "token_blank": "HTTP 401",
-            "unavailable": "statistics are not available", "internal": "internal error", "internal_other": "HTTP 500",
-            "busy": "statistics are not available right now", "closed": "the statistics database could not be opened",
-            "busy_other": "HTTP 503", "bad_gateway": "HTTP 502", "query": "HTTP 400", "wrong_status": "HTTP 503"}
+            "unavailable": "statistics are not available", "internal": "internal error", "internal_blank": "HTTP 500",
+            "internal_other": "database is locked", "busy": "statistics are not available right now",
+            "closed": "the statistics database could not be opened", "busy_other": "the disk is on fire", "bad_gateway": "HTTP 502",
+            "query": "invalid days: expected a whole number from 7 to 800", "unknown_report": "unknown report",
+            "wrong_status": "internal error", "markup": "unknown parameter: &lt;b&gt;&amp;x"}
+    sent = {name for name, code in codes.items() if code == "sent"}
     for name, found in reasons.items():
         assert found["stale"] == ('<div class="nm-msg" role="status"><b>Statistics old</b>The latest refresh failed ('
                                   f"{said[name]}). These figures are from 3 m ago.</div>"), name
@@ -3994,7 +4022,10 @@ def test_each_stats_answer_is_worded_by_its_status(checks: dict[str, Any]) -> No
         french = found["frenchStale"]
         assert french.startswith('<div class="nm-msg" role="status"><b lang="en">Statistics old</b>OLD-FR ('), name
         assert ("(BUSY-FR)" in french) == (name == "busy") and (f'(<span lang="en">{said[name]}</span>)' in french) == (name != "busy"), name
+        if name in sent:          # the monitor's text, marked on its own: the sentence around it is the French catalog's
+            assert f'FAILED-FR (<span lang="en">{said[name]}</span>)' in found["frenchProblem"] or status in (501, 503), name
     assert reasons["internal"]["frenchProblem"].endswith('FAILED-FR (<span lang="en">internal error</span>)</div>')
+    assert "<b>&x" not in reasons["markup"]["problem"] + reasons["markup"]["stale"] + reasons["markup"]["frenchStale"]
 
 
 @ui_only
@@ -4052,11 +4083,19 @@ def test_english_limit_tags_are_the_limits_own_and_other_languages_name_the_kind
 def test_an_unknown_plan_is_worded_by_the_page(checks: dict[str, Any]) -> None:
     """#90's hand-off, done here: a plan whose sign-in names no subscription keeps "Unknown plan" in the data layer's name;
     the page shows plan.unknown in its place (English as before, another language its own words). A plan with a
-    subscription keeps its name, and a plan with no name the cost card's fallback."""
+    subscription keeps its name, and a plan with no name the cost card's fallback. plan.unknown is the catalog's word, not
+    a name: never translate="no", and marked with its language where it is not the plan line's (#98's review). In English
+    the cost card's plan line is plain text, as before #98: a plan's own name too."""
     plan = checks["stageB"]["plan"]
     assert plan["words"] == ["Unknown plan", "Forfait inconnu", "Max 5x", None, "", "Team"]
-    assert '<span><span translate="no">UNKNOWN PLAN</span> · $50 / month</span>' in plan["en"]
-    assert '<span translate="no">FORFAIT INCONNU</span>' in plan["fr"] and "Unknown plan" not in plan["fr"]
+    assert plan["unknown"] == [True, False, False, False]
+    assert "<span>UNKNOWN PLAN · $50 / month</span>" in plan["en"]
+    assert "<span>MAX 5X · $50 / month</span>" in plan["named"]["en"]
+    assert "translate=" not in plan["en"] + plan["named"]["en"]
+    assert '<span lang="en"><span lang="fr">FORFAIT INCONNU</span> · 50' in plan["fr"] and "Unknown plan" not in plan["fr"]
+    assert '<span><span lang="en">UNKNOWN PLAN</span> - 50' in plan["partial"]          # an English word inside a French line
+    assert '<span translate="no">MAX 5X</span>' in plan["named"]["fr"]          # a name is marked as one off English
+    assert 'translate="no">FORFAIT' not in plan["fr"] and 'translate="no">UNKNOWN' not in plan["partial"]
     assert "1 cell = 1 month of Forfait inconnu plan" in plan["fr"]          # ratio.note, plain text (the Cost page escapes it)
 
 
@@ -4080,6 +4119,20 @@ def test_a_pacing_charts_label_is_one_sentence_with_both_parts(checks: dict[str,
     label = checks["stageB"]["chartLabel"]
     assert label["en"].startswith("Weekly usage readings, 2 points. Reaches 100% about ") and label["en"].endswith(" at this rate")
     assert label["fr"].startswith(f"Reaches 100{NB}% about ") and label["fr"].endswith(" at this rate // Weekly usage readings, 2 points")
+
+
+@ui_only
+def test_a_forecasts_end_label_has_the_languages_percent(checks: dict[str, Any]) -> None:
+    """#98's review: the label above a forecast's end is limits.chart.end_label, filled with the language's percent (French
+    "100 %" with a no-break space, Turkish "%100"), as its tooltip has it; English reads "100% ~ <clock>" as before. The
+    pseudo scan cannot see it, since it holds no words."""
+    end = checks["stageB"]["endLabel"]
+    assert ENGLISH_CATALOG["limits.chart.end_label"] == "{percent} ~ {time}"
+    for lang, percent in (("en", "100%"), ("fr", f"100{NB}%"), ("tr", "%100")):
+        label, tip = end[lang]["label"], end[lang]["tip"]
+        clock = label.split(" ~ ", 1)[1]
+        assert label == f"{percent} ~ {clock}" and tip.startswith(f"Reaches {percent} about {clock} "), (lang, end[lang])
+    assert re.fullmatch(r"100% ~ [A-Z]{3} \d{1,2}:\d{2} [AP]M", end["en"]["label"])
 
 
 @ui_only
@@ -4130,6 +4183,10 @@ def page_views(record: dict[str, Any]) -> dict[str, dict[str, dict[str, Any]]]:
 
 
 THEN = page_views(PAGE_WORDS_RECORD)
+# The answers the first record lacked (#98's review: the statistics routes' own texts the page does not word), recorded later
+# from the same code at c05f45d by page_words.js's --record-more, so the first record stays as it was made.
+PAGE_WORDS_MORE: dict[str, Any] = json.loads(
+    (Path(__file__).resolve().parent / "fixtures" / "page_words_english_more.json").read_text(encoding="utf-8"))
 
 
 @pytest.fixture(scope="module")
@@ -4224,7 +4281,8 @@ def test_the_page_shows_todays_english_in_every_look(page_words: dict[str, Any])
     The page met no error on the way.
 
     One difference is recorded (#98's critic 11): before its first state, Gates showed the shell's own capitals until
-    gates.js came with the theme ("ACQUIRING", "REFRESH", "OVERVIEW"); now its words are Gates' from the first frame. What
+    gates.js came with the theme ("ACQUIRING", "REFRESH", "OVERVIEW"); now its words are Gates' from app.js's first render
+    (init, before any state; the served shell's own words show until app.js has run). What
     it shows once gates.js runs is still the record's, byte for byte, and the header's and the sidebar's words are already
     the ones gates.js would make of them."""
     assert page_words["problems"] == []
@@ -4246,12 +4304,54 @@ def test_the_page_shows_todays_english_in_every_look(page_words: dict[str, Any])
     assert not differences, f"{len(differences)} regions differ:\n" + "\n".join(differences[:12])
 
 
+def test_the_later_record_holds_the_answers_the_first_lacked() -> None:
+    """The second record (#98's review) is the first's kind, made from the same code: a refused query (400), an unknown
+    report (404) and a refresh refused with a query's text (the stale banner), each as English showed the monitor's own text
+    before #98, and a plan the data layer names "Unknown plan" (a sign-in with no subscription, a price the user set), from
+    the cost report and from the state, in all five looks."""
+    more = PAGE_WORDS_MORE
+    assert more["looks"] == PAGE_LOOKS and more["_about"][0].startswith("Cases tests/fixtures/page_words_english.json lacked")
+    assert [c["name"] for c in more["cases"]] == ["reports-400", "reports-404", "reports-stale-400", "plan-unknown-named",
+                                                  "plan-unknown-named-pending"]
+    assert not set(page_views(more)) & set(THEN)
+    texts = "\n".join(more["strings"])
+    assert "STATISTICS COULD NOT BE LOADED (INVALID DAYS: EXPECTED A WHOLE NUMBER FROM 7 TO 800). TRYING AGAIN SHORTLY." in texts
+    assert "Statistics could not be loaded (unknown report). Trying again shortly." in texts
+    assert "THE LATEST REFRESH FAILED (UNKNOWN PARAMETER: WINDW). THESE FIGURES ARE FROM 2 M AGO." in texts
+    assert "HTTP 4" not in texts
+    assert "YOUR PLANUNKNOWN PLAN · $50 / MONTH" in texts and "Your planUnknown plan · $50 / month" in texts    # Nostromo, Gates
+
+
+@ui_only
+def test_the_page_shows_todays_english_for_the_answers_the_first_record_lacked(page_words: dict[str, Any]) -> None:
+    """#98's review: a statistics answer whose text the page does not word (a query the monitor refused, a report it does not
+    know) reads in English as the monitor sent it, as before #98, byte for byte in every look: the banners and the Limits
+    cards' problem lines, against the second record; and so does the cost card of a plan the data layer names "Unknown
+    plan"."""
+    shown = page_views(page_words["more"])
+    then = page_views(PAGE_WORDS_MORE)
+    assert list(shown) == list(then)
+    differences = [f"{key} {name}:\n  then {json.dumps(then[key].get(name), ensure_ascii=False)[:400]}\n"
+                   f"  now  {json.dumps(shown[key].get(name), ensure_ascii=False)[:400]}"
+                   for key in then for name in sorted(set(then[key]) | set(shown[key])) if then[key].get(name) != shown[key].get(name)]
+    assert not differences, f"{len(differences)} regions differ:\n" + "\n".join(differences[:12])
+
+
+@ui_only
+def test_englishs_cards_carry_no_translate_mark(page_words: dict[str, Any]) -> None:
+    """#98's review: in English a name inside a card is plain text, as before #98 (a span would split its text run and draw it
+    a sub-pixel apart): no card of the record's pages holds an element marked translate. Another language marks a name
+    translate="no" (tName, lineAttrs)."""
+    assert page_words["marked"] == []
+
+
 @ui_only
 def test_the_shell_and_app_js_agree_before_the_first_state(page_words: dict[str, Any]) -> None:
     """#98's critic 10, 11 and 17: before the monitor has answered, the header shows index.html's own text (which the server
     fills from the same keys) in Nostromo and Night City, as the page opens and at its first 1 s tick, and the health box
-    its words once that tick has drawn it; a first poll that fails says No link. Gates shows its own words from the first
-    frame. Only the words: the link's mark stays as the shell has it until a state or a failed poll says how the link is."""
+    its words once that tick has drawn it; a first poll that fails says No link. Gates shows its own words from app.js's first
+    render, as the page opens (the served shell's words, the header's keys in every look, show until app.js has run). Only
+    the words: the link's mark stays as the shell has it until a state or a failed poll says how the link is."""
     en = ENGLISH_CATALOG
     first = page_words["first"]
     shell = first["shell"]

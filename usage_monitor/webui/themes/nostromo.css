@@ -587,6 +587,15 @@ html[data-reduce-motion="1"] *, html[data-reduce-motion="1"] *::before, html[dat
 :root:not(:lang(en)) .nm-grid .nm-card-t:not(.nm-chart-t) .nm-meta-t { overflow: visible; text-overflow: clip; }
 :root:not(:lang(en)) .nm-row2 > .nm-facts { min-width: 0; white-space: normal; overflow-wrap: break-word; }
 :root:not(:lang(en)) .nm-error { overflow-wrap: break-word; }     /* a word longer than the line breaks (mono is wide) */
+/* the header's one row: the data age gives way first, below the width where longer words leave Refresh no room (#98's
+   review: a pseudo-locale bar needs 1048 px with its longest link word), then the brand mark (a pseudo-locale bar with no
+   data age needs 860 px); under 800 px every language hides both already */
+@media (max-width: 1100px) {
+  :root:not(:lang(en)) #data-age { display: none; }
+}
+@media (max-width: 900px) {
+  :root:not(:lang(en)) .nm-brand em { display: none; }
+}
 /* the Overview grid's rows grow with what their cards hold (as Night City's do), so a wrapped line never cuts a card off */
 @media (min-width: 1001px) {
   :root:not(:lang(en)) .nm-grid { grid-template-rows: minmax(auto, 196fr) minmax(auto, 276fr) minmax(auto, 146fr); }

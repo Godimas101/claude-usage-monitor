@@ -479,6 +479,20 @@
     return markup('<span translate="no">' + esc(text) + "</span>");
   }
 
+  /* A name inside one of #98's sentences (Claude Code in the no-activity line): plain text on an English page, as English
+   * always drew it (a span of its own would split the text run and move its glyphs a sub-pixel), tName's span on another
+   * language's. The update banner keeps tName's span in English too, as #97 wrote it. */
+  function nameInLine(text) {
+    return I18N.language === "en" ? markup(esc(text)) : tName(text);
+  }
+
+  /* The cost card's plan name in its line, in the page's capitals (#91): as nameInLine, but in Gates' English a span of its
+   * own, with no mark, so gates.js sets the capitals in sentence case as it did the whole line before #98 ("Max 5x"; #101
+   * retires that re-casing). */
+  function planNameInLine(text) {
+    return I18N.language === "en" && gatesLook() ? markup("<span>" + esc(text) + "</span>") : nameInLine(text);
+  }
+
   /* The CLDR plural category of count in language: i18n.plural_category's rules, so the page and the app agree whatever
    * the WebView's own ICU says. en and tr have one and other; fr and es have one, many and other; French counts 0, 1
    * and 1.5 as one. A count that is not a finite number is other. */
@@ -961,8 +975,9 @@
 
   // ── The header's, the sidebar's and the headings' words (#98) ─────────────────────
   // In natural case: Nostromo and Night City set them in capitals by CSS. Gates says some of them in words of its own
-  // (page.gates.*), which gates.js used to make of the capitals: app.js writes them while the look is Gates, from the first
-  // frame. Each table holds one literal key a line (the UPDATE_REFUSED pattern), so the catalog check reads them all.
+  // (page.gates.*), which gates.js used to make of the capitals: app.js writes them while the look is Gates, from its first
+  // render (init's renderFirstChrome, before any state); until then the served shell shows the shell's own words. Each table
+  // holds one literal key a line (the UPDATE_REFUSED pattern), so the catalog check reads them all.
 
   /* Shows a line in an element: its text, and lang="en" while it is English on another language's page. */
   function writeLine(el, line) {
@@ -1074,33 +1089,43 @@
   // the table does not know is shown as written. Gates' accents have short names of three letters; any other id shows its
   // first three (Night City's names). Nostromo names its phosphors in full (accentLabel, the theme's own names).
   var ACCENT_TIPS = {
-    amber: function () { return t("nav.colour.title.amber"); },
-    green: function () { return t("nav.colour.title.green"); },
-    white: function () { return t("nav.colour.title.white"); },
-    red: function () { return t("nav.colour.title.red"); },
-    blue: function () { return t("nav.colour.title.blue"); },
-    purple: function () { return t("nav.colour.title.purple"); },
-    teal: function () { return t("nav.colour.title.teal"); },
-    rose: function () { return t("nav.colour.title.rose"); },
-    orange: function () { return t("nav.colour.title.orange"); },
-    system: function () { return t("nav.colour.title.system"); }
+    amber: function () { return tLine("nav.colour.title.amber"); },
+    green: function () { return tLine("nav.colour.title.green"); },
+    white: function () { return tLine("nav.colour.title.white"); },
+    red: function () { return tLine("nav.colour.title.red"); },
+    blue: function () { return tLine("nav.colour.title.blue"); },
+    purple: function () { return tLine("nav.colour.title.purple"); },
+    teal: function () { return tLine("nav.colour.title.teal"); },
+    rose: function () { return tLine("nav.colour.title.rose"); },
+    orange: function () { return tLine("nav.colour.title.orange"); },
+    system: function () { return tLine("nav.colour.title.system"); }
   };
   var ACCENT_SHORT = {
-    system: function () { return t("nav.colour.short.system"); },
-    blue: function () { return t("nav.colour.short.blue"); },
-    teal: function () { return t("nav.colour.short.teal"); },
-    purple: function () { return t("nav.colour.short.purple"); },
-    rose: function () { return t("nav.colour.short.rose"); },
-    orange: function () { return t("nav.colour.short.orange"); },
-    green: function () { return t("nav.colour.short.green"); }
+    system: function () { return tLine("nav.colour.short.system"); },
+    blue: function () { return tLine("nav.colour.short.blue"); },
+    teal: function () { return tLine("nav.colour.short.teal"); },
+    purple: function () { return tLine("nav.colour.short.purple"); },
+    rose: function () { return tLine("nav.colour.short.rose"); },
+    orange: function () { return tLine("nav.colour.short.orange"); },
+    green: function () { return tLine("nav.colour.short.green"); }
   };
 
+  /* A colour button's tooltip as a line: the id's words, or an id the table does not know as written (no language of its own). */
+  function accentTipLine(accent) {
+    return Object.prototype.hasOwnProperty.call(ACCENT_TIPS, accent) ? ACCENT_TIPS[accent]() : bareLine(accent);
+  }
+
+  /* A colour button's short label (Gates, Night City) as a line: Gates' three letters, or an id's first three. */
+  function accentShortLine(accent) {
+    return Object.prototype.hasOwnProperty.call(ACCENT_SHORT, accent) ? ACCENT_SHORT[accent]() : bareLine(accent.slice(0, 3).toUpperCase());
+  }
+
   function accentTip(accent) {
-    return Object.prototype.hasOwnProperty.call(ACCENT_TIPS, accent) ? ACCENT_TIPS[accent]() : accent;
+    return accentTipLine(accent).text;
   }
 
   function accentShort(accent) {
-    return Object.prototype.hasOwnProperty.call(ACCENT_SHORT, accent) ? ACCENT_SHORT[accent]() : accent.slice(0, 3).toUpperCase();
+    return accentShortLine(accent).text;
   }
 
   /* The line after "Check for updates now". `checked` is false when the monitor could not look (offline, GitHub's rate
@@ -1207,7 +1232,7 @@
     var e = S.stats[key];
     if (!e) {
       e = S.stats[key] = {
-        key: key, name: name, url: "/api/analytics/" + key, data: null, digest: "", error: "", status: 0,
+        key: key, name: name, url: "/api/analytics/" + key, data: null, digest: "", error: "", sent: "", status: 0,
         at: 0, errAt: 0, pending: false
       };
     }
@@ -1248,10 +1273,13 @@
         e.data = res.data;
         e.digest = digest;
         e.error = "";
+        e.sent = "";
         e.status = 200;
         e.at = Date.now();
       } else {
         e.error = errorText(res);
+        // the monitor's own text, apart from errorText's "HTTP n" for an answer that has none (statReason)
+        e.sent = res.data && res.data.error ? String(res.data.error) : "";
         e.status = res.status;
         e.errAt = Date.now();
       }
@@ -1261,6 +1289,7 @@
       window.clearTimeout(e.slowTimer);
       e.slow = false;
       e.error = "the dashboard lost its link";
+      e.sent = "";
       e.status = 0;
       e.errAt = Date.now();
       statArrived();
@@ -1307,10 +1336,11 @@
   }
 
   // ── Why a report failed (#98) ───────────────────────────────────────────────────
-  // A failed report's reason is worded by the page, never shown as the monitor sent it: the reason's code comes from the
-  // answer's HTTP status and, where a status has more than one reason, from the monitor's own text, compared whole. These are
-  // the texts ui/server.py answers the statistics routes with (a test holds each to its literal there). #102 may give the
-  // answers codes: it changes statReason only.
+  // A failed report's reason is worded by the page when the page knows it: its code comes from the answer's HTTP status and,
+  // where a status has more than one reason, from the monitor's own text, compared whole. These are the texts ui/server.py
+  // answers the statistics routes with (a test holds each to its literal there). Any other text the monitor sends (a query it
+  // refused, an unknown report) is shown as it came, Python's English, as it always was; "HTTP {status}" names an answer that
+  // has no text. #102 may give the answers codes: it changes statReason only.
   var STAT_ERRORS = {
     unavailable: "statistics are not available",                     // 501: this build has no statistics
     busy: "statistics are not available right now",                  // 503: a report failed on the database twice
@@ -1331,22 +1361,27 @@
     http: function (status) { return tHtml("stats.reason.http", { status: status }); }
   };
 
-  /* The reason a report failed, as a code: "lost" when the monitor did not answer (the request itself failed), the reason of
-   * a known text with its own status, else "http" (named by its status). Every answer the monitor gives the page reads as
-   * it did; an answer with a text the page does not know is named by its status. */
+  /* The reason a report failed, as a code: "lost" when the monitor did not answer (the request itself failed); the reason of
+   * a known text with its own status; "sent" for any other text the monitor sent (e.sent); else "http", named by its status
+   * (an answer with no text). In English every answer reads as it did before #98. */
   function statReason(e) {
     if (!e.status) {
       return "lost";
     }
     var found = Object.keys(STAT_ERRORS).filter(function (code) {
-      return STAT_ERROR_STATUS[code] === e.status && STAT_ERRORS[code] === e.error;
+      return STAT_ERROR_STATUS[code] === e.status && STAT_ERRORS[code] === e.sent;
     })[0];
-    return found || "http";
+    return found || (e.sent ? "sent" : "http");
   }
 
-  /* The reason in words, as markup for a sentence's {reason}. */
+  /* The reason in words, as markup for a sentence's {reason}. A text the page does not know is the monitor's English, as it
+   * came: marked lang="en" on another language's page, and as plain text on an English one (as it always was). */
   function statReasonHtml(e) {
-    return markup(STAT_REASONS[statReason(e)](String(e.status)));
+    var code = statReason(e);
+    if (code === "sent") {
+      return markup(I18N.language !== "en" ? '<span lang="en">' + esc(e.sent) + "</span>" : esc(e.sent));
+    }
+    return markup(STAT_REASONS[code](String(e.status)));
   }
 
   /* The whole sentence of a failed report, as markup: for the banner and for a Limits card's chart. */
@@ -2459,7 +2494,22 @@
   /* A plan's name for people: the catalog's "Unknown plan" for a plan whose sign-in names no subscription (#90: the data layer
    * keeps that English text in its name, and a cost report copies it), else the plan's own name, as written. */
   function planWords(plan) {
-    return plan && plan.name && plan.subscription_type === null ? t("plan.unknown") : plan ? plan.name : "";
+    return planUnknown(plan) ? t("plan.unknown") : plan ? plan.name : "";
+  }
+
+  /* Whether planWords gives the catalog's plan.unknown: a word, not a name, so the cost card marks it as one. */
+  function planUnknown(plan) {
+    return !!(plan && plan.name && plan.subscription_type === null);
+  }
+
+  /* plan.unknown inside the cost card's plan line: in the capitals of the language it came from, and marked with that
+   * language when it is not the line's own (outer: the language of the line around it). Never translate="no": it is the
+   * catalog's word, not a name. In Gates a span of its own, as planNameInLine's, for gates.js's sentence case. */
+  function unknownPlanHtml(outer) {
+    var line = tLine("plan.unknown");
+    var html = esc(FMT.upper(line.text, line.lang));
+    var lang = line.lang !== outer ? ' lang="' + esc(line.lang) + '"' : "";
+    return markup(lang || gatesLook() ? "<span" + lang + ">" + html + "</span>" : html);
   }
 
   /* The cost figures the overview shows: from the cost report once it is in, from the data service's own
@@ -2468,7 +2518,7 @@
     var entry = statEntry("cost", { window: "cycle" });
     var d = entry.data;
     var out = { loaded: !!d, pending: false, entry: entry, cycle: null, today: null, week: null, saved: null, hit: null, thinking: null,
-      multiplier: null, projected: null, planName: "", price: null, cycleStart: null, cycleEnd: null, models: [] };
+      multiplier: null, projected: null, planName: "", planUnknown: false, price: null, cycleStart: null, cycleEnd: null, models: [] };
     if (d) {
       var c = d.windows.cycle, tk = c.tokens || {};
       var prompt = (tk.input || 0) + (tk.cache_read || 0) + (tk.cache_write || 0);
@@ -2481,6 +2531,7 @@
       out.multiplier = num(d.value.multiplier);
       out.projected = num(d.value.projected_cycle_cost_usd);
       out.planName = planWords(d.plan);
+      out.planUnknown = planUnknown(d.plan);
       out.price = num(d.plan.price_usd);
       out.cycleStart = d.value.cycle_start;
       out.cycleEnd = d.value.cycle_end;
@@ -2491,6 +2542,7 @@
     var month = windowOf("month"), today = windowOf("today"), week = windowOf("week");
     var calendarCycle = S.settings.billing_day === null || S.settings.billing_day === undefined;
     out.planName = s && s.plan ? planWords(s.plan) : "";
+    out.planUnknown = !!(s && planUnknown(s.plan));
     out.price = effectivePlanPrice();
     if (month && calendarCycle) {
       out.cycle = num(month.totals.cost_usd);
@@ -2584,8 +2636,9 @@
         tHtml("overview.cost.set_price") + "</span></div></div>";
     } else {
       var proj = n.projected !== null ? t("overview.cost.projection", { amount: fmtUsd(n.projected), multiple: fmtMult(n.projected / n.price) }) : "";
-      // the plan's name in the page's capitals, as written (#91); a plan with no name is the catalog's
-      var plan = n.planName ? tName(FMT.upper(n.planName)) : markup(tHtml("overview.cost.plan_fallback"));
+      // the plan's name in the page's capitals, as written (#91); an unknown plan and a plan with no name are the catalog's
+      var plan = n.planUnknown ? unknownPlanHtml(tLang("overview.cost.plan_price")) : n.planName ? planNameInLine(FMT.upper(n.planName)) :
+        markup(tHtml("overview.cost.plan_fallback"));
       planBlock = '<div class="nm-plan"><div class="nm-big m"' + (proj ? ' title="' + esc(proj) + '"' : "") + ">" + esc(fmtMult(n.multiplier)) + '</div><div class="nm-facts"><span>' +
         tHtml("overview.cost.your_plan") + "</span><span>" + tHtml("overview.cost.plan_price", { plan: plan, price: fmtPlanPrice(n.price) }) + "</span></div></div>";
     }
@@ -2727,7 +2780,7 @@
     var he = statEntry("history");
     // No Claude Code activity on this PC (limitsOnly): the three cards that count records say so in place of their figures, and
     // they ask for no report, so they are ready, with no problem to report.
-    var none = limitsOnly() ? markup(tHtml("overview.no_activity", { product: tName(CLAUDE_CODE) })) : "";
+    var none = limitsOnly() ? markup(tHtml("overview.no_activity", { product: nameInLine(CLAUDE_CODE) })) : "";
     // Nothing to show yet (n.pending): the cost report is on its way, or it failed and the monitor has no month of its own to
     // stand in (a billing day is set). The three cards that draw from it say which, as they do on the Cost page.
     var costState = n.pending && !none ? entryState([n.entry]) : "ready";
@@ -2924,7 +2977,7 @@
       forecastText = forecast.reaches === null ? "" : t("limits.chart.reaches", { percent: FMT.percent("100"), time: at });
       series.push({
         kind: "forecast", points: forecast.points,
-        endLabel: forecast.reaches === null ? "" : "100% ~ " + at, endTip: forecastText
+        endLabel: forecast.reaches === null ? "" : t("limits.chart.end_label", { percent: FMT.percent("100"), time: at }), endTip: forecastText
       });
     }
     var every = Math.max(1, Math.ceil(pts.length / 24));
@@ -3076,7 +3129,7 @@
     var colours = ["main", "alt", "dim"];
     var stack = breakdown.length
       ? CHARTS.stackedBar(breakdown.map(function (r, i) {
-        return { value: r.percent, cls: colours[i % 3], tip: String(r.name || r.key || "") + ": " + fmtPct(r.percent) };
+        return { value: r.percent, cls: colours[i % 3], tip: t("limits.surfaces.tip", { name: String(r.name || r.key || ""), percent: fmtPct(r.percent) }) };
       }), { width: 520, height: 16, label: t("limits.surfaces.label") })
       : '<p class="nm-empty">' + tHtml("limits.surfaces.none") + "</p>";
     var legend = breakdown.map(function (r) {
@@ -5912,8 +5965,9 @@
     }
   }
 
-  /* The header before the monitor has answered: the shell's own words, in the look's (Gates' from the first frame). Only the
-   * words: the link's mark stays as the shell has it until a state or a failed poll says how the link is. */
+  /* The header before the monitor has answered: the shell's own words, in the look's (Gates' own from here: init runs this
+   * before any state; the served shell holds the shell's words, header.link.loading and header.age_none, until then). Only
+   * the words: the link's mark stays as the shell has it until a state or a failed poll says how the link is. */
   function renderFirstChrome() {
     writeLine(document.getElementById("uplink-text"), linkLine("loading"));
     renderAge();
@@ -5975,8 +6029,13 @@
     var active = theme ? accentOf(theme.variant) : "";
     var full = theme && theme.id === "nostromo";          // Nostromo's six phosphors fit by name, two to a row
     var html = accents.slice(0, 8).map(function (a) {
+      // the button is marked lang="en" while its tooltip, or Gates' letters on it, are English on another language's page;
+      // Nostromo's names are its own (accentLabel), English names cased by English's rule
+      var tip = accentTipLine(a);
+      var short = full ? null : accentShortLine(a);
+      var other = [tip, short].filter(function (line) { return line && line.lang && line.lang !== I18N.language; })[0];
       return '<button type="button" data-accent="' + esc(a) + '" class="' + (a === active ? "on" : "") + '" aria-pressed="' + (a === active ? "true" : "false") +
-        '" title="' + esc(accentTip(a)) + '">' + esc(full ? accentLabel(meta, a) : accentShort(a)) + "</button>";
+        '" title="' + esc(tip.text) + '"' + (other ? lineLangAttr(other.lang) : "") + ">" + esc(full ? accentLabel(meta, a) : short.text) + "</button>";
     }).join("");
     if (box.getAttribute("data-sig") !== html) {
       box.setAttribute("data-sig", html);
@@ -6437,7 +6496,7 @@
       accentShort: accentShort, tUpper: tUpper, burnUnitLine: burnUnitLine, writeLine: writeLine,
       // the banners', Overview's and Limits' words (#98)
       statReason: statReason, statProblem: statProblem, statProblemShort: statProblemShort, problemBanner: problemBanner,
-      STAT_ERRORS: STAT_ERRORS, STAT_ERROR_STATUS: STAT_ERROR_STATUS, limitTag: limitTag, planWords: planWords, costCard: costCard,
+      STAT_ERRORS: STAT_ERRORS, STAT_ERROR_STATUS: STAT_ERROR_STATUS, limitTag: limitTag, planWords: planWords, planUnknown: planUnknown, costCard: costCard,
       pacingCard: pacingCard, pendingStory: pendingStory, burnHourLine: burnHourLine, ratioNoteLine: ratioNoteLine,
       tHtmlLine: tHtmlLine, lineAttrs: lineAttrs, nameLine: nameLine,
       // The formatters and the sites tests/webui_formats.js holds to today's English (#91).

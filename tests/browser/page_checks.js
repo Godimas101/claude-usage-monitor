@@ -14,6 +14,10 @@
  *   CSS_CAPS           the elements that have their capitals from the look's stylesheet since #98, and their page
  *   writeLines(args)   writes each line into an element (its textContent) and reads it back: args [selector, lines]
  *   readUpdate()       Settings' update row and buttons, and the update banner's heading, sentence and buttons
+ *   header()           the header bar's row at the window's width: {vw, sw, cw, refresh, ageShown, link, cut, overlap}
+ *   chips()            each chip in #main (.nm-chip, and .nm-pace > b where a look frames it as one): where its words' ink sits
+ *                      against its box and whether the look draws a frame there, and how far the chip and its words run out
+ *                      of its card: [{at, text, top, bottom, h, framed, out, wordsOut}]
  */
 
 function settled() {
@@ -281,7 +285,85 @@ function readUpdate() {
   };
 }
 
+/* The header bar's one row at the window's width (#98's review): its scroll width against its width, Refresh's right edge
+ * against the window's, whether the data age is shown, the link's words, the bar's elements cut (wider than their box) and
+ * whether the brand's words run into the right-hand group. */
+function header() {
+  var bar = document.querySelector(".nm-bar");
+  var refresh = document.getElementById("refresh");
+  var age = document.getElementById("data-age");
+  var brand = document.querySelector(".nm-brand");
+  var right = document.querySelector(".nm-bar-r");
+  if (!bar) { return null; }
+  var shown = function (el) { return !!el && getComputedStyle(el).display !== "none" && el.getClientRects().length > 0; };
+  var cut = Array.prototype.filter.call(bar.querySelectorAll("*"), function (el) {
+    return shown(el) && getComputedStyle(el).display !== "inline" && el.clientWidth > 0 && el.scrollWidth > el.clientWidth + 1;
+  }).map(function (el) { return (el.id ? "#" + el.id : "." + String(el.className).split(" ")[0]) + " " + el.scrollWidth + ">" + el.clientWidth; });
+  // the brand's own words (its text nodes) against the right-hand group's box
+  var words = 0;
+  if (brand) {
+    var range = document.createRange();
+    range.selectNodeContents(brand);
+    Array.prototype.forEach.call(range.getClientRects(), function (q) { if (q.width > 0) { words = Math.max(words, q.right); } });
+  }
+  var r = refresh ? refresh.getBoundingClientRect() : null;
+  return { vw: innerWidth, sw: bar.scrollWidth, cw: bar.clientWidth, refresh: r ? +r.right.toFixed(1) : null,
+    ageShown: shown(age), link: (document.getElementById("uplink-text") || {}).textContent || "", cut: cut,
+    overlap: right && words ? +(words - right.getBoundingClientRect().left).toFixed(1) : null };
+}
+
+/* Each chip in #main (.nm-chip, and .nm-pace > b where a look frames the verdict as a chip): where the ink of its words sits
+ * against its border box, from the font's own metrics (a canvas's measureText at the chip's computed font), whether the look
+ * draws a 1 px frame there (a border, or a ::before ring as Night City's), and how far the chip runs out of its card. */
+function chips() {
+  var canvas = document.createElement("canvas");
+  var ctx = canvas.getContext("2d");
+  var out = [];
+  Array.prototype.forEach.call(document.querySelectorAll("#main .nm-chip, #main .nm-pace > b"), function (el) {
+    var cs = getComputedStyle(el);
+    if (cs.display === "inline" || cs.display === "none" || !el.getClientRects().length || el.closest("[aria-hidden='true']")) { return; }
+    var ring = getComputedStyle(el, "::before");
+    var framed = parseFloat(cs.borderTopWidth) >= 1 || (ring.content !== "none" && ring.position === "absolute");
+    if (!framed && !el.classList.contains("nm-chip")) { return; }          // a verdict the look sets as plain words
+    for (var n = el; n && n.nodeType === 1; n = n.parentElement) {
+      if (getComputedStyle(n).display === "none" || getComputedStyle(n).visibility === "hidden") { return; }
+    }
+    var text = (el.innerText || "").replace(/\s+/g, " ").trim();
+    if (!text) { return; }
+    var box = el.getBoundingClientRect();
+    ctx.font = cs.fontStyle + " " + cs.fontWeight + " " + cs.fontSize + " " + cs.fontFamily;
+    var m = ctx.measureText(text);
+    var inkTop = Infinity, inkBottom = -Infinity, left = Infinity, right = -Infinity;
+    Array.prototype.forEach.call(el.childNodes, function (node) {
+      if (node.nodeType !== 3 || !node.nodeValue.trim()) { return; }
+      var range = document.createRange();
+      range.selectNodeContents(node);
+      Array.prototype.forEach.call(range.getClientRects(), function (q) {
+        if (q.width <= 0) { return; }
+        // a text fragment's box is the font's ascent over its descent, centred on its line: the baseline sits at the box's
+        // top plus the font's ascent
+        var pad = (q.height - (m.fontBoundingBoxAscent + m.fontBoundingBoxDescent)) / 2;
+        var baseline = q.top + pad + m.fontBoundingBoxAscent;
+        inkTop = Math.min(inkTop, baseline - m.actualBoundingBoxAscent);
+        inkBottom = Math.max(inkBottom, baseline + m.actualBoundingBoxDescent);
+        left = Math.min(left, q.left);
+        right = Math.max(right, q.right);
+      });
+    });
+    if (!isFinite(inkTop)) { return; }
+    var card = el.closest(".nm-card-in");
+    var c = card ? card.getBoundingClientRect() : null;
+    var host = el.closest("[data-card]");
+    out.push({ at: (host ? host.getAttribute("data-card") + " " : "") + el.tagName.toLowerCase() + (el.classList.length ? "." + el.classList[0] : ""),
+      text: text.slice(0, 60),
+      top: +(inkTop - box.top).toFixed(2), bottom: +(box.bottom - inkBottom).toFixed(2), h: +box.height.toFixed(2), framed: framed,
+      out: c ? +Math.max(box.right - c.right, c.left - box.left, 0).toFixed(1) : 0,
+      wordsOut: c ? +Math.max(right - c.right, c.left - left, 0).toFixed(1) : 0 });
+  });
+  return out;
+}
+
 if (typeof module !== "undefined") {
   module.exports = { settled: settled, measure: measure, regions: regions, readCaps: readCaps, CSS_CAPS: CSS_CAPS,
-    writeLines: writeLines, readUpdate: readUpdate };
+    writeLines: writeLines, readUpdate: readUpdate, header: header, chips: chips };
 }

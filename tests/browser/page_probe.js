@@ -21,7 +21,7 @@
 //   --scenarios a,b     the dev server's scenarios the widths step shows (default normal,warning,critical,stale)
 //   --routed a,b        the states the probe makes by answering the page itself (default status-offline,link-lost,
 //                       reports-failed,reports-stale; "none": none)
-//   --steps a,b         widths,clip,caps,record,update,motion by default
+//   --steps a,b         widths,header,clip,caps,record,update,motion by default
 //   --shots all|narrow|none   which views of the widths step are shot (default narrow: the narrowest size; all: every size)
 //   CHROMIUM_PATH       a Chromium to launch instead of Playwright's own
 //
@@ -33,9 +33,16 @@
 //           scrollHeight > clientHeight + 1); text that leaves its card or the header bar at a side, the top or the bottom,
 //           or the nav at a side (the nav scrolls); words drawn over other words in a card, the bar or the nav; the nav's
 //           blocks or the header's parts on top of each other; the two rows of a Limits meter whose bars do not start at the
-//           same x. English has exactly the overflows tests/fixtures/page_overflow_english.json names (#98's owner question 3,
-//           made from an English run of this step), each no more than 1 px past its English width; anything else fails, and
-//           another language has none.
+//           same x; a chip (a box of its own: .nm-chip, .nm-pace > b) whose words' ink reaches its 1 px frame at the top or
+//           the bottom (an accented capital, a cedilla: chips() measures the ink from the font's metrics), or whose frame runs
+//           out of its card at a side while its words stay in (words that leave are the check above). English has exactly the overflows tests/fixtures/page_overflow_english.json names (#98's
+//           owner question 3 decided two; made from an English run of this step), each no more than 1 px past its English
+//           width; anything else fails, and another language has none.
+//   header  The header bar in each language and look, with each link word (live, loading, stale, offline, rate_limited,
+//           no_credentials, paused, and lost: the monitor stops answering), at every page width from 704 to 1184 px (most
+//           20 px apart): the bar's one row never runs past the window (its scroll width), Refresh's right edge stays inside
+//           it, nothing in the bar is cut, and the brand's words never run into the right-hand group (#98's review: outside
+//           English the data age gives way first).
 //   clip    tests/test_server.py's clip test (test_overview_cards_never_clip_their_content_in_the_real_web_view) at its four
 //           sizes, in English and the pseudo-locale: no Overview card cuts its content off, the cost tiles' numerals keep
 //           4 px off the card's edge, and the plan block's two lines are the catalog's.
@@ -43,7 +50,11 @@
 //           every element that has its capitals from the look's stylesheet since #98 (CSS_CAPS) shows them (innerText) in
 //           Nostromo, Night City and Edgerun and stores the natural case (textContent), and in Gates shows what it stores,
 //           with no text-transform; and the regions that do not hang on the clock's zone (the header, the sidebar, the
-//           heading) equal tests/fixtures/page_words_english.json's live view.
+//           heading) equal tests/fixtures/page_words_english.json's live view. Then the same judge in the states the normal
+//           scenario does not draw (#98's review), each answered as tests/page_words.js answers its case (--worlds): the
+//           status banners (Auth lost, No carrier, Rate limited, Paused), the stale and problem banners' headings, every
+//           pace verdict and chip and every burn velocity; where the record's view has a banner, its heading
+//           (#main .nm-msg > b) must be there, and every region of Overview and Limits equals the record's view of that case.
 //   record  English, every look, every page: the probe answers the page with tests/fixtures/page_words_inputs.json (the
 //           dev server's answers, frozen) at its moment (the page's clock is held there, the time zone UTC), and every region
 //           tests/page_words.js reads (the header, the sidebar, each page's top parts and the cards the record keeps), read
@@ -66,7 +77,7 @@
 // Exit code 1 and "VERDICT: FAIL" when any check fails.
 'use strict';
 const { chromium } = require('playwright');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -83,7 +94,7 @@ const LANGS = list('langs', 'en,pseudo,fr');
 const SIZES = list('sizes', '1200x780,1060x640,720x480').map((s) => s.split('x').map(Number));
 const SCENARIOS = list('scenarios', 'normal,warning,critical,stale');
 const ROUTED = list('routed', 'status-offline,link-lost,reports-failed,reports-stale');
-const STEPS = list('steps', 'widths,clip,caps,record,update,motion');
+const STEPS = list('steps', 'widths,header,clip,caps,record,update,motion');
 const SHOTS = opt('shots', 'narrow');
 const FRAME = [16, 39];               // a WebView2 window's frame: a 1200 x 780 window holds a 1184 x 741 page
 const PAGES = ['overview', 'limits'];
@@ -98,7 +109,9 @@ const LOOK = {
   'gates-light': { settings: { theme_id: 'gates', theme_variant: 'blue', theme_mode: 'light' }, caps: false },
 };
 
-// English's own overflows, as English draws them today (#98's owner question 3, decided: they stay). Each is named with the
+// English's own overflows, as English draws them today (#98's owner question 3 decided two: Night City's heading and Edgerun's
+// surfaces meta in the default window, each entry's owner "decided"; the others, first seen at 1060 x 640, "awaiting" the
+// owner on #98). Each is named with the
 // views it shows in and how far it runs past its box (wide: scrollWidth - clientWidth; leaves-side: px past its card); in
 // English a known one may run at most 1 px further, and anything else fails. Another language has none: it wraps.
 //   heading   Night City's page heading: its slanted cursor runs 3 px past the heading's box (nothing is cut).
@@ -106,7 +119,8 @@ const LOOK = {
 //             Edgerun's surfaces meta in the default window, and at the 1060 x 640 window (Gates' 232 px nav column, which
 //             the plan never measured) more of them in Nostromo, Night City and Edgerun.
 //   find      not by design, and outside #98 (English must not change here): at 1060 x 640 Nostromo's weekly and scoped
-//             Overview cards cut their reset lines and chip off when the figure has two digits (the critical scenario).
+//             Overview cards cut their reset lines and chip off when the figure has two digits (the warning and critical
+//             scenarios), for a ticket of its own.
 // Made from an English run of the widths step (all its scenarios and states) with the clocks held at MOMENT.
 const KNOWN = JSON.parse(fs.readFileSync(path.join(REPO, 'tests', 'fixtures', 'page_overflow_english.json'), 'utf8')).known;
 
@@ -281,6 +295,14 @@ async function widthsView(browser, server, lang, look, state, routed) {
         await resize(page, size);
         const where = `widths/${lang}/${look}/${state}/${hash}/${sizeName(size)}`;
         const m = await page.evaluate(CHECKS.measure);
+        // a chip's words clear of its frame (#98's review: accented capitals on Night City's 14 px chips), and inside its card
+        for (const c of await page.evaluate(CHECKS.chips)) {
+          const room = c.framed ? 1 : 0;              // clear of a 1 px frame, or inside an unframed chip's box
+          if (c.top < room || c.bottom < room) { m.over.push({ at: c.at, kind: 'ink', top: c.top, bottom: c.bottom, h: c.h, text: c.text }); }
+          // a chip whose frame leaves its card while its words stay in (words that leave are measure()'s leaves-side, which
+          // English's record judges: Nostromo's find at 1060 x 640)
+          if (c.out > 0.5 && c.wordsOut <= 0.5) { m.over.push({ at: c.at, kind: 'chip-out', by: c.out, text: c.text }); }
+        }
         judgeWidths(where, lang, look, state, hash, size, m);
         if (hash === 'limits' && !m.meters && !routed) { fail(`${where}: no meter on Limits`); }
         if (SHOTS === 'all' || (SHOTS === 'narrow' && size === SIZES[SIZES.length - 1])) {
@@ -292,6 +314,56 @@ async function widthsView(browser, server, lang, look, state, routed) {
       fail(`widths/${lang}/${look}/${state}/${hash}: ${String(e).split('\n')[0]}`);
     }
     if (errors.length) { fail(`widths/${lang}/${look}/${state}/${hash}: page errors: ${errors.slice(0, 3).join(' | ')}`); }
+    await context.close();
+  }
+}
+
+// ── step header: the header's one row at every width, with every link word ───────────────────────────────────────────
+
+const HEADER_WIDTHS = [704, 744, 784, 801, 820, 840, 860, 880, 900, 920, 940, 960, 980, 1000, 1020, 1044, 1064, 1084, 1104, 1124, 1144, 1164, 1184];
+const LINK_STATES = ['live', 'loading', 'stale', 'offline', 'rate_limited', 'no_credentials', 'paused', 'lost'];
+const LINK_DETAIL = { offline: DETAIL, rate_limited: 'Usage API rate limited', paused: 'Paused', loading: 'Loading usage',
+  stale: 'The sign-in has expired. Claude Code renews it when you use it.' };
+
+async function headerLook(browser, server, lang, look) {
+  for (const code of LINK_STATES) {
+    const flags = {};
+    const routes = async (page) => {
+      await page.route('**/api/state*', async (r) => {
+        try {
+          if (flags.lost) { return await r.abort(); }
+          const res = await r.fetch();
+          if (res.status() !== 200 || code === 'live' || code === 'lost') { return await r.fulfill({ response: res }); }
+          const body = await res.json();
+          body.state.status = code;
+          body.state.status_detail = LINK_DETAIL[code] || '';
+          return await r.fulfill({ response: res, body: JSON.stringify(body), headers: Object.assign({}, res.headers(), { etag: '' }) });
+        } catch (e) {
+          return undefined;                         // the page closed while the answer was on its way
+        }
+      });
+    };
+    const { context, page, errors } = await openPage(browser, server, look, 'overview', { size: SIZES[0], routes });
+    const where = `header/${lang}/${look}/${code}`;
+    try {
+      if (code === 'lost') { await ROUTES['link-lost'].then(page, flags); }
+      const seen = [];
+      for (const width of HEADER_WIDTHS) {
+        await page.setViewportSize({ width, height: 601 });
+        await page.waitForTimeout(120);
+        const h = await page.evaluate(CHECKS.header);
+        seen.push([width, h.sw, h.refresh, h.ageShown]);
+        const at = `${where}/${width}`;
+        if (h.sw > h.cw + 1) { fail(`${at}: the bar runs ${h.sw - h.cw} px past the window ("${h.link}")`); }
+        if (h.refresh !== null && h.refresh > h.vw + 0.5) { fail(`${at}: Refresh ends at ${h.refresh}, past the window's ${h.vw} ("${h.link}")`); }
+        if (h.cut.length) { fail(`${at}: cut in the bar: ${h.cut.join(', ')}`); }
+        if (h.overlap !== null && h.overlap > 0.5) { fail(`${at}: the brand's words run ${h.overlap} px into the bar's right-hand group`); }
+      }
+      result.header[where] = seen;
+    } catch (e) {
+      fail(`${where}: ${String(e).split('\n')[0]}`);
+    }
+    if (errors.length) { fail(`${where}: page errors: ${errors.slice(0, 3).join(' | ')}`); }
     await context.close();
   }
 }
@@ -395,6 +467,106 @@ async function capsLook(browser, server, look) {
     }
     if (errors.length) { fail(`${where}: page errors: ${errors.slice(0, 3).join(' | ')}`); }
     await context.close();
+  }
+}
+
+// ── step caps, in the states the normal scenario does not draw ──────────────────────────────────────────────────────
+
+const CAPS_CASES = ['status-stale', 'status-offline', 'status-rate-limited', 'status-paused', 'reports-stale', 'cost-failed-billing-day',
+  'reports-501', 'verdicts-limited-ahead', 'verdicts-at-risk-on-pace', 'verdicts-idle-unknown', 'verdicts-unknown-behind',
+  'chips-unused-on-pace-ahead', 'chips-no-clock-ahead', 'velocity-idle', 'velocity-slow', 'velocity-fast', 'velocity-very-fast'];
+let WORLDS = null;
+/* Each case's world as tests/page_words.js builds it (what its small server answers, and its steps). */
+function worlds() {
+  if (!WORLDS) {
+    const run = spawnSync(process.execPath, [path.join(REPO, 'tests', 'page_words.js'), path.join(REPO, 'usage_monitor', 'webui'), '--worlds',
+      CAPS_CASES.join(',')], { cwd: REPO, env: Object.assign({}, process.env, { TZ: 'UTC' }), encoding: 'utf8', windowsHide: true,
+      maxBuffer: 256 * 1024 * 1024 });
+    if (run.status !== 0) { throw new Error('page_words.js --worlds: ' + run.stderr); }
+    WORLDS = JSON.parse(run.stdout);
+  }
+  return WORLDS;
+}
+
+/* Answers a route as the case's world has it: undefined (the report as the inputs have it), "hang", "fail" or {status, body}. */
+function answerWith(r, spec, body) {
+  if (spec === 'hang') { return undefined; }
+  if (spec === 'fail') { return r.abort(); }
+  if (spec && spec.status) {
+    return r.fulfill({ status: spec.status, contentType: 'application/json', body: spec.body === null || spec.body === undefined ? '' : JSON.stringify(spec.body) });
+  }
+  return r.fulfill({ status: 200, contentType: 'application/json', headers: { 'Cache-Control': 'no-store' }, body: JSON.stringify(body) });
+}
+
+async function capsStatesLook(browser, server, look) {
+  const all = worlds();
+  for (const name of CAPS_CASES) {
+    const w = JSON.parse(JSON.stringify(all[name]));
+    const pages = w.pages.filter((p) => PAGES.includes(p));
+    for (const [i, hash] of pages.entries()) {
+      const answers = JSON.parse(JSON.stringify(w.answers));
+      const flags = { state: w.stateAnswer };
+      const routes = async (page) => {
+        await page.route('**/api/state*', async (r) => {
+          try {
+            if (flags.state) { return await answerWith(r, flags.state, null); }
+            const res = await r.fetch();
+            if (res.status() !== 200) { return await r.fulfill({ response: res }); }
+            const live = await res.json();
+            const body = JSON.parse(JSON.stringify(w.state));
+            body.theme = live.theme;
+            Object.assign(body.settings, { theme_id: live.settings.theme_id, theme_variant: live.settings.theme_variant, theme_mode: live.settings.theme_mode });
+            return await r.fulfill({ status: 200, contentType: 'application/json', headers: { 'Cache-Control': 'no-store' }, body: JSON.stringify(body) });
+          } catch (e) {
+            return undefined;                       // the page closed while the answer was on its way
+          }
+        });
+        await page.route('**/api/analytics/**', (r) => {
+          const report = new URL(r.request().url()).pathname.split('/').pop();
+          return w.reports[report] ? answerWith(r, answers[report], w.reports[report]) : r.continue();
+        });
+      };
+      const { context, page, errors } = await openPage(browser, server, look, hash, { size: SIZES[0], routes, clock: w.now });
+      const where = `caps/${look}/${name}/${hash}`;
+      try {
+        for (const s of w.steps) {
+          if (s.state !== undefined) { flags.state = s.state; }
+          if (s.reports !== undefined) { Object.keys(w.reports).forEach((k) => { answers[k] = s.reports; }); }
+          if (s.advance) {
+            // the page's timers run on: its clock moves on and its next polls ask again
+            await page.clock.setFixedTime(new Date(Date.parse(w.now) + s.advance));
+            await page.waitForTimeout(4500);
+          }
+        }
+        await settle(page, false);
+        const want = RECORD.views[name + '|' + look + '|' + hash];
+        const banner = Object.keys(want).some((r) => /^top:(status|stale|problem)$/.test(r));
+        const sels = CHECKS.CSS_CAPS.filter(([, p]) => p === '*' || p === hash).map(([sel]) => sel);
+        const found = await page.evaluate(CHECKS.readCaps, sels);
+        found.forEach((items, k) => {
+          if (sels[k] === '#main .nm-msg > b' && banner && !items.length) { fail(`${where}: no banner heading (${sels[k]})`); }
+        });
+        const seen = judgeCaps(where, look, found.flat());
+        const got = await page.evaluate(CHECKS.regions, [hash, i === 0, KEPT_CARDS[hash] || null]);
+        for (const region of Object.keys(want)) {
+          const text = RECORD.strings[want[region][0]];
+          const attrs = RECORD.strings[want[region][1]];
+          if (!got[region]) { fail(`${where}: no region ${region}`); continue; }
+          const axis = region === 'card:cost' && text.startsWith(got[region].text) && /^[A-Z][A-Za-z]{2} \d{1,2}$/.test(text.slice(got[region].text.length));
+          if (axis) {
+            notes.push(`${where}: ${region}: the daily chart's axis leaves out "${text.slice(got[region].text.length)}" at this width`);
+          } else if (got[region].text !== text) {
+            fail(`${where}: ${region} shows ${JSON.stringify(got[region].text).slice(0, 300)}, the record ${JSON.stringify(text).slice(0, 300)}`);
+          }
+          if (JSON.stringify(got[region].attrs) !== attrs) { fail(`${where}: ${region}'s attributes ${JSON.stringify(got[region].attrs).slice(0, 300)}, the record ${attrs.slice(0, 300)}`); }
+        }
+        result.caps[where] = { seen, banner, items: found.flat().length };
+      } catch (e) {
+        fail(`${where}: ${String(e).split('\n')[0]}`);
+      }
+      if (errors.length) { fail(`${where}: page errors: ${errors.slice(0, 3).join(' | ')}`); }
+      await context.close();
+    }
   }
 }
 
@@ -581,7 +753,7 @@ async function motionLook(browser, server, lang, look) {
 
 // ── the run ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-const result = { out: OUT, widths: {}, clip: {}, caps: {}, record: {}, update: {}, motion: {} };
+const result = { out: OUT, widths: {}, header: {}, clip: {}, caps: {}, record: {}, update: {}, motion: {} };
 
 (async () => {
   const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
@@ -605,13 +777,15 @@ const result = { out: OUT, widths: {}, clip: {}, caps: {}, record: {}, update: {
         }
       }
       const needs = (STEPS.includes('clip') && lang !== 'fr') || (STEPS.includes('motion') && lang !== 'pseudo') ||
-        (lang === 'en' && STEPS.includes('record'));
+        (lang === 'en' && (STEPS.includes('record') || STEPS.includes('caps'))) || STEPS.includes('header');
       if (needs) {
         const server = await startServer('normal', lang);
         try {
           for (const look of LOOKS) {
+            if (STEPS.includes('header')) { await headerLook(browser, server, lang, look); }
             if (STEPS.includes('clip') && lang !== 'fr') { await clipLook(browser, server, lang, look); }
             if (STEPS.includes('record') && lang === 'en') { await recordLook(browser, server, look); }
+            if (STEPS.includes('caps') && lang === 'en') { await capsStatesLook(browser, server, look); }
             if (STEPS.includes('motion') && lang !== 'pseudo') { await motionLook(browser, server, lang, look); }
             console.log('steps', lang, look, 'done', Math.round((Date.now() - t0) / 1000) + ' s');
           }

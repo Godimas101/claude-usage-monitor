@@ -3,8 +3,14 @@
  * the page headings and banners, Overview and Limits, and the cards elsewhere that share their code, to today's English
  * while their words move into the catalog.
  *
- *   node tests/page_words.js <webui folder>             prints the views as one JSON object
- *   node tests/page_words.js <webui folder> --record    writes tests/fixtures/page_words_english.json (refused once it exists)
+ *   node tests/page_words.js <webui folder>                  prints the views as one JSON object
+ *   node tests/page_words.js <webui folder> --record         writes tests/fixtures/page_words_english.json (refused once it exists)
+ *   node tests/page_words.js <webui folder> --record-more    writes tests/fixtures/page_words_english_more.json: MORE_CASES,
+ *                                                            the answers the first record lacked, from the same code at c05f45d
+ *                                                            (a copy of it: git archive), refused once it exists
+ *   node tests/page_words.js <webui folder> --worlds a,b     prints each named case's world (what its small server answers)
+ *                                                            and steps, for tests/browser/page_probe.js to answer a real
+ *                                                            browser the same way
  *
  * Each view is one fresh load of the real page on the small DOM (tests/mini_dom.js): index.html as the server serves it in
  * English (its theme on <html>, as ui/server.py's _themed_shell writes it), then formats.js, the English catalog, charts.js
@@ -33,7 +39,10 @@ const CSS_CASE = require("./css_case.js");
 
 const webui = process.argv[2];
 const RECORD = process.argv.includes("--record");
+const RECORD_MORE = process.argv.includes("--record-more");
+const WORLDS = process.argv.includes("--worlds") ? process.argv[process.argv.indexOf("--worlds") + 1].split(",") : null;
 const FIXTURE = path.join(__dirname, "fixtures", "page_words_english.json");
+const MORE_FIXTURE = path.join(__dirname, "fixtures", "page_words_english_more.json");
 const INPUTS = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "page_words_inputs.json"), "utf8"));
 const NOW = Date.parse(INPUTS.now);
 const WIDTH = 1184;
@@ -218,6 +227,30 @@ const CASES = [
   { name: "age-minutes", world: (w) => { st(w).usage.fetched_at = iso(NOW - 5 * 60000 - 7000); }, pages: ["overview"] },
   { name: "age-hours", world: (w) => { st(w).usage.fetched_at = iso(NOW - 3 * HOUR - 60000); }, pages: ["overview"] },
   { name: "age-days", world: (w) => { st(w).usage.fetched_at = iso(NOW - 50 * HOUR); }, pages: ["overview"] },
+];
+
+/* Cases the first record lacked (#98's review): the statistics routes' own texts that the page does not word (a query the
+ * monitor refused, a report it does not know), which English shows as the monitor sent them, and the unknown plan as the
+ * data layer names it. Recorded later, from the same code at c05f45d, into page_words_english_more.json, so the first record
+ * stays as it was made. */
+const MORE_CASES = [
+  { name: "reports-400", world: failWith(400, "invalid days: expected a whole number from 7 to 800"), pages: MODEL_PAGES },
+  { name: "reports-404", world: failWith(404, "unknown report"), pages: STAT_PAGES },
+  { name: "reports-stale-400", steps: [{ reports: { status: 400, body: { error: "unknown parameter: windw" } } }, { advance: 125000 }],
+    pages: MODEL_PAGES },
+  // a sign-in that names no subscription, as the data layer names it ("Unknown plan"), with a price the user set: from the
+  // cost report, and from the state while the report is on its way
+  { name: "plan-unknown-named", world: (w) => {
+    st(w).plan = { subscription_type: null, rate_limit_tier: null, name: "Unknown plan", monthly_price_usd: null };
+    w.state.settings.plan_price_override = 50;
+    Object.assign(w.reports.cost.plan, { name: "Unknown plan", subscription_type: null, rate_limit_tier: null, price_usd: 50, price_source: "override" });
+    w.reports.cost.value.multiplier = w.reports.cost.value.cycle_cost_usd / 50;
+  }, pages: ["overview", "cost", "efficiency"] },
+  { name: "plan-unknown-named-pending", world: (w) => {
+    st(w).plan = { subscription_type: null, rate_limit_tier: null, name: "Unknown plan", monthly_price_usd: null };
+    w.state.settings.plan_price_override = 50;
+    w.answers.cost = "hang";
+  }, pages: ["overview", "cost"] },
 ];
 
 // ── the page ─────────────────────────────────────────────────────────────────────
@@ -489,10 +522,11 @@ async function gatesOver(view, page, withChrome) {
   return readView(view, page, withChrome);
 }
 
-async function run() {
+async function run(cases) {
   const views = {};
   const problems = [];
-  for (const c of CASES) {
+  const marked = [];
+  for (const c of cases) {
     for (const look of LOOKS) {
       for (const [i, page] of c.pages.entries()) {
         // a fresh page for every page of a case, so what one page left behind never colours the next (and Gates before
@@ -513,11 +547,15 @@ async function run() {
           Object.keys(shown).forEach((name) => { shown[name].gates = after[name] ? after[name].text : null; });
         }
         views[key] = shown;
+        // a card holding an element marked translate (a name's span): English's cards had none before #98
+        mainParts(view.doc, page).forEach(([name, el]) => {
+          if (name.startsWith("card:") && el.querySelectorAll("*").some((d) => d.hasAttribute("translate"))) { marked.push(key + " " + name); }
+        });
         seen.forEach((p) => problems.push(key + ": " + p));
       }
     }
   }
-  return { views, problems };
+  return { views, problems, marked };
 }
 
 /* The record: every distinct text once, each view's regions as [text, attributes] indexes. */
@@ -651,7 +689,39 @@ function unmarkedText(root) {
   return found;
 }
 
-run().then(async ({ views, problems }) => {
+async function main() {
+  if (WORLDS) {
+    const out = {};
+    for (const name of WORLDS) {
+      const c = CASES.concat(MORE_CASES).filter((x) => x.name === name)[0];
+      if (!c) { throw new Error("no case " + name); }
+      const w = world();
+      if (c.world) { c.world(w); }
+      out[name] = { state: w.state, reports: w.reports, answers: w.answers, stateAnswer: w.stateAnswer === undefined ? null : w.stateAnswer,
+        steps: c.steps || [], pages: c.pages, now: INPUTS.now };
+    }
+    process.stdout.write(JSON.stringify(out));
+    return;
+  }
+  if (RECORD_MORE) {
+    if (fs.existsSync(MORE_FIXTURE)) {
+      throw new Error(MORE_FIXTURE + " exists: the record is made once, from the code before the change");
+    }
+    const { views, problems } = await run(MORE_CASES);
+    if (problems.length) {
+      throw new Error("the page met problems; nothing recorded:\n" + problems.slice(0, 20).join("\n"));
+    }
+    const more = {
+      _about: ["Cases tests/fixtures/page_words_english.json lacked (#98's review): the statistics routes' own texts the page " +
+        "does not word, and the unknown plan as the data layer names it. tests/page_words.js's MORE_CASES on the code at c05f45d " +
+        "(a copy of it), with TZ=UTC, as the first record. Never re-recorded."],
+      looks: LOOKS, cases: MORE_CASES.map((c) => ({ name: c.name, pages: c.pages })), ...pack(views),
+    };
+    fs.writeFileSync(MORE_FIXTURE, format(more));
+    process.stdout.write(JSON.stringify({ recorded: MORE_FIXTURE, views: Object.keys(views).length, strings: more.strings.length }) + "\n");
+    return;
+  }
+  const { views, problems, marked } = await run(CASES);
   const record = {
     _about: ["The dashboard's English before #98 moved its words into the catalog: tests/page_words.js on the code at c05f45d, " +
       "with TZ=UTC. Each view is case|look|page; each region [text, attributes] (and, in Gates before the first state, the text " +
@@ -671,8 +741,13 @@ run().then(async ({ views, problems }) => {
   }
   const first = await firstChrome(problems);
   const moving = await entrance(problems);
-  process.stdout.write(JSON.stringify({ ...record, problems, first, entrance: moving }));
-}).catch((e) => {
+  const more = await run(MORE_CASES);
+  more.problems.forEach((p) => problems.push(p));
+  process.stdout.write(JSON.stringify({ ...record, problems, marked: marked.concat(more.marked), first, entrance: moving,
+    more: { cases: MORE_CASES.map((c) => ({ name: c.name, pages: c.pages })), ...pack(more.views) } }));
+}
+
+main().catch((e) => {
   console.error(e && e.stack ? e.stack : e);
   process.exit(1);
 });

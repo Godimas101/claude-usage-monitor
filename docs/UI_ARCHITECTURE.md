@@ -643,7 +643,11 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   `.nm-menu a`, `.nm-health .nm-kv` and `.nm-h1`, and Nostromo and Night City on `.nm-remain .l`; Night City set the
   others already. Gates' own wordings are `page.gates.*` keys (its link words, `Updated {age} ago`, `Updated --`,
   `Tokens / min`, `-- / Hour`) that `app.js` writes when the look is Gates (`gatesLook()`: `data-theme` on `<html>`,
-  which the server writes into the first paint), so Gates shows its own words from the first frame. Efficiency's pipeline
+  which the server writes into the first paint), so Gates shows its own words from `app.js`'s first render (`init`'s
+  `renderFirstChrome`, before any state). Until then the served shell shows the shell's own words in every look (the server
+  fills them from `header.link.loading`, `header.age_none` and `nav.colour.label.phosphor`): with motion on and a Gates boot
+  due, the boot curtain (`html[data-fx-boot]`) hides them; with reduced motion, or once the boot has played, they show
+  for a moment. Efficiency's pipeline
   card (#99's) keeps its link row in capitals (`FMT.upper` of the header's word) until #99 moves the card. The other pages
   still write many labels in capitals, and `gates.js` re-cases them, and what #98 leaves in capitals (English limit tags,
   names, dates, the SVG labels), through `VOCAB` and `PHRASES`. It keeps a compact figure's magnitude in capitals (`1.5M`, and
@@ -655,7 +659,8 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   take their words from the catalog: `shell.*` (the shell's marks), `header.*` (the link word by status code, `lost` when
   the monitor does not answer, and the data age), `nav.*` (the health box, the colour heading, and the sidebar's colour
   buttons: `nav.colour.title.<id>` words an accent or a phosphor from its id, `nav.colour.short.<id>` Gates' three
-  letters; Night City's cuts of its variant names stay its own, #102's), `heading.<page>.title` and `.sub`,
+  letters, each button marked `lang="en"` while its tooltip or Gates' letters on it are English on another language's
+  page; Night City's cuts of its variant names stay its own, #102's), `heading.<page>.title` and `.sub`,
   `banner.stats.*` (the problem and stale banners), `stats.*` (the problem lines, the cards' short lines, the reasons),
   `limit.*` (shared by Overview's limit cards and Limits' pacing cards), `overview.*`, `limits.*`, `plan.unknown`,
   `ratio.*`, `format.now` and `page.gates.*`. No key is also the start of another (`a.b` and `a.b.c` never both:
@@ -665,17 +670,29 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   `.nm-meta-t`, `.nm-mrow .k`, `.nm-kv-grid .nm-kv b`) holds its words as its own text, never in an inner span, since
   Nostromo's typer and Night City's decoder read only the element's own text: `tHtmlLine` gives such an element its
   markup and language, and `lineAttrs` puts `lang="en"` and, for a name (`nameLine`), `translate="no"` on the element
-  itself, off English only, so English's markup is as it was. Elsewhere a name keeps `tName`'s span. A report's failure
-  is worded by the page (`statReason`): no answer is `lost`; each of the five texts the statistics routes answer with
-  (501, the two 503s, 500 and 401: `STAT_ERRORS`, which a test holds to `server.py`) is its reason when its status
-  matches; anything else is `HTTP {status}`. A reason is one placeholder in a whole sentence, and #102 may give the
-  answers codes in `statReason` alone. `fmtRemain(ms, inSentence)` keeps the badge form (`3 H 27 M`, `NOW`) and has a
-  sentence form, its units in lower case (`In 3 h 27 m`, `format.now`). In English a limit's tag is its own label (the
+  itself, off English only, so English's markup is as it was. A name inside one of these sentences (the cost card's plan,
+  Claude Code in the no-activity line: `nameInLine`) is plain text in English, as English drew it (a span of its own splits
+  the text run and moves its glyphs a sub-pixel), and `tName`'s span (`translate="no"`) elsewhere. In Gates' English the
+  plan's name has a bare span of its own (`planNameInLine`, no attribute), so `gates.js` still sets it in sentence case
+  (Gates draws the split run as before, pixel for pixel); the update banner keeps `tName`'s span in English, as #97
+  wrote it. A
+  report's failure is worded by the page where the page knows it
+  (`statReason`): no answer is `lost`; each of the five texts the statistics routes answer with (501, the two 503s, 500
+  and 401: `STAT_ERRORS`, which a test holds to `server.py`) is its reason when its status matches; any other text the
+  monitor sends (a query it refused, a report it does not know: `e.sent`) is shown as it came, Python's English, marked
+  `lang="en"` on another language's page (#102's to give it a code); `HTTP {status}` names only an answer with no text. So
+  English reads as before for every answer (`page_words_english_more.json` holds the 400 and 404 texts). A reason is one
+  placeholder in a whole sentence, and #102 may give the answers codes in `statReason` alone. `fmtRemain(ms,
+  inSentence)` keeps the badge form (`3 H 27 M`, `NOW`) and has a sentence form, its units in lower case (`In 3 h 27 m`,
+  `format.now`). In English a limit's tag is its own label (the
   identity string); another language names it from its kind and scope (`limit.name.*`). A plan whose sign-in names no
-  subscription shows `plan.unknown` (`planWords`, #90's hand-off). `ratioNote` stays plain text, since Cost escapes it.
+  subscription shows `plan.unknown` (`planWords`, #90's hand-off): a catalog word, not a name, so the cost card never marks
+  it `translate="no"` and marks it with its language where that is not the plan line's. `ratioNote` stays plain text,
+  since Cost escapes it. The forecast's end label on a limit's chart (`limits.chart.end_label`) and the surface bar's tips
+  (`limits.surfaces.tip`) are keys too, so the label takes the language's percent as its tooltip does.
   The pacing card's hidden sizing texts come from the story keys, with the language's clock of noon and its `00.0`.
   English is unchanged on screen, byte for byte in every look, as `tests/fixtures/page_words_english.json` holds it
-  ("Test tools"); the one difference is Gates before its first state, which shows its own words from the first frame
+  ("Test tools"); the one difference is Gates before its first state, which shows its own words from `app.js`'s first render
   instead of the shell's capitals until `gates.js` arrived. Three English forms changed that cannot show: the one forms
   of `limits.fact.value.days` and `.hours` (`1 day`, `1 hour`; the windows are 5 hours and 7 days) and of `ratio.scaled`
   (a cell of one month is never scaled).
@@ -683,15 +700,24 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   shrinks or is cut. The rules sit at the end of each theme sheet under `:root:not(:lang(en))`, so English keeps its
   one-line layout, its designed ellipses included. Card titles, metas and tags, chips, pace and forecast lines and the
   limit facts wrap (`white-space: normal`, `overflow-wrap: break-word`); Nostromo's Overview grid rows grow with their
-  cards (`minmax(auto, ...)`, from 1001 px), as Night City's always did; Night City's nav items grow past 34 px, its
-  slanted cursor after the page heading gets 4 px of room, and its data age gives way below 800 px, as Nostromo's always
-  has; and the meter's two rows share one first column (a grid with the rows as subgrids, `fit-content(50%)`, never under
-  English's 112 px), so their bars start at the same x. English keeps its own overflows, which
-  `tests/fixtures/page_overflow_english.json` names (owner question 3): Night City's page heading (its slanted cursor runs
-  3 px past the box; nothing is cut), the Overview cards' metas that the theme cuts with an ellipsis (Edgerun's surfaces
-  meta in the default window, and at 1060 x 640 more of them in Nostromo, Night City and Edgerun), and one find outside
-  #98: at 1060 x 640 Nostromo's weekly and scoped Overview cards cut their reset lines and their chip off when the figure
-  has two digits (the warning and critical scenarios). These rules are plain wrapping; owner question 1 as decided (a
+  cards (`minmax(auto, ...)`, from 1001 px), as Night City's always did; Night City's nav items grow past 34 px and its
+  slanted cursor after the page heading gets 4 px of room; Night City's chips (`.nm-chip`, the pace verdict) grow past
+  their 14 px line, so an accented capital or a cedilla clears the 1 px frame, and the verdict and the burn card's chip
+  wrap inside their card; and the meter's two rows share one first column (a grid with the rows as subgrids,
+  `fit-content(50%)`, never under English's 112 px), so their bars start at the same x. In the header (one row) the data
+  age gives way first: outside English Nostromo's goes below 1100 px and then its brand mark below 900 px (a
+  pseudo-locale bar with its longest link word needs 1048 px, and 860 px without the data age; the pseudo-locale also
+  lengthens the brand mark, which a real language keeps as written), and Night City's below 800 px; under 800 px every
+  language hides Nostromo's data age and brand mark. English keeps its own overflows, which
+  `tests/fixtures/page_overflow_english.json` names element by element, each labelled with its `owner`. Owner question 3
+  decided two of them (`decided`): Night City's page heading (its slanted cursor runs 3 px past the box; nothing is cut)
+  and Edgerun's Overview surfaces meta, cut with an ellipsis in the default window. The rest are English as it was at
+  c05f45d, which the 1060 x 640 window (#98's critic 22) shows for the first time, and await the owner's acceptance on #98
+  (`awaiting`): ten more Overview metas cut with the same
+  ellipsis at 1060 x 640 (in Nostromo, Night City and Edgerun), and six entries of one find, not a design: at 1060 x 640
+  Nostromo's weekly and scoped Overview cards cut their reset lines and their chip off when the figure has two digits
+  (the warning and critical scenarios), for a ticket of its own. Until then the record keeps them, so English's layout
+  does not change. These rules are plain wrapping; owner question 1 as decided (a
   room in each constrained key's note, an ellipsis with the full text reachable on the Overview subtitles only) is a
   follow-up stage of #98.
 - **Rendering never reads Windows.** The locale rides on the view model (#91, not #93: it is the first ticket in which
@@ -991,7 +1017,10 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   takes from the look's sheets (`tests/css_case.js`: the cascade, with the browser's own `text-transform: none` on
   `button`, `input`, `select` and `textarea`), in Gates after `gates.js`, with the attributes people read. `--record`
   wrote `tests/fixtures/page_words_english.json` from the code before #98 moved a word, and refuses to write it again;
-  `test_webui.py` holds the page to it. Its other outputs feed the gated tests: the first chrome (before the first
+  `--record-more` wrote `tests/fixtures/page_words_english_more.json` the same way, from a copy of that code (`git archive
+  c05f45d`), for answers the first record lacked (`MORE_CASES`: a 400 and a 404 that carry the monitor's own text, and the
+  stale banner after a 400). `test_webui.py` holds the page to both, and holds English's cards to no `translate` mark (as
+  before #98). Its other outputs feed the gated tests: the first chrome (before the first
   state, after the 1 s tick and after a failed first poll), the entrances (`motion.js` and every theme script under
   reduced motion, each director's settings kept: every element a director animates holds its words as its own text, in
   English and on a French page) and the French page's unmarked English. The small DOM has a `MutationObserver` (its
@@ -1001,10 +1030,18 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   settings, their clock and the page's held at the record's moment, the page in UTC. Its steps: widths (Overview and
   Limits in English, the pseudo-locale and French, every look, the normal, warning, critical and stale scenarios and four
   states it answers itself, in 1200 x 780, 1060 x 640 and 720 x 480 windows), clip (the clip test's measure at its four
-  sizes, in English and the pseudo-locale), caps (the CSS capitals), record (the page answered from the page-words
-  inputs: every region equals the record's live view in every look and page), update (#97's lines) and motion (without
-  reduced motion, in English and French: every element a theme's entrance animates is animated). What it reads from the
-  page is `tests/browser/page_checks.js`, which the real-web-view tests evaluate in WebView2 too. Its limits: headless
+  sizes, in English and the pseudo-locale), header (every language and look, each link word, the lost link too, at page
+  widths from 704 to 1184 px: the bar's one row never runs past the window, Refresh stays inside it, nothing in the bar is
+  cut, `header()`), caps (the CSS capitals, in the normal scenario and then in the states it does not draw, each answered
+  as `page_words.js --worlds` answers its case: the status, stale and problem banners' headings, every pace verdict and
+  chip and every burn velocity, each view's regions equal to the record's view of that case), record (the page answered
+  from the page-words inputs: every region equals the record's live view in every look and page), update (#97's lines)
+  and motion (without reduced motion, in English and French: every element a theme's entrance animates is animated). The
+  widths step also judges each chip (`chips()`): its words' ink, from the font's metrics, clear of a 1 px frame, and the
+  chip inside its card. What it reads from the page is `tests/browser/page_checks.js`, which the real-web-view tests
+  evaluate in WebView2 too. The capitals of the elements only those states draw (the banners' headings, the verdicts
+  and velocities the normal scenario does not show) are read in a browser by the stand-in alone; the real-web-view
+  capitals test reads the normal scenario, and the static cascade (`tests/css_case.js`) covers the rest. Its limits: headless
   Chromium at a device pixel ratio of 1 (WebView2 at 125 or 150 % display scaling rounds text widths otherwise), and the
   daily chart's axis may draw a date fewer than the small DOM's (a note, not a failure).
   The real-web-view tests in `tests/test_server.py` (gated; they open WebView2 windows parked off screen): the clip test
@@ -1401,7 +1438,10 @@ default browser instead, and the exit code says so (below).
     open at a time. Fetching comes first, so a failed fetch never asks where to save nothing.
 - **The window's language (#88, #98).** `dashboard_main` sets `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` before pywebview
   starts, from the `/api/state` it reads first: `--lang=<locale.format>` (English `en-US`) beside pywebview's own
-  `--disable-features=ElasticOverscroll` (`webview2_arguments`). A developer's own value is kept: its `--lang` wins, and
+  `--disable-features=ElasticOverscroll` (`webview2_arguments`). pywebview's other default switch,
+  `--allow-file-access-from-files` (its `ALLOW_FILE_URLS` is True by default), is not repeated, on purpose: the page is
+  `http://127.0.0.1`, never a `file://` page, so it would only loosen `file://` isolation the window does not need (a test
+  holds both defaults). A developer's own value is kept: its `--lang` wins, and
   its `--disable-features` lists become one switch with ElasticOverscroll in it (two such switches do not add up). A
   format that is not a language tag leaves the variable as it is, with a warning. Only the child's environment changes.
   WebView2 takes its language when it starts, and for now a language change does not reopen the window: the page
