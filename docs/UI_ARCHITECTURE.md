@@ -970,9 +970,13 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   Setup's language: `LanguageDetectionMethod=uilanguage` (Windows' display language, `GetUserDefaultUILanguage`: the
   entry with its LANGID, else one with its primary language, else English), `ShowLanguageDialog=no`,
   `UsePreviousLanguage=no` (Inno Setup would otherwise take the last install's language, in a silent run too); a
-  `/LANG=<name>` naming an entry comes first, and one naming none is ignored. The in-app update passes none yet, so a
-  silent update follows Windows' display language. For the same display language it is the app's pick; the inputs can
-  differ, as "Detection" says. The uninstaller speaks the language of the last Setup run (Setup records it and hands it
+  `/LANG=<name>` naming an entry comes first, and one naming none is ignored. The in-app update passes the app's own
+  language, `/LANG=<id>` (`MonitorApp._apply_update`, `app.setup_language`; `update_check` passes only an id of
+  `SETUP_LANGUAGES`, the entries' names, so never the pseudo-locale, and nothing for anything else), so Setup and the
+  uninstaller it leaves speak the language chosen in the app; a build that lacks it passes over it. An updater from
+  before this change (v1.1.5's, 2.3.0's and older) passes none: that update, like a first install by hand, follows
+  Windows' display language, the app's pick for the same display language; the inputs can differ, as "Detection"
+  says. The uninstaller speaks the language of the last Setup run (Setup records it and hands it
   that language's messages) and passes it to the exe as `--remove-setup <report> --lang <name>`, after the report's
   path, for #102 to word the report in; `main.py` ignores it until then. Inno Setup has no plural forms: each count has
   two messages, `...One` for 1 and `...Other` (the count as `%1`) for more, chosen in `EndedNote`: CLDR's choice for

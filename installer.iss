@@ -13,11 +13,13 @@
 ; language when [Languages] has it, else English (#103).
 ;
 ; The in-app updater (update_check.py) runs this installer unattended:
-;   Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /MERGETASKS="!startup"
+;   Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /MERGETASKS="!startup" /LANG=<the app's language>
 ; after the running app has exited. The /MERGETASKS part keeps an update from touching the "Start with
-; Windows" entry (the app repairs a stale path itself at launch). v1.1.5's updater, which cannot be changed,
-; runs the same line WITHOUT /MERGETASKS, so the entry is also decided in code (WriteStartupEntry), not only
-; by the task. tests/test_update_check.py keeps this file and the updater in agreement.
+; Windows" entry (the app repairs a stale path itself at launch). /LANG makes Setup, and the uninstaller it leaves,
+; speak the language chosen in the app (#103); it is left out for a language the updater does not know, and a build
+; that lacks the language passes over it. v1.1.5's updater, which cannot be changed, runs the same line WITHOUT
+; /MERGETASKS or /LANG, so the entry is also decided in code (WriteStartupEntry), not only by the task, and that
+; update speaks Windows' display language. tests/test_update_check.py keeps this file and the updater in agreement.
 
 #ifndef AppVer
   #define VersionFile FileOpen(SourcePath + "VERSION")

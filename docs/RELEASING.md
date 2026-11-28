@@ -65,8 +65,10 @@ When an asset is uploaded, GitHub computes its SHA-256 and lists it in the relea
   page opens too.
 - Then it waits for the monitor to exit and runs the installer
   `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /MERGETASKS="!startup"` (an update leaves the Start with Windows
-  entry alone), and relaunches the app. If the helper that does this dies while the app is closing, the app
-  opens the release page and starts itself again instead of quitting for nothing.
+  entry alone) and `/LANG=<the app's language>` (Setup and the uninstaller it leaves speak the language chosen in
+  the app, #103; a build that lacks that language passes over it), and relaunches the app. If the helper that does
+  this dies while the app is closing, the app opens the release page and starts itself again instead of quitting
+  for nothing.
 
 So attach the one `ClaudeUsageMonitorSetup-v<VERSION>.exe` that the workflow built, under that name, and do
 not swap it by hand later. The updater reads `releases/latest`, which skips drafts and pre-releases, so a
@@ -193,7 +195,9 @@ has to download the installer by hand.
 **Later releases, where the previous version is 2.x:** Settings → System → **Install update**. The monitor exits and the
 new version is back within about half a minute. `monitor.log` has `update verified: ... sha256 ...`,
 `%TEMP%\ClaudeUsageMonitor-update.log` ends with `installer exit code 0`, and Setup's own log is
-`%TEMP%\ClaudeUsageMonitor-setup.log`.
+`%TEMP%\ClaudeUsageMonitor-setup.log`. From an updater that passes the language (a release after 2.3.0), that
+log's `Setup command line:` line holds `/LANG=` and the language the app showed; 2.3.0's and older updaters pass
+none.
 
 - [ ] The Discord post is up (the bot makes it).
 

@@ -367,6 +367,18 @@ def toast_locale(source: Callable[[], i18n.Locale]) -> i18n.Locale:
         return i18n.ENGLISH
 
 
+def setup_language(source: Callable[[], i18n.Locale]) -> str | None:
+    """The app's language for the update's Setup (#103), read when the update starts: update_check passes it as
+    /LANG=<id> when it is one of the installer's languages (update_check.SETUP_LANGUAGES, the app's ids), so Setup and
+    the uninstaller it leaves speak the language chosen in the app; the pseudo-locale passes nothing. None when the
+    locale cannot be read: Setup then takes Windows' display language."""
+    try:
+        return source().language
+    except Exception:
+        log.exception("the locale could not be read; Setup picks its language itself")
+        return None
+
+
 def update_toast_title(version_text: str, locale: i18n.Locale = i18n.ENGLISH) -> str:
     """The toast for a newly found release: "Claude Usage Monitor v2.1.0 is available" (toast.update.title), the
     version as given (a plain one: UpdateTracker.announcement)."""
@@ -1117,6 +1129,7 @@ class MonitorApp:
             update_check.apply_update(
                 info["asset_url"], digest=info.get("asset_digest"),
                 on_error=self._update_failed, on_before_exit=self._prepare_exit,
+                language=setup_language(self.locale),
             )
             return {"started": True, "mode": "installer"}
         self._open_url(release_url(info))

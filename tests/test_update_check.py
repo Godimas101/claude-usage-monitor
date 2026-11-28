@@ -652,6 +652,7 @@ def test_a_matching_digest_stages_the_update(stage: Stage) -> None:
     assert env["USAGE_MONITOR_UPDATE_PID"] == str(os.getpid())
     assert env["USAGE_MONITOR_UPDATE_EXE"] == sys.executable
     assert env["USAGE_MONITOR_UPDATE_LOG"] == str(stage.temp / "ClaudeUsageMonitor-update.log")
+    assert "USAGE_MONITOR_UPDATE_LANG" not in env                     # no language given: no /LANG (#103)
 
 
 def test_the_digest_the_caller_already_has_saves_the_lookup(stage: Stage) -> None:
@@ -1253,12 +1254,13 @@ def test_the_record_takes_only_what_belongs_to_a_run(clock: FakeClock) -> None:
 
 
 def test_apply_update_keeps_its_signature() -> None:
-    """The app calls apply_update with digest, on_error and on_before_exit (test_app pins those); the record is
-    read through status(), so the signature does not change."""
+    """The app calls apply_update with digest, on_error, on_before_exit and language (test_app pins those); the record
+    is read through status(), so #58 added no parameter. ``language`` is #103's, last and optional."""
     params = inspect.signature(uc.apply_update).parameters
     assert [(name, p.kind.name, p.default) for name, p in params.items()] == [
         ("asset_url", "POSITIONAL_OR_KEYWORD", inspect.Parameter.empty), ("on_error", "KEYWORD_ONLY", None),
-        ("on_before_exit", "KEYWORD_ONLY", None), ("repo", "KEYWORD_ONLY", None), ("digest", "KEYWORD_ONLY", None)]
+        ("on_before_exit", "KEYWORD_ONLY", None), ("repo", "KEYWORD_ONLY", None), ("digest", "KEYWORD_ONLY", None),
+        ("language", "KEYWORD_ONLY", None)]
 
 
 def test_the_new_errors_are_update_errors_with_the_old_messages(stage: Stage, tmp_path: Path) -> None:
@@ -1445,10 +1447,11 @@ def test_the_helper_script_is_a_constant_ascii_batch_file() -> None:
 
 
 def test_the_helper_script_holds_nothing_that_varies() -> None:
-    """Only environment variables carry the installer's name, the exe to relaunch, the pid and the log."""
+    """Only environment variables carry the installer's name, the exe to relaunch, the pid, the log and the /LANG=
+    switch (#103)."""
     script = uc._helper_script()
     used = set(re.findall(r"%(USAGE_MONITOR_[A-Z_]+)%", script))
-    provided = set(uc._helper_environment(r"C:\x\Setup.exe", r"C:\x\App.exe", 1))
+    provided = set(uc._helper_environment(r"C:\x\Setup.exe", r"C:\x\App.exe", 1, language="fr"))
     assert used - provided == {"USAGE_MONITOR_N"}                    # the loop counter is the script's own
     assert not re.search(r"[A-Za-z]:\\", script.replace("%SystemRoot%", ""))   # no drive path anywhere
     assert "Users" not in script and sys.executable not in script
@@ -1456,9 +1459,63 @@ def test_the_helper_script_holds_nothing_that_varies() -> None:
 
 def test_the_helper_script_runs_the_installer_the_way_the_updater_promises() -> None:
     script = uc._helper_script()
-    assert f'"%~dp0%USAGE_MONITOR_UPDATE_SETUP%" {uc.SILENT_ARGS} /LOG=' in script
+    assert f'"%~dp0%USAGE_MONITOR_UPDATE_SETUP%" {uc.SILENT_ARGS} %USAGE_MONITOR_UPDATE_LANG% /LOG=' in script
     for flag in ("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", '/MERGETASKS="!startup"'):
         assert flag in uc.SILENT_ARGS
+
+
+def batch_expanded(line: str, env: dict[str, str]) -> str:
+    """``line`` with each %NAME% as cmd expands it in a batch file: the variable's value, or nothing when it is not set.
+    (#103's probe ran a line like the helper's under cmd started as the helper is: not set, nothing; set, its value.)
+    The helper's cmd runs with /v:off, so a !NAME! stays as written, and so does %~dp0 here."""
+    values = {name.upper(): value for name, value in env.items()}
+    return re.sub(r"%(\w+)%", lambda found: values.get(found[1].upper(), ""), line)
+
+
+def installer_line() -> str:
+    """The update helper's line that runs Setup."""
+    (line,) = [line for line in uc._helper_script().splitlines() if 'USAGE_MONITOR_UPDATE_SETUP%" ' in line]
+    return line
+
+
+def test_the_update_hands_setup_the_apps_language(stage: Stage, run: Run) -> None:
+    """apply_update's language reaches Setup as /LANG=<id> (#103), so Setup and the uninstaller it leaves speak the
+    language chosen in the app: through _apply and _stage_update into the helper's environment, which the helper's
+    installer line expands."""
+    stage.serve()
+    run.start(language="fr")
+    assert run.errors == [] and stage.events == ["launch", "before_exit", "exit"]
+    (_command, _cwd, env), = stage.launched
+    assert env["USAGE_MONITOR_UPDATE_LANG"] == "/LANG=fr"
+    temp = {name.upper(): value for name, value in env.items()}.get("TEMP", "")
+    assert batch_expanded(installer_line(), env) == (
+        f'"%~dp0{SETUP}" {uc.SILENT_ARGS} /LANG=fr /LOG="{temp}\\ClaudeUsageMonitor-setup.log"')
+
+
+@pytest.mark.parametrize("language", [None, "", "pseudo", "zz", "FR", "fr-CA", "fr /X", "fr&calc", "%PATH%", 7])
+def test_the_pseudo_locale_and_unknown_ids_pass_no_language(stage: Stage, monkeypatch: pytest.MonkeyPatch,
+                                                            language: Any) -> None:
+    """Only an id of SETUP_LANGUAGES reaches Setup. Anything else (no language, the pseudo-locale, an id the app does
+    not have, another spelling, words that would change the command line) passes no /LANG at all, not an empty one,
+    and Setup takes Windows' display language. A variable of that name in our own environment is not handed on."""
+    monkeypatch.setenv("USAGE_MONITOR_UPDATE_LANG", "/LANG=tr")
+    stage.serve()
+    uc._stage_update(URL, repo=REPO, language=language)
+    (_command, _cwd, env), = stage.launched
+    assert "USAGE_MONITOR_UPDATE_LANG" not in {name.upper() for name in env}
+    assert "/LANG" not in batch_expanded(installer_line(), env)
+
+
+def test_the_update_names_only_the_installers_languages() -> None:
+    """SETUP_LANGUAGES is the review build's [Languages] names and the app's language ids (i18n.LANGUAGES), in order:
+    each language the app can show reaches Setup by the name Setup knows it by (#103)."""
+    from usage_monitor import i18n
+
+    review = [entry["Name"] for entry in installer_words.language_entries(ISS, review=True)]
+    assert list(uc.SETUP_LANGUAGES) == review == list(i18n.LANGUAGES)
+    for language in uc.SETUP_LANGUAGES:
+        env = uc._helper_environment(r"C:\x\Setup.exe", r"C:\x\App.exe", 1, language=language)
+        assert env["USAGE_MONITOR_UPDATE_LANG"] == f"/LANG={language}"
 
 
 def test_the_helper_script_has_no_pipe_and_calls_system_tools_by_absolute_path() -> None:
@@ -3646,6 +3703,7 @@ def test_releasing_md_describes_the_updater_and_the_release_workflow_as_they_are
     releasing = (ROOT / "docs" / "RELEASING.md").read_text(encoding="utf-8")
     workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
     assert uc.SILENT_ARGS in releasing                                    # the switches update_check.py passes
+    assert "/LANG=<the app's language>" in releasing                      # and the app's language (#103)
     assert "gh release view" in workflow and "git tag" not in workflow    # the workflow looks for a release, not a tag...
     assert "already exists it stops" in releasing and "not the tag" in releasing   # ...and the doc says so
     assert "python-version: '3.14'" in workflow and "Python 3.14" in releasing

@@ -2004,7 +2004,33 @@ def test_applying_an_update_in_the_installed_build_downloads_the_installer(setti
     monkeypatch.setattr(app_mod.update_check, "apply_update",
                         lambda url, **kw: calls.append((url, sorted(kw))))
     assert app._apply_update() == {"started": True, "mode": "installer"}
-    assert calls == [(INFO["asset_url"], ["digest", "on_before_exit", "on_error"])]
+    assert calls == [(INFO["asset_url"], ["digest", "language", "on_before_exit", "on_error"])]
+
+
+@pytest.mark.parametrize("shown, passed", [("en", "/LANG=en"), ("fr", "/LANG=fr"), ("es", "/LANG=es"),
+                                           ("tr", "/LANG=tr"), (i18n.PSEUDO, None)])
+def test_an_update_hands_setup_the_apps_language(settings, monkeypatch, shown, passed):
+    """The app's language, read as the update starts, is what Setup is told (#103): /LANG=<id> for a catalog language,
+    so Setup and the uninstaller it leaves speak the language chosen in the app; nothing for the pseudo-locale."""
+    monkeypatch.setenv("USAGE_MONITOR_LANG", shown)                     # the fixture makes this a dev instance
+    app = MonitorApp(settings=settings, language_reader=_Windows(["en-US"]))
+    app.settings = settings
+    app.updates = UpdateTracker(settings, FakeChecker(INFO))
+    app.updates.start_check()
+    calls: list[Any] = []
+    monkeypatch.setattr(app_mod.update_check, "can_self_update", lambda info: True)
+    monkeypatch.setattr(app_mod.update_check, "apply_update", lambda url, **kw: calls.append(kw["language"]))
+    assert app._apply_update() == {"started": True, "mode": "installer"}
+    assert calls == [shown]
+    env = app_mod.update_check._helper_environment(r"C:\x\Setup.exe", r"C:\x\App.exe", 1, language=calls[0])
+    assert env.get("USAGE_MONITOR_UPDATE_LANG") == passed
+
+
+def test_setup_is_told_no_language_when_the_locale_cannot_be_read():
+    def broken() -> i18n.Locale:
+        raise RuntimeError("no locale")
+
+    assert app_mod.setup_language(broken) is None
 
 
 def test_an_update_with_a_foreign_installer_link_is_offered_as_the_release_page(settings, monkeypatch):

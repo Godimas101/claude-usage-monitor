@@ -45,6 +45,12 @@
 # http_error_302 and its UpdateRedirectRefused, DOWNLOAD_TIMEOUT_S as two defaults, and
 # hooks in apply_update, _apply, _stage_update, _download and _spawn_installer. A copy
 # for the suite takes all of #58 or none of it.
+#
+# This copy also tells the installer the app's language (#103): apply_update's ``language``
+# goes through _apply, _stage_update and _spawn_installer to the helper's environment
+# (_helper_environment, USAGE_MONITOR_UPDATE_LANG), and the helper passes it as /LANG= when
+# it is one of SETUP_LANGUAGES, the installer's language names. The suite's other copies pass
+# no /LANG; a copy for the suite takes all of this or none of it.
 
 import errno
 import hashlib
@@ -73,6 +79,12 @@ log = logging.getLogger("usage_monitor.update_check")
 # What the helper passes to the installer. /MERGETASKS="!startup" keeps an update away from the user's
 # "Start with Windows" entry (installer.iss task "startup"): the app repairs a stale path itself at launch.
 SILENT_ARGS = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /MERGETASKS="!startup"'
+# And /LANG=<id>, the app's language (#103), so Setup and the uninstaller it leaves speak the language chosen in the
+# app. Only these ids are passed: installer.iss's [Languages] names, which are the app's language ids (i18n.LANGUAGES;
+# tests hold the three equal). Anything else (the pseudo-locale, an unknown id, none) passes no /LANG, and Setup takes
+# Windows' display language; so nothing but these ids can reach the helper's command line. A build that lacks the
+# language passes over it the same way (the release build declares the languages the app offers).
+SETUP_LANGUAGES = ("en", "fr", "es", "tr")
 MAX_INSTALLER_BYTES = 512 * 1024 * 1024                    # far above any real installer; stops a runaway download
 MAX_JSON_BYTES = 4 * 1024 * 1024
 HELPER_GRACE_S = 0.6                                       # the helper must still be running this long after it starts
@@ -489,7 +501,7 @@ def can_self_update(info) -> bool:
 
 # --- The update --------------------------------------------------------------
 
-def apply_update(asset_url, *, on_error=None, on_before_exit=None, repo=None, digest=None):
+def apply_update(asset_url, *, on_error=None, on_before_exit=None, repo=None, digest=None, language=None):
     """Download the installer, verify it, then silently apply it and relaunch -
     this process exits on success. The work runs on a daemon thread so the UI
     stays responsive; on failure, on_error(exc) is called and the app keeps
@@ -501,6 +513,9 @@ def apply_update(asset_url, *, on_error=None, on_before_exit=None, repo=None, di
     link, the digest or the file is not acceptable, nothing is run: the release
     page opens in the browser and on_error receives an UpdateError.
 
+    ``language``, the app's language id, is passed to Setup as /LANG= when it is one of
+    SETUP_LANGUAGES; otherwise Setup takes Windows' display language (#103).
+
     PROGRESS records the run once this request holds the lock, so a second request, which is
     ignored, never touches the record of the one that is running."""
     def worker():
@@ -510,7 +525,8 @@ def apply_update(asset_url, *, on_error=None, on_before_exit=None, repo=None, di
         progress = PROGRESS
         try:
             progress.begin(_release_version(asset_url, repo))
-            _apply(asset_url, repo=repo, digest=digest, on_before_exit=on_before_exit, progress=progress)
+            _apply(asset_url, repo=repo, digest=digest, on_before_exit=on_before_exit, progress=progress,
+                   language=language)
         except Exception as exc:
             progress.fail(exc)
             log.warning("the update was not applied: %s", exc)
@@ -531,9 +547,9 @@ def _release_version(asset_url, repo):
     return parts[0].lstrip("v") if parts else None
 
 
-def _apply(asset_url, *, repo, digest, on_before_exit, progress=None):
+def _apply(asset_url, *, repo, digest, on_before_exit, progress=None, language=None):
     staged = {}
-    proc = _stage_update(asset_url, repo=repo, digest=digest, staged=staged, progress=progress)
+    proc = _stage_update(asset_url, repo=repo, digest=digest, staged=staged, progress=progress, language=language)
     # The helper is running and waiting for us, so it is safe to go.
     if progress is not None:
         progress.phase("restarting")
@@ -580,7 +596,8 @@ def _exit_process():
     os._exit(0)  # hard exit so the running .exe unlocks for overwrite
 
 
-def _stage_update(asset_url, *, repo=None, digest=None, timeout=DOWNLOAD_TIMEOUT_S, staged=None, progress=None):
+def _stage_update(asset_url, *, repo=None, digest=None, timeout=DOWNLOAD_TIMEOUT_S, staged=None, progress=None,
+                  language=None):
     """Check the link and the digest, download and verify the installer, start the helper.
 
     Returns the running helper process. Raises UpdateRejected (link), UpdateVerificationError
@@ -589,7 +606,8 @@ def _stage_update(asset_url, *, repo=None, digest=None, timeout=DOWNLOAD_TIMEOUT
     receives "page" (the release page) and "installer" (the downloaded file, which sits in a
     folder of its own) so the caller can recover if the helper dies before the app exits.
     ``progress``, when given, is an UpdateProgress that hears the bytes of the download and is
-    moved on to "checking" when the file is in and to "starting" once it checked out."""
+    moved on to "checking" when the file is in and to "starting" once it checked out.
+    ``language`` goes to the helper, which passes it to Setup as /LANG= (see SETUP_LANGUAGES)."""
     if not is_frozen():
         raise UpdateError("self-update runs only in the installed build")
     repo = repo or _default_repo()
@@ -623,7 +641,7 @@ def _stage_update(asset_url, *, repo=None, digest=None, timeout=DOWNLOAD_TIMEOUT
             staged["installer"] = installer
         if progress is not None:
             progress.phase("starting")
-        return _spawn_installer(installer)
+        return _spawn_installer(installer, language=language)
     except BaseException:
         shutil.rmtree(work, ignore_errors=True)
         raise
@@ -710,11 +728,12 @@ def _helper_script(install=True):
     installer step, used when the update helper died while the app was closing (see
     _helper_is_waiting). It holds no path and no value that varies: it reads
     USAGE_MONITOR_UPDATE_PID (our pid), USAGE_MONITOR_UPDATE_SETUP (the installer's file name, beside the script),
-    USAGE_MONITOR_UPDATE_EXE (what to relaunch) and USAGE_MONITOR_UPDATE_LOG from the environment, so the file is the
-    same ASCII text for everybody. System tools are called by absolute path (a Git for Windows
-    'find' ahead of System32 on PATH must not answer), there is no pipe in it (see the top of this
-    file), and every echo puts its redirection first (a digit right before > would be read as a
-    handle number). Split out so it's testable without executing anything."""
+    USAGE_MONITOR_UPDATE_EXE (what to relaunch), USAGE_MONITOR_UPDATE_LOG and USAGE_MONITOR_UPDATE_LANG (the
+    whole /LANG= switch, or not set: in a batch file a variable that is not set is empty, so then no /LANG is
+    passed) from the environment, so the file is the same ASCII text for everybody. System tools are called by
+    absolute path (a Git for Windows 'find' ahead of System32 on PATH must not answer), there is no pipe in it
+    (see the top of this file), and every echo puts its redirection first (a digit right before > would be read
+    as a handle number). Split out so it's testable without executing anything."""
     ping = '"%SystemRoot%\\System32\\ping.exe"'
     lines = [
         "@echo off",
@@ -741,7 +760,8 @@ def _helper_script(install=True):
     ]
     if install:
         lines += [
-            '"%~dp0%USAGE_MONITOR_UPDATE_SETUP%" ' + SILENT_ARGS + ' /LOG="%TEMP%\\ClaudeUsageMonitor-setup.log"',
+            '"%~dp0%USAGE_MONITOR_UPDATE_SETUP%" ' + SILENT_ARGS + ' %USAGE_MONITOR_UPDATE_LANG% '
+            '/LOG="%TEMP%\\ClaudeUsageMonitor-setup.log"',
             '>>"%USAGE_MONITOR_UPDATE_LOG%" echo %DATE% %TIME% installer exit code %ERRORLEVEL%',
             ping + " -n 8 127.0.0.1 >nul",                                  # ~7 s: let the install flush and Defender scan the new exe before we launch it
         ]
@@ -761,8 +781,13 @@ def _helper_script(install=True):
     return "\r\n".join(lines) + "\r\n"
 
 
-def _helper_environment(installer_path, exe, pid):
+def _helper_environment(installer_path, exe, pid, language=None):
     env = dict(os.environ)
+    # The whole /LANG= switch for an id of SETUP_LANGUAGES, else no variable at all (one left in our own environment
+    # must not reach Setup either): the helper's line then passes nothing in its place.
+    env.pop("USAGE_MONITOR_UPDATE_LANG", None)
+    if language in SETUP_LANGUAGES:
+        env["USAGE_MONITOR_UPDATE_LANG"] = "/LANG=" + language
     env.update({
         "USAGE_MONITOR_UPDATE_PID": str(pid),
         "USAGE_MONITOR_UPDATE_SETUP": os.path.basename(installer_path),
@@ -799,16 +824,17 @@ def _launch(command, cwd, env):
     )
 
 
-def _spawn_installer(installer_path, exe=None, pid=None, install=True):
+def _spawn_installer(installer_path, exe=None, pid=None, install=True, language=None):
     """Write the helper beside the installer and start it. Returns the running process.
 
     Raises UpdateError when it cannot be started or stops at once, so the caller can stay up
     instead of quitting for an update that will never happen. ``install=False`` starts the
-    restart helper instead (it waits for us to exit, starts the app again and removes the folder)."""
+    restart helper instead (it waits for us to exit, starts the app again and removes the folder). ``language`` is
+    the app's, for Setup's /LANG= (_helper_environment)."""
     helper = os.path.join(os.path.dirname(installer_path), HELPER_NAME)
     with open(helper, "w", encoding="ascii", newline="") as f:
         f.write(_helper_script(install))
-    env = _helper_environment(installer_path, exe or sys.executable, os.getpid() if pid is None else pid)
+    env = _helper_environment(installer_path, exe or sys.executable, os.getpid() if pid is None else pid, language)
     command, cwd = _helper_command(helper)
     try:
         proc = _launch(command, cwd, env)
