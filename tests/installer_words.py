@@ -17,8 +17,12 @@ before and after #103. A site's Pascal string expression is rendered as Setup bu
 - any other name: {Name}, a value the code fills in. A box whose whole text is a variable (MonitorClosed's Text before
   #103) is read from that variable's one assignment, with the routine's parameters as the site gives them.
 
+Also here (#103): the [Languages] entries of each build, every language's messages and their shape against English's,
+Setup's choice of language (inno_language), and a run of EndedNote (run).
+
     python tests/installer_words.py --print     the texts of today's script, as JSON
     python tests/installer_words.py --record    write the record; refused once it exists (English must not change)
+    python tests/installer_words.py --todo      what each language's file lacks of en.isl (English shows there)
 """
 from __future__ import annotations
 
@@ -406,14 +410,16 @@ def expression(text: str, at: int, context: Context) -> tuple[str, int]:
         return "".join(parts), at
 
 
-def constants(value: str, messages: dict[str, str]) -> str:
+def constants(value: str, messages: dict[str, str], used: list[str] | None = None) -> str:
     """A section value as Setup shows it: {cm:X} is the message, {#Name} (the preprocessor's) is {Name}; other
-    constants stay as written."""
+    constants stay as written. ``used`` collects the message names it read."""
     def one(found: re.Match[str]) -> str:
         inner = found.group(1)
         if inner.startswith("cm:"):
             if "," in inner:
                 raise ValueError(f"{{{inner}}}: a message with arguments is not read here")
+            if used is not None:
+                used.append(inner[3:])
             return Context(messages).message(inner[3:])
         if inner.startswith("#"):
             return "{" + inner[1:] + "}"
@@ -459,7 +465,7 @@ def apps_name(setup: dict[str, str], messages: dict[str, str]) -> str:
     return fmt_message(template, [constants(setup["AppName"], messages), constants(setup["AppVersion"], messages)])
 
 
-def section_words(script: str, messages: dict[str, str]) -> dict[str, str]:
+def section_words(script: str, messages: dict[str, str], used: list[str] | None = None) -> dict[str, str]:
     setup = setup_values(script)
     (task,) = [parameters(line) for line in section(script, "Tasks")]
     (run,) = [parameters(line) for line in section(script, "Run")]
@@ -469,29 +475,410 @@ def section_words(script: str, messages: dict[str, str]) -> dict[str, str]:
         name = icons[filename]
         if not name.startswith("{group}\\"):
             raise ValueError(f"the shortcut {name!r} is not in the Start-menu folder")
-        return constants(name[len("{group}\\"):], messages)
+        return constants(name[len("{group}\\"):], messages, used)
 
     return {
-        "setup.name": constants(setup["AppName"], messages),
+        "setup.name": constants(setup["AppName"], messages, used),
         "apps.name": apps_name(setup, messages),
-        "setup.publisher": constants(setup["AppPublisher"], messages),
-        "setup.group": constants(setup["DefaultGroupName"], messages),
+        "setup.publisher": constants(setup["AppPublisher"], messages, used),
+        "setup.group": constants(setup["DefaultGroupName"], messages, used),
         "icon.app": shortcut("{app}\\{#ExeName}"),
         "icon.uninstall": shortcut("{uninstallexe}"),
-        "task.group": constants(task["GroupDescription"], messages),
-        "task.startup": constants(task["Description"], messages),
-        "run.launch": constants(run["Description"], messages),
+        "task.group": constants(task["GroupDescription"], messages, used),
+        "task.startup": constants(task["Description"], messages, used),
+        "run.launch": constants(run["Description"], messages, used),
     }
 
 
-def words(script: str | None = None, repo: Path = REPO) -> dict[str, str]:
-    """Every text the script shows, in English, by site id: the record's shape."""
+def words(script: str | None = None, repo: Path = REPO, used: list[str] | None = None) -> dict[str, str]:
+    """Every text the script shows, in English, by site id: the record's shape. ``used`` collects the message names
+    the sites read."""
     text = ISS.read_text(encoding="ascii") if script is None else script
     messages = english_messages(text, repo)
-    found = section_words(text, messages)
+    found = section_words(text, messages, used)
     for site in CODE_SITES:
-        found[site[0]] = code_site(text, site, messages)
+        found[site[0]] = code_site(text, site, messages, used)
     return found
+
+
+def used_names(script: str) -> list[str]:
+    """Every message name the script shows: CustomMessage('X') in [Code] and {cm:X} above it, comments left out."""
+    head, code = script[:script.index("[Code]")], without_comments(script[script.index("[Code]"):])
+    lines = "\n".join(line for line in head.splitlines() if not line.lstrip().startswith(";"))
+    return re.findall(r"\bCustomMessage\('(\w+)'\)", code) + re.findall(r"\{cm:(\w+)", lines)
+
+
+class _AnyMessage(Context):
+    """A context in which every message name reads as empty: to find where an expression ends."""
+
+    def message(self, name: str) -> str:
+        return ""
+
+
+# Where text is shown in [Code]: a box's first argument, a label's caption, the download page's two texts.
+SINKS = ((r"(?<!\w)(?:Suppressible)?MsgBox\(", 1), (r"\.Caption :=", 1), (r"\bCreateDownloadPage\(", 2))
+_LITERAL = re.compile(r"'((?:[^']|'')*)'|((?:#\d+)+)")
+
+
+def shown_literals(script: str) -> list[tuple[str, str]]:
+    """(routine, literal) for every literal in a place [Code] shows text (SINKS, and PrepareToInstall's Result, the
+    Preparing page's text), a CustomMessage's name aside; a run of #13#10 codes is one literal."""
+    code = without_comments(script[script.index("[Code]"):])
+    found: list[tuple[str, str]] = []
+    for name in re.findall(r"^(?:procedure|function) (\w+)", code, re.M):
+        body = routine(script, name)
+        starts = [(hit.end(), count) for pattern, count in SINKS for hit in re.finditer(pattern, body)]
+        if name == "PrepareToInstall":
+            starts += [(hit.end(), 1) for hit in re.finditer(r"\bResult :=", body)]
+        for at, count in starts:
+            for index in range(count):
+                _text, end = expression(body, at, _AnyMessage({}))
+                for quoted, chars in _LITERAL.findall(re.sub(r"\bCustomMessage\('\w*'\)", "", body[at:end])):
+                    found.append((name, quoted.replace("''", "'") if not chars else
+                                  "".join(chr(int(code)) for code in chars[1:].split("#"))))
+                if index + 1 < count:
+                    at = _expect(body, end, ",")
+    return found
+
+
+# ── The languages (#103) ─────────────────────────────────────────────────────
+
+MESSAGES_DIR = REPO / "installer-messages"
+# Inno Setup's own messages file for each language of the app, as [Languages] names it, and its [LangOptions]
+# LanguageID (Inno Setup 6.7.1's Default.isl and Languages\*.isl; a test compares them with the PC's Inno Setup).
+INNO_FILES: dict[str, str] = {"en": "compiler:Default.isl", "fr": "compiler:Languages\\French.isl",
+                              "es": "compiler:Languages\\Spanish.isl", "tr": "compiler:Languages\\Turkish.isl"}
+INNO_LANGUAGE_IDS: dict[str, int] = {"en": 0x0409, "fr": 0x040C, "es": 0x0C0A, "tr": 0x041F}
+# Names that stay as written in every language (en.isl's rules): where English has one, a translation has it too.
+KEPT_NAMES = ("Claude Usage Monitor", "Claude Code", "Microsoft Edge WebView2", "WebView2", "microsoft.com", "/mcp",
+              "https://github.com/Godimas101/claude-usage-monitor/blob/main/docs/AGENT_HOOK.md")
+
+
+def language_entries(script: str, review: bool) -> list[dict[str, str]]:
+    """The [Languages] entries of the release build (``review`` False) or of the review build (ISCC /DAllLanguages):
+    the entries between "#ifdef AllLanguages" and "#endif" are the review build's only. Any other directive there is
+    refused, so a switch this does not know is noticed."""
+    found = re.search(r"^\[Languages\][ \t]*$(.*?)(?=^\[|\Z)", script, re.M | re.S)
+    if found is None:
+        raise ValueError("installer.iss has no [Languages]")
+    entries, inside = [], False
+    for line in (raw.strip() for raw in found.group(1).splitlines()):
+        if not line or line.startswith(";"):
+            continue
+        if line == "#ifdef AllLanguages" and not inside:
+            inside = True
+        elif line == "#endif" and inside:
+            inside = False
+        elif line.startswith("#"):
+            raise ValueError(f"[Languages]: {line!r} is not read here")
+        elif review or not inside:
+            entries.append(parameters(line))
+    if inside:
+        raise ValueError("[Languages]: #ifdef AllLanguages has no #endif")
+    return entries
+
+
+def ours(language: str, folder: Path = MESSAGES_DIR) -> dict[str, str]:
+    """installer-messages/<language>.isl's custom messages, %n expanded."""
+    return custom_messages((folder / f"{language}.isl").read_text(encoding="utf-8"))
+
+
+def missing(language: str, folder: Path = MESSAGES_DIR) -> list[str]:
+    """The names en.isl has and <language>.isl lacks: that language's to do. Setup shows English for each."""
+    theirs = ours(language, folder)
+    return [name for name in ours("en", folder) if name not in theirs]
+
+
+def message(language: str, name: str, *args: str, folder: Path = MESSAGES_DIR) -> str:
+    """The text Setup shows for ``name`` in ``language``, filled as FmtMessage fills it: the language's own entry, else
+    English's (ISCC's fallback to the first language that defines it)."""
+    theirs, english = ours(language, folder), ours("en", folder)
+    return fmt_message(theirs.get(name, english[name]), list(args))
+
+
+def _access_keys(value: str) -> int:
+    return len(re.findall(r"(?<!&)&(?!&)", value))
+
+
+def problems(language: str, folder: Path = MESSAGES_DIR) -> list[str]:
+    """What is wrong with <language>.isl's shape against en.isl: an encoding other than UTF-8 without a byte order mark
+    in NFC (en.isl: ASCII), a section other than [CustomMessages], a name English lacks or one of Inno Setup's own,
+    another set of %1 to %9, another count of %n or of & (the access key), a % that is none of those or %%, a name that
+    stays as written (KEPT_NAMES) dropped, or a space at either end."""
+    import unicodedata
+
+    path = folder / f"{language}.isl"
+    raw = path.read_bytes()
+    found: list[str] = []
+    if raw.startswith(b"\xef\xbb\xbf"):
+        found.append("starts with a byte order mark")
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return found + ["is not UTF-8"]
+    if language == "en" and not text.isascii():
+        found.append("is not ASCII")
+    if unicodedata.normalize("NFC", text) != text:
+        found.append("is not NFC")
+    sections = read_isl(text)
+    found += [f"has a [{name}] section" for name in sections if name != "CustomMessages"]
+    english = custom_messages((folder / "en.isl").read_text(encoding="utf-8"))
+    inno = {name.lower() for name in INNO_DEFAULT_CUSTOM}
+    for name, written in sections.get("CustomMessages", {}).items():
+        if name.lower() in inno:
+            found.append(f"{name}: is one of Inno Setup's own messages")
+        if name not in english:
+            found.append(f"{name}: English has no such message")
+            continue
+        source = written
+        model = read_isl((folder / "en.isl").read_text(encoding="utf-8"))["CustomMessages"][name]
+        if sorted(set(re.findall(r"%([1-9])", source))) != sorted(set(re.findall(r"%([1-9])", model))):
+            found.append(f"{name}: other arguments than English's %1 to %9")
+        if source.count("%n") != model.count("%n"):
+            found.append(f"{name}: {source.count('%n')} line breaks, English has {model.count('%n')}")
+        if _access_keys(source) != _access_keys(model):
+            found.append(f"{name}: another count of & than English's")
+        if re.search(r"%(?![1-9n%])", re.sub("%%", "", source)):
+            found.append(f"{name}: a % that is not %1 to %9, %n or %%")
+        found += [f"{name}: drops {kept!r}" for kept in KEPT_NAMES if kept in model and kept not in source]
+        if source != source.strip():
+            found.append(f"{name}: a space at an end")
+    return found
+
+
+def inno_language(langid: int, entries: list[str], lang: str = "") -> str:
+    """The language Setup picks (Inno Setup 6.7.1, SetupLdrAndSetup.InstFunc.pas DetermineDefaultLanguage): a /LANG=
+    naming an entry (any case), else the entry whose LanguageID is Windows' display language exactly, else the first
+    whose primary language (the low 10 bits) is the same, else the first entry; a LANGID of 0 (the call failed) is
+    the first entry. ``entries`` are language names in [Languages] order, with INNO_LANGUAGE_IDS. (Inno Setup's code
+    page check for Chinese is left out: no entry is Chinese.)"""
+    for name in entries:
+        if lang and lang.lower() == name.lower():
+            return name
+    if langid:
+        for name in entries:
+            if INNO_LANGUAGE_IDS[name] == langid:
+                return name
+        for name in entries:
+            if INNO_LANGUAGE_IDS[name] & 0x3FF == langid & 0x3FF:
+                return name
+    return entries[0]
+
+
+def inno_folder() -> Path | None:
+    """The folder of the Inno Setup on this PC (its ISCC.exe), as tests/test_update_check.py's find_iscc finds it."""
+    import os
+    import shutil
+
+    candidates = [os.environ.get("ISCC"), r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+                  r"C:\Program Files\Inno Setup 6\ISCC.exe", shutil.which("ISCC")]
+    found = next((Path(candidate) for candidate in candidates if candidate and Path(candidate).is_file()), None)
+    return found.parent if found is not None else None
+
+
+# ── Running a routine (EndedNote) ────────────────────────────────────────────
+
+_TOKEN = re.compile(r"(?P<string>'(?:[^']|'')*')|(?P<chars>(?:#\d+)+)|(?P<number>\d+)|(?P<name>[A-Za-z_]\w*)"
+                    r"|(?P<op>:=|<>|<=|>=|[=<>+()\[\],;])")
+_COMPARE = {"=": lambda a, b: a == b, "<>": lambda a, b: a != b, "<": lambda a, b: a < b, ">": lambda a, b: a > b,
+            "<=": lambda a, b: a <= b, ">=": lambda a, b: a >= b}
+
+
+class _Exit(Exception):
+    pass
+
+
+class _Routine:
+    """Enough Pascal to run EndedNote: begin/end, if/then/else, := and Exit; strings and integers, = <> < > <= >=, +,
+    and, or (short-circuit, as Pascal Script evaluates them), not; CustomMessage, FmtMessage, Format (%d, %s) and
+    IntToStr. Anything else is refused, so a routine that grows past this is noticed."""
+
+    def __init__(self, text: str) -> None:
+        self.tokens: list[tuple[str, Any]] = []
+        at = 0
+        while (at := _skip(text, at)) < len(text):
+            found = _TOKEN.match(text, at)
+            if found is None:
+                raise ValueError(f"cannot read {text[at:at + 40]!r}")
+            kind, value = found.lastgroup or "", found.group(found.lastgroup or 0)
+            if kind == "string":
+                value = value[1:-1].replace("''", "'")
+            elif kind == "chars":
+                value, kind = "".join(chr(int(code)) for code in value[1:].split("#")), "string"
+            elif kind == "number":
+                value = int(value)
+            self.tokens.append((kind, value))
+            at = found.end()
+        self.at = 0
+        self.body = self._block()
+
+    # parsing
+    def _peek(self) -> tuple[str, Any]:
+        return self.tokens[self.at] if self.at < len(self.tokens) else ("", None)
+
+    def _is(self, word: str) -> bool:
+        kind, value = self._peek()
+        return (kind == "name" and value.lower() == word) or (kind == "op" and value == word)
+
+    def _take(self, word: str) -> None:
+        if not self._is(word):
+            raise ValueError(f"expected {word!r}, found {self._peek()!r}")
+        self.at += 1
+
+    def _block(self) -> tuple[Any, ...]:
+        self._take("begin")
+        statements = []
+        while not self._is("end"):
+            statements.append(self._statement())
+            if self._is(";"):
+                self.at += 1
+            elif not self._is("end"):
+                raise ValueError(f"expected ; or end, found {self._peek()!r}")
+        self._take("end")
+        return ("block", statements)
+
+    def _statement(self) -> tuple[Any, ...]:
+        if self._is("begin"):
+            return self._block()
+        if self._is("if"):
+            self.at += 1
+            condition = self._expression()
+            self._take("then")
+            then = self._statement()
+            otherwise = None
+            if self._is("else"):
+                self.at += 1
+                otherwise = self._statement()
+            return ("if", condition, then, otherwise)
+        if self._is("exit"):
+            self.at += 1
+            return ("exit",)
+        kind, name = self._peek()
+        if kind != "name":
+            raise ValueError(f"cannot run the statement at {self._peek()!r}")
+        self.at += 1
+        self._take(":=")
+        return ("set", name, self._expression())
+
+    def _expression(self) -> tuple[Any, ...]:
+        left = self._simple()
+        kind, value = self._peek()
+        if kind == "op" and value in _COMPARE:
+            self.at += 1
+            return ("compare", value, left, self._simple())
+        return left
+
+    def _simple(self) -> tuple[Any, ...]:
+        left = self._term()
+        while self._is("+") or self._is("or"):
+            operator = self._peek()[1].lower()
+            self.at += 1
+            left = (operator, left, self._term())
+        return left
+
+    def _term(self) -> tuple[Any, ...]:
+        left = self._factor()
+        while self._is("and"):
+            self.at += 1
+            left = ("and", left, self._factor())
+        return left
+
+    def _factor(self) -> tuple[Any, ...]:
+        kind, value = self._peek()
+        if self._is("not"):
+            self.at += 1
+            return ("not", self._factor())
+        self.at += 1
+        if kind in ("string", "number"):
+            return ("value", value)
+        if kind == "op" and value == "(":
+            inner = self._expression()
+            self._take(")")
+            return inner
+        if kind == "op" and value == "[":
+            items = []
+            while not self._is("]"):
+                items.append(self._expression())
+                if self._is(","):
+                    self.at += 1
+            self._take("]")
+            return ("array", items)
+        if kind != "name":
+            raise ValueError(f"cannot read {value!r}")
+        if self._is("("):
+            self.at += 1
+            args = []
+            while not self._is(")"):
+                args.append(self._expression())
+                if self._is(","):
+                    self.at += 1
+            self._take(")")
+            return ("call", value, args)
+        return ("name", value)
+
+    # running
+    def run(self, values: dict[str, Any], messages: dict[str, str]) -> dict[str, Any]:
+        state = dict(values)
+        try:
+            self._do(self.body, state, messages)
+        except _Exit:
+            pass
+        return state
+
+    def _do(self, node: tuple[Any, ...], state: dict[str, Any], messages: dict[str, str]) -> None:
+        kind = node[0]
+        if kind == "block":
+            for statement in node[1]:
+                self._do(statement, state, messages)
+        elif kind == "if":
+            branch = node[2] if self._value(node[1], state, messages) else node[3]
+            if branch is not None:
+                self._do(branch, state, messages)
+        elif kind == "set":
+            state[node[1]] = self._value(node[2], state, messages)
+        elif kind == "exit":
+            raise _Exit
+
+    def _value(self, node: tuple[Any, ...], state: dict[str, Any], messages: dict[str, str]) -> Any:
+        kind = node[0]
+        if kind == "value":
+            return node[1]
+        if kind == "name":
+            if node[1] not in state:
+                raise KeyError(f"{node[1]} has no value")
+            return state[node[1]]
+        if kind == "compare":
+            return _COMPARE[node[1]](self._value(node[2], state, messages), self._value(node[3], state, messages))
+        if kind == "+":
+            return self._value(node[1], state, messages) + self._value(node[2], state, messages)
+        if kind == "and":
+            return bool(self._value(node[1], state, messages)) and bool(self._value(node[2], state, messages))
+        if kind == "or":
+            return bool(self._value(node[1], state, messages)) or bool(self._value(node[2], state, messages))
+        if kind == "not":
+            return not self._value(node[1], state, messages)
+        if kind == "array":
+            return [self._value(item, state, messages) for item in node[1]]
+        args = [self._value(arg, state, messages) for arg in node[2]]
+        if node[1] == "CustomMessage":
+            return Context(messages).message(args[0])
+        if node[1] == "FmtMessage":
+            return fmt_message(args[0], args[1])
+        if node[1] == "Format":
+            return pascal_format(args[0], [str(arg) for arg in args[1]])
+        if node[1] == "IntToStr":
+            return str(int(args[0]))
+        raise ValueError(f"a call to {node[1]} is not run here")
+
+
+def run(script: str, name: str, values: dict[str, Any], messages: dict[str, str]) -> dict[str, Any]:
+    """Run the [Code] routine ``name`` (no var section, only what _Routine reads) with ``values`` for its names; returns
+    every name's value after it, Result among them."""
+    text = routine(script, name)
+    start = re.search(r"^begin\b", text, re.M)
+    if start is None:
+        raise ValueError(f"{name} has no begin")
+    return _Routine(text[start.start():].rstrip().rstrip(";")).run(values, messages)
 
 
 def recorded() -> dict[str, str]:
@@ -522,6 +909,11 @@ def main(argv: list[str]) -> int:
         return 0
     if argv == ["--record"]:
         return record()
+    if argv == ["--todo"]:
+        for language in ("fr", "es", "tr"):
+            todo = missing(language)
+            print(f"{language}.isl lacks {len(todo)} of en.isl's {len(ours('en'))} messages: {', '.join(todo) or '-'}")
+        return 0
     print(__doc__)
     return 2
 
