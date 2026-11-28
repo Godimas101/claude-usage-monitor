@@ -9,7 +9,7 @@
  *                      owner question 1, decided on #98); NEVER_CUT the kinds of element never cut; BAR_FLOOR the narrowest
  *                      a meter's bar may be outside English
  *   measure()          everything in the header, the nav and #main that runs past its room (page_probe.js's header says what
- *                      counts); {vw, vh, lang, over: [{at, kind, ...}], meters, bars, styled}. An element cut with a visible
+ *                      counts); {vw, vh, dpr, lang, over: [{at, kind, ...}], meters, bars, styled}. An element cut with a visible
  *                      ellipsis carries cut: {designed, role, full, title, named, catalog, lang}; one cut by less than a px
  *                      (its words past its content box, which whole-px scroll widths do not show) carries by, to 0.1 px
  *   meterStress(text)  the first meter with each label replaced by text, read and put back: its bars and its labels
@@ -292,7 +292,7 @@ function measure(lists) {
   meters.forEach((m) => {
     if (m.lefts.length >= 2 && Math.max(...m.lefts) - Math.min(...m.lefts) > 0.5) { over.push({ at: m.at, kind: 'meter', lefts: m.lefts }); }
   });
-  return { vw: innerWidth, vh: innerHeight, lang: document.documentElement.lang, over, meters: meters.length,
+  return { vw: innerWidth, vh: innerHeight, dpr: devicePixelRatio, lang: document.documentElement.lang, over, meters: meters.length,
     bars: meters.map((m) => ({ at: m.at, widths: m.widths })), styled };
 }
 

@@ -5,7 +5,8 @@
  * text itself is upper case, and Windows 11 writes sentence case. So this script rewrites those strings as they appear
  * ("RESETS 2:30 PM" -> "Resets 2:30 PM") and again whenever app.js draws them, and puts every one back when another theme
  * takes over. Only the app's own wording is touched: names and titles that come from your data (session titles, folders,
- * supporters, file paths, chart labels) are left exactly as they are. It also
+ * supporters, file paths, chart labels) are left exactly as they are. An Overview card's subtitle carries its whole text in
+ * a title (app.js's metaAttrs, #98), which follows its words, so the tooltip says what the card shows. It also
  *   - flags html[data-g-icons] when Segoe Fluent Icons (or Segoe MDL2 Assets) is installed, which turns the glyphs on;
  *   - gives each status chip the tone app.js set on it (data-tone: ok, warn, alert, acc, or neutral; anything else is neutral),
  *     as data-g-tone, so an "under pace" chip is green and an "at risk" chip amber;
@@ -50,7 +51,8 @@
   var active = false;
   var screen = null;
   var observer = null;
-  var undo = [];                 // [{ref: WeakRef(text node or element), text}] so a theme change can put the wording back
+  var undo = [];                 // [{ref: WeakRef(text node or element), text, attr}] so a theme change can put the wording back
+  var titled = null;             // WeakMap: a subtitle -> the title this script gave it (app.js's is in undo, once)
   var swatchState = "idle";      // idle | loading | ready
   var swatchStyle = null;
 
@@ -168,6 +170,7 @@
     if (next !== null && next !== node.nodeValue) {
       remember(node, node.nodeValue);
       node.nodeValue = next;
+      fixTitle(node.parentElement);
     }
     var host = node.parentElement;
     if (host) {
@@ -176,6 +179,27 @@
         toneChip(chip);
       }
       splitPercent(host);
+    }
+  }
+
+  /* An Overview card's subtitle (.nm-meta-t) carries its whole text in a title (app.js's metaAttrs: Chris on #98, a cut
+   * subtitle can be read). Once its words are re-cased ("OCT 1 - NOV 1" -> "Oct 1 - Nov 1") the title is set to them, so the
+   * tooltip says what the card shows; the title app.js wrote goes back with the words when another theme takes over. */
+  function fixTitle(el) {
+    var host = el && el.closest ? el.closest(".nm-meta-t") : null;
+    var title = host ? host.getAttribute("title") : null;
+    if (!title || title === host.textContent) {
+      return;
+    }
+    if (typeof WeakMap === "function" && !titled) {
+      titled = new WeakMap();
+    }
+    if (!titled || titled.get(host) !== title) {
+      remember(host, title, "title");            // app.js's title, once: not one this script set
+    }
+    host.setAttribute("title", host.textContent);
+    if (titled) {
+      titled.set(host, host.textContent);
     }
   }
 

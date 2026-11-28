@@ -4498,7 +4498,8 @@ def test_the_records_differ_from_their_first_making_by_the_subtitle_titles_alone
     file tests/page_words.js first made (FIRST_MAKING), its _about without the sentence that says so. Each title taken out
     sits on an Overview card, is a subtitle the card's text shows (en.json's English for one of the meta keys), and every
     card has its subtitle's: one on each card but the burn card (none) and the cost card (two where its daily chart shows
-    a subtitle beside its title)."""
+    a subtitle beside its title). In Gates, which draws no capitals of its own, each is the subtitle as the card shows it
+    (gates.js re-cases the title with the words: the cost card's "Oct 1 - Nov 1 · at list prices", not app.js's "OCT 1")."""
     english = ENGLISH_CATALOG
 
     def pattern(key: str) -> re.Pattern[str]:
@@ -4509,7 +4510,8 @@ def test_the_records_differ_from_their_first_making_by_the_subtitle_titles_alone
     for name, sha in FIRST_MAKING.items():
         path = Path(__file__).resolve().parent / "fixtures" / name
         record = json.loads(path.read_text(encoding="utf-8"))
-        assert path.read_bytes() == record_text(record).encode("utf-8"), name           # the recorder's own form
+        # the recorder's own form, whatever line ends the checkout gave the file (Git for Windows' autocrlf writes CRLF)
+        assert path.read_bytes().replace(b"\r\n", b"\n") == record_text(record).encode("utf-8"), name
         assert len(record["_about"]) == 2 and "Chris on #98, 2026-11-27" in record["_about"][1], name
         views = page_views(record)
         taken = 0
@@ -4530,6 +4532,10 @@ def test_the_records_differ_from_their_first_making_by_the_subtitle_titles_alone
                 assert len(titles) == 1 + with_daily, (name, key, region, titles)
                 assert any(shape.fullmatch(titles[0]) for shape in shapes[group]), (name, key, region, titles)
                 assert not with_daily or any(shape.fullmatch(titles[1]) for shape in shapes["daily"]), (name, key, titles)
+                # Gates draws no capitals of its own (gates.js re-cases the words, and the subtitle's title with them, #98's
+                # third review): each title is the subtitle exactly as the card shows it, once the first state has come
+                if key.split("|")[1].startswith("gates") and "gates" not in r:
+                    assert all(title in r["text"] for title in titles), (name, key, region, titles)
         assert taken > 0, name
         strings, packed = record_pack(views)
         first = dict(record, _about=record["_about"][:1], strings=strings, views=packed)
@@ -4700,6 +4706,81 @@ def test_the_small_dom_ends_a_script_where_its_closing_tag_is_after_a_dotted_cap
                          encoding="utf-8", timeout=60, check=False, creationflags=NO_WINDOW)
     assert run.returncode == 0, run.stderr[-2000:]
     assert json.loads(run.stdout) == {"scripts": [["a.js", ""], ["b.js", "x</b"]], "style": "p{}", "after": "z"}
+
+
+GATES_SUBTITLE_TITLES = r"""
+const fs = require("fs");
+const vm = require("vm");
+const D = require(process.argv[1]);
+const doc = D.createDocument('<html lang="en" data-theme="gates"><head></head><body><div id="screen"><main id="main">' +
+  '<section data-card="cost"><div class="nm-card-t"><h2 class="nm-ttl">Cost</h2><span class="nm-meta-t" id="range" ' +
+  'title="OCT 1 - NOV 1 · at list prices">OCT 1 - NOV 1 · at list prices</span></div></section>' +
+  '<section data-card="limit-session"><div class="nm-card-t"><span class="nm-tag" id="tag" title="SESSION">SESSION</span>' +
+  '<span class="nm-meta-t" id="window" title="5-hour window">5-hour window</span></div></section>' +
+  '<section data-card="surfaces"><div class="nm-card-t"><span class="nm-meta-t" id="bare">SHARE, 7 DAYS</span></div></section>' +
+  '</main></div></body></html>');
+const box = { document: doc, MutationObserver: D.MutationObserver, NodeFilter: D.NodeFilter, WeakRef, console,
+  fetch: () => Promise.reject(new Error("no server here")) };
+Object.setPrototypeOf(box, D.Target.prototype);
+box.window = box;
+box.self = box;
+doc.defaultView = box;
+vm.createContext(box);
+vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), box, { filename: "gates.js" });
+const read = () => Object.fromEntries(["range", "tag", "window", "bare"].map((id) => {
+  const el = doc.getElementById(id);
+  return [id, [el.textContent, el.getAttribute("title")]];
+}));
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+const out = {};
+(async () => {
+  box.USAGE_MONITOR_THEME_FX.gates.start();
+  out.started = read();
+  // app.js draws the card again: its new subtitle comes in capitals, its title with it
+  doc.querySelector('[data-card="cost"] .nm-card-t').innerHTML = '<h2 class="nm-ttl">Cost</h2><span class="nm-meta-t" id="range" ' +
+    'title="SEP 1 - OCT 1 · at list prices">SEP 1 - OCT 1 · at list prices</span>';
+  await tick();
+  out.redrawn = read();
+  // the subtitle's words change in place, the title this script gave it still on it
+  doc.getElementById("range").firstChild.nodeValue = "AUG 1 - SEP 1 · at list prices";
+  await tick();
+  out.changed = read();
+  doc.documentElement.setAttribute("data-theme", "nostromo");     // another look: every word and title as app.js wrote it
+  await tick();
+  out.left = read();
+  doc.documentElement.setAttribute("data-theme", "gates");
+  await tick();
+  out.back = read();
+  doc.documentElement.setAttribute("data-theme", "nostromo");
+  await tick();
+  out.leftAgain = read();
+  console.log(JSON.stringify(out));
+})();
+"""
+
+
+@ui_only
+def test_gates_gives_an_overview_subtitles_title_the_words_it_shows_and_puts_both_back() -> None:
+    """#98's third review: every Overview card subtitle carries its whole text in a title (Chris on #98, 2026-11-27), and in
+    Gates the title says what the card shows. gates.js re-cases a subtitle's words ("OCT 1 - NOV 1" -> "Oct 1 - Nov 1"), so it
+    gives the title the same words, again whenever app.js draws the subtitle anew or changes its words; when another look
+    takes over, the words and the title app.js wrote come back (a title gates.js set is never what it puts back). A subtitle
+    whose words it leaves alone keeps its title; it adds no title, and re-cases no title but a subtitle's."""
+    run = subprocess.run([node_binary(), "-e", GATES_SUBTITLE_TITLES, str(MINI_DOM_JS), str(WEBUI / "themes" / "gates.js")],
+                         capture_output=True, encoding="utf-8", timeout=60, check=False, creationflags=NO_WINDOW)
+    assert run.returncode == 0, run.stderr[-2000:]
+    out = json.loads(run.stdout)
+    rest = {"tag": ["Session", "SESSION"], "window": ["5-hour window", "5-hour window"], "bare": ["Share, 7 days", None]}
+    app = {"tag": ["SESSION", "SESSION"], "window": ["5-hour window", "5-hour window"], "bare": ["SHARE, 7 DAYS", None]}
+    shown = "Oct 1 - Nov 1 · at list prices"
+    assert out["started"] == dict(rest, range=[shown, shown])
+    shown = "Sep 1 - Oct 1 · at list prices"
+    assert out["redrawn"] == dict(rest, range=[shown, shown])
+    shown = "Aug 1 - Sep 1 · at list prices"
+    assert out["changed"] == dict(rest, range=[shown, shown])
+    assert out["left"] == dict(app, range=["AUG 1 - SEP 1 · at list prices", "SEP 1 - OCT 1 · at list prices"])
+    assert out["back"] == out["changed"]
+    assert out["leftAgain"] == out["left"]
 
 
 CASE_RESET_JS = r"""

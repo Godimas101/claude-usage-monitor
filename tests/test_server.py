@@ -5502,10 +5502,13 @@ def chip_problems(chip: dict[str, Any], lang: str) -> list[str]:
 
 def overflow_problems(look: str, lang: str, results: list[dict[str, Any]]) -> list[str]:
     """What runs past its room in ``results`` (each page at each size, as measure() reads it) that English's record does not
-    name, and a known one that runs more than 1 px further than in English; and each chip chips() reads that chip_problems
-    fails, in every language. Outside English (#98's owner question 1, as decided): a cut with an ellipsis that is not a
-    designed cut passing cut_problem's rules, an ellipsis set on a nav tab, the header's link words, a sentence line or a
-    figure (measure()'s styled), and a meter's bar under BAR_FLOOR."""
+    name, and a known one that runs more than 1 px further than in English; in English, a known one its view does not
+    measure (#98's third review: the record and the page have parted ways, or the measure no longer sees a cut under a px;
+    such a cut is asked for at the record's device pixel ratio of 1 alone, since at another display scaling it hangs on the
+    glyph metrics); and each chip chips() reads that chip_problems fails, in every language. Outside English (#98's owner
+    question 1, as decided): a cut with an ellipsis that is not a designed cut passing cut_problem's rules, an ellipsis set
+    on a nav tab, the header's link words, a sentence line or a figure (measure()'s styled), and a meter's bar under
+    BAR_FLOOR."""
     known = overflow_known(look, lang)
     problems = []
     for result in results:
@@ -5528,6 +5531,12 @@ def overflow_problems(look: str, lang: str, results: list[dict[str, Any]]) -> li
         for chip in result.get("chips") or []:
             problems.extend(f"{page} {size}: {why}" for why in chip_problems(chip, lang))
         if lang == "en":
+            dpr = measured.get("dpr", 1)
+            for k in known:
+                if k["page"] == page and size in k["sizes"] and (k["by"] >= 1 or dpr == 1) and not any(
+                        item["kind"] == k["kind"] and item["at"] == k["at"] for item in measured["over"]):
+                    problems.append(f"{page} {size}: English's known {k['why']} {k['at']} ({k['kind']}, {k['by']} px) is not "
+                                    f"measured here (device pixel ratio {dpr})")
             continue
         for styled in measured.get("styled", []):
             problems.append(f"{page} {size}: an ellipsis on a {styled['role']}: {styled['at']}")
@@ -5587,7 +5596,8 @@ def test_the_overflow_judge_holds_the_designed_cuts_to_their_rules() -> None:
     styled = {"over": [], "styled": [{"at": "li>a", "role": "nav tab"}], "bars": [{"at": "div.nm-meter", "widths": [90, 90]}]}
     found = overflow_problems("night_city", "pseudo", [{"page": "limits", "size": [720, 480], "measured": styled}])
     assert len(found) == 2 and "on a nav tab" in found[0] and "narrower than 96 px" in found[1]
-    assert overflow_problems("night_city", "en", [{"page": "limits", "size": [720, 480], "measured": styled}]) == []
+    # (Gates: English's record names nothing of it, so the record asks for no overflow there)
+    assert overflow_problems("gates-dark", "en", [{"page": "limits", "size": [720, 480], "measured": styled}]) == []
     assert overflow_problems("night_city", "pseudo", [{"page": "limits", "size": [720, 480], "measured": dict(
         styled, styled=[], bars=[{"at": "div.nm-meter", "widths": [96, 120]}])}]) == []
 
@@ -5602,8 +5612,10 @@ def test_the_overflow_judge_holds_each_chip_to_its_frame_and_its_card() -> None:
 
     def judge(lang: str = "pseudo", **changes: Any) -> list[str]:
         measured = {"over": [], "styled": [], "bars": []}
-        return overflow_problems("night_city", lang, [{"page": "overview", "size": [1200, 780], "measured": measured,
-                                                       "chips": [dict(chip, **changes)]}])
+        # Nostromo frames its chips, and English's record names nothing of its Overview in the default window (in Night City
+        # it names the heading, which an English view must then measure)
+        return overflow_problems("nostromo", lang, [{"page": "overview", "size": [1200, 780], "measured": measured,
+                                                     "chips": [dict(chip, **changes)]}])
 
     assert judge() == [] and judge(lang="en") == [] and judge(top=1, bottom=1) == []
     assert len(judge(top=-0.5)) == 1 and "ink" in judge(top=-0.5)[0] and len(judge(bottom=0.9)) == 1
@@ -5663,6 +5675,59 @@ def test_the_overflow_record_names_englishs_own_and_no_other_language_has_any() 
     assert overflow_problems(look, "en", [dict(result, measured={"over": [dict(fine, by=heading["by"] + 1.2)]})])
 
 
+def test_the_overflow_judge_asks_for_each_known_overflow_in_every_view_it_names() -> None:
+    """#98's third review: in English each overflow OVERFLOW_RECORD names for a view (its look, the normal scenario, its page
+    and size) must be measured there, or the record and the page have parted ways: a measure that stopped seeing a cut under
+    a px (Night City's model-mix subtitle by 0.6 px at 1060 x 640) once failed nothing. A cut under a px is asked for at the
+    record's device pixel ratio of 1 alone (measure()'s dpr), since at another display scaling it hangs on the glyph
+    metrics; a whole-px one at any. An entry of another view (a scenario the test does not draw, another page or size) is
+    not asked for, and another language has no record to measure."""
+    known = json.loads(OVERFLOW_RECORD.read_text(encoding="utf-8"))["known"]
+    assert "dpr: devicePixelRatio," in PAGE_CHECKS.read_text(encoding="utf-8")       # measure() says the ratio it read at
+
+    def as_recorded(look: str, page: str, size: str) -> list[dict[str, Any]]:
+        items = []
+        for k in known:
+            if look in k["looks"] and k["page"] == page and size in k["sizes"] and (k["states"] == "*" or "normal" in k["states"]):
+                item: dict[str, Any] = {"kind": k["kind"], "at": k["at"], "text": k["why"]}
+                if k["kind"] == "wide" and k["by"] >= 1:
+                    item.update(sw=100 + k["by"], cw=100)
+                elif k["kind"] == "wide":                       # a cut under a px: equal scroll widths, its by
+                    item.update(sw=100, cw=100, by=k["by"])
+                else:
+                    item["by"] = k["by"]
+                items.append(item)
+        return items
+
+    def judge(look: str, items: list[dict[str, Any]], page: str = "overview", size: tuple[int, int] = (1060, 640),
+              dpr: float = 1, lang: str = "en") -> list[str]:
+        return overflow_problems(look, lang, [{"page": page, "size": list(size), "measured": {"over": items, "dpr": dpr}}])
+
+    night = as_recorded("night_city", "overview", "1060x640")
+    assert sorted((i["text"], i.get("by", 1) < 1) for i in night) == [("ellipsis", False), ("ellipsis", True), ("heading", False)]
+    assert judge("night_city", night) == [] and judge("night_city", night, dpr=1.25) == []
+    fine = next(i for i in night if i.get("by", 1) < 1)
+    found = judge("night_city", [i for i in night if i is not fine])
+    assert len(found) == 1 and "not measured" in found[0] and fine["at"] in found[0] and "0.6 px" in found[0], found
+    assert judge("night_city", [i for i in night if i is not fine], dpr=1.25) == []    # another display scaling
+    # the same element measured as another kind is not the record's overflow: it is one of its own, and the record's is missing
+    found = judge("night_city", [dict(i, kind="tall") if i is fine else i for i in night])
+    assert len(found) == 2 and sum("not measured" in p for p in found) == 1, found
+    heading = next(i for i in night if i["text"] == "heading")
+    for dpr in (1, 1.25, 1.5):
+        found = judge("night_city", [i for i in night if i is not heading], dpr=dpr)
+        assert len(found) == 1 and "known heading" in found[0], (dpr, found)
+    assert judge("night_city", [i for i in night if i is not heading and i is not fine], dpr=1.25) != []
+    assert judge("night_city", [], lang="pseudo") == []
+    # other views: Night City's Limits asks for its heading alone; Nostromo's find is drawn in the warning and critical
+    # scenarios, not the normal one; nothing of Nostromo's in the default window
+    limits = as_recorded("night_city", "limits", "1060x640")
+    assert [i["at"] for i in limits] == [heading["at"]] and judge("night_city", limits, page="limits") == []
+    nostromo = as_recorded("nostromo", "overview", "1060x640")
+    assert len(nostromo) == 3 and not any("nm-facts" in i["at"] for i in nostromo) and judge("nostromo", nostromo) == []
+    assert judge("nostromo", [], size=(1200, 780)) == [] and len(judge("nostromo", nostromo[1:])) == 1
+
+
 @ui_only
 @pytest.mark.parametrize("lang", ["en", "pseudo"])
 @pytest.mark.parametrize("look", list(LOOKS_98))
@@ -5675,7 +5740,8 @@ def test_overview_and_limits_overflow_nothing_in_the_real_web_view(tmp_path: Pat
     each chip's words' ink clear of its 1 px frame and its frame inside its card (chips(), chip_problems: #98's review, finding
     F2, an accented capital on Night City's chips; read here since its second review, as WebView2's display scaling may
     place the ink otherwise than the stand-in's). An element cut with an ellipsis is cut however little its words run past
-    its box. English may have only its own known overflows (OVERFLOW_RECORD, none more than 1 px further). The
+    its box. English has exactly its own known overflows (OVERFLOW_RECORD: none more than 1 px further, and since #98's
+    third review each measured in every view it names, a cut under a px at a device pixel ratio of 1 alone). The
     pseudo-locale has none but the designed cuts
     (#98's owner question 1, as decided: a longer line wraps, and an Overview card's meta or a limit card's chip may be cut
     with an ellipsis, its whole text kept in the element, its title and the card's name), no ellipsis on a nav tab, the

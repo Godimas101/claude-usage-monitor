@@ -696,10 +696,12 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   instead of the shell's capitals until `gates.js` arrived. One deliberate change, attributes only (Chris on #98,
   2026-11-27): every Overview card subtitle (`.nm-meta-t` on the Overview's cards, the cost card's daily chart's too) carries
   its full text in a `title` in every language (`metaAttrs`), so a subtitle English's own rule cuts with "…" can be read;
-  nothing on screen moves (#118 moves a subtitle that does not fit under its title). Both records gained those titles,
-  derived from the records, not re-recorded. Three English forms changed that cannot show: the one forms
-  of `limits.fact.value.days` and `.hours` (`1 day`, `1 hour`; the windows are 5 hours and 7 days) and of `ratio.scaled`
-  (a cell of one month is never scaled).
+  nothing on screen moves (#118 moves a subtitle that does not fit under its title). In Gates the title follows
+  `gates.js`'s re-casing of the subtitle's words (the cost card's `Oct 1 - Nov 1 · at list prices`, where `app.js`
+  writes `OCT 1`), so the tooltip says what the card shows; `app.js`'s title comes back with the words in another look.
+  Both records gained those titles, derived from the records, not re-recorded. Three English forms changed that cannot
+  show: the one forms of `limits.fact.value.days` and `.hours` (`1 day`, `1 hour`; the windows are 5 hours and 7 days)
+  and of `ratio.scaled` (a cell of one month is never scaled).
 - **Longer words (#98, owner question 1).** As the owner decided on #98, after a look at what other apps do: outside
   English a line longer than its room wraps and its box grows first; the translator writes a short form to the room its
   key's note gives (below); an ellipsis comes last, only where a row's height is fixed and the whole text can still be
@@ -1088,7 +1090,10 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   label long enough for two lines (`navStress()`: its words stay in the tab) and one word far longer than a line in the
   first limit card's pace line, verdict and forecast (`sentenceStress()`: each breaks inside the card). An element cut with
   an ellipsis counts as cut once its words run past its content box by more than Chromium's 1/64 px layout unit, which
-  whole-px scroll widths do not show under about 1 px (`measure()` gives such a cut's `by` to 0.1 px). The header step also fails where the
+  whole-px scroll widths do not show under about 1 px (`measure()` gives such a cut's `by` to 0.1 px). In English every
+  overflow the record names for a view must be measured there (#98's third review: a record entry the page, or the
+  measure, no longer shows fails), and before the step `measure()` is checked on a page of its own (`measureSelfCheck`:
+  an ellipsis cut by a third of a px is one item, its `by` under 1 px). The header step also fails where the
   data age is in neither the header nor the health box but the gaps `AGE_GAPS` records, and outside English it writes the
   link's words twice as long: they wrap to at most two lines inside the bar. The rooms step (English, the default window)
   measures each constrained text's room (`rooms()`) and holds each key `ROOM_KEYS` names to its note. What it reads from
@@ -1100,7 +1105,8 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   daily chart's axis may draw a date fewer than the small DOM's (a note, not a failure).
   The real-web-view tests in `tests/test_server.py` (gated; they open WebView2 windows parked off screen): the clip test
   in English and the pseudo-locale; `test_overview_and_limits_overflow_nothing_in_the_real_web_view` (every look,
-  English and the pseudo-locale, `measure()` at the three sizes, English allowed only the record's known overflows and the
+  English and the pseudo-locale, `measure()` at the three sizes, English allowed only the record's known overflows, each
+  measured in every view it names (since #98's third review; a cut under a px at a device pixel ratio of 1 alone), and the
   pseudo-locale only the designed cuts, judged by `overflow_problems` as the stand-in judges them, and since #98's second
   review `chips()` there too, each chip held by `chip_problems` to the stand-in's rules: its ink clear of a 1 px frame,
   its frame inside its card, and outside English its word on one line);

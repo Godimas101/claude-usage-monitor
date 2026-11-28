@@ -1731,7 +1731,7 @@
    * language (Chris on #98, 2026-11-27: a cut subtitle can be read). English's own rule cuts a meta with "…" where its row
    * has no room (#118 moves it under the title instead); outside English the Overview's rows keep their height, so a meta
    * longer than its room is cut there too (#98's owner question 1: a designed cut), its whole text in the element, in this
-   * title and in the card's name (cardName). */
+   * title and in the card's name (cardName). In Gates, gates.js gives the title the words it re-cases (fixTitle). */
   function metaAttrs(line) {
     var text = lineText(line);
     return lineAttrs(line) + (text ? ' title="' + esc(text) + '"' : "");

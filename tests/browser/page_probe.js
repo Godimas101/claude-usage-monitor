@@ -50,7 +50,11 @@
 //           stays in the card (burnStress); a nav tab written for two lines keeps its words in the tab (navStress); and one
 //           word far longer than a line in the pace line, the verdict or the forecast breaks inside the card
 //           (sentenceStress). An element cut with an ellipsis is cut once its words run past its content box by more than
-//           Chromium's 1/64 px (measure(): its by to 0.1 px), however little.
+//           Chromium's 1/64 px (measure(): its by to 0.1 px), however little. In English every overflow the record names
+//           for a view must be measured in that view: an entry the page, or the measure, no longer shows fails (#98's third
+//           review: a cut under a px that measure() stops seeing). And before the step, measure() is checked on a page of
+//           its own (measureSelfCheck): an ellipsis whose words run a third of a px past its box is one item, wide, its by
+//           under 1 px and its cut read; the same element 1 px wider is none.
 //   header  The header bar in each language and look, with each link word (live, loading, stale, offline, rate_limited,
 //           no_credentials, paused, and lost: the monitor stops answering), at every page width from 704 to 1184 px (most
 //           20 px apart): the bar's one row never runs past the window (its scroll width), Refresh's right edge stays inside
@@ -132,8 +136,8 @@ const LOOK = {
 // English's own overflows, as English draws them today, each with the owner's decision that keeps it (owner), as Chris made
 // them on #98 (owner question 3 on 2026-11-26, then all of them looked at one by one on 2026-11-27). Each is named with the
 // views it shows in and how far it runs past its box (wide: scrollWidth - clientWidth, or to 0.1 px for a cut under a px;
-// leaves-side: px past its card); in English a known one may run at most 1 px further, and anything else fails. Another
-// language has none but the designed cuts (DESIGNED_CUTS below): it wraps.
+// leaves-side: px past its card); in English a known one may run at most 1 px further, each must be measured in every view
+// it names, and anything else fails. Another language has none but the designed cuts (DESIGNED_CUTS below): it wraps.
 //   heading   Night City's page heading: its slanted cursor runs 3 px past the heading's box (nothing is cut): "decided,
 //             kept (Chris 2026-11-26)".
 //   ellipsis  the Overview grid's card subtitles, cut with an ellipsis by the theme's own rule (.nm-grid .nm-card-t
@@ -259,6 +263,12 @@ function englishKnown(item, look, state, page, size) {
     k.sizes.includes(sizeName(size)) && (k.states === '*' || k.states.includes(state)));
 }
 
+/* Every entry English's record names for this view: each must be measured there. */
+function englishKnownHere(look, state, page, size) {
+  return KNOWN.filter((k) => k.page === page && k.looks.includes(look) && k.sizes.includes(sizeName(size)) &&
+    (k.states === '*' || k.states.includes(state)));
+}
+
 /* Why a cut with a visible ellipsis outside English is not a designed cut that passes, or null when it is one. In a real
  * language a designed cut in the default window passes only where its words are English's (a key the language has no words
  * for yet, lang="en") and English's record names the same cut there. */
@@ -291,7 +301,16 @@ function judgeWidths(where, lang, look, state, page, size, m) {
     }
     fail(`${where}: ${item.kind} ${item.at} ${JSON.stringify(Object.fromEntries(Object.entries(item).filter(([k]) => !['at', 'kind'].includes(k))))}`);
   }
-  if (lang === 'en') { return; }
+  if (lang === 'en') {
+    // each overflow the record names for this view is measured here (#98's third review): one the page no longer shows, or
+    // the measure no longer sees (a cut under a px), means the record and the page have parted ways
+    for (const k of englishKnownHere(look, state, page, size)) {
+      if (!m.over.some((item) => item.kind === k.kind && item.at === k.at)) {
+        fail(`${where}: English's known ${k.why} ${k.at} (${k.kind}, ${k.by} px) is not measured here`);
+      }
+    }
+    return;
+  }
   for (const s of m.styled) { fail(`${where}: an ellipsis on a ${s.role}: ${s.at} "${s.text}"`); }
   for (const b of m.bars) {
     if (b.widths.some((w) => w < CHECKS.BAR_FLOOR - 0.5)) {
@@ -387,6 +406,39 @@ const ROUTES = {
     },
   },
 };
+
+/* measure()'s own check (#98's third review), on a page of its own: an element cut with an ellipsis whose words run a third
+ * of a px past its content box is one item, wide, its by under 1 px and its cut read (whole-px scroll widths do not show
+ * it); the same element 1 px wider than its words is none. So a measure that stops seeing a cut under a px fails here,
+ * whatever English's record holds. */
+async function measureSelfCheck(browser) {
+  const context = await browser.newContext({ viewport: { width: 800, height: 300 }, deviceScaleFactor: 1, reducedMotion: 'reduce' });
+  try {
+    const page = await context.newPage();
+    await page.setContent('<!doctype html><html lang="en"><body><main id="main"><span id="cut" style="display: inline-block; ' +
+      'white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 16px sans-serif">Share of cost, cycle</span></main></body></html>');
+    const room = (past) => page.evaluate((by) => {
+      const el = document.getElementById('cut');
+      el.style.width = '';
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      el.style.width = (range.getBoundingClientRect().width - by) + 'px';
+      return el.getBoundingClientRect().width;
+    }, past);
+    await room(0.3);
+    const cut = (await page.evaluate(CHECKS.measure, LISTS)).over;
+    await room(-1);
+    const fits = (await page.evaluate(CHECKS.measure, LISTS)).over;
+    result.selfCheck = { cut, fits };
+    const one = cut.length === 1 ? cut[0] : null;
+    if (!one || one.kind !== 'wide' || !(one.by > 0 && one.by < 1) || !one.cut) {
+      fail(`measure: an ellipsis cut by 0.3 px is not one wide item with its by under 1 px and its cut: ${JSON.stringify(cut)}`);
+    }
+    if (fits.length) { fail(`measure: an element 1 px wider than its words is measured: ${JSON.stringify(fits)}`); }
+  } finally {
+    await context.close();
+  }
+}
 
 async function widthsView(browser, server, lang, look, state, routed) {
   const flags = {};
@@ -985,6 +1037,7 @@ const result = { out: OUT, widths: {}, header: {}, clip: {}, caps: {}, record: {
   const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
   const t0 = Date.now();
   try {
+    if (STEPS.includes('widths')) { await measureSelfCheck(browser); }
     for (const lang of LANGS) {
       if (STEPS.includes('widths')) {
         for (const scenario of SCENARIOS) {
