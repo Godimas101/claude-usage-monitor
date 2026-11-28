@@ -48,6 +48,7 @@ from typing import Any
 
 import pytest
 
+import installer_words
 import update_check as uc
 import version
 
@@ -1744,6 +1745,7 @@ def test_a_real_helper_in_a_unc_folder_with_metacharacters_runs(monkeypatch: pyt
 
 ISS = (ROOT / "installer.iss").read_text(encoding="utf-8")
 SPEC_TEXT = (ROOT / "ClaudeUsageMonitor.spec").read_text(encoding="utf-8")
+ENGLISH = installer_words.english_messages(ISS)       # what the script's CustomMessage and {cm:} names say (#103)
 
 
 def iss_defines() -> dict[str, str]:
@@ -1830,9 +1832,9 @@ def test_setup_and_uninstall_close_a_running_monitor_themselves() -> None:
     assert "CheckForMutexes(MonitorMutex)" in close and "FindWindowByClassName(ControllerClass)" in close
     assert "PostMessage(Wnd, WmClose, 0, 0)" in close
     prepare = iss_routine("PrepareToInstall")
-    assert prepare.index("MonitorClosed('Setup')") < prepare.index("CloseDashboardWindow") < prepare.index("EndOtherProcesses")
+    assert prepare.index("not MonitorClosed then") < prepare.index("CloseDashboardWindow") < prepare.index("EndOtherProcesses")
     uninstall = iss_routine("CurUninstallStepChanged")
-    assert uninstall.index("MonitorClosed('Uninstall')") < uninstall.index("Abort") < uninstall.index("RemoveFromClaudeCode")
+    assert uninstall.index("not MonitorClosed then") < uninstall.index("Abort") < uninstall.index("RemoveFromClaudeCode")
 
 
 def test_restart_manager_closes_what_is_using_the_files_and_restarts_nothing() -> None:
@@ -1848,7 +1850,7 @@ def test_setup_ends_the_exes_other_processes_before_the_folder_check() -> None:
     asking the dashboard to close, and Uninstall does the same at usUninstall, before it deletes (#53)."""
     prepare = iss_routine("PrepareToInstall")
     assert prepare.index("CloseDashboardWindow;") < prepare.index("EndOtherProcesses;")
-    assert re.search(r"if CurUninstallStep = usUninstall then begin\s+if not MonitorClosed\('Uninstall'\) then begin\s+Log\([^\n]*\);\s+Abort;\s+end;"
+    assert re.search(r"if CurUninstallStep = usUninstall then begin\s+if not MonitorClosed then begin\s+Log\([^\n]*\);\s+Abort;\s+end;"
                      r"\s+CloseDashboardWindow;[^\n]*\s+RemoveFromClaudeCode;[^\n]*\s+EndOtherProcesses;",
                      iss_routine("CurUninstallStepChanged"))
     assert re.search(r"if CurStep = ssInstall then\s+MoveOldInstallAside;", iss_routine("CurStepChanged"))
@@ -1916,7 +1918,7 @@ def test_the_start_with_windows_task_is_checked_by_default() -> None:
     (task,) = [iss_parameters(line) for line in iss_section("Tasks")]
     assert task["Name"] == "startup"
     assert "unchecked" not in task.get("Flags", "").split()
-    assert "Windows" in task["Description"]
+    assert task["Description"] == "{cm:StartupTask}" and "Windows" in ENGLISH["StartupTask"]
 
 
 def test_the_start_with_windows_task_writes_the_entry_the_app_writes() -> None:
@@ -2050,7 +2052,8 @@ def test_the_uninstaller_keeps_the_settings_unless_the_user_says_otherwise() -> 
 
     assert all('Name: "{app}\\' in line for line in iss_section("UninstallDelete"))   # outside the install folder nothing goes unasked
     assert "{userappdata}\\" + paths.APP_FOLDER in ISS      # %APPDATA%\ClaudeUsageMonitor, where paths.app_data_dir() is
-    prompt = ISS.index("MsgBox('Do you also want to delete")
+    prompt = ISS.index("MsgBox(FmtMessage(CustomMessage('DeleteUserData'), [Folder])")
+    assert ENGLISH["DeleteUserData"].startswith("Do you also want to delete")
     assert "MB_YESNO or MB_DEFBUTTON2" in ISS[prompt:prompt + 700]   # defaults to No
     guard = ISS.index("if UninstallSilent then", ISS.index("procedure AskToDeleteUserData"))
     assert guard < prompt < ISS.index("DelTree(Folder")
@@ -2064,7 +2067,8 @@ def test_the_webview2_offer_follows_microsofts_detection_rule() -> None:
         assert needle in ISS, needle
     offer = ISS.index("procedure OfferWebView2")
     assert "WizardSilent" in ISS[offer:offer + 200]         # never in a silent install, so a self-update never downloads it
-    assert "web browser" in ISS[offer:]                     # the explanation: without it the dashboard opens in the browser
+    assert "CustomMessage('WebView2Offer')" in iss_routine("OfferWebView2")
+    assert "web browser" in ENGLISH["WebView2Offer"]        # the explanation: without it the dashboard opens in the browser
 
 
 def test_the_iss_is_ascii() -> None:
@@ -2096,13 +2100,13 @@ def test_setup_writes_the_note_as_counts() -> None:
 
 def test_the_finish_page_and_the_toast_say_the_same_english() -> None:
     """Setup's Finish page words what it ended itself (EndedNote); after a silent update the app words the counts
-    (en.json's toast.updated.*). Both say the same English: EndedNote's four sentence forms, its doubled quotes read as
-    one and its %d as {count}, are en.json's forms with Claude Code and /mcp put in. When #103 moves them into
-    [CustomMessages], this reads its en. messages (their %1 as {count}), each paired with its form."""
+    (en.json's toast.updated.*). Both say the same English: EndedNote's four messages in installer-messages/en.isl
+    (#103), their %1 as {count}, are en.json's forms with Claude Code and /mcp put in, each paired with its form."""
     from usage_monitor import app, i18n
 
-    literals = [text.replace("''", "'") for text in re.findall(r"'((?:[^']|'')*)'", iss_routine("EndedNote"))]
-    forms = [text.replace("%d", "{count}") for text in literals if len(text) > 1]
+    names = ("EndedToolsOne", "EndedToolsOther", "EndedWaitsOne", "EndedWaitsOther")
+    assert all(f"CustomMessage('{name}')" in iss_routine("EndedNote") for name in names)
+    forms = [ENGLISH[name].replace("%1", "{count}") for name in names]
     english = json.loads((ROOT / "usage_monitor" / "webui" / "i18n" / "en.json").read_text(encoding="utf-8"))
     names = {"product": "Claude Code", "command": "/mcp"}
     ours = [i18n.fill(english[f"toast.updated.{kind}"][form], names) for kind in ("tools", "waits")
@@ -2137,6 +2141,7 @@ REAL_IDENTITY = (                                                               
     "{localappdata}", "{userappdata}\\ClaudeUsageMonitor", "Global\\ClaudeUsageMonitor", "'ClaudeUsageMonitor'", "Explorer\\StartupApproved",
     '"ClaudeUsageMonitor"', "AppName=Claude Usage Monitor", '#define AppIdValue "Claude Usage Monitor"',
     "DefaultGroupName=Claude Usage Monitor", "DashboardTitle = 'Claude Usage Monitor'", "ClaudeUsageMonitor.Controller",
+    "UninstallDisplayName=Claude Usage Monitor",
 )
 
 
@@ -2227,6 +2232,7 @@ def sandbox_script(real: str, app: Path) -> str:
         ("AppName=Claude Usage Monitor", f"AppName={SANDBOX}"),
         ("DefaultDirName={localappdata}\\ClaudeUsageMonitor", f"DefaultDirName={app}"),
         ("DefaultGroupName=Claude Usage Monitor", f"DefaultGroupName={SANDBOX}"),
+        ("UninstallDisplayName=Claude Usage Monitor version", f"UninstallDisplayName={SANDBOX} version"),
         ("MonitorMutex = 'Global\\ClaudeUsageMonitor';", f"MonitorMutex = '{SANDBOX_MUTEX}';"),
         ("ControllerClass = 'ClaudeUsageMonitor.Controller';", f"ControllerClass = '{SANDBOX_CONTROLLER}';"),
         ("MonitorQuitTries = 100;", "MonitorQuitTries = 30;"),                          # a monitor that stays costs 3 s, not 10
@@ -2289,6 +2295,7 @@ class Sandbox:
             assert script.count(old) == 1, f"a test's swap no longer matches the script exactly once: {old!r}"
             script = script.replace(old, new)
         (scripts / "v2.iss").write_text(script, encoding="ascii")
+        shutil.copytree(ROOT / "installer-messages", scripts / "installer-messages")   # MessagesFile names it from the script
         (scripts / "v1.iss").write_text(v1_stand_in_script(self.app), encoding="ascii")
         self.v2 = self._build(scripts / "v2.iss", "v2", dist, "2.0.0", "ClaudeUsageMonitorSetup-v2.0.0.exe")
         self.v1 = self._build(scripts / "v1.iss", "v1", dist, "1.1.5", "v1like.exe")
@@ -3044,7 +3051,7 @@ def test_a_sandboxed_uninstall_takes_the_app_out_of_claude_code_first(tmp_path: 
         box.reset("v2", None)
         box.uninstall()
         calls = (box.root / "modes.txt").read_text(encoding="ascii").splitlines()
-        assert len(calls) == 1 and calls[0].startswith("--remove-setup ") and calls[0].endswith("claude-code-left.txt")
+        assert len(calls) == 1 and calls[0].startswith("--remove-setup ") and calls[0].endswith("claude-code-left.txt --lang en")
         assert not box.app.exists(), "the uninstall did not finish"
         log = max(box.logs.glob("uninstall-*.log"), key=lambda path: path.stat().st_mtime).read_text(encoding="utf-8-sig", errors="replace")
         assert "Nothing of this app is left in Claude Code." in log      # or everyone gets a box saying some of it stayed

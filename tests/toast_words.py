@@ -8,8 +8,8 @@ What is recorded, all of it in English, through the code that shows it:
 - the release toast, by MonitorApp._announce_update on a stand-in app (UPDATE_VERSIONS);
 - the note toast after a silent update, by MonitorApp._announce_update_note on a stand-in app whose app data folder is
   a temporary one: for each count pair of NOTE_COUNTS, the note as installer.iss's EndedNote words it (its four
-  sentence forms read from the script), and a note with a line break, a long one, an empty one, one with a byte order
-  mark and one in another code page, with whether the file was deleted after;
+  sentence forms read from installer-messages/en.isl since #103), and a note with a line break, a long one, an empty
+  one, one with a byte order mark and one in another code page, with whether the file was deleted after;
 - the alerts, by AlertEngine.evaluate over scripted readings for each name shape (SHAPES): the threshold ladder, a
   reset by a change of window, a threshold in the new window and a reset when that window runs out by the clock; and
   the credits alert for each SPENDS shape; the session's ladder at the alert levels of THRESHOLDS;
@@ -28,7 +28,6 @@ from __future__ import annotations
 import functools
 import json
 import os
-import re
 import subprocess
 import sys
 import tempfile
@@ -40,7 +39,8 @@ from typing import Any
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
 RECORD = HERE / "fixtures" / "toast_words_english.json"
-ISS = REPO / "installer.iss"
+EN_ISL = REPO / "installer-messages" / "en.isl"
+NOTE_MESSAGES = ("EndedToolsOne", "EndedToolsOther", "EndedWaitsOne", "EndedWaitsOther")   # EndedNote's, in order
 PINNED_TZ = "UTC0"              # the C runtime reads TZ when Python starts, so it is set for a fresh process
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 ABOUT = ("Today's English toasts and usage alerts, recorded before #97 moved their words into the catalog (step a1 of "
@@ -104,17 +104,16 @@ THRESHOLDS: tuple[tuple[int, ...], ...] = ((1, 33, 99), (50, 100))
 # ── installer.iss's EndedNote ─────────────────────────────────────────────────
 
 def ended_note_forms(text: str | None = None) -> tuple[str, str, str, str]:
-    """EndedNote's four sentence forms as installer.iss writes them, Pascal's doubled quote read as one: a tool, N tools
-    (with %d), a wait, N waits (with %d)."""
-    source = ISS.read_text(encoding="ascii") if text is None else text
-    routine = re.search(r"^function EndedNote\b.*?^end;", source, re.M | re.S)
-    if routine is None:
-        raise RuntimeError("installer.iss has no function EndedNote")
-    literals = [found.replace("''", "'") for found in re.findall(r"'((?:[^']|'')*)'", routine.group(0))]
-    forms = tuple(literal for literal in literals if len(literal) > 1)
-    if len(forms) != 4:
-        raise RuntimeError(f"EndedNote has {len(forms)} sentence forms, not 4: {forms}")
-    return forms  # type: ignore[return-value]
+    """EndedNote's four sentence forms, its messages in installer-messages/en.isl (``text``: that file's text) since
+    #103: a tool, N tools, a wait, N waits, each count's %1 read as %d (EndedNote's Format wrote %d before #103, and the
+    record's notes were made from those)."""
+    from installer_words import custom_messages
+
+    messages = custom_messages(EN_ISL.read_text(encoding="utf-8") if text is None else text)
+    missing = [name for name in NOTE_MESSAGES if name not in messages]
+    if missing:
+        raise RuntimeError(f"en.isl lacks EndedNote's messages {missing}")
+    return tuple(messages[name].replace("%1", "%d") for name in NOTE_MESSAGES)  # type: ignore[return-value]
 
 
 def ended_note(tools: int, waits: int, forms: tuple[str, str, str, str] | None = None) -> str:

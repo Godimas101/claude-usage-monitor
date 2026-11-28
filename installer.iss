@@ -1,10 +1,16 @@
-; Claude Usage Monitor installer (Inno Setup 6.3 or newer).
+; Claude Usage Monitor installer (Inno Setup 6.7.1 exactly: the guard below refuses any other version, #103).
 ;
 ; Per-user install, no UAC. Build:  ISCC /DAppVer=2.0.0 installer.iss
 ;   AppVer   the version. build.bat and release.yml pass it from the VERSION file; without it the
 ;            VERSION file is read here.
 ;   DistDir  the PyInstaller onedir folder to package (default: dist\ClaudeUsageMonitor).
+;   AllLanguages  when defined (ISCC /DAllLanguages), the review build: every language of [Languages]. Never
+;            published; the release build has the languages the app offers (#107).
 ; The installer is written to installer\ClaudeUsageMonitorSetup-v<version>.exe (ISCC /O<dir> moves it).
+;
+; What Setup and the uninstaller say is in installer-messages\<language>.isl, one file per language (en.isl is the
+; English and its notes); Inno Setup's own pages come from its own messages files. Setup speaks Windows' display
+; language when [Languages] has it, else English (#103).
 ;
 ; The in-app updater (update_check.py) runs this installer unattended:
 ;   Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /MERGETASKS="!startup"
@@ -22,6 +28,12 @@
   #define DistDir "dist\ClaudeUsageMonitor"
 #endif
 
+; Inno Setup's own pages and messages are part of what Setup shows, so one version builds it: 6.7.1, which built v2.3.0.
+; Moving to another is a change of its own (#119).
+#if Ver != EncodeVer(6, 7, 1)
+  #error This script is built with Inno Setup 6.7.1 and no other version
+#endif
+
 ; The AppId is what Inno derives from AppName, and the v1 installs already carry it: their uninstall key
 ; is "Claude Usage Monitor_is1". Pinned here so a later change of the display name cannot orphan them.
 #define AppIdValue "Claude Usage Monitor"
@@ -31,6 +43,10 @@
 AppId={#AppIdValue}
 AppName=Claude Usage Monitor
 AppVersion={#AppVer}
+; The name in Apps, pinned like the Start-menu names (#86). Left out, Setup writes AppVerName, which it builds from the
+; language's NameAndVersion message ("%1 version %2" in English; Spanish and Turkish word it otherwise), so the name
+; would change with the language of each install and update. This is the English one.
+UninstallDisplayName=Claude Usage Monitor version {#AppVer}
 AppPublisher=Godimas
 AppPublisherURL=https://patreon.com/Godimas101
 AppSupportURL=https://github.com/Godimas101/claude-usage-monitor
@@ -49,6 +65,12 @@ WizardStyle=modern
 ; Version 2 is built and tested on Windows 11 only (README, Requirements); this is the floor Setup
 ; enforces, not a promise of support.
 MinVersion=10.0
+; Setup's language (#103): Windows' display language (GetUserDefaultUILanguage) when [Languages] has it, exactly or by
+; its primary language, else the first entry, English. A /LANG= naming an entry comes first. No language dialog, and
+; never the language of the last install, which Inno Setup would otherwise also take in a silent update.
+LanguageDetectionMethod=uilanguage
+ShowLanguageDialog=no
+UsePreviousLanguage=no
 ArchitecturesAllowed=x64compatible
 ; The monitor holds a mutex for as long as it runs (usage_monitor/app.py MUTEX_NAME). Setup and Uninstall close it
 ; themselves (CloseMonitor): its controller window quits on WM_CLOSE as on Exit in its menu, and they ask the person only
@@ -71,12 +93,23 @@ CloseApplicationsFilter=*.exe,*.dll,*.pyd
 RestartApplications=no
 
 [Languages]
-Name: "english"; MessagesFile: "compiler:Default.isl"
+; English first: the language for a Windows language Setup does not offer, and for a message a language's file lacks
+; (ISCC takes it from the first language that defines it). The names are the app's language ids, so /LANG=fr and
+; ActiveLanguage (passed to --remove-setup) are the app's. A language moves above the #ifdef in the change that offers
+; it in the app (#107); tests/test_installer_words.py holds the release build's entries equal to i18n.OFFERED.
+Name: "en"; MessagesFile: "compiler:Default.isl,installer-messages\en.isl"
+#ifdef AllLanguages
+; The review build (ISCC /DAllLanguages), never published: every language, its file as far as it is translated.
+Name: "fr"; MessagesFile: "compiler:Languages\French.isl,installer-messages\fr.isl"
+Name: "es"; MessagesFile: "compiler:Languages\Spanish.isl,installer-messages\es.isl"
+Name: "tr"; MessagesFile: "compiler:Languages\Turkish.isl,installer-messages\tr.isl"
+#endif
 
 [Tasks]
 ; Checked by default. On an update the user's current choice wins: CurPageChanged unchecks the box when the
-; entry is off, and in a silent run the [Registry] entry's Check function decides (see "Start with Windows").
-Name: "startup"; Description: "&Start with Windows (start the monitor when I sign in)"; GroupDescription: "Startup:"
+; entry is off, and in a silent run the [Registry] entry's Check function decides (see "Start with Windows"). The
+; heading is Inno Setup's own AutoStartProgramGroupDescription ("Startup:" in English).
+Name: "startup"; Description: "{cm:StartupTask}"; GroupDescription: "{cm:AutoStartProgramGroupDescription}"
 
 [InstallDelete]
 ; A PyInstaller onedir bundle: the files under _internal change with every Python, Pillow or pywebview
@@ -93,6 +126,7 @@ Source: "{#DistDir}\*"; Excludes: "\{#ExeName}"; DestDir: "{app}"; Flags: ignore
 Source: "{#DistDir}\{#ExeName}"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
+; Names, the same in every language (#86).
 Name: "{group}\Claude Usage Monitor"; Filename: "{app}\{#ExeName}"
 Name: "{group}\Uninstall Claude Usage Monitor"; Filename: "{uninstallexe}"
 
@@ -110,7 +144,7 @@ Type: files; Name: "{app}\{#ExeName}.old*"
 Type: filesandordirs; Name: "{app}\_internal.old*"
 
 [Run]
-Filename: "{app}\{#ExeName}"; Description: "Launch Claude Usage Monitor now"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#ExeName}"; Description: "{cm:LaunchNow}"; Flags: nowait postinstall skipifsilent
 
 [Code]
 const
@@ -285,20 +319,14 @@ begin
     Log('The WebView2 Runtime is installed.');
     Exit;
   end;
-  if SuppressibleMsgBox(
-       'The dashboard window needs the Microsoft Edge WebView2 Runtime, and it is not installed on this PC.' + #13#10 + #13#10 +
-       'Without it the dashboard opens in your web browser instead. Everything else works the same.' + #13#10 + #13#10 +
-       'Download Microsoft''s installer for it (about 2 MB) and run it after the installation?',
-       mbConfirmation, MB_YESNO or MB_DEFBUTTON1, IDNO) <> IDYES then begin
+  if SuppressibleMsgBox(CustomMessage('WebView2Offer'), mbConfirmation, MB_YESNO or MB_DEFBUTTON1,
+                        IDNO) <> IDYES then begin
     Log('The user declined the WebView2 Runtime.');
     Exit;
   end;
   WebView2Downloaded := DownloadWebView2;
   if (not WebView2Downloaded) and (not WebView2Cancelled) then   // a download the user cancelled needs no apology
-    SuppressibleMsgBox(
-      'The WebView2 installer could not be downloaded, so the installation continues without it.' + #13#10 + #13#10 +
-      'The dashboard will open in your web browser. You can install the WebView2 Runtime later from microsoft.com and it will be used automatically.',
-      mbInformation, MB_OK, IDOK);
+    SuppressibleMsgBox(CustomMessage('WebView2NotDownloaded'), mbInformation, MB_OK, IDOK);
 end;
 
 // True when the downloaded bootstrapper has a valid Authenticode signature made by Microsoft Corporation. The
@@ -330,25 +358,20 @@ var
   Bootstrapper: String;
 begin
   Bootstrapper := ExpandConstant('{tmp}\' + WebView2File);
-  WizardForm.StatusLabel.Caption := 'Checking the Microsoft Edge WebView2 installer...';
+  WizardForm.StatusLabel.Caption := CustomMessage('WebView2Checking');
   WizardForm.FilenameLabel.Caption := '';
   if not WebView2InstallerIsMicrosofts(Bootstrapper) then begin
     Log('The WebView2 installer is not signed by Microsoft Corporation; it was not run.');
-    SuppressibleMsgBox(
-      'The WebView2 installer that was downloaded could not be verified as Microsoft''s, so it was not run.' + #13#10 + #13#10 +
-      'Claude Usage Monitor is installed, and its dashboard will open in your web browser. You can install the WebView2 Runtime later from microsoft.com and it will be used automatically.',
-      mbInformation, MB_OK, IDOK);
+    SuppressibleMsgBox(CustomMessage('WebView2NotVerified'), mbInformation, MB_OK, IDOK);
     Exit;
   end;
-  WizardForm.StatusLabel.Caption := 'Installing the Microsoft Edge WebView2 Runtime...';
+  WizardForm.StatusLabel.Caption := CustomMessage('WebView2Installing');
   if ShellExec('open', Bootstrapper, '/silent /install', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
     Log(Format('The WebView2 installer finished with exit code %d.', [ResultCode]))
   else
     Log('The WebView2 installer could not be started: ' + SysErrorMessage(ResultCode));
   if not WebView2Installed then
-    SuppressibleMsgBox(
-      'The Microsoft Edge WebView2 Runtime could not be installed. Claude Usage Monitor is installed, and its dashboard will open in your web browser.',
-      mbInformation, MB_OK, IDOK);
+    SuppressibleMsgBox(CustomMessage('WebView2NotInstalled'), mbInformation, MB_OK, IDOK);
 end;
 
 // ---- The exe's other processes ------------------------------------------------------------------
@@ -407,18 +430,15 @@ end;
 
 // Closes the monitor. While it stays, asks the person to close it and click Retry, or to Cancel. False means stop with
 // nothing changed. A silent run has no one to ask and stops at once (SuppressibleMsgBox answers Cancel), as AppMutex did.
-function MonitorClosed(const Who: String): Boolean;
-var
-  Text: String;
+// Setup's box and the uninstaller's are two whole messages, so no language has to fit a word into the other's sentence.
+function MonitorClosed: Boolean;
 begin
   Result := CloseMonitor;
-  Text := 'Claude Usage Monitor is still running. It did not close when ' + Who + ' asked it to.' + #13#10 + #13#10 +
-          'Close it from its icon near the clock (right-click it, then Exit), and click Retry.';
   while not Result do begin
     if IsUninstaller then begin
-      if UninstallSilent or (MsgBox(Text, mbError, MB_RETRYCANCEL) <> IDRETRY) then
+      if UninstallSilent or (MsgBox(CustomMessage('StillRunningUninstall'), mbError, MB_RETRYCANCEL) <> IDRETRY) then
         Exit;
-    end else if SuppressibleMsgBox(Text, mbError, MB_RETRYCANCEL, IDCANCEL) <> IDRETRY then
+    end else if SuppressibleMsgBox(CustomMessage('StillRunningSetup'), mbError, MB_RETRYCANCEL, IDCANCEL) <> IDRETRY then
       Exit;
     Result := CloseMonitor;
   end;
@@ -426,7 +446,7 @@ end;
 
 // The mode word on a command line of the exe, or '' when it has none (the monitor is started with no mode). Quotes
 // and tabs become spaces and the line is padded with spaces, so a mode matches only as a whole word, as in main.py.
-// (StringSplit would read better, but it needs Inno Setup 6.4 and this script promises 6.3.)
+// (Written when the script still ran on Inno Setup 6.3, which has no StringSplit.)
 function OtherMode(CommandLine: String): String;
 var
   Modes, Mode: String;
@@ -536,21 +556,22 @@ end;
 
 // What Setup ended of Claude Code's calls, for the person, on the last page of a run by hand. After a silent update the
 // monitor says the same, worded from the counts WriteUpdateNote leaves it (app.py, toast.updated.*). Empty when it
-// ended neither kind: a hook cut short fails once, and Claude Code's next one works.
+// ended neither kind: a hook cut short fails once, and Claude Code's next one works. Inno Setup has no plural forms, so
+// each count has two messages: ...One for 1, ...Other for more, with the count as %1.
 function EndedNote: String;
 begin
   Result := '';
   if EndedTools = 1 then
-    Result := 'Setup closed the monitor''s tool in a Claude Code session. If that session shows an error, type /mcp there or restart it.'
+    Result := CustomMessage('EndedToolsOne')
   else if EndedTools > 1 then
-    Result := Format('Setup closed the monitor''s tool in %d Claude Code sessions. If one shows an error, type /mcp there or restart it.', [EndedTools]);
+    Result := FmtMessage(CustomMessage('EndedToolsOther'), [IntToStr(EndedTools)]);
   if EndedWaits > 0 then begin
     if Result <> '' then
       Result := Result + ' ';
     if EndedWaits = 1 then
-      Result := Result + 'A session waiting on the usage guard was let go early.'
+      Result := Result + CustomMessage('EndedWaitsOne')
     else
-      Result := Result + Format('%d sessions waiting on the usage guard were let go early.', [EndedWaits]);
+      Result := Result + FmtMessage(CustomMessage('EndedWaitsOther'), [IntToStr(EndedWaits)]);
   end;
 end;
 
@@ -558,9 +579,7 @@ end;
 
 procedure InitializeWizard;
 begin
-  DownloadPage := CreateDownloadPage(
-    'Downloading the Microsoft Edge WebView2 Runtime',
-    'Setup is downloading the installer for the runtime that the dashboard window needs.', nil);
+  DownloadPage := CreateDownloadPage(CustomMessage('WebView2Downloading'), CustomMessage('WebView2DownloadingWhy'), nil);
   DownloadPage.ShowBaseNameInsteadOfUrl := True;
 end;
 
@@ -596,9 +615,9 @@ end;
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
-  if not MonitorClosed('Setup') then begin
+  if not MonitorClosed then begin
     Log('The monitor is still running; Setup stops before anything is changed.');
-    Result := 'Claude Usage Monitor is still running, so Setup stopped without changing anything. Close the monitor, then run Setup again.';
+    Result := CustomMessage('StillRunningStopped');
     Exit;
   end;
   CloseDashboardWindow;
@@ -635,10 +654,7 @@ end;
 procedure StopInUse(const Path: String);
 begin
   Log('The bundle folder is in use; stopping before anything is changed.');
-  SuppressibleMsgBox(
-    'Claude Usage Monitor cannot be updated because ' + Path + ' is in use. Nothing was changed.' + #13#10 + #13#10 +
-    'Close the program and run Setup again.',
-    mbError, MB_OK, IDOK);
+  SuppressibleMsgBox(FmtMessage(CustomMessage('InUse'), [Path]), mbError, MB_OK, IDOK);
   Abort;
 end;
 
@@ -678,10 +694,7 @@ begin
         if HadExe then begin
           if not MovedTo(OldExe, Exe) then begin
             Log('The exe could not be moved back from ' + OldExe + '.');
-            SuppressibleMsgBox(
-              'Setup moved ' + Exe + ' to ' + OldExe + ', and could not move it back.' + #13#10 + #13#10 +
-              'Please rename it back by hand and run Setup again.',
-              mbError, MB_OK, IDOK);
+            SuppressibleMsgBox(FmtMessage(CustomMessage('NotMovedBack'), [Exe, OldExe]), mbError, MB_OK, IDOK);
             Abort;
           end;
           MovedExe := '';
@@ -768,8 +781,7 @@ begin
     Log('The old version is back.')
   else begin
     Log('The old version could not be put back.');
-    SuppressibleMsgBox('Setup did not finish, and could not put the old version back.' + #13#10 + #13#10 +
-                       'Run Setup again to install Claude Usage Monitor.', mbError, MB_OK, IDOK);
+    SuppressibleMsgBox(CustomMessage('NotPutBack'), mbError, MB_OK, IDOK);
   end;
 end;
 
@@ -859,10 +871,8 @@ begin
     Exit;
   if not SameText(ExtractFileName(RemoveBackslash(Folder)), 'ClaudeUsageMonitor') then
     Exit;   // never delete a folder that is not ours, whatever the constant expanded to
-  if MsgBox('Do you also want to delete your Claude Usage Monitor settings and usage history?' + #13#10 + #13#10 +
-            'This removes the settings, the usage database and the logs in:' + #13#10 + Folder + #13#10 + #13#10 +
-            'Choose No to keep them, for example to reinstall later.',
-            mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then begin
+  if MsgBox(FmtMessage(CustomMessage('DeleteUserData'), [Folder]), mbConfirmation,
+            MB_YESNO or MB_DEFBUTTON2) = IDYES then begin
     DelTree(Folder, True, True, True);
     Log('Deleted ' + Folder);
   end else
@@ -874,6 +884,8 @@ end;
 // stops the uninstall, and nothing here waits for ever: with its bundle broken the exe sits behind the bootloader's error
 // dialog, which no switch answers, and an uninstall is how people get out of that. EndOtherProcesses ends what is left.
 // The exe writes its report last, empty when all of it went. No report means all that is known is that it may be there.
+// --lang after the report's path names the uninstaller's language (that of the last Setup run), for the exe to word the
+// report in (#102); until then main.py ignores it, and an id it does not offer must never turn the call into an error.
 procedure RemoveFromClaudeCode;
 var
   Report, Left, Status: String;
@@ -881,13 +893,13 @@ var
   I, Tries, Code: Integer;
 begin
   Report := ExpandConstant('{tmp}\claude-code-left.txt');
-  Left := 'If you set up the usage guard, its hooks and MCP tool may still be there. ' +
-          'https://github.com/Godimas101/claude-usage-monitor/blob/main/docs/AGENT_HOOK.md says how to remove them.';
+  Left := CustomMessage('MaybeLeftInClaudeCode');
   if DirExists(ExpandConstant('{app}\_internal')) and
-     Exec(ExpandConstant('{app}\{#ExeName}'), '--remove-setup "' + Report + '"', '', SW_HIDE, ewNoWait, Code) then begin
+     Exec(ExpandConstant('{app}\{#ExeName}'), '--remove-setup "' + Report + '" --lang ' + ActiveLanguage, '', SW_HIDE,
+          ewNoWait, Code) then begin
     // The exe can take a while (claude is slow to start the first time): the window says what it waits for.
     Status := UninstallProgressForm.StatusLabel.Caption;
-    UninstallProgressForm.StatusLabel.Caption := 'Taking Claude Usage Monitor out of Claude Code...';
+    UninstallProgressForm.StatusLabel.Caption := CustomMessage('TakingOutOfClaudeCode');
     for Tries := 1 to RemoveSetupWaitTries do begin
       if FileExists(Report) then
         Break;
@@ -907,13 +919,13 @@ begin
   end;
   Log('Left in Claude Code: ' + Left);
   if not UninstallSilent then
-    MsgBox('Some of this app is still in Claude Code:' + #13#10 + #13#10 + Left + #13#10 + 'The uninstall carries on.', mbInformation, MB_OK);
+    MsgBox(FmtMessage(CustomMessage('LeftInClaudeCode'), [Left]), mbInformation, MB_OK);
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usUninstall then begin
-    if not MonitorClosed('Uninstall') then begin
+    if not MonitorClosed then begin
       Log('The monitor is still running; the uninstall stops before anything is removed.');
       Abort;                   // here Abort ends the uninstall
     end;

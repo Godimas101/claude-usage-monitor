@@ -75,17 +75,17 @@ def test_the_toast_record_is_whole(recorded):
 
 
 def test_the_recorder_words_the_note_as_endednote_does():
-    """The prose the record's notes start from is installer.iss's own EndedNote: its four sentence forms, read from
-    the script, joined by a space as the routine joins them."""
+    """The prose the record's notes start from is installer.iss's own EndedNote: its four sentence forms, its messages
+    in installer-messages/en.isl since #103 (each %1 read as %d), joined by a space as the routine joins them."""
     forms = toast_words.ended_note_forms()
     assert forms[0].startswith("Setup closed the monitor's tool in a Claude Code session.")
     assert "%d" in forms[1] and "%d" not in forms[0] and "%d" in forms[3] and "%d" not in forms[2]
     assert toast_words.ended_note(0, 0) == ""
     assert toast_words.ended_note(2, 1) == forms[1].replace("%d", "2") + " " + forms[2]
     assert toast_words.ended_note(0, 12) == forms[3].replace("%d", "12")
-    pascal = ("function EndedNote: String;\nbegin\n  Result := '';\n  A := 'It''s one';\n  B := 'x %d';\n"
-              "  C := ' ';\n  D := 'a wait';\n  E := 'ws %d';\nend;\n\nprocedure Other;\nbegin\n  F := 'not it';\nend;\n")
-    assert toast_words.ended_note_forms(pascal) == ("It's one", "x %d", "a wait", "ws %d")
+    isl = ("; notes\n[CustomMessages]\nEndedWaitsOther=ws %1\nEndedToolsOne=It's one\nOther=not it\n"
+           "EndedToolsOther=x %1\nEndedWaitsOne=a wait\n")
+    assert toast_words.ended_note_forms(isl) == ("It's one", "x %d", "a wait", "ws %d")
 
 
 # ── The note Setup leaves after a silent update (steps a4 to a6) ──────────────
