@@ -719,9 +719,25 @@ html[data-g-swatches] .nm-variants .nm-btn[aria-pressed="true"]::before { box-sh
 html[data-reduce-motion="1"] *, html[data-reduce-motion="1"] *::before, html[data-reduce-motion="1"] *::after { animation: none !important; transition: none !important; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 
-/* Outside English (#98, owner question 1): a line longer than its room wraps and its box grows; nothing is cut or shrunk.
-   The meter's two rows share one first column, as wide as the longer label (up to half the meter), so their bars start at
-   the same x. Held to a page whose language is not English, so English keeps its layout. */
-:root:not(:lang(en)) .nm-meter { display: grid; grid-template-columns: fit-content(50%) minmax(0, 1fr) 48px; gap: 9px 10px; }
+/* Outside English (#98, owner question 1), as the owner decided on #98: a line longer than its room wraps and its box grows; the
+   translator writes a short form to the room its key's note gives. This look's card metas drop below the title in every
+   language, so it has no designed cut. Nothing shrinks, and no code cuts a translation. Held to a page whose language is
+   not English, so English keeps its layout. */
+/* a nav tab wraps to a second line and grows (the row of tabs of a narrow window too); it is never cut */
+:root:not(:lang(en)) .nm-menu a { white-space: normal; overflow-wrap: break-word; height: auto; min-height: 36px; }
+@media (max-width: 1000px) {
+  :root:not(:lang(en)) .nm-menu a { min-height: 32px; }
+}
+/* the link's words wrap in their pill once the bar has no room left; never cut */
+:root:not(:lang(en)) .nm-uplink { white-space: normal; height: auto; min-height: 28px; line-height: 16px; }
+/* sentences (the pace line, the forecast): a word longer than the line breaks, with no hyphen and no "…" */
+:root:not(:lang(en)) :is(.nm-pace, .nm-pace > *) { overflow-wrap: break-word; }
+/* a limit's facts: a label wraps within its room (at most 60 % of the row), its figure (b) and the chip's word stay on one
+   line */
+:root:not(:lang(en)) .nm-row2 > .nm-facts { min-width: 0; max-width: 60%; white-space: normal; overflow-wrap: break-word; }
+:root:not(:lang(en)) .nm-row2 > .nm-facts b { white-space: nowrap; }
+/* the meter: its two rows share one first column, as wide as the longer label up to half the meter, so their bars start at
+   the same x; the bar keeps at least 96 px (a label never squeezes it), and a longer label wraps where English cuts it */
+:root:not(:lang(en)) .nm-meter { display: grid; grid-template-columns: fit-content(50%) minmax(96px, 1fr) 48px; gap: 9px 10px; }
 :root:not(:lang(en)) .nm-meter .nm-mrow { grid-column: 1 / -1; grid-template-columns: subgrid; }
-:root:not(:lang(en)) .nm-meter .nm-mrow .k { min-width: 112px; white-space: normal; overflow-wrap: break-word; }
+:root:not(:lang(en)) .nm-meter .nm-mrow .k { min-width: 112px; white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: break-word; }

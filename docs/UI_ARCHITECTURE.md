@@ -696,19 +696,51 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   instead of the shell's capitals until `gates.js` arrived. Three English forms changed that cannot show: the one forms
   of `limits.fact.value.days` and `.hours` (`1 day`, `1 hour`; the windows are 5 hours and 7 days) and of `ratio.scaled`
   (a cell of one month is never scaled).
-- **Longer words (#98, owner question 1).** Outside English a line longer than its room wraps and its box grows; nothing
-  shrinks or is cut. The rules sit at the end of each theme sheet under `:root:not(:lang(en))`, so English keeps its
-  one-line layout, its designed ellipses included. Card titles, metas and tags, chips, pace and forecast lines and the
-  limit facts wrap (`white-space: normal`, `overflow-wrap: break-word`); Nostromo's Overview grid rows grow with their
-  cards (`minmax(auto, ...)`, from 1001 px), as Night City's always did; Night City's nav items grow past 34 px and its
-  slanted cursor after the page heading gets 4 px of room; Night City's chips (`.nm-chip`, the pace verdict) grow past
-  their 14 px line, so an accented capital or a cedilla clears the 1 px frame, and the verdict and the burn card's chip
-  wrap inside their card; and the meter's two rows share one first column (a grid with the rows as subgrids,
-  `fit-content(50%)`, never under English's 112 px), so their bars start at the same x. In the header (one row) the data
-  age gives way first: outside English Nostromo's goes below 1100 px and then its brand mark below 900 px (a
-  pseudo-locale bar with its longest link word needs 1048 px, and 860 px without the data age; the pseudo-locale also
-  lengthens the brand mark, which a real language keeps as written), and Night City's below 800 px; under 800 px every
-  language hides Nostromo's data age and brand mark. English keeps its own overflows, which
+- **Longer words (#98, owner question 1).** As the owner decided on #98, after a look at what other apps do: outside
+  English a line longer than its room wraps and its box grows first; the translator writes a short form to the room its
+  key's note gives (below); an ellipsis comes last, only where a row's height is fixed and the whole text can still be
+  read. Nothing shrinks, and no code cuts or abbreviates a translation (numbers and units take their short forms from
+  `Intl` alone). The rules sit at the end of each theme sheet under `:root:not(:lang(en))`, so English keeps its
+  one-line layout, its own ellipses included. By element:
+  - A nav tab wraps to a second line and grows (Night City's past 34 px, Gates' past 36 px; Nostromo's two lines fit its
+    34 px); it is never cut, and a third line is a fault for the translator.
+  - The header's link words: the data age gives way first (Nostromo's below 1101 px and then its brand mark below 901 px,
+    Night City's below 801 px; a pseudo-locale bar with its longest link word needs 1048 px, and 860 px without the data
+    age; under 801 px every language hides Nostromo's data age and brand mark), then the words wrap to a second line
+    (`.nm-uplink`; two lines fit each bar, Gates' pill grows). They are never cut.
+  - Chips: a card's title row wraps, so a chip moves below its title; a chip's own word never wraps. Night City's chips and
+    its framed pace verdict grow past their 14 px line, so an accented capital or a cedilla clears the 1 px frame.
+  - The Overview's card metas (Nostromo, Night City, Edgerun) are a designed cut: the title and the meta keep one row, the
+    title keeps its words whole up to 70 % of the row (no shrinking; past that it wraps), and the meta takes the rest, cut
+    with English's own ellipsis. Nostromo's pace chip in a limit card's facts is the other designed cut, where the column beside the
+    figure has no more room. Gates moves a meta below its title, as in English, and on the other pages a meta moves below
+    the title in every look.
+  - The pace line, its verdict and the forecast are sentences: they wrap, a word longer than its line breaks
+    (`overflow-wrap: break-word`, no hyphen), never an ellipsis.
+  - A limit card's facts wrap within at most 60 % of the row; their figure (`b`) stays on one line.
+  - The meter's two rows share one first column (a grid with the rows as subgrids, `fit-content(50%)`, never under
+    English's 112 px), so their bars start at the same x, and the bar keeps at least 96 px (`minmax(96px, 1fr)`); a longer
+    label wraps (Gates' English ellipsis on the label stays English's).
+  - Nostromo's Overview grid rows grow with their cards (`minmax(auto, ...)`, from 1001 px), as Night City's always did,
+    and Night City's slanted cursor after the page heading gets 4 px of room.
+
+  A designed cut keeps its whole text in the element (the CSS cuts only what is drawn), in its `title` (`cutAttrs`) and in
+  the card's name (`aria-label`, `cardName`: `overview.card.name`, and `overview.card.name_chip` for a limit card, with
+  its chip's word), outside English only; English's markup is unchanged. `DESIGNED_CUTS` in
+  `tests/browser/page_checks.js` (the same list in `tests/test_server.py`) names them, `NEVER_CUT` the elements never cut
+  (a nav tab, the link's words, a sentence line, a figure) and `BAR_FLOOR` the meter's 96 px ("Test tools"). The designed
+  cuts are the one exception to #98's acceptance "nothing cut in the pseudo-locale"; in a real language the target is
+  none in the default window (#108).
+  Rooms: each constrained key's note in `en.json` says "room about N px, about C capitals", the narrowest look's room in
+  the default window as the stand-in's rooms step measures it (and holds the note to, within 1 px and 1 capital): a nav
+  tab 120 px (Night City), an Overview card's meta from 76 px (the surfaces card) to 311 px (the cost card), a limit
+  card's facts and its chip 146 px, the burn card's chip 147 px, a meter's label 112 px. A string over its room goes back
+  to its translator; the CSS is not changed to fit it. The header's link words have no px room (they share the row with
+  the data age and Refresh), and a sentence line's note asks for no shorthand.
+  The data age cannot be read at all where the header hides it and the sidebar's health box is hidden too (every look
+  hides the box under 1001 px, where the nav is a row): in Nostromo under 801 px in every language, as at c05f45d, and
+  under 1001 px outside English; in Night City and Edgerun under 801 px outside English. Recorded (`AGE_GAPS` in
+  `page_probe.js`), not fixed here. English keeps its own overflows, which
   `tests/fixtures/page_overflow_english.json` names element by element, each labelled with its `owner`. Owner question 3
   decided two of them (`decided`): Night City's page heading (its slanted cursor runs 3 px past the box; nothing is cut)
   and Edgerun's Overview surfaces meta, cut with an ellipsis in the default window. The rest are English as it was at
@@ -717,9 +749,7 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   ellipsis at 1060 x 640 (in Nostromo, Night City and Edgerun), and six entries of one find, not a design: at 1060 x 640
   Nostromo's weekly and scoped Overview cards cut their reset lines and their chip off when the figure has two digits
   (the warning and critical scenarios), for a ticket of its own. Until then the record keeps them, so English's layout
-  does not change. These rules are plain wrapping; owner question 1 as decided (a
-  room in each constrained key's note, an ellipsis with the full text reachable on the Overview subtitles only) is a
-  follow-up stage of #98.
+  does not change.
 - **Rendering never reads Windows.** The locale rides on the view model (#91, not #93: it is the first ticket in which
   the widgets draw something that depends on the language): `build_model(..., locale=)` fills `WidgetModel.locale`,
   English by default, and the app passes `MonitorApp.locale()`. A locale change redraws, since the frame caches key on
@@ -1038,7 +1068,16 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   from the page-words inputs: every region equals the record's live view in every look and page), update (#97's lines)
   and motion (without reduced motion, in English and French: every element a theme's entrance animates is animated). The
   widths step also judges each chip (`chips()`): its words' ink, from the font's metrics, clear of a 1 px frame, and the
-  chip inside its card. What it reads from the page is `tests/browser/page_checks.js`, which the real-web-view tests
+  chip inside its card. Outside English (owner question 1) it passes a cut with an ellipsis only as a designed cut
+  (`DESIGNED_CUTS`): in one of its looks, its text a whole catalog string, its `title` that text and an ancestor's
+  `aria-label` holding it, and in a real language never in the default window but where English's own cut shows through
+  a key the language has no words for yet. It fails any other ellipsis, an ellipsis set on a `NEVER_CUT` element, a nav
+  tab over two lines, a chip whose word wraps and a meter bar under `BAR_FLOOR`, and on Limits it reads the first meter
+  again with each label far longer than a translation should be (`meterStress()`). The header step also fails where the
+  data age is in neither the header nor the health box but the gaps `AGE_GAPS` records, and outside English it writes the
+  link's words twice as long: they wrap to at most two lines inside the bar. The rooms step (English, the default window)
+  measures each constrained text's room (`rooms()`) and holds each key `ROOM_KEYS` names to its note. What it reads from
+  the page is `tests/browser/page_checks.js`, which the real-web-view tests
   evaluate in WebView2 too. The capitals of the elements only those states draw (the banners' headings, the verdicts
   and velocities the normal scenario does not show) are read in a browser by the stand-in alone; the real-web-view
   capitals test reads the normal scenario, and the static cascade (`tests/css_case.js`) covers the rest. Its limits: headless
@@ -1046,7 +1085,8 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   daily chart's axis may draw a date fewer than the small DOM's (a note, not a failure).
   The real-web-view tests in `tests/test_server.py` (gated; they open WebView2 windows parked off screen): the clip test
   in English and the pseudo-locale; `test_overview_and_limits_overflow_nothing_in_the_real_web_view` (every look,
-  English and the pseudo-locale, `measure()` at the three sizes, English allowed only the record's known overflows);
+  English and the pseudo-locale, `measure()` at the three sizes, English allowed only the record's known overflows and the
+  pseudo-locale only the designed cuts, judged by `overflow_problems` as the stand-in judges them);
   `test_css_capitals_read_as_todays_english_in_the_real_web_view` (the header, the sidebar and the headings against the
   page-words record, the CSS capitals, and #97's update texts, which #97 left to #98); and
   `test_webview2_follows_the_language_the_dashboard_passes_in_the_real_web_view` (`navigator.language` follows

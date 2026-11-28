@@ -2715,6 +2715,33 @@ function gatesWords(page, theme) {
   reset();
 }
 
+// ── Long text outside English (#98's owner question 1, as decided): the Overview's cut lines keep their whole text ──────────
+// The Overview's cards with a meta, and a limit card's pace chip, in English and on a French page (a few words of its own,
+// made up here, the rest English's): outside English each meta and chip carries its whole text in a title, and the card's
+// name (aria-label) holds it; English keeps its markup.
+{
+  const french = { setting: "fr", language: "fr", system: "fr", format: "fr-FR", clock: 24, offered: ["en", "fr"] };
+  const meta = (sel) => (sel === 'meta[name="monitor-locale"]' ? { getAttribute: (k) => (k === "content" ? JSON.stringify(french) : null) } : null);
+  const strings = { "overview.card.name": "{name} : {meta}", "limit.meta.session": "fenêtre de 5 heures", "limit.pace.under": "sous le rythme",
+    "overview.surfaces.meta": "part, 7 jours" };
+  const fr = load(meta, { MonitorI18n: { language: "fr", strings, fallback: EN_CATALOG.fallback } }).api;
+  const H = 3600000;
+  const session = { kind: "session", label: "SESSION", percent: 13, resets_at: new Date(Date.now() + 3 * H).toISOString(), window_seconds: 18000 };
+  const n = { cycle: 10, today: 1, week: 5, multiplier: 0.2, projected: null, price: 50, planName: "Max 5x", planUnknown: false, cycleStart: null,
+    cycleEnd: null, pending: false, loaded: true, hit: 0.5, thinking: 0.2, saved: 3, models: [{ name: "Opus", id: "opus", share: 60 }] };
+  const cards = (P) => {
+    P.S.nextCharts = {};
+    return {
+      limit: P.limitCard(session, { meta: P.tLine("limit.meta.session") }),
+      empty: P.emptyLimitCard(P.tLine("limit.name.scoped_pending"), P.tLine("overview.limit.no_scoped")),
+      cost: P.costCard(n), efficiency: P.efficiencyCard(n), models: P.modelMixCard(n),
+      surfaces: P.surfaceCard({ breakdown: [{ name: "CLI", percent: 70 }] }),
+    };
+  };
+  out.q1 = { en: cards(api), fr: cards(fr) };
+  reset();
+}
+
 // ── tUpper (#98): a chart label in its language's capitals, its values as they are ─────────────────────────────────────
 {
   const catalog = { language: "tr", strings: { "k.avg": "ort. {amount} gün", "k.plain": "bugün" }, fallback: { "k.avg": "avg {amount}", "k.en": "today {n}" } };

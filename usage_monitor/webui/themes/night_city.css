@@ -825,25 +825,40 @@ html[data-reduce-motion="1"] *, html[data-reduce-motion="1"] *::before, html[dat
 :root[data-variant="blackwall"] .nm-grid > [data-limit] .nm-facts > span:nth-child(2):not(.nm-chip):not(:has(b)) { color: var(--nc-accent); box-shadow: inset 0 0 0 1px var(--nc-accent); }
 :root[data-variant="blackwall"] .nm-grid > [data-limit] .nm-facts > span:first-child:not(.nm-chip):not(:has(b)) { padding: 1px 0 0; box-shadow: none; }
 
-/* Outside English (#98, owner question 1): a line longer than its room wraps and its box grows; nothing is cut or shrunk.
-   In the header the data age gives way first, as Nostromo's does. Each rule holds only on a page whose language is not
-   English, so English keeps its one-line layout, its designed ellipses included. */
+/* Outside English (#98, owner question 1), as the owner decided on #98: a line longer than its room wraps and its box grows; the
+   translator writes a short form to the room its key's note gives; "…" only where a row's height is fixed and the whole text
+   can still be read (the Overview's card metas, a designed cut: app.js puts the meta's whole text in its title and in the
+   card's name). Nothing shrinks, and no code cuts a translation. In the header the data age gives way first, as Nostromo's
+   does, then the link's words wrap (two lines fit the 34 px bar). Each rule holds only on a page whose language is not
+   English, so English keeps its one-line layout, its own ellipses included. */
+/* a nav tab wraps to a second line and grows; it is never cut */
 :root:not(:lang(en)) .nm-menu a { white-space: normal; overflow-wrap: break-word; height: auto; min-height: 34px; padding-top: 6px; padding-bottom: 6px; line-height: 1.15; }
 @media (max-width: 800px) { :root:not(:lang(en)) #data-age { display: none; } }
+:root:not(:lang(en)) .nm-uplink { white-space: normal; }
 :root:not(:lang(en)) .nm-cur { margin-right: 4px; }          /* the slanted cursor stays inside the heading's box */
+/* a card's title row wraps, so a chip moves below the title; on the Overview's fixed rows the title and the meta keep one
+   line: the title keeps its words whole up to 70 % of the row (past that it wraps), and the meta takes the rest, cut with
+   "…" (English's own rule above) */
 :root:not(:lang(en)) .nm-card-t { flex-wrap: wrap; row-gap: 0; }
 :root:not(:lang(en)) :is(.nm-tag, .nm-ttl, .nm-meta-t, .nm-facts) { white-space: normal; overflow-wrap: break-word; }
-:root:not(:lang(en)) .nm-grid .nm-card-t:not(.nm-chart-t) .nm-meta-t { overflow: visible; text-overflow: clip; }
-:root:not(:lang(en)) .nm-row2 > .nm-facts { min-width: 0; }
+:root:not(:lang(en)) .nm-grid .nm-card-t:not(.nm-chart-t):has(> .nm-meta-t) { flex-wrap: nowrap; }
+:root:not(:lang(en)) .nm-grid .nm-card-t:not(.nm-chart-t):has(> .nm-meta-t) > :is(.nm-tag, .nm-ttl) { flex-shrink: 0; max-width: 70%; }
+:root:not(:lang(en)) .nm-grid .nm-card-t:not(.nm-chart-t) > .nm-meta-t { white-space: nowrap; }
+/* a card's facts: a label wraps within its room (at most 60 % of the row), its figure (b) stays on one line */
+:root:not(:lang(en)) .nm-row2 > .nm-facts { min-width: 0; max-width: 60%; }
+:root:not(:lang(en)) .nm-facts b { white-space: nowrap; }
+/* a limit card's facts and its sentences (the pace line, the forecast) wrap; a word longer than the line breaks, with no
+   hyphen and no "…" */
 :root:not(:lang(en)) .nm-grid > [data-limit] :is(.nm-facts > span:not(.nm-chip), .nm-pace > span:first-child, .nm-pace > .fc) {
   white-space: normal; overflow-wrap: break-word; overflow: visible; text-overflow: clip;
 }
 /* a chip's words clear of its 1 px frame: an accented capital (É, İ) or a cedilla (Ç, Ş) runs past the 14 px box's single
-   line, so the chip grows with its words (#98's review); the verdict and the burn card's chip wrap inside their card */
+   line, so the chip grows with its words (#98's review); a chip's own word stays on one line, and the pace verdict (a
+   sentence this look frames as a chip) wraps inside its card */
 :root:not(:lang(en)) :is(.nm-chip, .nm-pace > b) { height: auto; min-height: 14px; padding-top: 2px; padding-bottom: 2px; line-height: 1.15; }
-:root:not(:lang(en)) :is(.nm-pace > b, .nm-card-t > .nm-chip) { white-space: normal; min-width: 0; max-width: 100%; overflow-wrap: break-word; }
-/* the meter's two rows share one first column, as wide as the longer label (up to half the meter), so their bars start at
-   the same x */
-:root:not(:lang(en)) .nm-meter { display: grid; grid-template-columns: fit-content(50%) minmax(0, 1fr) 48px; gap: 7px 10px; }
+:root:not(:lang(en)) .nm-pace > b { white-space: normal; min-width: 0; max-width: 100%; overflow-wrap: break-word; }
+/* the meter: its two rows share one first column, as wide as the longer label up to half the meter, so their bars start at
+   the same x; the bar keeps at least 96 px (a label never squeezes it), and a longer label wraps */
+:root:not(:lang(en)) .nm-meter { display: grid; grid-template-columns: fit-content(50%) minmax(96px, 1fr) 48px; gap: 7px 10px; }
 :root:not(:lang(en)) .nm-meter .nm-mrow { grid-column: 1 / -1; grid-template-columns: subgrid; height: auto; min-height: 18px; }
-:root:not(:lang(en)) .nm-meter .nm-mrow .k { min-width: 112px; white-space: normal; overflow-wrap: break-word; line-height: 1.2; }
+:root:not(:lang(en)) .nm-meter .nm-mrow .k { min-width: 112px; white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: break-word; line-height: 1.2; }

@@ -21,7 +21,7 @@
 //   --scenarios a,b     the dev server's scenarios the widths step shows (default normal,warning,critical,stale)
 //   --routed a,b        the states the probe makes by answering the page itself (default status-offline,link-lost,
 //                       reports-failed,reports-stale; "none": none)
-//   --steps a,b         widths,header,clip,caps,record,update,motion by default
+//   --steps a,b         widths,header,clip,caps,record,update,motion,rooms by default
 //   --shots all|narrow|none   which views of the widths step are shot (default narrow: the narrowest size; all: every size)
 //   CHROMIUM_PATH       a Chromium to launch instead of Playwright's own
 //
@@ -37,12 +37,23 @@
 //           the bottom (an accented capital, a cedilla: chips() measures the ink from the font's metrics), or whose frame runs
 //           out of its card at a side while its words stay in (words that leave are the check above). English has exactly the overflows tests/fixtures/page_overflow_english.json names (#98's
 //           owner question 3 decided two; made from an English run of this step), each no more than 1 px past its English
-//           width; anything else fails, and another language has none.
+//           width; anything else fails. Another language (#98's owner question 1, as decided) has none but the designed cuts
+//           (DESIGNED_CUTS, page_checks.js): an Overview card's meta cut with an ellipsis in Nostromo, Night City and Edgerun,
+//           which passes only with its whole catalog text in the element, in its title and in an ancestor's aria-label, and
+//           in a real language (not the pseudo-locale) never in the default window but where its words are English's (a key
+//           the language has no words for yet) and English's record names the same cut. Also outside English: an ellipsis set on
+//           a nav tab, the header's link words, a sentence line or a figure (NEVER_CUT), a nav tab over two lines, a chip
+//           whose word wraps, and a meter's bar narrower than BAR_FLOOR fail; on Limits the first meter is read again with
+//           each label far longer than a translation should be (meterStress): its bars keep BAR_FLOOR and start at the same
+//           x, and nothing leaves the card.
 //   header  The header bar in each language and look, with each link word (live, loading, stale, offline, rate_limited,
 //           no_credentials, paused, and lost: the monitor stops answering), at every page width from 704 to 1184 px (most
 //           20 px apart): the bar's one row never runs past the window (its scroll width), Refresh's right edge stays inside
 //           it, nothing in the bar is cut, and the brand's words never run into the right-hand group (#98's review: outside
-//           English the data age gives way first).
+//           English the data age gives way first). Where the header hides the data age and the sidebar's health box (its
+//           UPDATED row) is hidden too, the age cannot be read at all: AGE_GAPS names where that is so today (a gap found
+//           elsewhere fails). Outside English the link's words are then written twice as long as the longest: they wrap to at
+//           most two lines inside the bar, and the bar still holds its row.
 //   clip    tests/test_server.py's clip test (test_overview_cards_never_clip_their_content_in_the_real_web_view) at its four
 //           sizes, in English and the pseudo-locale: no Overview card cuts its content off, the cost tiles' numerals keep
 //           4 px off the card's edge, and the plan block's two lines are the catalog's.
@@ -67,6 +78,10 @@
 //           Settings' line under the update buttons and into the update banner's line, and read back: shown in capitals in
 //           Nostromo, Night City and Edgerun (the line's "today"), as stored in Gates; the buttons, the row's title and the
 //           banner's heading likewise, the banner's sentence in capitals in Nostromo only, the row's help as written.
+//   rooms   English, the default window, every look: the room each constrained text has (rooms() in page_checks.js: a nav
+//           tab, an Overview card's meta, a limit card's facts and chip, the burn card's chip, a meter's label), in px and
+//           in capitals of its font; each key ROOM_KEYS names must say the narrowest look's room in its en.json note
+//           ("room about N px, about C capitals"), within 1 px and 1 capital.
 //   motion  With motion (not reduced), English and French: every element a theme's entrance takes on Overview and Limits
 //           (its director's selectors, the elements there when the entrance starts) is typed or decoded by the time it ends,
 //           which it can only be when its words are its own text (#98's critic 2: no inner span in an animated element; on the
@@ -94,7 +109,7 @@ const LANGS = list('langs', 'en,pseudo,fr');
 const SIZES = list('sizes', '1200x780,1060x640,720x480').map((s) => s.split('x').map(Number));
 const SCENARIOS = list('scenarios', 'normal,warning,critical,stale');
 const ROUTED = list('routed', 'status-offline,link-lost,reports-failed,reports-stale');
-const STEPS = list('steps', 'widths,header,clip,caps,record,update,motion');
+const STEPS = list('steps', 'widths,header,clip,caps,record,update,motion,rooms');
 const SHOTS = opt('shots', 'narrow');
 const FRAME = [16, 39];               // a WebView2 window's frame: a 1200 x 780 window holds a 1184 x 741 page
 const PAGES = ['overview', 'limits'];
@@ -113,7 +128,8 @@ const LOOK = {
 // surfaces meta in the default window, each entry's owner "decided"; the others, first seen at 1060 x 640, "awaiting" the
 // owner on #98). Each is named with the
 // views it shows in and how far it runs past its box (wide: scrollWidth - clientWidth; leaves-side: px past its card); in
-// English a known one may run at most 1 px further, and anything else fails. Another language has none: it wraps.
+// English a known one may run at most 1 px further, and anything else fails. Another language has none but the designed
+// cuts (DESIGNED_CUTS below): it wraps.
 //   heading   Night City's page heading: its slanted cursor runs 3 px past the heading's box (nothing is cut).
 //   ellipsis  the Overview grid's card metas, cut with an ellipsis by the theme's own rule (.nm-grid .nm-card-t .nm-meta-t):
 //             Edgerun's surfaces meta in the default window, and at the 1060 x 640 window (Gates' 232 px nav column, which
@@ -123,6 +139,11 @@ const LOOK = {
 //             scenarios), for a ticket of its own.
 // Made from an English run of the widths step (all its scenarios and states) with the clocks held at MOMENT.
 const KNOWN = JSON.parse(fs.readFileSync(path.join(REPO, 'tests', 'fixtures', 'page_overflow_english.json'), 'utf8')).known;
+// Outside English: the designed cuts (#98's owner question 1, decided on #98), and what is never cut. The lists are
+// page_checks.js's, which measure() reads in the page; the judge below holds each cut to the brief's rules.
+const DESIGNED_CUTS = CHECKS.DESIGNED_CUTS;
+const LISTS = { cuts: CHECKS.DESIGNED_CUTS, never: CHECKS.NEVER_CUT };
+const DEFAULT_SIZE = '1200x780';              // the default window: a designed cut never fires there in a real language
 
 const failures = [];
 const fail = (msg) => { failures.push(msg); console.log('FAIL', msg); };
@@ -226,16 +247,64 @@ async function resize(page, size) {
 
 const pastBy = (item) => (item.kind === 'wide' ? item.sw - item.cw : item.by);
 
+/* English's own overflow of this item in this view, as tests/fixtures/page_overflow_english.json names it. */
+function englishKnown(item, look, state, page, size) {
+  return KNOWN.find((k) => k.kind === item.kind && k.at === item.at && k.page === page && k.looks.includes(look) &&
+    k.sizes.includes(sizeName(size)) && (k.states === '*' || k.states.includes(state)));
+}
+
+/* Why a cut with a visible ellipsis outside English is not a designed cut that passes, or null when it is one. In a real
+ * language a designed cut in the default window passes only where its words are English's (a key the language has no words
+ * for yet, lang="en") and English's record names the same cut there. */
+function cutProblem(item, look, lang, state, page, size) {
+  const c = item.cut;
+  const d = DESIGNED_CUTS.find((x) => x.id === c.designed);
+  if (!d) { return 'an ellipsis not in DESIGNED_CUTS' + (c.role ? ` (on a ${c.role})` : ''); }
+  if (!d.looks.includes(look)) { return `a designed cut (${d.id}) in a look that does not cut it`; }
+  if (!c.catalog) { return `a designed cut (${d.id}) whose text is not a whole catalog string ("${c.full}")`; }
+  if (c.title !== c.full) { return `a designed cut (${d.id}) without its whole text in its title (title ${JSON.stringify(c.title)})`; }
+  if (!c.named) { return `a designed cut (${d.id}) whose whole text is in no ancestor's aria-label`; }
+  if (lang !== 'pseudo' && sizeName(size) === DEFAULT_SIZE && !(c.lang === 'en' && englishKnown(item, look, state, page, size))) {
+    return `a designed cut (${d.id}) in a real language in the default window`;
+  }
+  return null;
+}
+
 function judgeWidths(where, lang, look, state, page, size, m) {
   for (const item of m.over) {
-    const known = lang === 'en' ? KNOWN.find((k) => k.kind === item.kind && k.at === item.at && k.page === page && k.looks.includes(look) &&
-      k.sizes.includes(sizeName(size)) && (k.states === '*' || k.states.includes(state))) : null;
+    const known = lang === 'en' ? englishKnown(item, look, state, page, size) : null;
     if (known) {
       if (pastBy(item) > known.by + 1) { fail(`${where}: ${item.at} runs ${pastBy(item)} px past its box, English's known ${known.by} px (${known.why})`); }
       continue;
     }
+    if (lang !== 'en' && item.cut) {
+      const why = cutProblem(item, look, lang, state, page, size);
+      if (!why) { result.cuts.push({ where, at: item.at, by: pastBy(item), full: item.cut.full }); continue; }
+      fail(`${where}: ${why}: ${item.at} "${item.cut.full}"`);
+      continue;
+    }
     fail(`${where}: ${item.kind} ${item.at} ${JSON.stringify(Object.fromEntries(Object.entries(item).filter(([k]) => !['at', 'kind'].includes(k))))}`);
   }
+  if (lang === 'en') { return; }
+  for (const s of m.styled) { fail(`${where}: an ellipsis on a ${s.role}: ${s.at} "${s.text}"`); }
+  for (const b of m.bars) {
+    if (b.widths.some((w) => w < CHECKS.BAR_FLOOR - 0.5)) {
+      fail(`${where}: a meter's bar narrower than ${CHECKS.BAR_FLOOR} px: ${b.at} ${JSON.stringify(b.widths)}`);
+    }
+  }
+}
+
+/* The first meter on Limits with each label far longer than a translation should be: its bars keep BAR_FLOOR and start at the
+ * same x, the meter stays inside its card and no label runs past its box. */
+function judgeStress(where, s) {
+  if (!s) { return; }
+  const lefts = s.bars.map((b) => b.left);
+  if (s.bars.some((b) => b.width < CHECKS.BAR_FLOOR - 0.5)) {
+    fail(`${where}: a long label leaves the bar under ${CHECKS.BAR_FLOOR} px: ${JSON.stringify(s.bars)}`);
+  }
+  if (Math.max(...lefts) - Math.min(...lefts) > 0.5) { fail(`${where}: with a long label the bars start at ${JSON.stringify(lefts)}`); }
+  if (s.card !== null && s.right > s.card + 0.5) { fail(`${where}: with a long label the meter ends at ${s.right}, past its card's ${s.card}`); }
+  if (s.labels.some((l) => l.sw > l.cw + 1)) { fail(`${where}: a long label runs past its box: ${JSON.stringify(s.labels)}`); }
 }
 
 // What the probe answers for a routed state (route), and what it does once the page has loaded (then).
@@ -244,12 +313,16 @@ const ROUTES = {
   'status-offline': {
     route: async (page) => {
       await page.route('**/api/state*', async (r) => {
-        const res = await r.fetch();
-        if (res.status() !== 200) { return r.fulfill({ response: res }); }
-        const body = await res.json();
-        body.state.status = 'offline';
-        body.state.status_detail = DETAIL;
-        return r.fulfill({ response: res, body: JSON.stringify(body), headers: Object.assign({}, res.headers(), { etag: '' }) });
+        try {
+          const res = await r.fetch();
+          if (res.status() !== 200) { return await r.fulfill({ response: res }); }
+          const body = await res.json();
+          body.state.status = 'offline';
+          body.state.status_detail = DETAIL;
+          return await r.fulfill({ response: res, body: JSON.stringify(body), headers: Object.assign({}, res.headers(), { etag: '' }) });
+        } catch (e) {
+          return undefined;                         // the page closed while the answer was on its way
+        }
       });
     },
   },
@@ -294,7 +367,7 @@ async function widthsView(browser, server, lang, look, state, routed) {
       for (const size of SIZES) {
         await resize(page, size);
         const where = `widths/${lang}/${look}/${state}/${hash}/${sizeName(size)}`;
-        const m = await page.evaluate(CHECKS.measure);
+        const m = await page.evaluate(CHECKS.measure, LISTS);
         // a chip's words clear of its frame (#98's review: accented capitals on Night City's 14 px chips), and inside its card
         for (const c of await page.evaluate(CHECKS.chips)) {
           const room = c.framed ? 1 : 0;              // clear of a 1 px frame, or inside an unframed chip's box
@@ -302,8 +375,14 @@ async function widthsView(browser, server, lang, look, state, routed) {
           // a chip whose frame leaves its card while its words stay in (words that leave are measure()'s leaves-side, which
           // English's record judges: Nostromo's find at 1060 x 640)
           if (c.out > 0.5 && c.wordsOut <= 0.5) { m.over.push({ at: c.at, kind: 'chip-out', by: c.out, text: c.text }); }
+          // outside English a chip's own word stays on one line (#98's owner question 1)
+          if (lang !== 'en' && c.chip && c.lines > 1) { m.over.push({ at: c.at, kind: 'chip-wraps', lines: c.lines, text: c.text }); }
         }
         judgeWidths(where, lang, look, state, hash, size, m);
+        if (lang !== 'en' && hash === 'limits') {
+          const label = await page.evaluate(() => { const k = document.querySelector('#main .nm-meter .nm-mrow .k'); return k ? k.textContent : null; });
+          if (label) { judgeStress(where + '/long label', await page.evaluate(CHECKS.meterStress, (label + ' ').repeat(4).trim() + ' ' + 'W'.repeat(40))); }
+        }
         if (hash === 'limits' && !m.meters && !routed) { fail(`${where}: no meter on Limits`); }
         if (SHOTS === 'all' || (SHOTS === 'narrow' && size === SIZES[SIZES.length - 1])) {
           await page.screenshot({ path: path.join(OUT, `widths-${lang}-${look}-${state}-${hash}-${sizeName(size)}.png`) });
@@ -320,6 +399,16 @@ async function widthsView(browser, server, lang, look, state, routed) {
 
 // ── step header: the header's one row at every width, with every link word ───────────────────────────────────────────
 
+// Where the data age cannot be read at all today: the header hides it and the sidebar's health box (its UPDATED row) is
+// hidden too (every look hides the health box under 1001 px, where the nav is a row). Recorded, not fixed here (#98's owner
+// question 1: the 704 px check). below: the page widths under it; langs: 'all', or 'not-en' (outside English the header
+// hides the data age at wider widths).
+const AGE_GAPS = [
+  { looks: ['nostromo'], langs: 'all', below: 801 },                     // as at c05f45d: Nostromo hides the data age under 801 px
+  { looks: ['nostromo'], langs: 'not-en', below: 1001 },                 // outside English it goes under 1101 px
+  { looks: ['night_city', 'edgerun'], langs: 'not-en', below: 801 },     // outside English it goes under 801 px
+];
+const ageGap = (look, lang, width) => AGE_GAPS.some((g) => g.looks.includes(look) && (g.langs === 'all' || lang !== 'en') && width < g.below);
 const HEADER_WIDTHS = [704, 744, 784, 801, 820, 840, 860, 880, 900, 920, 940, 960, 980, 1000, 1020, 1044, 1064, 1084, 1104, 1124, 1144, 1164, 1184];
 const LINK_STATES = ['live', 'loading', 'stale', 'offline', 'rate_limited', 'no_credentials', 'paused', 'lost'];
 const LINK_DETAIL = { offline: DETAIL, rate_limited: 'Usage API rate limited', paused: 'Paused', loading: 'Loading usage',
@@ -348,18 +437,44 @@ async function headerLook(browser, server, lang, look) {
     try {
       if (code === 'lost') { await ROUTES['link-lost'].then(page, flags); }
       const seen = [];
-      for (const width of HEADER_WIDTHS) {
-        await page.setViewportSize({ width, height: 601 });
-        await page.waitForTimeout(120);
-        const h = await page.evaluate(CHECKS.header);
-        seen.push([width, h.sw, h.refresh, h.ageShown]);
-        const at = `${where}/${width}`;
+      const judgeHeader = (at, h) => {
         if (h.sw > h.cw + 1) { fail(`${at}: the bar runs ${h.sw - h.cw} px past the window ("${h.link}")`); }
         if (h.refresh !== null && h.refresh > h.vw + 0.5) { fail(`${at}: Refresh ends at ${h.refresh}, past the window's ${h.vw} ("${h.link}")`); }
         if (h.cut.length) { fail(`${at}: cut in the bar: ${h.cut.join(', ')}`); }
         if (h.overlap !== null && h.overlap > 0.5) { fail(`${at}: the brand's words run ${h.overlap} px into the bar's right-hand group`); }
+        if (h.lines > 2 || !h.inBar) { fail(`${at}: the link's words take ${h.lines} lines${h.inBar ? '' : ', past the bar'} ("${h.link}")`); }
+      };
+      for (const width of HEADER_WIDTHS) {
+        await page.setViewportSize({ width, height: 601 });
+        await page.waitForTimeout(120);
+        const h = await page.evaluate(CHECKS.header);
+        seen.push([width, h.sw, h.refresh, h.ageShown, h.healthShown]);
+        const at = `${where}/${width}`;
+        judgeHeader(at, h);
+        // the data age readable somewhere: in the header, or in the health box's UPDATED row
+        if (!h.ageShown && !h.healthShown) {
+          if (ageGap(look, lang, width)) { result.ageGaps.push(at); } else { fail(`${at}: the data age is in neither the header nor the health box`); }
+        }
       }
       result.header[where] = seen;
+      // outside English, the link's words far longer than any (the longest written twice): they wrap inside the bar, and the
+      // bar holds its row at every width (#98's owner question 1: the status word wraps, never cut)
+      if (lang !== 'en' && code === 'offline') {
+        await page.evaluate(`window.__probeHeader = ${CHECKS.header.toString()}`);
+        for (const width of HEADER_WIDTHS) {
+          await page.setViewportSize({ width, height: 601 });
+          await page.waitForTimeout(80);
+          const h = await page.evaluate(() => {
+            const el = document.getElementById('uplink-text');
+            const kept = el.textContent;
+            el.textContent = kept + ' ' + kept;
+            const got = window.__probeHeader();
+            el.textContent = kept;
+            return got;
+          });
+          judgeHeader(`${where}/long words/${width}`, h);
+        }
+      }
     } catch (e) {
       fail(`${where}: ${String(e).split('\n')[0]}`);
     }
@@ -580,13 +695,17 @@ const KEPT_CARDS = { overview: '*', limits: '*', cost: ['value', 'credits'], eff
 async function recordLook(browser, server, look) {
   const routes = async (page) => {
     await page.route('**/api/state*', async (r) => {
-      const res = await r.fetch();
-      if (res.status() !== 200) { return r.fulfill({ response: res }); }
-      const live = await res.json();
-      const body = JSON.parse(JSON.stringify(INPUTS.state));
-      body.theme = live.theme;
-      Object.assign(body.settings, { theme_id: live.settings.theme_id, theme_variant: live.settings.theme_variant, theme_mode: live.settings.theme_mode });
-      return r.fulfill({ status: 200, contentType: 'application/json', headers: { 'Cache-Control': 'no-store' }, body: JSON.stringify(body) });
+      try {
+        const res = await r.fetch();
+        if (res.status() !== 200) { return await r.fulfill({ response: res }); }
+        const live = await res.json();
+        const body = JSON.parse(JSON.stringify(INPUTS.state));
+        body.theme = live.theme;
+        Object.assign(body.settings, { theme_id: live.settings.theme_id, theme_variant: live.settings.theme_variant, theme_mode: live.settings.theme_mode });
+        return await r.fulfill({ status: 200, contentType: 'application/json', headers: { 'Cache-Control': 'no-store' }, body: JSON.stringify(body) });
+      } catch (e) {
+        return undefined;                         // the page closed while the answer was on its way
+      }
     });
     await page.route('**/api/analytics/**', (r) => {
       const name = new URL(r.request().url()).pathname.split('/').pop();
@@ -682,6 +801,80 @@ async function updateLook(browser, server, look) {
   }
 }
 
+// ── step rooms: each constrained text's room, against its note ───────────────────────────────────────────────────────
+
+// The keys whose en.json note gives translators a room, by what rooms() measures for them: nav (a nav tab), meta:<card>
+// (an Overview card's meta; limit.meta.weekly and overview.limit.no_scoped sit on the weekly and scoped cards), facts (a
+// limit card's facts column; its chip's words, limit.pace.*, in caps of the chip's font), burn (the burn card's chip) and
+// meter (a meter's label).
+const ROOM_KEYS = {
+  nav: ['shell.nav.overview', 'shell.nav.limits', 'shell.nav.cost', 'shell.nav.efficiency', 'shell.nav.history', 'shell.nav.settings', 'shell.nav.about'],
+  'meta:limit-session': ['limit.meta.session'],
+  'meta:limit-weekly,limit-scoped': ['limit.meta.weekly', 'overview.limit.no_scoped'],
+  'meta:cost': ['overview.cost.meta', 'overview.cost.meta_range'],
+  'meta:efficiency': ['overview.efficiency.cycle', 'overview.efficiency.month'],
+  'meta:models': ['overview.models.cycle', 'overview.models.month'],
+  'meta:surfaces': ['overview.surfaces.meta'],
+  facts: ['limit.fact.share', 'limit.fact.resets', 'limit.fact.in'],
+  'facts:chip': ['limit.pace.unused', 'limit.pace.no_draw', 'limit.pace.ahead', 'limit.pace.under', 'limit.pace.on', 'limit.pace.no_clock'],
+  burn: ['overview.burn.velocity.idle', 'overview.burn.velocity.slow', 'overview.burn.velocity.normal', 'overview.burn.velocity.fast',
+    'overview.burn.velocity.very_fast'],
+  meter: ['limits.meter.elapsed', 'limits.meter.used'],
+};
+const ROOM_NOTE = /room about (\d+) px, about (\d+) capitals/;
+
+async function roomsLook(browser, server, look) {
+  const found = {};
+  for (const hash of PAGES) {
+    const { context, page, errors } = await openPage(browser, server, look, hash, { size: SIZES[0] });
+    try {
+      const r = await page.evaluate(CHECKS.rooms);
+      if (hash === 'overview') {
+        found.nav = r.nav;
+        r.metas.forEach((m) => { found['meta:' + m.card] = [m]; });
+        found.facts = r.facts;
+        found['facts:chip'] = r.facts.filter((f) => f.chipCaps !== null).map((f) => ({ card: f.card, room: f.room, caps: f.chipCaps }));
+        found.burn = r.burn;
+      } else {
+        found.meter = r.meter;
+      }
+    } catch (e) {
+      fail(`rooms/${look}/${hash}: ${String(e).split('\n')[0]}`);
+    }
+    if (errors.length) { fail(`rooms/${look}/${hash}: page errors: ${errors.slice(0, 3).join(' | ')}`); }
+    await context.close();
+  }
+  result.rooms[look] = found;
+}
+
+/* Each ROOM_KEYS group's narrowest room over the looks that have it (px, and capitals), against the note of each of its keys. */
+function judgeRooms() {
+  const least = {};
+  for (const [group, keys] of Object.entries(ROOM_KEYS)) {
+    const items = [];
+    for (const [look, found] of Object.entries(result.rooms)) {
+      for (const part of group.split(':')[0] === 'meta' ? group.slice(5).split(',').map((c) => 'meta:' + c) : [group]) {
+        (found[part] || []).forEach((x) => items.push(Object.assign({ look }, x)));
+      }
+    }
+    if (!items.length) { fail(`rooms: nothing measured for ${group}`); continue; }
+    const px = Math.floor(Math.min(...items.map((x) => x.room)));
+    const caps = Math.min(...items.map((x) => x.caps));
+    least[group] = { px, caps, pxLook: items.find((x) => x.room === Math.min(...items.map((y) => y.room))).look,
+      capsLook: items.find((x) => x.caps === caps).look };
+    for (const key of keys) {
+      const note = EN_CATALOG['_note.' + key] || '';
+      const m = ROOM_NOTE.exec(note);
+      if (!m) { fail(`rooms: the note of ${key} gives no room ("room about N px, about C capitals"); measured ${px} px, ${caps} capitals`); continue; }
+      if (Math.abs(Number(m[1]) - px) > 1 || Math.abs(Number(m[2]) - caps) > 1) {
+        fail(`rooms: the note of ${key} says ${m[1]} px, ${m[2]} capitals; measured ${px} px (${least[group].pxLook}), ${caps} capitals (${least[group].capsLook})`);
+      }
+    }
+  }
+  result.roomsLeast = least;
+  console.log('rooms', JSON.stringify(least));
+}
+
 // ── step motion: every animated element is animated ──────────────────────────────────────────────────────────────────
 
 // The words each theme's entrance animates: its director's head selectors (outside the cards) and card selectors (inside
@@ -753,7 +946,7 @@ async function motionLook(browser, server, lang, look) {
 
 // ── the run ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-const result = { out: OUT, widths: {}, header: {}, clip: {}, caps: {}, record: {}, update: {}, motion: {} };
+const result = { out: OUT, widths: {}, header: {}, clip: {}, caps: {}, record: {}, update: {}, motion: {}, rooms: {}, cuts: [], ageGaps: [] };
 
 (async () => {
   const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
@@ -802,6 +995,16 @@ const result = { out: OUT, widths: {}, header: {}, clip: {}, caps: {}, record: {
           await stopServer(server);
         }
       }
+      if (STEPS.includes('rooms') && lang === 'en') {
+        const server = await startServer('normal', 'en');
+        try {
+          for (const look of LOOKS) { await roomsLook(browser, server, look); }
+          judgeRooms();
+          console.log('rooms done', Math.round((Date.now() - t0) / 1000) + ' s');
+        } finally {
+          await stopServer(server);
+        }
+      }
       if (STEPS.includes('caps') && lang === 'en') {
         const server = await startServer('normal', 'en', 'ok');           // with a release on offer, as the capitals test has
         try {
@@ -817,6 +1020,8 @@ const result = { out: OUT, widths: {}, header: {}, clip: {}, caps: {}, record: {
   }
   result.failures = failures;
   result.notes = notes;
+  if (result.cuts.length) { console.log('designed cuts that fired (passed):', result.cuts.length); }
+  if (result.ageGaps.length) { console.log('data age gaps (AGE_GAPS, recorded):', result.ageGaps.length); }
   notes.forEach((n) => console.log('NOTE', n));
   result.seconds = Math.round((Date.now() - t0) / 1000);
   fs.writeFileSync(path.join(OUT, 'page_probe.json'), JSON.stringify(result, null, 1));

@@ -5,8 +5,14 @@
  *
  *   settled()          the page has drawn its cards, nothing in #main is a placeholder (but the burn card's), and no boot
  *                      and no entrance is playing
+ *   DESIGNED_CUTS      the elements a look may cut with an ellipsis outside English, where a row's height is fixed (#98's
+ *                      owner question 1, decided on #98); NEVER_CUT the kinds of element never cut; BAR_FLOOR the narrowest
+ *                      a meter's bar may be outside English
  *   measure()          everything in the header, the nav and #main that runs past its room (page_probe.js's header says what
- *                      counts); {vw, vh, lang, over: [{at, kind, ...}], meters}
+ *                      counts); {vw, vh, lang, over: [{at, kind, ...}], meters, bars, styled}. An element cut with a visible
+ *                      ellipsis carries cut: {designed, role, full, title, named, catalog, lang}
+ *   meterStress(text)  the first meter with each label replaced by text, read and put back: its bars and its labels
+ *   rooms()            the room each constrained text has in the window: px, and about how many capitals fit
  *   regions(args)      every region tests/page_words.js reads (the header, the sidebar, each top part of #main, the cards
  *                      the record keeps), each text node in its element's computed text-transform, with the attributes
  *                      people read: args [page, with the header and sidebar, the cards kept ("*", a list, or null)]
@@ -14,10 +20,12 @@
  *   CSS_CAPS           the elements that have their capitals from the look's stylesheet since #98, and their page
  *   writeLines(args)   writes each line into an element (its textContent) and reads it back: args [selector, lines]
  *   readUpdate()       Settings' update row and buttons, and the update banner's heading, sentence and buttons
- *   header()           the header bar's row at the window's width: {vw, sw, cw, refresh, ageShown, link, cut, overlap}
+ *   header()           the header bar's row at the window's width: {vw, sw, cw, refresh, ageShown, healthShown, link,
+ *                      lines, inBar, cut, overlap}
  *   chips()            each chip in #main (.nm-chip, and .nm-pace > b where a look frames it as one): where its words' ink sits
  *                      against its box and whether the look draws a frame there, and how far the chip and its words run out
- *                      of its card: [{at, text, top, bottom, h, framed, out, wordsOut}]
+ *                      of its card, and how many lines its words take: [{at, text, top, bottom, h, framed, chip, lines,
+ *                      out, wordsOut}]
  */
 
 function settled() {
@@ -31,8 +39,33 @@ function settled() {
     function (el) { return !el.closest('[data-card="burn"]'); });
 }
 
-/* Everything in the header, the nav and the page that runs past its room. */
-function measure() {
+/* The designed cuts outside English (#98's owner question 1, decided on #98: wrap first, then the translator's short form,
+ * an ellipsis last, only where a row's height is fixed and the whole text can still be read). Each: its id, the elements
+ * (sel), the looks that cut them (by the records' names) and why. A cut of one passes only in one of its looks, with a
+ * visible ellipsis (computed text-overflow: ellipsis, overflow hidden, nowrap), its text a whole catalog string (no script
+ * cut it), its title that text and an ancestor's aria-label holding it; and, in a real language, never in the default
+ * window (#108). tests/test_server.py keeps the same list beside its record of English's own overflows. */
+var DESIGNED_CUTS = [
+  {"id": "overview-meta", "sel": "#main .nm-grid .nm-card-t:not(.nm-chart-t) > .nm-meta-t", "looks": ["nostromo", "night_city", "edgerun"],
+   "why": "an Overview card's meta: the Overview's rows keep their height, and the meta describes the card; it is not data"},
+  {"id": "overview-chip", "sel": "#main .nm-grid .nm-row2 > .nm-facts > .nm-chip", "looks": ["nostromo"],
+   "why": "a limit card's pace chip on the Overview: its facts column beside the figure has no more room, and the pace line under it says the same in a sentence"}
+];
+
+/* The kinds of element never cut, in any language: a nav tab, the header's link words, a sentence line, a figure. Outside
+ * English an ellipsis set on one is a fault even where its words fit (measure()'s styled). */
+var NEVER_CUT = [
+  ["nav tab", ".nm-menu a, .nm-menu a *"], ["header status word", ".nm-uplink, .nm-uplink *"],
+  ["sentence line", ".nm-pace, .nm-pace *, .nm-story, .nm-sub"], ["figure", ".nm-big, .nm-facts b, .nm-mrow .v, .nm-kv b, .nm-stat-v"]
+];
+
+/* Outside English a meter's bar keeps at least this many px, however long its label (each look's sheet). */
+var BAR_FLOOR = 96;
+
+/* Everything in the header, the nav and the page that runs past its room. lists: {cuts, never} (DESIGNED_CUTS and NEVER_CUT,
+ * which a caller that hands this function alone to the page passes; with none, the file's own). */
+function measure(lists) {
+  const LISTS = lists || { cuts: DESIGNED_CUTS, never: NEVER_CUT };
   const where = (el) => {
     const parts = [];
     for (let n = el; n && n.nodeType === 1 && parts.length < 6; n = n.parentElement) {
@@ -88,9 +121,43 @@ function measure() {
     return out;
   };
   const own = (el) => [...el.childNodes].some((n) => n.nodeType === 3 && n.nodeValue.trim());
+  const squash = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+  const roleOf = (el) => (LISTS.never.find(([, sel]) => el.matches(sel)) || [null])[0];
+  const ellipsis = (cs) => cs.textOverflow === 'ellipsis' && /hidden|clip/.test(cs.overflowX);
+  // the page's catalog strings (its language's, English's behind them), each as a pattern its filled text matches whole; a
+  // string with fewer than three letters outside its placeholders ("{name}, {meta}") would match any text and is left out
+  let patterns = null;
+  const catalog = (text) => {
+    if (!patterns) {
+      const cat = window.MonitorI18n || {};
+      const values = [];
+      for (const src of [cat.strings || {}, cat.fallback || {}]) {
+        for (const v of Object.values(src)) {
+          if (typeof v === 'string') { values.push(v); }
+          if (v && typeof v === 'object') { values.push(...Object.values(v).filter((x) => typeof x === 'string')); }
+        }
+      }
+      patterns = values.filter((v) => (v.replace(/\{\w+\}/g, '').match(/\p{L}/gu) || []).length >= 3)
+        .map((v) => new RegExp('^' + v.split(/\{\w+\}/).map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.+') + '$', 'su'));
+    }
+    return !text.includes('\u2026') && patterns.some((re) => re.test(text));
+  };
+  // an element its look cuts with a visible ellipsis: which designed cut it is (if any), what kind of element, its whole
+  // text, its title, whether an ancestor's aria-label holds that text, whether the text is a whole catalog string, and its
+  // language (en: English's words on another language's page, a key the language has no words for yet)
+  const cutOf = (el) => {
+    const full = squash(el.textContent);
+    let named = false;
+    for (let n = el.parentElement; n && !named; n = n.parentElement) { named = squash(n.getAttribute('aria-label')).includes(full); }
+    const d = LISTS.cuts.find((c) => el.matches(c.sel));
+    const marked = el.closest('[lang]');
+    return { designed: d ? d.id : null, role: roleOf(el), full, title: el.hasAttribute('title') ? squash(el.getAttribute('title')) : null,
+      named, catalog: catalog(full), lang: marked ? marked.getAttribute('lang') : null };
+  };
   const WIDE = '.nm-menu a, .nm-mrow > *, .nm-chip, .nm-tag, .nm-uplink, #data-age, .nm-refresh, .nm-sw button, .nm-kick';
   const FIXED = '.nm-mrow, .nm-menu a, .nm-bar, .nm-refresh, .nm-chip, .nm-sw button, .nm-btn, .nm-pill';
   const over = [];
+  const styled = [];
   const roots = [document.querySelector('.nm-bar'), document.querySelector('.nm-nav'), document.getElementById('main')].filter(Boolean);
   for (const root of roots) {
     for (const el of [root, ...root.querySelectorAll('*')]) {
@@ -100,8 +167,12 @@ function measure() {
       const text = (el.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 90);
       // wider than its box
       if (!inline && el.clientWidth > 0 && (/nowrap|pre/.test(cs.whiteSpace) || el.matches(WIDE)) && el.scrollWidth > el.clientWidth + 1) {
-        over.push({ at: where(el), kind: 'wide', sw: el.scrollWidth, cw: el.clientWidth, text });
+        const item = { at: where(el), kind: 'wide', sw: el.scrollWidth, cw: el.clientWidth, text };
+        if (ellipsis(cs) && /nowrap|pre/.test(cs.whiteSpace)) { item.cut = cutOf(el); }      // cut with a visible ellipsis
+        over.push(item);
       }
+      // an ellipsis set on an element that is never cut, whether its words fit or not
+      if (!inline && ellipsis(cs) && roleOf(el)) { styled.push({ at: where(el), role: roleOf(el), text }); }
       // taller than a box that cannot grow: one that cuts what runs past it, or one of a fixed height whose words take more
       // lines than it has room for (a figure taller than its row, as Nostromo's model rows draw theirs, is the design)
       const shut = (v) => v === 'hidden' || v === 'clip';
@@ -181,15 +252,22 @@ function measure() {
   const right = document.querySelector('.nm-bar-r');
   pairs([document.querySelector('.nm-brand'), right], 'bar-overlap');
   if (right) { pairs([...right.children], 'bar-overlap'); }
-  // a meter's two bars start at the same x
+  // a nav tab's words take at most two lines
+  for (const a of document.querySelectorAll('.nm-menu a')) {
+    if (!shown(a)) { continue; }
+    const lines = Math.max(0, ...[a, ...a.querySelectorAll('*')].map((d) => (own(d) && shown(d) ? (textRect(d) || { lines: 0 }).lines : 0)));
+    if (lines > 2) { over.push({ at: where(a), kind: 'nav-lines', lines, text: squash(a.innerText) }); }
+  }
+  // a meter's two bars start at the same x; how wide each bar is (the judges hold it to BAR_FLOOR outside English)
   const meters = [...document.querySelectorAll('#main .nm-meter')].filter(shown).map((m) => {
-    const lefts = [...m.querySelectorAll('.nm-cells')].map((c) => +c.getBoundingClientRect().left.toFixed(2));
-    return { at: where(m), lefts };
+    const cells = [...m.querySelectorAll('.nm-cells')].map((c) => c.getBoundingClientRect());
+    return { at: where(m), lefts: cells.map((r) => +r.left.toFixed(2)), widths: cells.map((r) => +r.width.toFixed(2)) };
   });
   meters.forEach((m) => {
     if (m.lefts.length >= 2 && Math.max(...m.lefts) - Math.min(...m.lefts) > 0.5) { over.push({ at: m.at, kind: 'meter', lefts: m.lefts }); }
   });
-  return { vw: innerWidth, vh: innerHeight, lang: document.documentElement.lang, over, meters: meters.length };
+  return { vw: innerWidth, vh: innerHeight, lang: document.documentElement.lang, over, meters: meters.length,
+    bars: meters.map((m) => ({ at: m.at, widths: m.widths })), styled };
 }
 
 /* Every region tests/page_words.js reads, as the browser draws it: page_words.js's region and mainParts, with the browser's own
@@ -307,8 +385,23 @@ function header() {
     Array.prototype.forEach.call(range.getClientRects(), function (q) { if (q.width > 0) { words = Math.max(words, q.right); } });
   }
   var r = refresh ? refresh.getBoundingClientRect() : null;
+  // the link's words: how many lines they take, and whether they stay inside the bar
+  var text = document.getElementById("uplink-text");
+  var tops = [], top = Infinity, bottom = -Infinity;
+  if (text) {
+    var lr = document.createRange();
+    lr.selectNodeContents(text);
+    Array.prototype.forEach.call(lr.getClientRects(), function (q) {
+      if (q.width <= 0) { return; }
+      if (!tops.some(function (t) { return Math.abs(t - q.top) < 2; })) { tops.push(q.top); }
+      top = Math.min(top, q.top);
+      bottom = Math.max(bottom, q.bottom);
+    });
+  }
+  var b = bar.getBoundingClientRect();
   return { vw: innerWidth, sw: bar.scrollWidth, cw: bar.clientWidth, refresh: r ? +r.right.toFixed(1) : null,
-    ageShown: shown(age), link: (document.getElementById("uplink-text") || {}).textContent || "", cut: cut,
+    ageShown: shown(age), healthShown: shown(document.querySelector(".nm-health")),
+    link: text ? text.textContent : "", lines: tops.length, inBar: !tops.length || (top >= b.top - 0.5 && bottom <= b.bottom + 0.5), cut: cut,
     overlap: right && words ? +(words - right.getBoundingClientRect().left).toFixed(1) : null };
 }
 
@@ -333,13 +426,14 @@ function chips() {
     var box = el.getBoundingClientRect();
     ctx.font = cs.fontStyle + " " + cs.fontWeight + " " + cs.fontSize + " " + cs.fontFamily;
     var m = ctx.measureText(text);
-    var inkTop = Infinity, inkBottom = -Infinity, left = Infinity, right = -Infinity;
+    var inkTop = Infinity, inkBottom = -Infinity, left = Infinity, right = -Infinity, tops = [];
     Array.prototype.forEach.call(el.childNodes, function (node) {
       if (node.nodeType !== 3 || !node.nodeValue.trim()) { return; }
       var range = document.createRange();
       range.selectNodeContents(node);
       Array.prototype.forEach.call(range.getClientRects(), function (q) {
         if (q.width <= 0) { return; }
+        if (!tops.some(function (t) { return Math.abs(t - q.top) < 2; })) { tops.push(q.top); }
         // a text fragment's box is the font's ascent over its descent, centred on its line: the baseline sits at the box's
         // top plus the font's ascent
         var pad = (q.height - (m.fontBoundingBoxAscent + m.fontBoundingBoxDescent)) / 2;
@@ -357,13 +451,111 @@ function chips() {
     out.push({ at: (host ? host.getAttribute("data-card") + " " : "") + el.tagName.toLowerCase() + (el.classList.length ? "." + el.classList[0] : ""),
       text: text.slice(0, 60),
       top: +(inkTop - box.top).toFixed(2), bottom: +(box.bottom - inkBottom).toFixed(2), h: +box.height.toFixed(2), framed: framed,
+      chip: el.classList.contains("nm-chip"), lines: tops.length,
       out: c ? +Math.max(box.right - c.right, c.left - box.left, 0).toFixed(1) : 0,
       wordsOut: c ? +Math.max(right - c.right, c.left - left, 0).toFixed(1) : 0 });
   });
   return out;
 }
 
+/* The first meter on the page with each of its labels replaced by text (a label far longer than a translation should be),
+ * read, and put back: each bar's left edge and width, the meter's right edge against its card's, and each label's scroll
+ * width against its width. Outside English the bar keeps BAR_FLOOR and both bars start at the same x however long the
+ * label (#98's owner question 1). */
+function meterStress(text) {
+  var meter = document.querySelector("#main .nm-meter");
+  if (!meter) { return null; }
+  var labels = Array.prototype.slice.call(meter.querySelectorAll(".nm-mrow .k"));
+  var kept = labels.map(function (k) { return k.textContent; });
+  labels.forEach(function (k) { k.textContent = text; });
+  var card = meter.closest(".nm-card-in");
+  var out = {
+    bars: Array.prototype.map.call(meter.querySelectorAll(".nm-cells"), function (c) {
+      var r = c.getBoundingClientRect();
+      return { left: +r.left.toFixed(2), width: +r.width.toFixed(2) };
+    }),
+    right: +meter.getBoundingClientRect().right.toFixed(1), card: card ? +card.getBoundingClientRect().right.toFixed(1) : null,
+    labels: labels.map(function (k) { return { sw: k.scrollWidth, cw: k.clientWidth }; })
+  };
+  labels.forEach(function (k, i) { k.textContent = kept[i]; });
+  return out;
+}
+
+/* The room each constrained text has in the window, as en.json's notes give it to translators (#98's owner question 1):
+ * px, and about how many capitals of the element's font fit (its letter spacing included). nav: a tab's words, from their
+ * left edge to the tab's padding; metas: an Overview card's meta beside its title (the row's width less the title and the
+ * gap); facts: a limit card's facts column beside its figure written as 100 % (the widest it gets), and at most 60 % of the
+ * row as outside English (a look whose facts are not a column of their own is left out); burn: the burn card's chip beside
+ * its title; meter: a meter's label column. */
+function rooms() {
+  var canvas = document.createElement("canvas");
+  var ctx = canvas.getContext("2d");
+  var caps = function (el, room) {
+    var cs = getComputedStyle(el);
+    ctx.font = cs.fontStyle + " " + cs.fontWeight + " " + cs.fontSize + " " + cs.fontFamily;
+    var spacing = parseFloat(cs.letterSpacing) || 0;
+    var each = ctx.measureText("ABCDEFGHIJKLMNOPQRSTUVWXYZ").width / 26 + spacing;
+    return Math.floor(room / each);
+  };
+  var px = function (n) { return +n.toFixed(1); };
+  var inner = function (el) {          // the content box's left and right edges
+    var b = el.getBoundingClientRect();
+    var cs = getComputedStyle(el);
+    return { left: b.left + parseFloat(cs.paddingLeft) + parseFloat(cs.borderLeftWidth),
+      right: b.right - parseFloat(cs.paddingRight) - parseFloat(cs.borderRightWidth) };
+  };
+  var shown = function (el) { return !!el && getComputedStyle(el).display !== "none" && el.getClientRects().length > 0; };
+  var out = { nav: [], metas: [], facts: [], burn: [], meter: [] };
+  Array.prototype.forEach.call(document.querySelectorAll(".nm-menu a"), function (a) {
+    var words = a.querySelector("span");
+    if (!shown(a) || !words) { return; }
+    var room = inner(a).right - words.getBoundingClientRect().left;
+    out.nav.push({ page: a.getAttribute("data-page"), room: px(room), caps: caps(words, room) });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("#main .nm-grid .nm-card"), function (card) {
+    var row = card.querySelector(".nm-card-t:not(.nm-chart-t)");
+    var meta = row && row.querySelector(":scope > .nm-meta-t");
+    var title = row && row.querySelector(":scope > .nm-tag, :scope > .nm-ttl");
+    if (!meta || !title || !shown(meta)) { return; }
+    var room = inner(row).right - title.getBoundingClientRect().right - (parseFloat(getComputedStyle(row).columnGap) || 0);
+    out.metas.push({ card: card.getAttribute("data-card"), room: px(room), caps: caps(meta, room) });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("#main .nm-grid > [data-limit] .nm-row2"), function (row) {
+    var facts = row.querySelector(":scope > .nm-facts");
+    var figure = row.querySelector(":scope > .nm-big");
+    if (!facts || !figure || getComputedStyle(facts).display !== "flex") { return; }
+    var kept = figure.textContent;
+    figure.textContent = kept.replace(/\d+/, "100");
+    var wide = figure.getBoundingClientRect().width;
+    figure.textContent = kept;
+    var box = inner(row);
+    var room = Math.min(box.right - box.left - wide - (parseFloat(getComputedStyle(row).columnGap) || 0), 0.6 * (box.right - box.left));
+    var label = facts.querySelector(":scope > span:not(.nm-chip)") || facts;
+    var chip = facts.querySelector(":scope > .nm-chip");
+    var host = row.closest("[data-card]");
+    // a chip's word has the column less the chip's own frame and padding
+    var chipRoom = chip ? room - (chip.offsetWidth - chip.clientWidth) - parseFloat(getComputedStyle(chip).paddingLeft) -
+      parseFloat(getComputedStyle(chip).paddingRight) : 0;
+    out.facts.push({ card: host ? host.getAttribute("data-card") : "?", room: px(room), row: px(box.right - box.left), figure: px(wide),
+      caps: caps(label, room), chipCaps: chip ? caps(chip, chipRoom) : null });
+  });
+  var burn = document.querySelector("#main #burn .nm-card-t");
+  var chip = burn && burn.querySelector(":scope > .nm-chip");
+  var title = burn && burn.querySelector(":scope > .nm-ttl");
+  if (chip && title) {
+    var cs = getComputedStyle(chip);
+    var room = inner(burn).right - title.getBoundingClientRect().right - (parseFloat(getComputedStyle(burn).columnGap) || 0) -
+      parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - parseFloat(cs.borderLeftWidth) - parseFloat(cs.borderRightWidth);
+    out.burn.push({ card: "burn", room: px(room), caps: caps(chip, room) });
+  }
+  Array.prototype.forEach.call(document.querySelectorAll("#main .nm-meter .nm-mrow .k"), function (k) {
+    if (shown(k)) { out.meter.push({ room: px(k.clientWidth), caps: caps(k, k.clientWidth) }); }
+  });
+  return out;
+}
+
 if (typeof module !== "undefined") {
-  module.exports = { settled: settled, measure: measure, regions: regions, readCaps: readCaps, CSS_CAPS: CSS_CAPS,
-    writeLines: writeLines, readUpdate: readUpdate, header: header, chips: chips };
+  module.exports = { settled: settled, DESIGNED_CUTS: DESIGNED_CUTS, NEVER_CUT: NEVER_CUT, BAR_FLOOR: BAR_FLOOR, measure: measure,
+    regions: regions, readCaps: readCaps, CSS_CAPS: CSS_CAPS, writeLines: writeLines, readUpdate: readUpdate, header: header,
+    chips: chips, meterStress: meterStress, rooms: rooms };
 }

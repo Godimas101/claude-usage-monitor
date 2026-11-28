@@ -5280,6 +5280,19 @@ LOOKS_98 = {"nostromo": "nostromo/amber", "night_city": "night_city/blackwall", 
             "gates-dark": "gates/blue-dark", "gates-light": "gates/blue-light"}
 CAPS_LOOKS = frozenset({"nostromo", "night_city", "edgerun"})       # the looks that set these words in capitals by CSS
 OVERFLOW_SIZES = [[1200, 780], [1060, 640], [720, 480]]              # outer sizes; at 1060 Gates' nav column is 232 px
+DEFAULT_SIZE = "1200x780"                                            # the default window
+# Outside English, the designed cuts (#98's owner question 1, decided on #98): where a row's height is fixed a look may cut a
+# text with an ellipsis, its whole text kept in the element, in its title and in an ancestor's aria-label. The same list as
+# tests/browser/page_checks.js's DESIGNED_CUTS, which measure() reads in the page to mark each cut
+# (test_the_designed_cuts_are_page_checks_own holds them equal); overflow_problems holds each cut to the rules.
+DESIGNED_CUTS = [
+    {"id": "overview-meta", "sel": "#main .nm-grid .nm-card-t:not(.nm-chart-t) > .nm-meta-t", "looks": ["nostromo", "night_city", "edgerun"],
+     "why": "an Overview card's meta: the Overview's rows keep their height, and the meta describes the card; it is not data"},
+    {"id": "overview-chip", "sel": "#main .nm-grid .nm-row2 > .nm-facts > .nm-chip", "looks": ["nostromo"],
+     "why": "a limit card's pace chip on the Overview: its facts column beside the figure has no more room, and the pace line under "
+            "it says the same in a sentence"},
+]
+BAR_FLOOR = 96                                                       # outside English a meter's bar keeps at least this many px
 
 
 def held_webui(folder: Path, moment: datetime = NOW) -> Path:
@@ -5443,24 +5456,121 @@ def overflow_known(look: str, lang: str) -> list[dict[str, Any]]:
     return [k for k in known if look in k["looks"] and (k["states"] == "*" or "normal" in k["states"])]
 
 
+def known_match(known: list[dict[str, Any]], item: dict[str, Any], page: str, size: str) -> dict[str, Any] | None:
+    """The entry of ``known`` that names ``item`` on ``page`` at ``size``, if any."""
+    return next((k for k in known if k["kind"] == item["kind"] and k["at"] == item["at"] and k["page"] == page and size in k["sizes"]),
+                None)
+
+
+def cut_problem(item: dict[str, Any], look: str, lang: str, page: str, size: str) -> str | None:
+    """Why an element cut with a visible ellipsis outside English (measure()'s cut) is not a designed cut that passes, or None
+    when it is one: in DESIGNED_CUTS and in one of its looks, its text a whole catalog string (no script cut it), its title
+    that text, an ancestor's aria-label holding it, and in a real language never in the default window but where its words
+    are English's (a key the language has no words for yet, lang en) and English's record names the same cut there."""
+    cut = item["cut"]
+    designed = next((d for d in DESIGNED_CUTS if d["id"] == cut["designed"]), None)
+    if designed is None:
+        return "an ellipsis not in DESIGNED_CUTS" + (f" (on a {cut['role']})" if cut.get("role") else "")
+    if look not in designed["looks"]:
+        return f"a designed cut ({designed['id']}) in a look that does not cut it"
+    if not cut["catalog"]:
+        return f"a designed cut ({designed['id']}) whose text is not a whole catalog string"
+    if cut["title"] != cut["full"]:
+        return f"a designed cut ({designed['id']}) without its whole text in its title (title {cut['title']!r})"
+    if not cut["named"]:
+        return f"a designed cut ({designed['id']}) whose whole text is in no ancestor's aria-label"
+    if lang != "pseudo" and size == DEFAULT_SIZE and not (cut.get("lang") == "en" and known_match(overflow_known(look, "en"), item, page, size)):
+        return f"a designed cut ({designed['id']}) in a real language in the default window"
+    return None
+
+
 def overflow_problems(look: str, lang: str, results: list[dict[str, Any]]) -> list[str]:
     """What runs past its room in ``results`` (each page at each size, as measure() reads it) that English's record does not
-    name, and a known one that runs more than 1 px further than in English."""
+    name, and a known one that runs more than 1 px further than in English. Outside English (#98's owner question 1, as
+    decided): a cut with an ellipsis that is not a designed cut passing cut_problem's rules, an ellipsis set on a nav tab,
+    the header's link words, a sentence line or a figure (measure()'s styled), and a meter's bar under BAR_FLOOR."""
     known = overflow_known(look, lang)
     problems = []
     for result in results:
         size = "%dx%d" % tuple(result["size"])
+        page = result["page"]
+        measured = result["measured"]
         if not result.get("settled", True):
-            problems.append(f"{result['page']} {size}: the page did not settle")
-        for item in result["measured"]["over"]:
+            problems.append(f"{page} {size}: the page did not settle")
+        for item in measured["over"]:
             past = item["sw"] - item["cw"] if item["kind"] == "wide" else item.get("by")
-            match = next((k for k in known if k["kind"] == item["kind"] and k["at"] == item["at"] and k["page"] == result["page"]
-                          and size in k["sizes"]), None)
-            if match is None:
-                problems.append(f"{result['page']} {size}: {item}")
+            match = known_match(known, item, page, size)
+            if match is None and lang != "en" and item.get("cut"):
+                why = cut_problem(item, look, lang, page, size)
+                if why:
+                    problems.append(f"{page} {size}: {why}: {item['at']} {item['cut']['full']!r}")
+            elif match is None:
+                problems.append(f"{page} {size}: {item}")
             elif past > match["by"] + 1:
-                problems.append(f"{result['page']} {size}: {item['at']} runs {past} px past its box, English's known {match['by']} px")
+                problems.append(f"{page} {size}: {item['at']} runs {past} px past its box, English's known {match['by']} px")
+        if lang == "en":
+            continue
+        for styled in measured.get("styled", []):
+            problems.append(f"{page} {size}: an ellipsis on a {styled['role']}: {styled['at']}")
+        for bar in measured.get("bars", []):
+            if any(width < BAR_FLOOR - 0.5 for width in bar["widths"]):
+                problems.append(f"{page} {size}: a meter's bar narrower than {BAR_FLOOR} px: {bar['at']} {bar['widths']}")
     return problems
+
+
+def test_the_designed_cuts_are_page_checks_own() -> None:
+    """DESIGNED_CUTS and BAR_FLOOR here are tests/browser/page_checks.js's, which measure() reads in the page (the stand-in
+    and the real web view): each cut names its elements, the looks that cut them (by the records' names) and why."""
+    source = PAGE_CHECKS.read_text(encoding="utf-8")
+    listed = re.search(r"^var DESIGNED_CUTS = (\[.*?^\]);$", source, re.S | re.M)
+    assert listed and json.loads(listed.group(1)) == DESIGNED_CUTS
+    assert re.search(r"^var BAR_FLOOR = (\d+);$", source, re.M).group(1) == str(BAR_FLOOR)
+    for cut in DESIGNED_CUTS:
+        assert set(cut) == {"id", "sel", "looks", "why"} and set(cut["looks"]) <= CAPS_LOOKS, cut
+
+
+def test_the_overflow_judge_holds_the_designed_cuts_to_their_rules() -> None:
+    """#98's owner question 1, as decided: outside English an element cut with an ellipsis passes only as a designed cut, in
+    one of its looks, with its text a whole catalog string, its title that text and an ancestor's aria-label holding it; in
+    a real language never in the default window but where English's own cut shows through a key the language has no words
+    for yet. Any other ellipsis fails (one on a nav tab says so), an ellipsis set on a never-cut element fails, and so does
+    a meter's bar under BAR_FLOOR. English is judged by its record alone."""
+    at = "section#models.nm-card[data-card=models]>div.nm-card-in>div.nm-card-t>span.nm-meta-t"
+    cut = {"designed": "overview-meta", "role": None, "full": "[ŞHÁRÉ ÖF ÇÖŞT ıİğ]", "title": "[ŞHÁRÉ ÖF ÇÖŞT ıİğ]", "named": True,
+           "catalog": True, "lang": None}
+    item = {"kind": "wide", "at": at, "sw": 140, "cw": 90, "text": "[ŞHÁRÉ ÖF", "cut": cut}
+
+    def judge(look: str = "nostromo", lang: str = "pseudo", size: list[int] | None = None, page: str = "overview",
+              **changes: Any) -> list[str]:
+        measured = {"over": [dict(item, cut=dict(cut, **changes))], "styled": [], "bars": []}
+        return overflow_problems(look, lang, [{"page": page, "size": size or [1060, 640], "measured": measured}])
+
+    assert judge() == [] and judge(size=[1200, 780]) == [] and judge(lang="fr") == []
+    def one(problems: list[str], words: str) -> bool:
+        return len(problems) == 1 and words in problems[0]
+
+    assert one(judge(title=None), "in its title") and one(judge(title="[ŞHÁRÉ ÖF"), "in its title")
+    assert one(judge(named=False), "aria-label")
+    assert one(judge(catalog=False), "catalog")
+    assert one(judge(look="gates-dark"), "a look that does not cut it")
+    assert one(judge(designed=None, role="nav tab"), "DESIGNED_CUTS (on a nav tab)")
+    assert one(judge(lang="fr", size=[1200, 780]), "default window")
+    # English's own cut through a fallback: Edgerun's surfaces meta, which English's record names in the default window
+    surfaces = next(k for k in json.loads(OVERFLOW_RECORD.read_text(encoding="utf-8"))["known"]
+                    if k["owner"] == "decided" and k["why"] == "ellipsis")
+    english = {"kind": "wide", "at": surfaces["at"], "sw": 100, "cw": 90,
+               "cut": dict(cut, full="share, 7 days", title="share, 7 days", lang="en")}
+    shown = {"page": "overview", "size": [1200, 780], "measured": {"over": [english], "styled": [], "bars": []}}
+    assert overflow_problems("edgerun", "fr", [shown]) == []
+    assert overflow_problems("edgerun", "fr", [dict(shown, measured={"over": [dict(english, cut=dict(english["cut"], lang="fr"))]})])
+    assert overflow_problems("nostromo", "fr", [shown])
+    # never cut, and the meter's bar
+    styled = {"over": [], "styled": [{"at": "li>a", "role": "nav tab"}], "bars": [{"at": "div.nm-meter", "widths": [90, 90]}]}
+    found = overflow_problems("night_city", "pseudo", [{"page": "limits", "size": [720, 480], "measured": styled}])
+    assert len(found) == 2 and "on a nav tab" in found[0] and "narrower than 96 px" in found[1]
+    assert overflow_problems("night_city", "en", [{"page": "limits", "size": [720, 480], "measured": styled}]) == []
+    assert overflow_problems("night_city", "pseudo", [{"page": "limits", "size": [720, 480], "measured": dict(
+        styled, styled=[], bars=[{"at": "div.nm-meter", "widths": [96, 120]}])}]) == []
 
 
 def test_the_overflow_record_names_englishs_own_and_no_other_language_has_any() -> None:
@@ -5507,9 +5617,12 @@ def test_overview_and_limits_overflow_nothing_in_the_real_web_view(tmp_path: Pat
     1060 x 640 (Gates' 232 px nav column) and at 720 x 480 (one column): no nowrap element, nav item or row cell wider than its
     box; nothing taller than a box that cannot grow; no words that leave their card, the bar or the nav, or sit on other
     words; the nav's blocks and the header's parts apart; a meter's two bars starting at the same x. English may have only
-    its own known overflows (OVERFLOW_RECORD, none more than 1 px further), the pseudo-locale none: outside English a longer
-    line wraps (#98's owner question 1). Measured in WebView2 by tests/browser/page_checks.js, which the headless stand-in
-    (tests/browser/page_probe.js) runs too, with the page's clock and the dev server's held at NOW."""
+    its own known overflows (OVERFLOW_RECORD, none more than 1 px further). The pseudo-locale has none but the designed cuts
+    (#98's owner question 1, as decided: a longer line wraps, and an Overview card's meta or a limit card's chip may be cut
+    with an ellipsis, its whole text kept in the element, its title and the card's name), no ellipsis on a nav tab, the
+    link's words, a sentence line or a figure, no nav tab over two lines, and no meter bar under BAR_FLOOR (overflow_problems).
+    Measured in WebView2 by tests/browser/page_checks.js, which the headless stand-in (tests/browser/page_probe.js) runs too,
+    with the page's clock and the dev server's held at NOW."""
     server, settings = held_server(tmp_path, monkeypatch, look, lang)
     server.start()
     try:

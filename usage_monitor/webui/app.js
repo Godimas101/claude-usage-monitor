@@ -1727,6 +1727,26 @@
     return nameLine(limit.label || FMT.upper(String(limit.kind || "").replace(/_/g, " "), "en"));
   }
 
+  /* The attributes of a line the Overview may cut: a card's meta, a limit card's pace chip. Outside English the Overview's rows
+   * keep their height, so such a line longer than its room is cut with "…" there by the theme's CSS (#98's owner question 1:
+   * a designed cut). Its whole text stays in the element, in its title and in the card's name (cardName). English keeps its
+   * markup. */
+  function cutAttrs(line) {
+    var text = lineText(line);
+    return lineAttrs(line) + (I18N.language !== "en" && text ? ' title="' + esc(text) + '"' : "");
+  }
+
+  /* The name (aria-label) of an Overview card with a meta: the card's own name, and outside English the meta's whole text with
+   * it (overview.card.name), and a limit card's chip word (overview.card.name_chip), since the Overview may cut them. English
+   * keeps the card's own name. */
+  function cardName(name, meta, chip) {
+    var text = lineText(meta);
+    if (I18N.language === "en" || !text) {
+      return name;
+    }
+    return chip ? t("overview.card.name_chip", { name: name, meta: text, chip: lineText(chip) }) : t("overview.card.name", { name: name, meta: text });
+  }
+
   /* The sign and the whole points of a pace difference: "+12", "-30". */
   function pacePoints(diff) {
     return (diff >= 0 ? "+" : "") + FMT.number(String(Math.round(diff)), NO_GROUP);
@@ -1752,13 +1772,14 @@
         facts.push("<span" + lineAttrs(left) + ">" + esc(left.text) + "</span>");
       }
     }
-    facts.push('<span class="nm-chip' + chip.cls + '" data-tone="' + chip.tone + '"' + lineAttrs(chip) + ">" + esc(chip.text) + "</span>");
+    facts.push('<span class="nm-chip' + chip.cls + '" data-tone="' + chip.tone + '"' + cutAttrs(chip) + ">" + esc(chip.text) + "</span>");
     var diff = p.diff === null ? tLine("limit.diff.no_reset") : PACE_DIFF[chip.code](pacePoints(p.diff));
     var pace = tLine("limit.pace.line", { used: fmtPct(pct), elapsed: p.elapsed === null ? "--" : fmtPct(p.elapsed * 100) });
     var pending = tLine("limit.forecast.more_readings");
-    return '<section class="nm-card' + (opts.wide ? " wide" : "") + sevClass(limit) + '" data-limit="' + esc(limit.kind) + '">' +
+    return '<section class="nm-card' + (opts.wide ? " wide" : "") + sevClass(limit) + '" data-limit="' + esc(limit.kind) + '"' +
+      (I18N.language !== "en" ? ' aria-label="' + esc(cardName(tag.text, opts.meta, chip)) + '"' : "") + ">" +
       '<div class="nm-card-in">' +
-      '<div class="nm-card-t"><span class="nm-tag"' + lineAttrs(tag) + ">" + esc(tag.text) + '</span><span class="nm-meta-t"' + lineAttrs(opts.meta) + ">" +
+      '<div class="nm-card-t"><span class="nm-tag"' + lineAttrs(tag) + ">" + esc(tag.text) + '</span><span class="nm-meta-t"' + cutAttrs(opts.meta) + ">" +
       esc(lineText(opts.meta) || "") + "</span></div>" +
       '<div class="nm-row2"><div class="nm-big">' + esc(fmtPct(pct)) + '</div><div class="nm-facts">' + facts.join("") + "</div></div>" +
       remainHTML(p) +
@@ -1772,8 +1793,9 @@
   /* A limit's card before its first reading, or with no limit to show: tag and meta are lines. */
   function emptyLimitCard(tag, meta) {
     var waiting = tLine("overview.limit.waiting");
-    return '<section class="nm-card"><div class="nm-card-in"><div class="nm-card-t"><span class="nm-tag"' + lineAttrs(tag) + ">" + esc(tag.text) +
-      '</span><span class="nm-meta-t"' + lineAttrs(meta) + ">" + esc(meta.text) + '</span></div><p class="nm-empty"' + lineAttrs(waiting) + ">" +
+    return '<section class="nm-card"' + (I18N.language !== "en" ? ' aria-label="' + esc(cardName(tag.text, meta)) + '"' : "") +
+      '><div class="nm-card-in"><div class="nm-card-t"><span class="nm-tag"' + lineAttrs(tag) + ">" + esc(tag.text) +
+      '</span><span class="nm-meta-t"' + cutAttrs(meta) + ">" + esc(meta.text) + '</span></div><p class="nm-empty"' + lineAttrs(waiting) + ">" +
       esc(waiting.text) + "</p></div></section>";
   }
 
@@ -2647,8 +2669,8 @@
     var title = tLine("overview.cost.title");
     var meta = n.cycleStart ? tLine("overview.cost.meta_range", { range: rangeText(n.cycleStart, n.cycleEnd) }) : tLine("overview.cost.meta");
     var today = tLine("overview.cost.today"), week = tLine("overview.cost.week");
-    return '<section class="nm-card wide" id="cost" aria-label="' + esc(title.text) + '" data-card="cost"><div class="nm-card-in">' +
-      '<div class="nm-card-t"><h2 class="nm-ttl"' + lineAttrs(title) + ">" + esc(title.text) + '</h2><span class="nm-meta-t"' + lineAttrs(meta) + ">" + esc(meta.text) + "</span></div>" +
+    return '<section class="nm-card wide" id="cost" aria-label="' + esc(cardName(title.text, meta)) + '" data-card="cost"><div class="nm-card-in">' +
+      '<div class="nm-card-t"><h2 class="nm-ttl"' + lineAttrs(title) + ">" + esc(title.text) + '</h2><span class="nm-meta-t"' + cutAttrs(meta) + ">" + esc(meta.text) + "</span></div>" +
       '<div class="nm-cost"><div class="nm-cost-l"><div class="nm-hero"><div class="nm-big h" style="--n:' + heroText.length + '">' + esc(heroText) + "</div>" + planBlock + "</div>" +
       (ratio === null || n.price === null ? "" : ratioCells(ratio, t("overview.cost.ratio_label", { multiple: fmtMult(ratio) }), n.pending ? 12 : 0)) +
       '<div class="nm-note"' + lineAttrs(note) + ">" + esc(note.text) + "</div>" +
@@ -2664,8 +2686,8 @@
     var thinking = n.thinking === null ? null : n.thinking * 100;
     var title = tLine("overview.efficiency.title");
     var meta = n.loaded ? tLine("overview.efficiency.cycle") : tLine("overview.efficiency.month");
-    return '<section class="nm-card" id="efficiency" aria-label="' + esc(t("overview.efficiency.label")) + '" data-card="efficiency"><div class="nm-card-in">' +
-      '<div class="nm-card-t"><h2 class="nm-ttl"' + lineAttrs(title) + ">" + esc(title.text) + '</h2><span class="nm-meta-t"' + lineAttrs(meta) + ">" + esc(meta.text) + "</span></div>" +
+    return '<section class="nm-card" id="efficiency" aria-label="' + esc(cardName(t("overview.efficiency.label"), meta)) + '" data-card="efficiency"><div class="nm-card-in">' +
+      '<div class="nm-card-t"><h2 class="nm-ttl"' + lineAttrs(title) + ">" + esc(title.text) + '</h2><span class="nm-meta-t"' + cutAttrs(meta) + ">" + esc(meta.text) + "</span></div>" +
       '<div class="nm-kpi"><div class="nm-kl">' + tHtml("overview.efficiency.hit") + '</div><div class="nm-big m">' + esc(hit === null ? "--" : FMT.percent(hit.toFixed(1))) +
       '</div><div class="nm-cells" aria-hidden="true">' + cellsHTML(20, hit || 0) + "</div></div>" +
       '<div class="nm-kpi"><div class="nm-kl">' + tHtml("overview.efficiency.thinking") + '</div><div class="nm-big m">' + esc(thinking === null ? "--" : fmtPct(thinking)) +
@@ -2686,8 +2708,8 @@
       : '<p class="nm-empty">' + tHtml("overview.models.none") + "</p>";
     var title = tLine("overview.models.title");
     var meta = n.loaded ? tLine("overview.models.cycle") : tLine("overview.models.month");
-    return '<section class="nm-card" id="models" aria-label="' + esc(title.text) + '" data-card="models"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl"' + lineAttrs(title) + ">" +
-      esc(title.text) + '</h2><span class="nm-meta-t"' + lineAttrs(meta) + ">" + esc(meta.text) + "</span></div>" +
+    return '<section class="nm-card" id="models" aria-label="' + esc(cardName(title.text, meta)) + '" data-card="models"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl"' + lineAttrs(title) + ">" +
+      esc(title.text) + '</h2><span class="nm-meta-t"' + cutAttrs(meta) + ">" + esc(meta.text) + "</span></div>" +
       '<div class="nm-mix">' + body + "</div></div></section>";
   }
 
@@ -2702,8 +2724,8 @@
       : '<p class="nm-empty">' + tHtml("overview.surfaces.none") + "</p>";
     var title = tLine("overview.surfaces.title");
     var meta = tLine("overview.surfaces.meta");
-    return '<section class="nm-card" aria-label="' + esc(title.text) + '" data-card="surfaces"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl"' + lineAttrs(title) + ">" +
-      esc(title.text) + '</h2><span class="nm-meta-t"' + lineAttrs(meta) + ">" + esc(meta.text) + "</span></div>" +
+    return '<section class="nm-card" aria-label="' + esc(cardName(title.text, meta)) + '" data-card="surfaces"><div class="nm-card-in"><div class="nm-card-t"><h2 class="nm-ttl"' + lineAttrs(title) + ">" +
+      esc(title.text) + '</h2><span class="nm-meta-t"' + cutAttrs(meta) + ">" + esc(meta.text) + "</span></div>" +
       '<div class="nm-mix">' + body + "</div></div></section>";
   }
 
@@ -6469,6 +6491,7 @@
       renderHealth: renderHealth, weeklyStory: weeklyStory, effectivePlanPrice: effectivePlanPrice,
       planFromState: planFromState, pipelineCard: pipelineCard, topModels: topModels, railHTML: railHTML,
       limitCard: limitCard, remainHTML: remainHTML, buildModel: buildModel, matchScoped: matchScoped, paceChip: paceChip,
+      emptyLimitCard: emptyLimitCard, cardName: cardName,
       sessionStory: sessionStory, weeklyStory: weeklyStory, fmtAge: fmtAge, ageWords: ageWords, AGE_UNIT: AGE_UNIT,
       AGE_UNIT_IN_SENTENCE: AGE_UNIT_IN_SENTENCE, staleBanner: staleBanner, renderHealth: renderHealth, accentName: accentName,
       accentTitled: accentTitled, entryOf: entryOf, statEntry: statEntry, entryState: entryState,

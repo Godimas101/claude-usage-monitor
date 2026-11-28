@@ -553,6 +553,78 @@ def test_the_longer_words_rules_hold_only_outside_english() -> None:
         assert not stray, (theme_id, stray)
 
 
+def outside_english_rules(theme_id: str) -> list[tuple[str, str]]:
+    """Each rule of a theme sheet's Outside English block (#98's owner question 1), in a media query too: (selector, body),
+    with the comments taken out."""
+    css = THEME_CSS[theme_id]
+    block = re.sub(r"/\*.*?\*/", "", css[css.index("/* Outside English (#98, owner question 1"):], flags=re.S)
+    return [(" ".join(sel.split()), body) for sel, body in re.findall(r"([^{}]+)\{([^{}]*)\}", block)]
+
+
+def test_outside_english_long_text_follows_the_owners_rules() -> None:
+    """#98's owner question 1, as decided on #98, in each sheet's Outside English block: nothing shrinks (no font, no scale,
+    no zoom, no hyphenation); the only ellipsis of the block is Nostromo's pace chip in a limit card's facts, a designed cut,
+    and the Overview's card metas keep English's own ellipsis in Nostromo and Night City (one line beside the title, the
+    title whole up to 70 % of the row, the meta alone giving way), where Gates moves them below the title as in English; nothing sets a nav tab, the link's words, a
+    sentence line or a chip's own word on one line but the chip, which never wraps; the link's words wrap; a limit's facts
+    wrap within 60 % of the row with their figure on one line; and the meter's bar keeps tests/browser/page_checks.js's
+    BAR_FLOOR."""
+    checks_js = (Path(__file__).resolve().parent / "browser" / "page_checks.js").read_text(encoding="utf-8")
+    floor = re.search(r"^var BAR_FLOOR = (\d+);$", checks_js, re.M).group(1)
+    meta = ":root:not(:lang(en)) .nm-grid .nm-card-t:not(.nm-chart-t) > .nm-meta-t"
+    for theme_id in ("nostromo", "night_city", "gates"):
+        rules = outside_english_rules(theme_id)
+        bodies = {sel: body for sel, body in rules}
+        for sel, body in rules:
+            assert not re.search(r"(^|[;\s])font(-size)?\s*:|hyphens|scale\(|zoom", body), (theme_id, sel)
+            if "ellipsis" in body:
+                assert (theme_id, sel) == ("nostromo", ":root:not(:lang(en)) .nm-grid .nm-row2 > .nm-facts > .nm-chip"), (theme_id, sel)
+            if re.search(r"\.nm-menu|\.nm-uplink|\.nm-pace|\.fc\b|\.nm-story", sel):
+                assert "nowrap" not in body and "ellipsis" not in body, (theme_id, sel)
+            if re.search(r"(?<!:not\()\.nm-chip\b", sel):                # a chip itself, not an element that is not one
+                assert "white-space: normal" not in body, (theme_id, sel)
+            if ".nm-meta-t" in sel and ".nm-grid" in sel:
+                assert "overflow: visible" not in body and "text-overflow" not in body, (theme_id, sel)
+        uplink = [body for sel, body in rules if sel.endswith(" .nm-uplink")]
+        assert uplink and all("white-space: normal" in body for body in uplink), theme_id
+        assert re.search(rf"minmax\({floor}px, 1fr\)", bodies[":root:not(:lang(en)) .nm-meter"]), theme_id
+        assert "max-width: 60%" in bodies[":root:not(:lang(en)) .nm-row2 > .nm-facts"], theme_id
+        assert any(sel.endswith(" b") and ".nm-facts" in sel and "white-space: nowrap" in body for sel, body in rules), theme_id
+        assert any(".nm-pace" in sel and "overflow-wrap: break-word" in body for sel, body in rules), theme_id
+        if theme_id == "gates":
+            assert not any(".nm-meta-t" in sel for sel, _ in rules)
+            assert any(sel == ":root:not(:lang(en)) .nm-menu a" and "white-space: normal" in body for sel, body in rules)
+        else:
+            assert "white-space: nowrap" in bodies[meta], theme_id
+            title = bodies[":root:not(:lang(en)) .nm-grid .nm-card-t:not(.nm-chart-t):has(> .nm-meta-t) > :is(.nm-tag, .nm-ttl)"]
+            assert "flex-shrink: 0" in title and "max-width: 70%" in title, theme_id
+            assert "flex-wrap: nowrap" in bodies[":root:not(:lang(en)) .nm-grid .nm-card-t:not(.nm-chart-t):has(> .nm-meta-t)"], theme_id
+            # English's own cut, which the designed cut keeps outside English
+            english = THEME_CSS[theme_id][:THEME_CSS[theme_id].index("/* Outside English (#98, owner question 1")]
+            assert ".nm-grid .nm-card-t:not(.nm-chart-t) .nm-meta-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }" in english
+    assert "white-space: normal" in dict(outside_english_rules("night_city"))[":root:not(:lang(en)) .nm-menu a"]
+
+
+def test_the_constrained_keys_notes_give_their_room() -> None:
+    """#98's owner question 1, as decided: each constrained key's note in en.json gives translators its room, as the stand-in
+    measured it (tests/browser/page_probe.js's rooms step, which fails a note more than 1 px or 1 capital off): every key
+    its ROOM_KEYS names says "room about N px, about C capitals". The header's link words say they are never cut, and a
+    sentence line's note asks for no shorthand."""
+    probe = (Path(__file__).resolve().parent / "browser" / "page_probe.js").read_text(encoding="utf-8")
+    listed = re.search(r"^const ROOM_KEYS = \{(.*?)^\};$", probe, re.S | re.M).group(1)
+    keys = re.findall(r"'([a-z_]+(?:\.[a-z_]+)+)'", listed)
+    assert len(keys) == len(set(keys)) == 33
+    assert {f"shell.nav.{page}" for page in PAGES} <= set(keys)
+    for key in keys:
+        assert key in ENGLISH_CATALOG, key
+        assert re.search(r"room about \d+ px, about \d+ capitals", ENGLISH_CATALOG["_note." + key]), key
+    for code in ("live", "loading", "stale", "offline", "rate_limited", "no_credentials", "paused", "lost"):
+        assert "never cut" in ENGLISH_CATALOG[f"_note.header.link.{code}"], code
+        assert "never cut" in ENGLISH_CATALOG[f"_note.page.gates.link.{code}"], code
+    for key in ("limit.pace.line", "limit.diff.ahead", "limit.forecast.weekly", "limit.forecast.at_risk"):
+        assert "no shorthand" in ENGLISH_CATALOG["_note." + key], key
+
+
 def test_the_time_left_bar_keeps_both_texts_readable_over_the_fill_and_the_track() -> None:
     """The label and the time left each span the whole bar and are painted from one hard-stop gradient that flips where
     the fill ends (ink on the fill, the signal colour on the track), so both read from a fresh window to an empty one.
@@ -4059,7 +4131,8 @@ def test_english_limit_tags_are_the_limits_own_and_other_languages_name_the_kind
     """#98: in English a limit's tag is its own label, the identity string the data layer gives (#90), as a name, and the
     pacing card's aria-label keeps it, capitals and all. Another language names the limit from its kind and scope (the
     widgets' rule, #93): "{name} weekly" with the scope as the usage API names it, the scoped placeholder "Scoped", and a
-    kind it has no words for keeps the label. A name's element is marked translate="no" there; English keeps its markup."""
+    kind it has no words for keeps the label. A name's element is marked translate="no" there; English keeps its markup.
+    Outside English the Overview card's meta carries its whole text in a title and the card a name (#98's owner question 1)."""
     tags = checks["stageB"]["tags"]
     en = {name: (tag["text"], tag["lang"], tag.get("name", False)) for name, tag in tags["en"].items()}
     assert en == {"scoped": ("FABLE WEEKLY", "", True), "surface": ("CLAUDE_CODE WEEKLY", "", True), "unnamed": ("WEEKLY SCOPED", "", True),
@@ -4072,7 +4145,8 @@ def test_english_limit_tags_are_the_limits_own_and_other_languages_name_the_kind
                   "otherBare": ("MONTHLY THING", "", True)}
     markup = checks["stageB"]["tagMarkup"]
     assert '<span class="nm-tag">FABLE WEEKLY</span><span class="nm-meta-t">7-day window</span>' in markup["en"]
-    assert '<span class="nm-tag">Fable HEBDO-FR</span><span class="nm-meta-t" lang="en">7-day window</span>' in markup["fr"]
+    assert '<span class="nm-tag">Fable HEBDO-FR</span><span class="nm-meta-t" lang="en" title="7-day window">7-day window</span>' in markup["fr"]
+    assert markup["fr"].startswith('<section class="nm-card" data-limit="weekly_scoped" aria-label="Fable HEBDO-FR, 7-day window, ')
     assert '<span class="nm-tag" lang="en">Weekly</span>' in markup["frWeekly"]
     assert 'aria-label="SESSION"' in markup["pacingEn"] and '<span class="nm-tag">SESSION</span>' in markup["pacingEn"]
     assert 'aria-label="SESSION-FR"' in markup["pacingFr"]
@@ -4097,6 +4171,38 @@ def test_an_unknown_plan_is_worded_by_the_page(checks: dict[str, Any]) -> None:
     assert '<span translate="no">MAX 5X</span>' in plan["named"]["fr"]          # a name is marked as one off English
     assert 'translate="no">FORFAIT' not in plan["fr"] and 'translate="no">UNKNOWN' not in plan["partial"]
     assert "1 cell = 1 month of Forfait inconnu plan" in plan["fr"]          # ratio.note, plain text (the Cost page escapes it)
+
+
+@ui_only
+def test_the_overviews_cut_lines_keep_their_whole_text_outside_english(checks: dict[str, Any]) -> None:
+    """#98's owner question 1, as decided: outside English the Overview may cut a card's meta, and a limit card's pace chip,
+    with an ellipsis (the designed cuts). Each keeps its whole text in the element, in its title, and in the card's name
+    (aria-label: overview.card.name, overview.card.name_chip for a limit card). English keeps its markup: no title on a meta
+    or a chip, no name on a limit card, each other card named by its title as before."""
+    def opening(markup: str) -> str:
+        return re.match(r"<section[^>]*>", markup).group(0)
+
+    def name(markup: str) -> str:
+        return unescape(re.search(r' aria-label="([^"]*)"', opening(markup)).group(1))
+
+    english = checks["q1"]["en"]
+    for card, markup in english.items():
+        assert not re.search(r'class="nm-meta-t"[^>]*title=', markup) and not re.search(r'class="nm-chip[^"]*"[^>]*title=', markup), card
+    assert "aria-label" not in opening(english["limit"]) and "aria-label" not in opening(english["empty"])
+    assert [name(english[card]) for card in ("cost", "efficiency", "models", "surfaces")] == [
+        ENGLISH_CATALOG["overview.cost.title"], ENGLISH_CATALOG["overview.efficiency.label"], ENGLISH_CATALOG["overview.models.title"],
+        ENGLISH_CATALOG["overview.surfaces.title"]]
+    french = checks["q1"]["fr"]
+    for card, markup in french.items():
+        attrs, text = re.search(r'<span class="nm-meta-t"([^>]*)>([^<]*)</span>', markup).groups()
+        title = re.search(r' title="([^"]*)"', attrs)
+        assert title and unescape(title.group(1)) == unescape(text), card
+        assert unescape(text) in name(markup), card
+    attrs, word = re.search(r'<span class="nm-chip[^"]*"([^>]*)>([^<]*)</span>', french["limit"]).groups()
+    assert word == "sous le rythme" and f' title="{word}"' in attrs
+    assert name(french["limit"]) == "Session, fen\u00eatre de 5 heures, sous le rythme"     # name_chip, English's form behind it
+    assert name(french["surfaces"]) == "Where the week went : part, 7 jours"           # the page's own overview.card.name
+    assert name(french["efficiency"]) == "Cache and thinking : this cycle"
 
 
 @ui_only
