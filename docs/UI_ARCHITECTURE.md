@@ -760,7 +760,11 @@ holds the rule; the localization tickets (#86 to #109) fill the catalogs and mov
   the others at 1060 x 640, which #98's critic 22 measured first; two of those by less than a px, named since #98's second
   review measures such cuts), "kept until #118 (approved 2026-11-27) moves the subtitle under the title"; and six entries of one find, not a design (at 1060 x 640 Nostromo's weekly and scoped Overview cards
   cut their reset lines and their chip off when the figure has two digits, in the warning and critical scenarios), "kept
-  until #117". Until #117 and #118 land the record keeps them all, so English's layout does not change here.
+  until #117". Until #117 and #118 land the record keeps them all, so English's layout does not change here. The real web
+  view's overflow test lets an English Overview subtitle cut pass at any width while its whole text is in its title
+  (`english_subtitle_cut` in `tests/test_server.py`): WebView2 cuts Night City's English subtitles wider than the headless
+  stand-in measured them (even "share, 7 days" in the default window), so the record's widths cannot pin those; every other
+  English overflow stays pinned to its width.
 - **Rendering never reads Windows.** The locale rides on the view model (#91, not #93: it is the first ticket in which
   the widgets draw something that depends on the language): `build_model(..., locale=)` fills `WidgetModel.locale`,
   English by default, and the app passes `MonitorApp.locale()`. A locale change redraws, since the frame caches key on

@@ -5484,6 +5484,19 @@ def cut_problem(item: dict[str, Any], look: str, lang: str, page: str, size: str
     return None
 
 
+def english_subtitle_cut(item: dict[str, Any], look: str) -> bool:
+    """Whether ``item`` is an English Overview card subtitle cut with an ellipsis in a look that cuts it, its whole text a
+    catalog string and in its title (Chris's tooltip, #98, 2026-11-27): #118's to remove (approved 2026-11-27), so it passes
+    at any width. How far such a cut runs hangs on the renderer's glyph metrics: WebView2 cuts Night City's English subtitles
+    wider than the headless stand-in measured them (even "share, 7 days" in the default window), so the record's widths
+    cannot pin them."""
+    cut = item.get("cut")
+    if not cut or cut.get("designed") != "overview-meta":
+        return False
+    designed = next(d for d in DESIGNED_CUTS if d["id"] == "overview-meta")
+    return look in designed["looks"] and bool(cut.get("catalog")) and cut.get("title") == cut.get("full")
+
+
 def chip_problems(chip: dict[str, Any], lang: str) -> list[str]:
     """What is wrong with one chip as chips() reads it (#98's review, finding F2; the stand-in's widths step judges the same):
     its words' ink less than 1 px clear of a framed chip's top or bottom (inside an unframed one's box); its frame out of
@@ -5508,7 +5521,8 @@ def overflow_problems(look: str, lang: str, results: list[dict[str, Any]]) -> li
     glyph metrics); and each chip chips() reads that chip_problems fails, in every language. Outside English (#98's owner
     question 1, as decided): a cut with an ellipsis that is not a designed cut passing cut_problem's rules, an ellipsis set
     on a nav tab, the header's link words, a sentence line or a figure (measure()'s styled), and a meter's bar under
-    BAR_FLOOR."""
+    BAR_FLOOR. In English an Overview subtitle cut with its whole text in its title passes at any width (#118's;
+    english_subtitle_cut), while the record still pins every other English overflow and asks for each known one."""
     known = overflow_known(look, lang)
     problems = []
     for result in results:
@@ -5518,6 +5532,8 @@ def overflow_problems(look: str, lang: str, results: list[dict[str, Any]]) -> li
         if not result.get("settled", True):
             problems.append(f"{page} {size}: the page did not settle")
         for item in measured["over"]:
+            if lang == "en" and english_subtitle_cut(item, look):
+                continue   # #118's, at any width (english_subtitle_cut)
             past = item["sw"] - item["cw"] if item["kind"] == "wide" and "by" not in item else item.get("by")   # a cut under a px: by
             match = known_match(known, item, page, size)
             if match is None and lang != "en" and item.get("cut"):
@@ -5562,7 +5578,8 @@ def test_the_overflow_judge_holds_the_designed_cuts_to_their_rules() -> None:
     one of its looks, with its text a whole catalog string, its title that text and an ancestor's aria-label holding it; in
     a real language never in the default window but where English's own cut shows through a key the language has no words
     for yet. Any other ellipsis fails (one on a nav tab says so), an ellipsis set on a never-cut element fails, and so does
-    a meter's bar under BAR_FLOOR. English is judged by its record alone."""
+    a meter's bar under BAR_FLOOR. English is judged by its record, but an Overview subtitle cut with its whole text in its
+    title, which passes at any width (#118's; english_subtitle_cut)."""
     at = "section#models.nm-card[data-card=models]>div.nm-card-in>div.nm-card-t>span.nm-meta-t"
     cut = {"designed": "overview-meta", "role": None, "full": "[ŞHÁRÉ ÖF ÇÖŞT ıİğ]", "title": "[ŞHÁRÉ ÖF ÇÖŞT ıİğ]", "named": True,
            "catalog": True, "lang": None}
@@ -5592,6 +5609,15 @@ def test_the_overflow_judge_holds_the_designed_cuts_to_their_rules() -> None:
     assert overflow_problems("edgerun", "fr", [shown]) == []
     assert overflow_problems("edgerun", "fr", [dict(shown, measured={"over": [dict(english, cut=dict(english["cut"], lang="fr"))]})])
     assert overflow_problems("nostromo", "fr", [shown])
+    # English: an Overview subtitle cut is #118's at any width while its whole text is in its title (WebView2 cuts Night
+    # City's wider than the stand-in measured); without that title, or on another element, English's record decides
+    en_cut = dict(cut, full="share of cost, cycle", title="share of cost, cycle", named=False, lang="en")
+    def english(look: str = "nostromo", **changes: Any) -> list[str]:
+        over = [dict(item, sw=150, cw=90, text="SHARE OF CO", cut=dict(en_cut, **changes))]
+        return overflow_problems(look, "en", [{"page": "overview", "size": [1200, 780], "measured": {"over": over, "styled": [], "bars": []}}])
+    assert english() == []
+    assert one(english(title=None), "SHARE OF CO") and one(english(designed="overview-chip"), "SHARE OF CO")
+    assert one(english(look="gates-dark"), "SHARE OF CO")
     # never cut, and the meter's bar
     styled = {"over": [], "styled": [{"at": "li>a", "role": "nav tab"}], "bars": [{"at": "div.nm-meter", "widths": [90, 90]}]}
     found = overflow_problems("night_city", "pseudo", [{"page": "limits", "size": [720, 480], "measured": styled}])
